@@ -87,8 +87,6 @@
       
       // PWA Service Worker Registration
       if ('serviceWorker' in navigator) {
-        console.log('Service Worker temporarily disabled for debugging');
-        /*
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js')
             .then((registration) => {
@@ -111,7 +109,6 @@
               console.log('SW registration failed: ', registrationError);
             });
         });
-        */
       }
     </script>
   </head>
