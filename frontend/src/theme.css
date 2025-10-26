@@ -1,0 +1,170 @@
+/* Add to your index.css file */
+
+/* Base transitions for all theme changes */
+* {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* View transition animations */
+.fade-enter {
+  opacity: 0;
+}
+.fade-enter-active {
+  opacity: 1;
+  transition: opacity 300ms;
+}
+.fade-exit {
+  opacity: 1;
+}
+.fade-exit-active {
+  opacity: 0;
+  transition: opacity 300ms;
+}
+
+/* Slide animations */
+.slide-enter {
+  transform: translateX(100%);
+}
+.slide-enter-active {
+  transform: translateX(0);
+  transition: transform 300ms;
+}
+.slide-exit {
+  transform: translateX(0);
+}
+.slide-exit-active {
+  transform: translateX(-100%);
+  transition: transform 300ms;
+}
+
+/* Dark theme variables */
+:root {
+  /* Light theme (default) */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f9fafb;
+  --bg-tertiary: #f3f4f6;
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
+  --border-color: #e5e7eb;
+  --highlight-bg: #dbeafe;
+  --highlight-text: #1e40af;
+  --card-bg: #ffffff;
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  --button-primary-bg: #2563eb;
+  --button-primary-text: #ffffff;
+  --button-primary-hover: #1d4ed8;
+  --button-secondary-bg: #f3f4f6;
+  --button-secondary-text: #1f2937;
+  --button-secondary-hover: #e5e7eb;
+}
+
+/* Dark theme */
+.dark-theme {
+  --bg-primary: #111827;
+  --bg-secondary: #1f2937;
+  --bg-tertiary: #374151;
+  --text-primary: #f9fafb;
+  --text-secondary: #e5e7eb;
+  --text-muted: #9ca3af;
+  --border-color: #374151;
+  --highlight-bg: #1e3a8a;
+  --highlight-text: #93c5fd;
+  --card-bg: #1f2937;
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  --button-primary-bg: #3b82f6;
+  --button-primary-text: #ffffff;
+  --button-primary-hover: #2563eb;
+  --button-secondary-bg: #374151;
+  --button-secondary-text: #e5e7eb;
+  --button-secondary-hover: #4b5563;
+}
+
+/* Common theme classes */
+body {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.bg-app {
+  background-color: var(--bg-primary);
+}
+
+.bg-card {
+  background-color: var(--card-bg);
+  box-shadow: var(--card-shadow);
+}
+
+/* Responsive improvements */
+@media (max-width: 640px) {
+  .responsive-table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+  }
+  
+  .mobile-menu-full {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 100;
+  }
+  
+  .mobile-p-2 {
+    padding: 0.5rem !important;
+  }
+  
+  .mobile-text-sm {
+    font-size: 0.875rem !important;
+  }
+  
+  .mobile-stack {
+    flex-direction: column !important;
+  }
+  
+  .mobile-stack > * {
+    width: 100% !important;
+    margin-bottom: 0.5rem !important;
+  }
+}
+
+/* Animation for button clicks */
+.btn-animate {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-animate::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.5);
+  opacity: 0;
+  border-radius: 100%;
+  transform: scale(1, 1) translate(-50%);
+  transform-origin: 50% 50%;
+}
+
+.btn-animate:focus:not(:active)::after {
+  animation: ripple 1s ease-out;
+}
+
+@keyframes ripple {
+  0% {
+    transform: scale(0, 0);
+    opacity: 0.5;
+  }
+  20% {
+    transform: scale(25, 25);
+    opacity: 0.3;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(40, 40);
+  }
+}

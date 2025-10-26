@@ -1,0 +1,261 @@
+/* Professional Report Card Print Styles */
+
+/* Print-specific styles */
+@media print {
+  /* Hide everything except report card content */
+  body * {
+    visibility: hidden;
+  }
+  
+  .report-card-printable, 
+  .report-card-printable * {
+    visibility: visible;
+  }
+  
+  .report-card-printable {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    background: white !important;
+    color: black !important;
+    font-family: 'Times New Roman', serif;
+    font-size: 12px;
+    line-height: 1.4;
+    padding: 20px;
+    margin: 0;
+    box-shadow: none;
+    border: none;
+  }
+
+  /* School Header */
+  .report-card-header {
+    text-align: center;
+    border-bottom: 2px solid #000;
+    padding-bottom: 15px;
+    margin-bottom: 20px;
+  }
+
+  .school-name {
+    font-size: 24px;
+    font-weight: bold;
+    margin-bottom: 5px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .school-subtitle {
+    font-size: 14px;
+    margin-bottom: 10px;
+    font-style: italic;
+  }
+
+  .report-title {
+    font-size: 18px;
+    font-weight: bold;
+    text-decoration: underline;
+    margin-top: 10px;
+  }
+
+  /* Student Information Section */
+  .student-info {
+    margin-bottom: 20px;
+    border: 1px solid #000;
+    padding: 15px;
+  }
+
+  .student-info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    font-size: 12px;
+  }
+
+  .info-field {
+    margin-bottom: 8px;
+  }
+
+  .field-label {
+    font-weight: bold;
+    display: inline-block;
+    width: 120px;
+  }
+
+  .field-value {
+    border-bottom: 1px dotted #000;
+    display: inline-block;
+    min-width: 150px;
+    padding-bottom: 2px;
+  }
+
+  /* Academic Progress Table */
+  .progress-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+    font-size: 10px;
+  }
+
+  .progress-table th,
+  .progress-table td {
+    border: 1px solid #000;
+    padding: 6px 4px;
+    text-align: center;
+    vertical-align: middle;
+  }
+
+  .progress-table th {
+    background-color: #f0f0f0;
+    font-weight: bold;
+    font-size: 9px;
+  }
+
+  .subject-header {
+    writing-mode: horizontal-tb;
+    transform: rotate(0deg);
+    font-weight: bold;
+  }
+
+  .marks-cell {
+    font-size: 10px;
+    font-weight: bold;
+  }
+
+  .grade-cell {
+    font-weight: bold;
+    font-size: 9px;
+  }
+
+  /* Grading Scale */
+  .grading-scale {
+    margin-top: 20px;
+    padding: 10px;
+    border: 1px solid #000;
+    font-size: 10px;
+  }
+
+  .grading-title {
+    font-weight: bold;
+    margin-bottom: 8px;
+    text-decoration: underline;
+  }
+
+  .grade-ranges {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 5px;
+  }
+
+  /* Academic Year and Term Info */
+  .academic-info {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 15px;
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  /* Signature Section */
+  .signature-section {
+    margin-top: 30px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 40px;
+    font-size: 11px;
+  }
+
+  .signature-block {
+    text-align: center;
+    border-top: 1px solid #000;
+    padding-top: 5px;
+  }
+
+  /* Hide non-print elements */
+  .no-print {
+    display: none !important;
+  }
+
+  /* Page break control */
+  .page-break-before {
+    page-break-before: always;
+  }
+
+  .page-break-after {
+    page-break-after: always;
+  }
+}
+
+/* Screen styles for preview */
+@media screen {
+  .report-card-printable {
+    max-width: 210mm;
+    margin: 20px auto;
+    padding: 20px;
+    background: white;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    border: 1px solid #ddd;
+    font-family: 'Times New Roman', serif;
+  }
+
+  .print-preview-mode .report-card-printable {
+    transform: scale(0.8);
+    transform-origin: top center;
+  }
+}
+
+/* Traditional Report Card Styling */
+.traditional-layout {
+  font-family: 'Times New Roman', serif;
+}
+
+.traditional-layout .progress-table {
+  border: 2px solid #000;
+}
+
+.traditional-layout .progress-table th {
+  background: linear-gradient(to bottom, #f8f8f8, #e8e8e8);
+  border: 1px solid #000;
+  font-weight: bold;
+}
+
+.traditional-layout .progress-table td {
+  border: 1px solid #000;
+}
+
+/* School Logo Placeholder */
+.school-logo {
+  width: 60px;
+  height: 60px;
+  border: 1px solid #000;
+  display: inline-block;
+  margin-right: 20px;
+  vertical-align: middle;
+}
+
+/* Term-wise column styling */
+.term-column {
+  background-color: #f9f9f9;
+}
+
+.marks-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+  align-items: center;
+}
+
+.marks-cell-small {
+  font-size: 9px;
+  padding: 1px;
+  text-align: center;
+}
+
+/* Grade color coding for print */
+@media print {
+  .grade-a-plus { background-color: #e8f5e8 !important; }
+  .grade-a { background-color: #f0f8f0 !important; }
+  .grade-b { background-color: #f8f8e8 !important; }
+  .grade-c { background-color: #f8f0e8 !important; }
+  .grade-d { background-color: #f8e8e8 !important; }
+  .grade-f { background-color: #f0e8e8 !important; }
+}

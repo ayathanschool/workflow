@@ -1,0 +1,23 @@
+{
+  "name": "ayathan-workflow",
+  "version": "1.0.0",
+  "description": "School Management System - AyathanWorkflow",
+  "scripts": {
+    "start": "cd frontend && npm start",
+    "build": "cd frontend && npm run build",
+    "install-deps": "cd frontend && npm install",
+    "deploy": "cd frontend && npm run build"
+  },
+  "keywords": [
+    "school",
+    "management",
+    "education",
+    "react",
+    "google-apps-script"
+  ],
+  "author": "AyathanWorkflow Team",
+  "license": "MIT",
+  "dependencies": {
+    "recharts": "^3.3.0"
+  }
+}

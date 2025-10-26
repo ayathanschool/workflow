@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="description" content="AyathanWorkflow - Comprehensive school management system for teachers, administrators, and students" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="AyathanWorkflow" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+    
+    <!-- Apple Touch Icons -->
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192x192.png" />
+    
+    <title>AyathanWorkflow - School Management System</title>
+    
+    <!-- Preload critical assets will be added at build time -->
+    <!-- These are removed in dev mode to avoid 404 errors -->
+    <!-- In production, Vite will inject the correct preloaded assets -->
+    
+    <!-- Inline critical CSS for faster rendering -->
+    <style>
+      /* Critical CSS for initial render */
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        background-color: #f9fafb;
+        color: #111827;
+      }
+      .loading-splash {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        width: 100vw;
+        background-color: #f9fafb;
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 9999;
+        transition: opacity 0.3s ease;
+      }
+      .loading-splash.fade-out {
+        opacity: 0;
+      }
+      .spinner {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        border: 4px solid #e5e7eb;
+        border-top-color: #4f46e5;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      /* Dark mode support */
+      @media (prefers-color-scheme: dark) {
+        body {
+          background-color: #111827;
+          color: #f9fafb;
+        }
+        .loading-splash {
+          background-color: #111827;
+        }
+        .spinner {
+          border-color: #374151;
+          border-top-color: #6366f1;
+        }
+      }
+    </style>
+    
+    <!-- Add loading indicator that shows before JS loads -->
+    <script>
+      // Add custom performance marks
+      window.performance.mark('initial_load_start');
+      
+      // PWA Service Worker Registration
+      if ('serviceWorker' in navigator) {
+        console.log('Service Worker temporarily disabled for debugging');
+        /*
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then((registration) => {
+              console.log('SW registered: ', registration);
+              
+              // Check for updates
+              registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                newWorker.addEventListener('statechange', () => {
+                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    // New content available, notify user
+                    if (window.showUpdateNotification) {
+                      window.showUpdateNotification();
+                    }
+                  }
+                });
+              });
+            })
+            .catch((registrationError) => {
+              console.log('SW registration failed: ', registrationError);
+            });
+        });
+        */
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root">
+      <!-- Initial loading state before React renders -->
+      <div class="loading-splash" id="initial-loading">
+        <div class="spinner"></div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.jsx"></script>
+    <script>
+      // Remove initial loader after React loads
+      document.addEventListener('DOMContentLoaded', () => {
+        window.performance.mark('dom_content_loaded');
+        setTimeout(() => {
+          const loader = document.getElementById('initial-loading');
+          if (loader) {
+            loader.classList.add('fade-out');
+            setTimeout(() => {
+              if (loader.parentNode) {
+                loader.parentNode.removeChild(loader);
+              }
+            }, 300);
+          }
+        }, 500);
+      });
+      
+      // Add performance monitoring
+      window.addEventListener('load', () => {
+        window.performance.mark('full_load_complete');
+        window.performance.measure('initial_to_dom_loaded', 'initial_load_start', 'dom_content_loaded');
+        window.performance.measure('initial_to_full_load', 'initial_load_start', 'full_load_complete');
+      });
+    </script>
+  </body>
+</html>

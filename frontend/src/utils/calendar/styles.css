@@ -1,0 +1,355 @@
+/* Calendar Utility Styles */
+
+/* Calendar Toolbar */
+.custom-calendar-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 0;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+@media (min-width: 768px) {
+  .custom-calendar-toolbar {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+}
+
+.toolbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.nav-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.current-date {
+  font-weight: 600;
+  min-width: 140px;
+  text-align: center;
+}
+
+.toolbar-btn {
+  padding: 6px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background-color: white;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.toolbar-btn:hover {
+  background-color: #f3f4f6;
+}
+
+.toolbar-btn.active {
+  background-color: #3b82f6;
+  color: white;
+  border-color: #2563eb;
+}
+
+.toolbar-btn.today-btn {
+  font-weight: 500;
+}
+
+.nav-btn {
+  padding: 6px 10px;
+}
+
+.toolbar-views {
+  display: flex;
+  gap: 4px;
+}
+
+.toolbar-filters {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.filter-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.filter-btn {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  border: 1px solid #d1d5db;
+  background-color: white;
+}
+
+.filter-btn.active {
+  border-width: 2px;
+}
+
+.timetable-filter.active {
+  border-color: #3b82f6;
+  color: #1e40af;
+}
+
+.substitution-filter.active {
+  border-color: #ef4444;
+  color: #b91c1c;
+}
+
+.personal-filter.active {
+  border-color: #8b5cf6;
+  color: #5b21b6;
+}
+
+.export-btn {
+  background-color: #10b981;
+  color: white;
+  border-color: #059669;
+}
+
+.export-btn:hover {
+  background-color: #059669;
+}
+
+/* Calendar Events */
+.custom-calendar-event {
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: white;
+  height: 100%;
+  overflow: hidden;
+}
+
+.event-title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.event-meta {
+  font-size: 0.75rem;
+  opacity: 0.9;
+  margin-top: 2px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.event-status {
+  margin-top: 2px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-align: right;
+}
+
+.substitution-label {
+  background-color: rgba(239, 68, 68, 0.8);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.notes-preview {
+  font-style: italic;
+  opacity: 0.9;
+}
+
+/* Event Modal */
+.event-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.event-modal.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.event-modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.event-modal-container {
+  position: relative;
+  width: 90%;
+  max-width: 500px;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  max-height: 90vh;
+  overflow-y: auto;
+  z-index: 101;
+  transform: translateY(20px);
+  transition: transform 0.2s ease-in-out;
+}
+
+.event-modal.open .event-modal-container {
+  transform: translateY(0);
+}
+
+.event-modal-content {
+  padding: 20px;
+}
+
+.event-modal-content h3 {
+  margin-top: 0;
+  margin-bottom: 16px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 8px;
+}
+
+.event-details {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.event-time {
+  display: flex;
+  gap: 8px;
+}
+
+.time-label, .resource-label, .lesson-plan-label {
+  font-weight: 500;
+  min-width: 80px;
+}
+
+.event-resource {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.resource-item {
+  display: flex;
+  gap: 8px;
+}
+
+.event-lesson-plan {
+  margin-top: 16px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 12px;
+}
+
+.event-lesson-plan h4, .event-notes h4 {
+  margin-top: 0;
+  margin-bottom: 8px;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.lesson-plan-item {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.event-notes {
+  margin-top: 16px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 12px;
+}
+
+.event-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.edit-btn, .save-btn {
+  background-color: #3b82f6;
+  color: white;
+  padding: 6px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.close-btn, .cancel-btn {
+  background-color: #f3f4f6;
+  padding: 6px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.delete-btn {
+  background-color: #ef4444;
+  color: white;
+  padding: 6px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-right: auto;
+}
+
+/* Form styling */
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-row {
+  display: flex;
+  gap: 16px;
+}
+
+.form-row .form-group {
+  flex: 1;
+}
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+
+input[type="text"], 
+input[type="datetime-local"], 
+textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+input[type="color"] {
+  width: 50px;
+  height: 30px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 100px;
+}

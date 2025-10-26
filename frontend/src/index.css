@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+.dark-theme {
+  color-scheme: dark;
+}
+
+/* Dark mode component overrides */
+.dark-theme .bg-white {
+  background-color: rgb(31 41 55) !important; /* gray-800 */
+}
+
+.dark-theme .text-gray-900 {
+  color: rgb(243 244 246) !important; /* gray-100 */
+}
+
+.dark-theme .text-gray-800 {
+  color: rgb(229 231 235) !important; /* gray-200 */
+}
+
+.dark-theme .text-gray-700 {
+  color: rgb(209 213 219) !important; /* gray-300 */
+}
+
+.dark-theme .text-gray-600 {
+  color: rgb(156 163 175) !important; /* gray-400 */
+}
+
+.dark-theme .text-gray-500 {
+  color: rgb(107 114 128) !important; /* gray-500 */
+}
+
+.dark-theme .border-gray-100 {
+  border-color: rgb(55 65 81) !important; /* gray-700 */
+}
+
+.dark-theme .border-gray-200 {
+  border-color: rgb(55 65 81) !important; /* gray-700 */
+}
+
+.dark-theme .border-gray-300 {
+  border-color: rgb(75 85 99) !important; /* gray-600 */
+}
+
+.dark-theme .bg-gray-50 {
+  background-color: rgb(55 65 81) !important; /* gray-700 */
+}
+
+.dark-theme .hover\:bg-gray-50:hover {
+  background-color: rgb(55 65 81) !important; /* gray-700 */
+}
+
+.dark-theme .hover\:bg-gray-100:hover {
+  background-color: rgb(75 85 99) !important; /* gray-600 */
+}
+
+/* Form inputs dark mode */
+.dark-theme input,
+.dark-theme select,
+.dark-theme textarea {
+  background-color: rgb(55 65 81) !important; /* gray-700 */
+  color: rgb(243 244 246) !important; /* gray-100 */
+  border-color: rgb(75 85 99) !important; /* gray-600 */
+}
+
+.dark-theme input:focus,
+.dark-theme select:focus,
+.dark-theme textarea:focus {
+  border-color: rgb(59 130 246) !important; /* blue-500 */
+  box-shadow: 0 0 0 1px rgb(59 130 246) !important; /* blue-500 */
+}
+
+/* Enhanced shadows for dark mode */
+.dark-theme .shadow-sm {
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.3) !important;
+}
+
+.dark-theme .shadow {
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4) !important;
+}
+
+.dark-theme .shadow-lg {
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.4) !important;
+}
+
+/* Smooth transitions */
+* {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 200ms;
+}
