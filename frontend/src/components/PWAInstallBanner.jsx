@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Download, X, Smartphone, Monitor } from 'lucide-react';
+import { Download, X, Smartphone, Monitor, AlertCircle } from 'lucide-react';
 
 const PWAInstallBanner = () => {
   const [showBanner, setShowBanner] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isStandalone, setIsStandalone] = useState(false);
+  const [installSupported, setInstallSupported] = useState(false);
 
   useEffect(() => {
     // Check if app is running in standalone mode
@@ -18,31 +19,48 @@ const PWAInstallBanner = () => {
 
     // Check if user has dismissed banner before
     const dismissed = localStorage.getItem('pwa-banner-dismissed');
-    if (dismissed) return;
+    const dismissedTime = localStorage.getItem('pwa-banner-dismissed-time');
+    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+    
+    // Reset dismissal after 24 hours
+    if (dismissed && dismissedTime && parseInt(dismissedTime) < oneDayAgo) {
+      localStorage.removeItem('pwa-banner-dismissed');
+      localStorage.removeItem('pwa-banner-dismissed-time');
+    }
+
+    if (dismissed && dismissedTime && parseInt(dismissedTime) >= oneDayAgo) return;
 
     // Listen for install prompt
     const handleBeforeInstallPrompt = (e) => {
+      console.log('PWA: beforeinstallprompt event fired');
       e.preventDefault();
       setDeferredPrompt(e);
+      setInstallSupported(true);
       setShowBanner(true);
     };
 
     // Listen for app installed
     const handleAppInstalled = () => {
+      console.log('PWA: App installed');
       setShowBanner(false);
       setDeferredPrompt(null);
       localStorage.setItem('pwa-banner-dismissed', 'true');
+      localStorage.setItem('pwa-banner-dismissed-time', Date.now().toString());
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
 
-    // Show banner after 3 seconds even without install prompt for testing
+    // Show banner after 5 seconds even without install prompt (for manual instructions)
     const timer = setTimeout(() => {
       if (!isStandaloneMode && !dismissed) {
         setShowBanner(true);
+        // Check if we can detect install capability
+        if ('serviceWorker' in navigator && 'PushManager' in window) {
+          setInstallSupported(true);
+        }
       }
-    }, 3000);
+    }, 5000);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -54,29 +72,49 @@ const PWAInstallBanner = () => {
   const handleInstall = async () => {
     if (deferredPrompt) {
       try {
+        console.log('PWA: Attempting to show install prompt');
         deferredPrompt.prompt();
         const { outcome } = await deferredPrompt.userChoice;
         
+        console.log('PWA: User choice:', outcome);
         if (outcome === 'accepted') {
           setShowBanner(false);
           setDeferredPrompt(null);
           localStorage.setItem('pwa-banner-dismissed', 'true');
+          localStorage.setItem('pwa-banner-dismissed-time', Date.now().toString());
         }
       } catch (error) {
-        console.error('Error installing app:', error);
+        console.error('PWA: Error installing app:', error);
+        showManualInstructions();
       }
     } else {
-      // Fallback for browsers that don't support install prompt
-      alert('To install this app:\n\n' +
-            'On Chrome/Edge: Click the install icon in the address bar\n' +
-            'On Safari: Add to Home Screen from share menu\n' +
-            'On Firefox: Look for "Install" in the address bar');
+      showManualInstructions();
     }
+  };
+
+  const showManualInstructions = () => {
+    const userAgent = navigator.userAgent.toLowerCase();
+    let instructions = '';
+    
+    if (userAgent.includes('chrome') && !userAgent.includes('edg')) {
+      instructions = 'Chrome: Look for the install icon (⊞) in the address bar, or click the three dots menu → "Install AyathanWorkflow"';
+    } else if (userAgent.includes('firefox')) {
+      instructions = 'Firefox: Click the three lines menu → "Install this site as an app"';
+    } else if (userAgent.includes('safari')) {
+      instructions = 'Safari: Click the Share button → "Add to Home Screen"';
+    } else if (userAgent.includes('edg')) {
+      instructions = 'Edge: Look for the install icon in the address bar, or click the three dots → "Apps" → "Install this site as an app"';
+    } else {
+      instructions = 'Look for an "Install" or "Add to Home Screen" option in your browser menu';
+    }
+    
+    alert(`To install AyathanWorkflow:\n\n${instructions}\n\nNote: Make sure you're on HTTPS and have used the app for a few minutes.`);
   };
 
   const handleDismiss = () => {
     setShowBanner(false);
     localStorage.setItem('pwa-banner-dismissed', 'true');
+    localStorage.setItem('pwa-banner-dismissed-time', Date.now().toString());
   };
 
   // Don't show if already installed
@@ -91,8 +129,16 @@ const PWAInstallBanner = () => {
             <Monitor className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="font-semibold">Install AyathanWorkflow</h3>
-            <p className="text-sm opacity-90">Get the full app experience with offline access</p>
+            <h3 className="font-semibold flex items-center space-x-2">
+              <span>Install AyathanWorkflow</span>
+              {!installSupported && <AlertCircle className="w-4 h-4 text-yellow-300" />}
+            </h3>
+            <p className="text-sm opacity-90">
+              {installSupported 
+                ? "Get the full app experience with offline access" 
+                : "Use this app offline - installation available in browser menu"
+              }
+            </p>
           </div>
         </div>
         
@@ -102,7 +148,7 @@ const PWAInstallBanner = () => {
             className="bg-white text-blue-600 px-4 py-2 rounded-lg font-medium hover:bg-gray-100 transition-colors flex items-center space-x-2"
           >
             <Download className="w-4 h-4" />
-            <span>Install</span>
+            <span>{deferredPrompt ? 'Install' : 'How to Install'}</span>
           </button>
           <button
             onClick={handleDismiss}
