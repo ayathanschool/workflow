@@ -1,0 +1,6 @@
+<!-- Simple placeholder icons for PWA requirements -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#2563eb"/>
+  <text x="256" y="280" text-anchor="middle" fill="white" font-size="60" font-family="Arial">AW</text>
+  <text x="256" y="320" text-anchor="middle" fill="white" font-size="32" font-family="Arial">School</text>
+</svg>

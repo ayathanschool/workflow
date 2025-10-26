@@ -10,6 +10,7 @@ import { useTheme } from './contexts/ThemeContext';
 import { NotificationProvider, useNotifications } from './contexts/NotificationContext';
 import NotificationCenter from './components/NotificationCenter';
 import PWAControls from './components/PWAControls';
+import PWAInstallBanner from './components/PWAInstallBanner';
 // import { useRealTimeUpdates } from './hooks/useRealTimeUpdates';
 
 // Lazy load heavy components for better performance
@@ -4759,6 +4760,7 @@ const App = () => {
             </main>
           </div>
         </div>
+        <PWAInstallBanner />
         <PWAControls />
       </div>
     );
