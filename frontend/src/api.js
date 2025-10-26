@@ -705,3 +705,13 @@ export async function getAllTeachers() {
     return [];
   }
 }
+
+// Get recent activities for analytics
+export async function getRecentActivities() {
+  try {
+    return await getJSON(`${BASE_URL}?action=getRecentActivities`);
+  } catch (error) {
+    console.warn('getRecentActivities endpoint not available:', error);
+    return [];
+  }
+}

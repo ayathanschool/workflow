@@ -10,12 +10,25 @@ const AdvancedAnalytics = ({ user }) => {
     classProgress: [],
     systemOverview: {}
   });
+  const [recentActivities, setRecentActivities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState('7days'); // 7days, 30days, 90days
 
   useEffect(() => {
     fetchAnalytics();
+    fetchRecentActivities();
   }, [user, timeRange]);
+
+  const fetchRecentActivities = async () => {
+    try {
+      const activities = await api.getRecentActivities();
+      setRecentActivities(activities || []);
+    } catch (err) {
+      console.error('Error loading recent activities:', err);
+      // Keep empty array as fallback
+      setRecentActivities([]);
+    }
+  };
 
   const fetchAnalytics = async () => {
     setLoading(true);
@@ -284,25 +297,29 @@ const AdvancedAnalytics = ({ user }) => {
           </div>
           <div className="p-6">
             <div className="space-y-4">
-              {[
-                { action: 'Lesson Plan Approved', user: 'John Smith', time: '2 minutes ago', type: 'success' },
-                { action: 'New Scheme Submitted', user: 'Mary Johnson', time: '15 minutes ago', type: 'info' },
-                { action: 'Daily Report Submitted', user: 'Robert Davis', time: '32 minutes ago', type: 'info' },
-                { action: 'Exam Marks Updated', user: 'Sarah Wilson', time: '1 hour ago', type: 'warning' },
-                { action: 'Substitution Assigned', user: 'Admin', time: '2 hours ago', type: 'info' }
-              ].map((activity, index) => (
-                <div key={index} className="flex items-center space-x-3">
-                  <div className={`w-2 h-2 rounded-full ${
-                    activity.type === 'success' ? 'bg-green-500' :
-                    activity.type === 'warning' ? 'bg-yellow-500' :
-                    'bg-blue-500'
-                  }`}></div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-900">{activity.action}</p>
-                    <p className="text-xs text-gray-500">{activity.user} • {activity.time}</p>
+              {recentActivities.length > 0 ? (
+                recentActivities.map((activity, index) => (
+                  <div key={index} className="flex items-center space-x-3">
+                    <div className={`w-2 h-2 rounded-full ${
+                      activity.type === 'success' ? 'bg-green-500' :
+                      activity.type === 'warning' ? 'bg-yellow-500' :
+                      'bg-blue-500'
+                    }`}></div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-gray-900">{activity.action}</p>
+                      <p className="text-xs text-gray-500">{activity.user} • {activity.time}</p>
+                      {activity.details && (
+                        <p className="text-xs text-gray-400">{activity.details}</p>
+                      )}
+                    </div>
                   </div>
+                ))
+              ) : (
+                <div className="text-center py-4 text-gray-500">
+                  <p className="text-sm">No recent activities found</p>
+                  <p className="text-xs">Activities will appear here when users submit content</p>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>

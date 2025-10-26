@@ -1568,6 +1568,129 @@ function doGet(e) {
       }
     }
 
+    if (action === 'getRecentActivities') {
+      try {
+        const activities = [];
+        const currentDate = new Date();
+        
+        // Get recent schemes (last 24 hours)
+        const schemesSh = _getSheet('Schemes');
+        const schemesHeaders = _headers(schemesSh);
+        const recentSchemes = _rows(schemesSh).map(r => _indexByHeader(r, schemesHeaders))
+          .filter(s => {
+            const submittedAt = s.submittedAt || s.createdAt || '';
+            if (!submittedAt) return false;
+            const submittedDate = new Date(submittedAt);
+            const hoursDiff = (currentDate - submittedDate) / (1000 * 60 * 60);
+            return hoursDiff <= 24 && hoursDiff >= 0;
+          })
+          .sort((a, b) => new Date(b.submittedAt || b.createdAt) - new Date(a.submittedAt || a.createdAt))
+          .slice(0, 3);
+        
+        // Get recent lesson plans (last 24 hours)
+        const lessonsSh = _getSheet('LessonPlans');
+        const lessonsHeaders = _headers(lessonsSh);
+        const recentLessons = _rows(lessonsSh).map(r => _indexByHeader(r, lessonsHeaders))
+          .filter(l => {
+            const submittedAt = l.submittedAt || l.createdAt || '';
+            if (!submittedAt) return false;
+            const submittedDate = new Date(submittedAt);
+            const hoursDiff = (currentDate - submittedDate) / (1000 * 60 * 60);
+            return hoursDiff <= 24 && hoursDiff >= 0;
+          })
+          .sort((a, b) => new Date(b.submittedAt || b.createdAt) - new Date(a.submittedAt || a.createdAt))
+          .slice(0, 3);
+        
+        // Get recent daily reports (last 24 hours)
+        const reportsSh = _getSheet('DailyReports');
+        const reportsHeaders = _headers(reportsSh);
+        const recentReports = _rows(reportsSh).map(r => _indexByHeader(r, reportsHeaders))
+          .filter(r => {
+            const submittedAt = r.submittedAt || r.date || '';
+            if (!submittedAt) return false;
+            const submittedDate = new Date(submittedAt);
+            const hoursDiff = (currentDate - submittedDate) / (1000 * 60 * 60);
+            return hoursDiff <= 24 && hoursDiff >= 0;
+          })
+          .sort((a, b) => new Date(b.submittedAt || b.date) - new Date(a.submittedAt || a.date))
+          .slice(0, 3);
+        
+        // Get users data to get teacher names
+        const usersSh = _getSheet('Users');
+        const usersHeaders = _headers(usersSh);
+        const allUsers = _rows(usersSh).map(r => _indexByHeader(r, usersHeaders));
+        
+        // Helper function to get teacher name from email
+        function getTeacherName(email) {
+          const user = allUsers.find(u => String(u.email || '').toLowerCase() === String(email || '').toLowerCase());
+          return user ? (user.name || user.teacherName || 'Unknown') : 'Unknown';
+        }
+        
+        // Helper function to format time ago
+        function formatTimeAgo(dateStr) {
+          if (!dateStr) return 'Unknown time';
+          const date = new Date(dateStr);
+          const now = new Date();
+          const diffInMinutes = Math.floor((now - date) / (1000 * 60));
+          
+          if (diffInMinutes < 1) return 'Just now';
+          if (diffInMinutes < 60) return `${diffInMinutes} minutes ago`;
+          
+          const diffInHours = Math.floor(diffInMinutes / 60);
+          if (diffInHours < 24) return `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`;
+          
+          const diffInDays = Math.floor(diffInHours / 24);
+          return `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`;
+        }
+        
+        // Add scheme activities
+        recentSchemes.forEach(scheme => {
+          activities.push({
+            action: scheme.status === 'approved' ? 'Scheme Approved' : 'New Scheme Submitted',
+            user: getTeacherName(scheme.teacherEmail),
+            time: formatTimeAgo(scheme.submittedAt || scheme.createdAt),
+            type: scheme.status === 'approved' ? 'success' : 'info',
+            details: `${scheme.class} - ${scheme.subject}`,
+            timestamp: scheme.submittedAt || scheme.createdAt
+          });
+        });
+        
+        // Add lesson plan activities
+        recentLessons.forEach(lesson => {
+          activities.push({
+            action: lesson.status === 'approved' ? 'Lesson Plan Approved' : 'New Lesson Plan Submitted',
+            user: getTeacherName(lesson.teacherEmail),
+            time: formatTimeAgo(lesson.submittedAt || lesson.createdAt),
+            type: lesson.status === 'approved' ? 'success' : 'info',
+            details: `${lesson.class} - ${lesson.subject}`,
+            timestamp: lesson.submittedAt || lesson.createdAt
+          });
+        });
+        
+        // Add daily report activities
+        recentReports.forEach(report => {
+          activities.push({
+            action: 'Daily Report Submitted',
+            user: getTeacherName(report.teacherEmail),
+            time: formatTimeAgo(report.submittedAt || report.date),
+            type: 'info',
+            details: `Report for ${report.date}`,
+            timestamp: report.submittedAt || report.date
+          });
+        });
+        
+        // Sort all activities by timestamp (most recent first)
+        activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        
+        // Return top 5 activities
+        return _respond(activities.slice(0, 5));
+        
+      } catch (error) {
+        Logger.log('Error getting recent activities: ' + error.message);
+        return _respond([]);
+      }
+    }
+
     if (action === 'getTeacherSchemes') {
       // Return all schemes submitted by the teacher, regardless of status
       const email = (e.parameter.email || '').toLowerCase().trim();
