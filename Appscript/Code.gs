@@ -292,15 +292,31 @@ function _normalizeDayName(input) {
 function _isoDateString(date) {
   if (!date) return '';
   
+  // If it's already in the correct format, return as-is
+  if (typeof date === 'string' && date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    return date;
+  }
+  
   let d;
   if (typeof date === 'string') {
-    // Handle ISO date strings: YYYY-MM-DD
-    if (date.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      return date; // Already in ISO format
+    // Handle various date string formats
+    if (date.includes('T') || date.includes('Z')) {
+      // This is an ISO timestamp, parse it
+      d = new Date(date);
+    } else if (date.includes('-') && date.split('-').length === 3) {
+      // This looks like YYYY-MM-DD or MM-DD-YYYY format
+      const parts = date.split('-');
+      if (parts[0].length === 4) {
+        // YYYY-MM-DD format - create as local date
+        d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+      } else {
+        // Try parsing as regular date
+        d = new Date(date);
+      }
+    } else {
+      // Parse as regular date
+      d = new Date(date);
     }
-    
-    // Parse the date string
-    d = new Date(date);
   } else if (date instanceof Date) {
     d = date;
   } else {
@@ -313,7 +329,7 @@ function _isoDateString(date) {
     return String(date || '');
   }
   
-  // Format as ISO date string YYYY-MM-DD
+  // Format as ISO date string YYYY-MM-DD using local timezone
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
@@ -2455,11 +2471,32 @@ function doGet(e) {
           .map(row => _indexByHeader(row, headers))
           .filter(row => {
             if (!row.date) return false;
-            return _isoDateString(row.date) === searchDate;
+            const rowDateNormalized = _isoDateString(row.date);
+            
+            // Also check if the date when converted to Date and back matches
+            // This handles cases where dates were stored incorrectly due to timezone issues
+            if (rowDateNormalized === searchDate) return true;
+            
+            // Additional check: if the original date is a Date object that represents the same day
+            if (row.date instanceof Date || (typeof row.date === 'string' && row.date.includes('GMT'))) {
+              const d = new Date(row.date);
+              if (!isNaN(d.getTime())) {
+                // Check both UTC and local interpretations
+                const utcDateStr = d.toISOString().split('T')[0];
+                const localDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                
+                if (utcDateStr === searchDate || localDateStr === searchDate) {
+                  Logger.log(`Date match found via Date object conversion: ${row.date} -> ${utcDateStr} or ${localDateStr} matches ${searchDate}`);
+                  return true;
+                }
+              }
+            }
+            
+            return false;
           })
           .map(row => ({
             id: row.id || row.substitutionId || `sub-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            date: String(row.date || ''),
+            date: _isoDateString(row.date), // Normalize the date in output
             period: parseInt(row.period || 0),
             class: String(row.class || ''),
             absentTeacher: String(row.absentTeacher || ''),
@@ -3265,8 +3302,14 @@ function doPost(e) {
       const sh = _getSheet('Substitutions');
       _ensureHeaders(sh, SHEETS.Substitutions);
       const now = new Date().toISOString();
+      
+      // Normalize the date to ensure consistent storage
+      const normalizedDate = _isoDateString(data.date || '');
+      
+      Logger.log(`assignSubstitution - Input date: ${data.date}, Normalized: ${normalizedDate}`);
+      
       sh.appendRow([
-        data.date || '',
+        normalizedDate,
         Number(data.period||0),
         data.class || '',
         data.absentTeacher || '',
