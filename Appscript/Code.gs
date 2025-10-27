@@ -5277,13 +5277,19 @@ function fixSubstitutionDates() {
       // Check if this substitution was created today but has yesterday's date
       if (createdAt && currentDate) {
         const createdDate = new Date(createdAt);
+        const createdISO = createdDate.toISOString();
+        
+        // Debug logging for first few problematic rows
+        if (i < 5 || (String(currentDate) === '2025-10-26' && createdISO.startsWith('2025-10-27'))) {
+          Logger.log(`Row ${i + 2}: date="${currentDate}", createdAt="${createdAt}", createdISO="${createdISO}"`);
+        }
         
         // More robust check: if creation timestamp is from today but date field shows yesterday
-        const createdToday = createdDate.toISOString().startsWith('2025-10-27');
-        const dateIsYesterday = currentDate === yesterdayStr || currentDate === '2025-10-26';
+        const createdToday = createdISO.startsWith('2025-10-27');
+        const dateIsYesterday = String(currentDate) === '2025-10-26';
         
         if (createdToday && dateIsYesterday) {
-          Logger.log(`Fixing substitution: ID ${rowObj.id}, current date: ${currentDate}, should be: ${todayStr}`);
+          Logger.log(`MATCH FOUND - Fixing substitution: ID ${rowObj.id}, current date: ${currentDate}, should be: ${todayStr}`);
           Logger.log(`Created: ${createdAt}, Row: ${i + 2}`);
           
           // Update the date to today's date
