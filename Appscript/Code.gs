@@ -2425,6 +2425,18 @@ function doGet(e) {
         return _respond({ error: String(err.message || err) });
       }
     }
+
+    // Data migration action to fix substitution dates
+    if (action === 'fixSubstitutionDates') {
+      try {
+        const result = fixSubstitutionDates();
+        Logger.log(`fixSubstitutionDates result: ${JSON.stringify(result)}`);
+        return _respond(result);
+      } catch (err) {
+        Logger.log(`fixSubstitutionDates ERROR: ${err.message || err}`);
+        return _respond({ error: String(err.message || err) });
+      }
+    }
     
     /**
      * Get all substitutions for a specific date
@@ -5226,6 +5238,70 @@ function getSmartReminders(teacherEmail, options = {}) {
       success: false,
       error: error.toString(),
       data: []
+    };
+  }
+}
+
+/**
+ * Data migration function to fix substitutions that were stored with wrong dates
+ * due to timezone conversion issues. This should be run once after deploying the
+ * timezone fixes to correct existing data.
+ */
+function fixSubstitutionDates() {
+  try {
+    const sh = _getSheet('Substitutions');
+    if (!sh) {
+      return { success: false, error: 'Substitutions sheet not found' };
+    }
+
+    const headers = _headers(sh);
+    const values = _rows(sh);
+    
+    if (values.length === 0) {
+      return { success: true, message: 'No substitutions to fix', fixed: 0 };
+    }
+
+    let fixedCount = 0;
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    
+    // Process each row
+    for (let i = 0; i < values.length; i++) {
+      const rowObj = _indexByHeader(values[i], headers);
+      const createdAt = rowObj.createdAt;
+      const currentDate = rowObj.date;
+      
+      // Check if this substitution was created today but has yesterday's date
+      if (createdAt && currentDate) {
+        const createdDate = new Date(createdAt);
+        const createdDateStr = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}-${String(createdDate.getDate()).padStart(2, '0')}`;
+        
+        // If the substitution was created today but stored with a different date (likely due to timezone bug)
+        if (createdDateStr === todayStr && currentDate !== todayStr) {
+          Logger.log(`Fixing substitution: ID ${rowObj.id}, current date: ${currentDate}, should be: ${createdDateStr}`);
+          
+          // Update the date to match the creation date
+          const dateColumnIndex = headers.indexOf('date');
+          if (dateColumnIndex >= 0) {
+            sh.getRange(i + 2, dateColumnIndex + 1).setValue(createdDateStr); // +2 because of header row and 0-based index
+            fixedCount++;
+          }
+        }
+      }
+    }
+
+    return { 
+      success: true, 
+      message: `Fixed ${fixedCount} substitution dates`,
+      fixed: fixedCount,
+      details: `Checked ${values.length} substitutions, fixed ${fixedCount} with incorrect dates`
+    };
+
+  } catch (error) {
+    Logger.log(`Error in fixSubstitutionDates: ${error.message || error}`);
+    return { 
+      success: false, 
+      error: error.toString() 
     };
   }
 }
