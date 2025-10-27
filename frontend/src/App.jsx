@@ -305,6 +305,8 @@ const App = () => {
   };
 
   const logout = () => {
+    // Clear Google Auth if present
+    if (googleAuth?.user) googleAuth.logout();
     setUser(null);
     localStorage.removeItem('user');
   };

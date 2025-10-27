@@ -205,9 +205,7 @@ export async function getTeacherWeeklyTimetable(email) {
 }
 
 export async function getTeacherDailyTimetable(email, date) {
-  console.log('📞 API call: getTeacherDailyTimetable', { email, date });
   const result = await getJSON(`${BASE_URL}?action=getTeacherDailyTimetable&email=${encodeURIComponent(email)}&date=${encodeURIComponent(date)}`, SHORT_CACHE_DURATION);
-  console.log('📞 API response: getTeacherDailyTimetable', result);
   return result;
 }
 
@@ -379,23 +377,20 @@ export async function getSubstitutionsForDate(date, options={}) {
   // Force cache bypass
   q.append('_', String(Date.now()));
   
-  console.log(`[API] Fetching substitutions for date: ${normalizedDate}`);
-  
   try {
     const result = await getJSON(`${BASE_URL}?${q.toString()}`);
     
     // Handle different response formats
     if (Array.isArray(result)) {
-      console.log(`[API] Got ${result.length} substitutions directly`);
       return result;
     } else if (result && result.data && Array.isArray(result.data)) {
-      console.log(`[API] Got ${result.data.length} substitutions from result.data`);
       return result.data;
     } else if (result && result.substitutions && Array.isArray(result.substitutions)) {
-      console.log(`[API] Got ${result.substitutions.length} substitutions from result.substitutions`);
       return result.substitutions;
     } else {
-      console.warn(`[API] Unexpected substitution data format:`, result);
+      if (import.meta.env.DEV) {
+        console.warn(`[API] Unexpected substitution data format:`, result);
+      }
       return Array.isArray(result) ? result : [];
     }
   } catch (err) {
@@ -511,11 +506,9 @@ export async function getExamMarks(examId) {
 // Get all exams - using working getExams function directly
 export async function getAllExams() {
   try {
-    console.log('Getting all exams using getExams...');
     // Use the existing getExams function that works in ExamManagement
     // Call getExams with empty parameters to get all exams (no filtering)
     const examData = await getExams('', '', ''); // empty strings for class, subject, examType
-    console.log('getExams call successful:', examData);
     
     // Transform the data to match the expected format for getAllExams
     const transformed = Array.isArray(examData) ? examData.map(exam => ({
@@ -533,7 +526,6 @@ export async function getAllExams() {
       createdAt: exam.date // Use date as fallback for createdAt
     })) : [];
     
-    console.log('Transformed exam data for getAllExams:', transformed);
     return transformed;
   } catch (error) {
     console.error('getAllExams using getExams failed:', error);

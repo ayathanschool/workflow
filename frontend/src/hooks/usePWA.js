@@ -14,13 +14,19 @@ export const usePWA = () => {
       document.referrer.includes('android-app://');
     setIsStandalone(isStandaloneMode);
     
-    console.log('PWA: Standalone mode:', isStandaloneMode);
-    console.log('PWA: Service Worker supported:', 'serviceWorker' in navigator);
-    console.log('PWA: Push Manager supported:', 'PushManager' in window);
+    // Only log PWA initialization once on first mount
+    if (!window.__PWA_INITIALIZED__) {
+      console.log('PWA: Initialized', {
+        standalone: isStandaloneMode,
+        serviceWorker: 'serviceWorker' in navigator,
+        pushManager: 'PushManager' in window
+      });
+      window.__PWA_INITIALIZED__ = true;
+    }
 
     // Listen for install prompt
     const handleBeforeInstallPrompt = (e) => {
-      console.log('PWA: beforeinstallprompt event fired');
+      console.log('PWA: Install prompt available');
       e.preventDefault();
       setDeferredPrompt(e);
       setIsInstallable(true);
@@ -30,16 +36,15 @@ export const usePWA = () => {
     const handleAppInstalled = () => {
       setIsInstallable(false);
       setDeferredPrompt(null);
-      console.log('PWA: App was installed');
+      console.log('PWA: App installed successfully');
     };
 
     // Listen for online/offline status
     const handleOnline = () => {
-      console.log('PWA: Online');
       setIsOnline(true);
     };
     const handleOffline = () => {
-      console.log('PWA: Offline');
+      console.warn('PWA: App offline');
       setIsOnline(false);
     };
 
@@ -50,19 +55,22 @@ export const usePWA = () => {
 
     // Global function for service worker update notification
     window.showUpdateNotification = () => {
-      console.log('PWA: Update available');
+      console.log('PWA: Update available, please refresh');
       setHasUpdate(true);
     };
 
-    // Check if manifest is valid
-    fetch('/manifest.json')
-      .then(response => response.json())
-      .then(manifest => {
-        console.log('PWA: Manifest loaded:', manifest);
-      })
-      .catch(error => {
-        console.error('PWA: Manifest error:', error);
-      });
+    // Check if manifest is valid (only once)
+    if (!window.__PWA_MANIFEST_CHECKED__) {
+      fetch('/manifest.json')
+        .then(response => response.json())
+        .then(() => {
+          // Manifest loaded successfully, no need to log
+          window.__PWA_MANIFEST_CHECKED__ = true;
+        })
+        .catch(error => {
+          console.error('PWA: Manifest error:', error);
+        });
+    }
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);

@@ -232,15 +232,6 @@ const CalendarView = ({ user }) => {
       setEvents([...validCalendarEvents, ...personalEvents]);
       setIsLoading(false);
       
-      // Debug log - check what data we received
-      console.log('Calendar data loaded:', {
-        user,
-        timetableEvents: validCalendarEvents.filter(e => e.type === 'timetable').length,
-        personalEvents: personalEvents.length,
-        userClasses: user?.classes,
-        userSubjects: user?.subjects
-      });
-      
     } catch (error) {
       console.error('Failed to load calendar events:', error);
       setLoadError('Failed to load calendar events. Please try again later.');

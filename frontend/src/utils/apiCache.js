@@ -129,7 +129,10 @@ class EnhancedApiCache {
     }
     
     if (count > 0) {
-      console.log(`[Cache] Cleared ${count} entries matching pattern: ${pattern}`);
+      // Only log in development and if significant
+      if (import.meta.env.DEV && count > 5) {
+        console.log(`[Cache] Cleared ${count} entries matching pattern: ${pattern}`);
+      }
       this.saveToLocalStorage();
     }
   }
@@ -174,7 +177,10 @@ class EnhancedApiCache {
     }
     
     if (expiredCount > 0) {
-      console.log(`[Cache] Cleaned up ${expiredCount} expired entries`);
+      // Only log significant cleanups in development
+      if (import.meta.env.DEV && expiredCount > 10) {
+        console.log(`[Cache] Cleaned up ${expiredCount} expired entries`);
+      }
       this.saveToLocalStorage();
     }
   }
@@ -214,7 +220,10 @@ class EnhancedApiCache {
       
       // Skip if version mismatch
       if (parsed.version !== CACHE_VERSION) {
-        console.log('[Cache] Version mismatch, clearing localStorage cache');
+        // Only log version mismatches (usually happens after updates)
+        if (import.meta.env.DEV) {
+          console.log('[Cache] Version mismatch, clearing old cache');
+        }
         localStorage.removeItem(LOCAL_STORAGE_KEY);
         return;
       }
@@ -227,7 +236,10 @@ class EnhancedApiCache {
         this.cache.set(key, entry);
       }
       
-      console.log(`[Cache] Loaded ${this.cache.size} entries from localStorage`);
+      // Only log in development
+      if (import.meta.env.DEV) {
+        console.log(`[Cache] Loaded ${this.cache.size} entries from storage`);
+      }
     } catch (err) {
       console.warn('[Cache] Failed to load from localStorage:', err);
     }
