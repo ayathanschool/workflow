@@ -1,7 +1,7 @@
 // src/components/SubstitutionModule.jsx
 import React, { useState, useEffect } from 'react';
 import * as api from '../api';
-import { Plus, Calendar, User, RefreshCw } from 'lucide-react';
+import { Plus, Calendar, User, RefreshCw, Monitor } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
 export default function SubstitutionModule() {
@@ -20,7 +20,21 @@ export default function SubstitutionModule() {
   const [assignError, setAssignError] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  // IT Lab support states
+  const [itLabAssigning, setItLabAssigning] = useState({});
+  const [selectedItLabSupport, setSelectedItLabSupport] = useState({});
   
+  // Helper: check if a period is an IT Lab period
+  function isItLabPeriod(subject) {
+    if (!subject) return false;
+    const subjectLower = subject.toLowerCase();
+    return subjectLower.includes('computer') || 
+           subjectLower.includes('it ') || 
+           subjectLower.includes('information technology') ||
+           subjectLower.includes('programming') ||
+           subjectLower.includes('coding');
+  }
+
   // Helper: refresh assigned substitutions for a date with robust fallbacks
   async function refreshAssigned(targetDate) {
     // 1) Direct endpoint
@@ -101,38 +115,43 @@ export default function SubstitutionModule() {
     fetchAbsentTeachers();
   }, []);
 
-  // Fetch timetable when teacher or date changes (use daily timetable API)
+  // Fetch timetable when date changes (show full daily timetable)
   useEffect(() => {
     let mounted = true;
     async function fetchTimetable() {
-      if (!absentTeacher || !date) return;      setLoading(true);
+      if (!date) return;
+      setLoading(true);
       try {
-        // Fetch the teacher's daily timetable for the selected date
-  // absentTeacher is the identifier (prefer email if provided)
-  const teacherDaily = await api.getTeacherDailyTimetable(absentTeacher, date);
+        // Fetch the full daily timetable for the selected date
+        const dailyTimetable = await api.getDailyTimetableForDate(date);
 
-        // teacherDaily expected to be an array of slots: { period, class, subject, ... }
-        const filteredTimetable = Array.isArray(teacherDaily) ? teacherDaily.slice() : [];
+        // dailyTimetable expected to be an array of slots: { period, class, subject, teacher, ... }
+        const filteredTimetable = Array.isArray(dailyTimetable) ? dailyTimetable.slice() : [];
 
-        // Sort by numeric period when possible
-        filteredTimetable.sort((a, b) => (parseInt(a.period) || 0) - (parseInt(b.period) || 0));
+        // Sort by period and class for better organization
+        filteredTimetable.sort((a, b) => {
+          const periodDiff = (parseInt(a.period) || 0) - (parseInt(b.period) || 0);
+          if (periodDiff !== 0) return periodDiff;
+          return (a.class || '').localeCompare(b.class || '');
+        });
 
         if (mounted) setTimetable(filteredTimetable);
 
-        // Refresh substitutions for the date (independent of absent teacher)
+        // Refresh substitutions for the date
         if (mounted) await refreshAssigned(date);
 
-        // Fetch free teachers for each period (limit concurrent requests)
+        // Fetch free teachers for each period
         const teachersMap = {};
-        const periods = filteredTimetable.map(slot => slot.period);
+        const uniquePeriods = [...new Set(filteredTimetable.map(slot => slot.period))];
         
         // Process periods in smaller batches to avoid overwhelming the server
         const batchSize = 3;
-        for (let i = 0; i < periods.length; i += batchSize) {
-          const batch = periods.slice(i, i + batchSize);
+        for (let i = 0; i < uniquePeriods.length; i += batchSize) {
+          const batch = uniquePeriods.slice(i, i + batchSize);
           await Promise.all(batch.map(async (period) => {
             try {
-              const free = await api.getFreeTeachers(date, period, [absentTeacher]);
+              // Get free teachers for this period (no exclusions since we're not tied to specific absent teacher)
+              const free = await api.getFreeTeachers(date, period, []);
               teachersMap[period] = Array.isArray(free) ? free : [];
             } catch (err) {
               console.error(`Error fetching free teachers for period ${period}:`, err);
@@ -141,7 +160,7 @@ export default function SubstitutionModule() {
           }));
           
           // Small delay between batches to be gentle on the server
-          if (i + batchSize < periods.length) {
+          if (i + batchSize < uniquePeriods.length) {
             await new Promise(resolve => setTimeout(resolve, 100));
           }
         }
@@ -161,10 +180,10 @@ export default function SubstitutionModule() {
 
     fetchTimetable();
     return () => { mounted = false };
-  }, [absentTeacher, date]);
+  }, [date]); // Remove absentTeacher dependency
   
   // Handle substitute teacher assignment
-  async function handleSubstituteAssign(period, classname, subject, substituteTeacher) {
+  async function handleSubstituteAssign(period, classname, subject, substituteTeacher, originalTeacher) {
     if (!substituteTeacher || !period || !classname) return false;
     
     const rowKey = `${period}-${classname}`;
@@ -181,7 +200,7 @@ export default function SubstitutionModule() {
       
       await api.assignSubstitution({
         date,
-        absentTeacher,
+        absentTeacher: originalTeacher || absentTeacher || 'Unknown', // Use original teacher if available
         period,
         class: classname,
         regularSubject: subject,
@@ -193,7 +212,7 @@ export default function SubstitutionModule() {
       const newSub = {
         period: Number(period),
         class: classname,
-        absentTeacher: absentTeacher,
+        absentTeacher: originalTeacher || absentTeacher || 'Unknown',
         regularSubject: subject,
         substituteTeacher: substituteIdentifier,
         substituteSubject: subject,
@@ -235,11 +254,97 @@ export default function SubstitutionModule() {
     }
   }
   
+  // Handle IT Lab support assignment
+  async function handleItLabSupportAssign(period, classname, supportTeacher) {
+    if (!supportTeacher || !period || !classname) return false;
+    
+    const rowKey = `${period}-${classname}`;
+    setAssignError(null);
+    setSuccessMessage(null);
+    setItLabAssigning(prev => ({ ...prev, [rowKey]: true }));
+    
+    try {
+      // supportTeacher may be an object { name, email } or a string
+      const supportIdentifier = typeof supportTeacher === 'object' ? (supportTeacher.email || supportTeacher.name) : supportTeacher;
+      const supportDisplayName = typeof supportTeacher === 'object' ? (supportTeacher.name || supportTeacher.email) : supportTeacher;
+      
+      console.log('Assigning IT Lab support:', { date, period, class: classname, support: supportIdentifier });
+      
+      // Use regular substitution assignment but with special note for IT Lab support
+      await api.assignSubstitution({
+        date,
+        absentTeacher: 'IT Lab Support', // Special designation
+        period,
+        class: classname,
+        regularSubject: 'IT Lab Support',
+        substituteTeacher: supportIdentifier,
+        substituteSubject: 'IT Lab Support',
+        note: `IT Lab Support for ${classname} period ${period}`
+      });
+
+      // Immediately show the assignment in UI (optimistic update)
+      const newSub = {
+        period: Number(period),
+        class: classname,
+        absentTeacher: 'IT Lab Support',
+        regularSubject: 'IT Lab Support',
+        substituteTeacher: supportIdentifier,
+        substituteSubject: 'IT Lab Support',
+        date: date,
+        note: `IT Lab Support for ${classname} period ${period}`
+      };
+      
+      setSubstitutions(prev => {
+        // Remove any existing IT Lab support assignment for this period/class
+        const filtered = prev.filter(s => !(Number(s.period) === Number(period) && String(s.class) === String(classname) && s.absentTeacher === 'IT Lab Support'));
+        return [...filtered, newSub];
+      });
+
+      // Also refresh from server to ensure list matches persisted data
+      try { await refreshAssigned(date); } catch {}
+
+      // Clear the selected IT Lab support for this row since it's now assigned
+      setSelectedItLabSupport(prev => { 
+        const updated = { ...prev }; 
+        delete updated[rowKey]; 
+        return updated; 
+      });
+
+      // Show success message briefly
+      setSuccessMessage(`✓ Assigned ${supportDisplayName} as IT Lab support for period ${period}, ${classname}`);
+      setAssignError(null);
+      
+      // Clear success message after 3 seconds
+      setTimeout(() => setSuccessMessage(null), 3000);
+      
+      return true;
+    } catch (err) {
+      console.error('Error assigning IT Lab support:', err);
+      const errorMsg = err?.message || String(err);
+      setAssignError(`Failed to assign IT Lab support: ${errorMsg}`);
+      setSuccessMessage(null);
+      return false;
+    } finally {
+      setItLabAssigning(prev => ({ ...prev, [rowKey]: false }));
+    }
+  }
+  
   // Check if a period already has a substitution assigned
   function getAssignedSubstitute(period, classname) {
     const substitution = substitutions.find(sub => 
       Number(sub.period) === Number(period) && 
-      String(sub.class) === String(classname)
+      String(sub.class) === String(classname) &&
+      sub.absentTeacher !== 'IT Lab Support' // Exclude IT Lab support entries
+    );
+    return substitution ? (substitution.substituteTeacher || substitution.teacher) : null;
+  }
+  
+  // Check if a period already has IT Lab support assigned
+  function getAssignedItLabSupport(period, classname) {
+    const substitution = substitutions.find(sub => 
+      Number(sub.period) === Number(period) && 
+      String(sub.class) === String(classname) &&
+      sub.absentTeacher === 'IT Lab Support'
     );
     return substitution ? (substitution.substituteTeacher || substitution.teacher) : null;
   }
@@ -321,7 +426,7 @@ export default function SubstitutionModule() {
           </div>
           <div>
             <label className={`block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'} mb-1 transition-colors duration-300`}>
-              <User className="inline h-4 w-4 mr-1 -mt-1" /> Absent Teacher
+              <User className="inline h-4 w-4 mr-1 -mt-1" /> Filter by Teacher (Optional)
             </label>
             <select
               value={absentTeacher}
@@ -333,7 +438,7 @@ export default function SubstitutionModule() {
               }}
               className={`w-full px-3 py-2 border ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded focus:ring-2 focus:ring-blue-500 transition-colors duration-300`}
             >
-              <option value="">Select Teacher</option>
+              <option value="">All Teachers</option>
               {absentTeachers.map((teacher, idx) => (
                 <option
                   key={`${(teacher && (teacher.email || teacher.name)) || String(teacher) || 'teacher'}-${idx}`}
@@ -385,11 +490,11 @@ export default function SubstitutionModule() {
         </div>
       )}
       
-      {/* Teacher's timetable */}
-      {absentTeacher && (
+      {/* Daily timetable */}
+      {timetable.length > 0 && (
         <div className="bg-white p-6 rounded-lg shadow-sm">
           <h2 className={`text-xl font-semibold mb-4 ${theme === 'dark' ? 'text-blue-400 border-gray-700' : 'text-blue-700 border-gray-200'} border-b pb-2 transition-colors duration-300`}>
-            {(absentTeachers.find(t => (t.email === absentTeacher || t.name === absentTeacher))?.name || absentTeacher) + "'s Timetable"}
+            Daily Timetable {absentTeacher ? `for ${(absentTeachers.find(t => (t.email === absentTeacher || t.name === absentTeacher))?.name || absentTeacher)}` : `for ${new Date(date).toLocaleDateString()}`}
           </h2>
           
           {loading && (
@@ -405,24 +510,42 @@ export default function SubstitutionModule() {
                   <th className={`px-6 py-3 text-left text-xs font-semibold ${theme === 'dark' ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-200'} uppercase tracking-wider border-b transition-colors duration-300`}>Period</th>
                   <th className={`px-6 py-3 text-left text-xs font-semibold ${theme === 'dark' ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-200'} uppercase tracking-wider border-b transition-colors duration-300`}>Class</th>
                   <th className={`px-6 py-3 text-left text-xs font-semibold ${theme === 'dark' ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-200'} uppercase tracking-wider border-b transition-colors duration-300`}>Subject</th>
+                  <th className={`px-6 py-3 text-left text-xs font-semibold ${theme === 'dark' ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-200'} uppercase tracking-wider border-b transition-colors duration-300`}>Teacher</th>
                   <th className={`px-6 py-3 text-left text-xs font-semibold ${theme === 'dark' ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-200'} uppercase tracking-wider border-b transition-colors duration-300`}>Substitute Teacher</th>
+                  <th className={`px-6 py-3 text-left text-xs font-semibold ${theme === 'dark' ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-200'} uppercase tracking-wider border-b transition-colors duration-300`}>IT Lab Support</th>
                   <th className={`px-6 py-3 text-left text-xs font-semibold ${theme === 'dark' ? 'text-gray-300 border-gray-600' : 'text-gray-700 border-gray-200'} uppercase tracking-wider border-b transition-colors duration-300`}>Status</th>
                 </tr>
               </thead>
               <tbody className={`${theme === 'dark' ? 'bg-gray-800' : 'bg-white'} divide-y ${theme === 'dark' ? 'divide-gray-700' : 'divide-gray-200'} transition-colors duration-300`}>
                 {timetable.map((slot, index) => {
                   const assignedTeacher = getAssignedSubstitute(slot.period, slot.class);
+                  const assignedItLabSupport = getAssignedItLabSupport(slot.period, slot.class);
                   const availableTeachers = freeTeachers[slot.period] || [];
                   const rowKey = `${slot.period}-${slot.class}`;
                   const isAssigning = assigningRows[rowKey] || false;
+                  const isItLab = isItLabPeriod(slot.subject);
+                  const isItLabAssigning = itLabAssigning[rowKey] || false;
                   
                   return (
                     <tr key={rowKey} className={`${theme === 'dark' ? 
                       (index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-750') :
-                      (index % 2 === 0 ? 'bg-white' : 'bg-gray-50')} transition-colors duration-300`}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 border-b">{slot.period}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 border-b">{slot.class}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 border-b">{slot.subject}</td>
+                      (index % 2 === 0 ? 'bg-white' : 'bg-gray-50')} transition-colors duration-300 ${isItLab ? 'ring-2 ring-blue-200 dark:ring-blue-800' : ''}`}>
+                      <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'} border-b transition-colors duration-300`}>
+                        <div className="flex items-center">
+                          {isItLab && <Monitor className="h-4 w-4 text-blue-500 mr-2" />}
+                          {slot.period}
+                        </div>
+                      </td>
+                      <td className={`px-6 py-4 whitespace-nowrap text-sm ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'} border-b transition-colors duration-300`}>{slot.class}</td>
+                      <td className={`px-6 py-4 whitespace-nowrap text-sm ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'} border-b transition-colors duration-300`}>
+                        <div className="flex items-center">
+                          {slot.subject}
+                          {isItLab && <span className="ml-2 px-2 py-1 text-xs bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200 rounded-full">IT Lab</span>}
+                        </div>
+                      </td>
+                      <td className={`px-6 py-4 whitespace-nowrap text-sm ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'} border-b transition-colors duration-300`}>
+                        {slot.teacher || 'Not assigned'}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm border-b">
                         {assignedTeacher ? (
                           <div className="text-green-600 font-medium flex items-center">
@@ -458,7 +581,7 @@ export default function SubstitutionModule() {
                                 className="ml-2 bg-green-600 dark:bg-green-700 text-white rounded px-3 py-1 text-sm flex items-center hover:bg-green-700 dark:hover:bg-green-800 disabled:bg-gray-400 dark:disabled:bg-gray-600 transition-colors duration-300 btn-animate"
                                 onClick={async () => {
                                   const sel = selectedSubstitutes[rowKey];
-                                  await handleSubstituteAssign(slot.period, slot.class, slot.subject, sel);
+                                  await handleSubstituteAssign(slot.period, slot.class, slot.subject, sel, slot.teacher);
                                   // Note: handleSubstituteAssign now clears the selection automatically
                                 }}
                                 disabled={loading || isAssigning || !selectedSubstitutes[rowKey]}
@@ -468,6 +591,60 @@ export default function SubstitutionModule() {
                               </button>
                             </div>
                           </div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm border-b">
+                        {isItLab ? (
+                          assignedItLabSupport ? (
+                            <div className="text-blue-600 font-medium flex items-center">
+                              <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
+                              <Monitor className="h-4 w-4 mr-1" />
+                              {assignedItLabSupport}
+                            </div>
+                          ) : (
+                            <div className="flex items-center space-x-2">
+                              <div className="flex-1">
+                                <select
+                                  className={`w-full border rounded px-2 py-1 ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} transition-colors duration-300`}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    const found = availableTeachers.find(t => (t.email === val || t.name === val));
+                                    setSelectedItLabSupport(prev => ({ ...prev, [rowKey]: found || val }));
+                                  }}
+                                  value={selectedItLabSupport[rowKey] ? (selectedItLabSupport[rowKey].email || selectedItLabSupport[rowKey].name || selectedItLabSupport[rowKey]) : ''}
+                                  disabled={loading || isItLabAssigning || availableTeachers.length === 0}
+                                >
+                                  <option value="">Select IT support</option>
+                                  {availableTeachers.map((teacher, idx) => (
+                                    <option
+                                      key={`itlab-${(teacher && (teacher.email || teacher.name)) || String(teacher) || 'free'}-${idx}`}
+                                      value={(teacher && (teacher.email || teacher.name)) || String(teacher)}
+                                    >
+                                      {(teacher && (teacher.name || teacher.email)) || String(teacher)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <button
+                                  className="ml-2 bg-blue-600 dark:bg-blue-700 text-white rounded px-3 py-1 text-sm flex items-center hover:bg-blue-700 dark:hover:bg-blue-800 disabled:bg-gray-400 dark:disabled:bg-gray-600 transition-colors duration-300 btn-animate"
+                                  onClick={async () => {
+                                    const sel = selectedItLabSupport[rowKey];
+                                    await handleItLabSupportAssign(slot.period, slot.class, sel);
+                                  }}
+                                  disabled={loading || isItLabAssigning || !selectedItLabSupport[rowKey]}
+                                >
+                                  {isItLabAssigning ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" /> : null}
+                                  <Monitor className="h-4 w-4 mr-1" />
+                                  Support
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        ) : (
+                          <span className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'} transition-colors duration-300`}>
+                            Not an IT Lab period
+                          </span>
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm border-b">

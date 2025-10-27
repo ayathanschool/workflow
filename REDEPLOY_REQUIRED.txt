@@ -1,0 +1,92 @@
+╔════════════════════════════════════════════════════════════════════════╗
+║                                                                        ║
+║   🔴 YOU NEED TO REDEPLOY THE FIXED CODE.GS FILE! 🔴                 ║
+║                                                                        ║
+║   The fix is in your local file but NOT in the deployed version       ║
+║                                                                        ║
+╚════════════════════════════════════════════════════════════════════════╝
+
+
+WHAT WAS FIXED IN YOUR LOCAL CODE.GS:
+═════════════════════════════════════
+
+✅ Line 3007: Fixed action parameter parsing
+   OLD: const action = (e.parameter.action || '').trim();
+   NEW: const action = (data.action || e.parameter.action || '').trim();
+
+✅ Lines 4446-4503: Fixed all IT Lab handlers to use 'data' instead of 'e.parameter'
+   - generateITLabDrafts: data.date ✅
+   - getITLabDrafts: data.date ✅  
+   - submitITLabDrafts: data.date, data.userName ✅
+   - updateITLabDraft: data.draftId, data.newTeacher ✅
+   - getFreeTeachers: data.date, data.period ✅
+
+
+DEPLOYMENT STEPS (MUST DO THIS NOW):
+════════════════════════════════════
+
+1. 🌐 Open Google Apps Script: https://script.google.com
+
+2. 📝 Find your project and open Code.gs
+
+3. 🗑️ DELETE all existing code in Apps Script editor:
+   - Press: Ctrl + A (select all)
+   - Press: Delete
+
+4. 📋 COPY from your VS Code workspace:
+   - File: d:\Backup app\1610\AyathanWorkflow\Appscript\Code.gs
+   - Press: Ctrl + A (select all)
+   - Press: Ctrl + C (copy)
+
+5. 📥 PASTE into Google Apps Script:
+   - Click in the Apps Script editor
+   - Press: Ctrl + V (paste)
+   - Press: Ctrl + S (save)
+
+6. 🚀 DEPLOY new version:
+   - Click: "Deploy" button
+   - Click: "Manage deployments"
+   - Click: "✏️ Edit" (pencil icon)
+   - Select: "New version"
+   - Description: "Fixed IT Lab parameter parsing"
+   - Click: "Deploy"
+
+7. ✅ VERIFY deployment:
+   - Should show new version number
+   - URL should remain the same
+
+
+AFTER DEPLOYMENT - TEST:
+═══════════════════════
+
+8. 🧪 Test in browser:
+   - Go to: http://localhost:5173/
+   - Login as HM
+   - Click: "IT Lab Substitutions"
+   - Click: "Generate Drafts"
+   - Should work now! ✅
+
+
+WHY IT'S STILL NOT WORKING:
+══════════════════════════
+
+❌ Your deployed Google Apps Script still has the OLD code
+✅ Your local workspace file has the CORRECT code
+🔄 You MUST copy the local file to Apps Script and redeploy
+
+The frontend is calling the deployed version, not your local file!
+
+
+QUICK VERIFICATION:
+══════════════════
+
+After deployment, this curl command should work:
+curl -X POST "https://script.google.com/macros/s/AKfycbxb3eCcrPwNyzeaYZJBFPyxESd2xWnnhjt2Q_XmnH-UXGneJyGHvxCrFMCow_iNGjGp/exec" -H "Content-Type: text/plain" -d '{"action": "generateITLabDrafts", "date": "2025-10-27"}'
+
+Should return: {"data": [...]} instead of {"error": "Unknown action"}
+
+
+═══════════════════════════════════════════════════════════════════════
+
+CRITICAL: The fix exists in your local file.
+          You MUST deploy it to Google Apps Script!

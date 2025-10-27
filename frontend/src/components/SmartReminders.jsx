@@ -62,15 +62,20 @@ const SmartReminders = ({ user }) => {
 
   const fetchSmartReminders = async () => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_GAS_WEB_APP_URL}?action=getSmartReminders&teacherEmail=${user.email}&advanceNotice=${settings.advanceNotice}`);
-      const result = await response.json();
+      // Temporarily disabled - backend not deployed yet
+      console.warn('Smart Reminders API temporarily disabled - awaiting backend deployment');
+      return [];
       
-      if (result.success && Array.isArray(result.data)) {
-        return result.data;
-      } else {
-        console.error('Error in smart reminders response:', result.error);
-        return [];
-      }
+      // Uncomment when backend is deployed:
+      // const response = await fetch(`${import.meta.env.VITE_GAS_WEB_APP_URL}?action=getSmartReminders&teacherEmail=${user.email}&advanceNotice=${settings.advanceNotice}`);
+      // const result = await response.json();
+      // 
+      // if (result.success && Array.isArray(result.data)) {
+      //   return result.data;
+      // } else {
+      //   console.error('Error in smart reminders response:', result.error);
+      //   return [];
+      // }
     } catch (error) {
       console.error('Error fetching smart reminders:', error);
       return [];

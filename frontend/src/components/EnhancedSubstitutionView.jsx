@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Download, Filter, RefreshCw, UserPlus, FileText, FileSpreadsheet, Eye, EyeOff, Table, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { Calendar, Download, Filter, RefreshCw, UserPlus, FileText, FileSpreadsheet, Eye, EyeOff, Table, CheckCircle, XCircle, Clock, Monitor } from 'lucide-react';
 import { toISTDateString, formatDateForInput, parseApiDate, formatLocalDate, periodToTimeString } from '../utils/dateUtils';
 import * as api from '../api';
 
@@ -36,6 +36,10 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
   const [lastApiCall, setLastApiCall] = useState(null);
   const [apiCallHistory, setApiCallHistory] = useState([]);
 
+  // IT Lab support states
+  const [itLabAssigning, setItLabAssigning] = useState({});
+  const [selectedItLabSupport, setSelectedItLabSupport] = useState({});
+
   // Add to API call history
   const logApiCall = (endpoint, params, result) => {
     setLastApiCall({
@@ -56,6 +60,84 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
       },
       ...prev.slice(0, 9)  // Keep last 10 calls
     ]);
+  };
+
+  // Helper: check if a period is an IT Lab period
+  const isItLabPeriod = (subject) => {
+    if (!subject) return false;
+    const subjectLower = subject.toLowerCase();
+    return subjectLower.includes('computer') || 
+           subjectLower.includes('it ') || 
+           subjectLower.includes('information technology') ||
+           subjectLower.includes('programming') ||
+           subjectLower.includes('coding');
+  };
+
+  // Check if a period already has IT Lab support assigned
+  const getAssignedItLabSupport = (period, classname) => {
+    const substitution = substitutionData.find(sub => 
+      Number(sub.period) === Number(period) && 
+      String(sub.class) === String(classname) &&
+      sub.absentTeacher === 'IT Lab Support'
+    );
+    return substitution ? (substitution.substituteTeacher || substitution.teacher) : null;
+  };
+
+  // Handle IT Lab support assignment
+  const handleItLabSupportAssign = async (period, classname, supportTeacher) => {
+    if (!supportTeacher || !period || !classname) return false;
+    
+    const rowKey = `${period}-${classname}`;
+    setError('');
+    setSuccessMessage('');
+    setItLabAssigning(prev => ({ ...prev, [rowKey]: true }));
+    
+    try {
+      // supportTeacher may be an object { name, email } or a string
+      const supportIdentifier = typeof supportTeacher === 'object' ? (supportTeacher.email || supportTeacher.name) : supportTeacher;
+      const supportDisplayName = typeof supportTeacher === 'object' ? (supportTeacher.name || supportTeacher.email) : supportTeacher;
+      
+      console.log('Assigning IT Lab support:', { date: selectedDate, period, class: classname, support: supportIdentifier });
+      
+      // Use regular substitution assignment but with special note for IT Lab support
+      await api.assignSubstitution({
+        date: selectedDate,
+        absentTeacher: 'IT Lab Support', // Special designation
+        period,
+        class: classname,
+        regularSubject: 'IT Lab Support',
+        substituteTeacher: supportIdentifier,
+        substituteSubject: 'IT Lab Support',
+        note: `IT Lab Support for ${classname} period ${period}`
+      });
+
+      // Clear the selected IT Lab support for this row since it's now assigned
+      setSelectedItLabSupport(prev => { 
+        const updated = { ...prev }; 
+        delete updated[rowKey]; 
+        return updated; 
+      });
+
+      // Show success message briefly
+      setSuccessMessage(`✓ Assigned ${supportDisplayName} as IT Lab support for period ${period}, ${classname}`);
+      setError('');
+      
+      // Refresh data
+      setDataRefreshKey(prev => prev + 1);
+      
+      // Clear success message after 3 seconds
+      setTimeout(() => setSuccessMessage(''), 3000);
+      
+      return true;
+    } catch (err) {
+      console.error('Error assigning IT Lab support:', err);
+      const errorMsg = err?.message || String(err);
+      setError(`Failed to assign IT Lab support: ${errorMsg}`);
+      setSuccessMessage('');
+      return false;
+    } finally {
+      setItLabAssigning(prev => ({ ...prev, [rowKey]: false }));
+    }
   };
 
   // Fetch timetable for selected date
@@ -202,7 +284,7 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
     return periodToTimeString(period, customPeriodTimes);
   };
 
-  // Check if period has substitution
+  // Check if period has substitution (excluding IT Lab support entries)
   const getSubstitutionForPeriod = (period, className) => {
     // console.log(`Looking for substitution - Period: ${period}, Class: ${className}`);
     // console.log('Available substitution data:', substitutionData);
@@ -215,10 +297,11 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
     const substitution = substitutionData.find(sub => {
       const periodMatch = (parseInt(sub.period) === parseInt(period));
       const classMatch = String(sub.class || '').toLowerCase() === String(className || '').toLowerCase();
+      const isNotItLabSupport = sub.absentTeacher !== 'IT Lab Support'; // Exclude IT Lab support entries
       
       // console.log(`Checking sub: Period ${sub.period} (${periodMatch ? '✓' : '✗'}), Class ${sub.class} (${classMatch ? '✓' : '✗'})`);
       
-      return periodMatch && classMatch;
+      return periodMatch && classMatch && isNotItLabSupport;
     });
     
     // console.log('Found substitution:', substitution || 'undefined');
@@ -794,14 +877,19 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
                         
                         const substitution = showWithSubstitutions ? getSubstitutionForPeriod(parseInt(period), className) : null;
                         const hasSubstitution = !!substitution;
+                        const isItLab = isItLabPeriod(item.subject);
+                        const itLabSupport = isItLab ? getAssignedItLabSupport(parseInt(period), className) : null;
+                        const rowKey = `${period}-${className}`;
+                        const isItLabAssigning = itLabAssigning[rowKey] || false;
                         
                         return (
                           <td 
                             key={`${className}-${period}`}
-                            className={`px-4 py-3 text-sm border ${hasSubstitution ? 'bg-orange-50 dark:bg-orange-900/20' : ''}`}
+                            className={`px-4 py-3 text-sm border ${hasSubstitution ? 'bg-orange-50 dark:bg-orange-900/20' : ''} ${isItLab ? 'ring-2 ring-blue-300 dark:ring-blue-700' : ''}`}
                           >
                             <div className="text-center">
-                              <div className="font-medium text-gray-900 dark:text-white">
+                              <div className="font-medium text-gray-900 dark:text-white flex items-center justify-center gap-1">
+                                {isItLab && <Monitor className="w-3 h-3 text-blue-500" />}
                                 {hasSubstitution && showWithSubstitutions ? (
                                   <>
                                     <span className="line-through text-gray-500">{item.subject}</span>
@@ -810,6 +898,7 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
                                 ) : (
                                   item.subject
                                 )}
+                                {isItLab && <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200 rounded-full">IT Lab</span>}
                               </div>
                               <div className="text-xs mt-1">
                                 {hasSubstitution && showWithSubstitutions ? (
@@ -821,7 +910,7 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
                                   item.teacherName
                                 )}
                               </div>
-                              <div className="mt-2">
+                              <div className="mt-2 space-y-1">
                                 {hasSubstitution ? (
                                   <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">
                                     Substituted
@@ -834,6 +923,54 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
                                     <UserPlus className="w-3 h-3" />
                                     Assign
                                   </button>
+                                )}
+                                {isItLab && (
+                                  itLabSupport ? (
+                                    <div className="mt-1 p-1 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-200 dark:border-blue-700">
+                                      <div className="text-blue-600 dark:text-blue-400 font-medium flex items-center justify-center gap-1 text-xs">
+                                        <Monitor className="w-3 h-3" />
+                                        IT Support: {itLabSupport}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-1">
+                                      <select
+                                        className="flex-1 text-xs border rounded px-1 py-1 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setSelectedItLabSupport(prev => ({ ...prev, [rowKey]: val }));
+                                        }}
+                                        value={selectedItLabSupport[rowKey] || ''}
+                                        disabled={isItLabAssigning}
+                                      >
+                                        <option value="">IT Support...</option>
+                                        {availableTeachers.map((teacher, idx) => (
+                                          <option
+                                            key={`itlab-${teacher.email || teacher.name}-${idx}`}
+                                            value={teacher.name}
+                                          >
+                                            {teacher.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      <button
+                                        className="px-2 py-1 bg-blue-600 dark:bg-blue-700 text-white rounded text-xs hover:bg-blue-700 dark:hover:bg-blue-800 disabled:bg-gray-400 dark:disabled:bg-gray-600 flex items-center gap-1"
+                                        onClick={async () => {
+                                          const sel = selectedItLabSupport[rowKey];
+                                          if (sel) {
+                                            await handleItLabSupportAssign(parseInt(period), className, sel);
+                                          }
+                                        }}
+                                        disabled={isItLabAssigning || !selectedItLabSupport[rowKey]}
+                                      >
+                                        {isItLabAssigning ? (
+                                          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />
+                                        ) : (
+                                          <Monitor className="w-3 h-3" />
+                                        )}
+                                      </button>
+                                    </div>
+                                  )
                                 )}
                               </div>
                             </div>

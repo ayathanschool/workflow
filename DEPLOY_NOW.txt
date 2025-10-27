@@ -1,0 +1,67 @@
+╔════════════════════════════════════════════════════════════════════════╗
+║                                                                        ║
+║   ⚠️  YOU STILL HAVE VERSION 33 DEPLOYED - IT HAS THE BUG! ⚠️        ║
+║                                                                        ║
+║   The fix is ready in your local Code.gs file                         ║
+║   But you MUST deploy it to Google Apps Script!                       ║
+║                                                                        ║
+╚════════════════════════════════════════════════════════════════════════╝
+
+
+STEP-BY-STEP DEPLOYMENT:
+═════════════════════════
+
+1️⃣  Open Google Apps Script
+   → https://script.google.com
+   → Find your project in the dashboard
+
+2️⃣  Open Code.gs file in the editor
+
+3️⃣  SELECT ALL the old code
+   → Press: Ctrl + A
+   → Press: Delete
+
+4️⃣  Open YOUR LOCAL fixed file
+   → File: d:\Backup app\1610\AyathanWorkflow\Appscript\Code.gs
+   → Press: Ctrl + A (select all)
+   → Press: Ctrl + C (copy)
+
+5️⃣  Paste into Google Apps Script
+   → Go back to the Apps Script editor tab
+   → Press: Ctrl + V (paste)
+   → Press: Ctrl + S (save)
+   → Wait for "Saved" confirmation
+
+6️⃣  Deploy new version
+   → Click: "Deploy" button (top right)
+   → Click: "Manage deployments"
+   → Click: "✏️ Edit" button (pencil icon)
+   → Under "Version": Select "New version"
+   → Add description: "Fixed IT Lab - handlers moved to doPost"
+   → Click: "Deploy"
+   → Confirm it says "Version 34"
+
+7️⃣  Test immediately
+   → Go to your frontend (localhost:5173)
+   → Login as HM
+   → Go to "IT Lab Substitutions"
+   → Click "Generate Drafts"
+   → Should work now! ✅
+
+
+WHY IT'S NOT WORKING NOW:
+═══════════════════════════
+
+❌ Your deployed version 33 still has the bug (handlers in doGet)
+✅ Your local Code.gs file has the fix (handlers in doPost)
+⚠️  Frontend is calling version 33 (the broken one)
+
+You MUST upload the fixed code to Apps Script and deploy it!
+
+
+═══════════════════════════════════════════════════════════════════════
+
+After deployment, if it STILL shows "unknown action":
+- Clear browser cache (Ctrl+Shift+Delete)
+- Do a hard refresh (Ctrl+F5)
+- Check the Apps Script version number is 34

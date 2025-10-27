@@ -707,3 +707,8 @@ export async function getRecentActivities() {
     return [];
   }
 }
+
+// Generic API caller for custom actions
+export async function callAPI(action, params = {}) {
+  return await postJSON(BASE_URL, { action, ...params });
+}

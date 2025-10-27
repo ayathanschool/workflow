@@ -16,6 +16,7 @@ import PWAInstallBanner from './components/PWAInstallBanner';
 // Lazy load heavy components for better performance
 const AdvancedAnalytics = lazy(() => import('./components/AdvancedAnalytics'));
 const SmartReminders = lazy(() => import('./components/SmartReminders'));
+const SubstitutionModule = lazy(() => import('./components/SubstitutionModule'));
 const EnhancedSubstitutionView = lazy(() => import('./components/EnhancedSubstitutionView'));
 const DailyReportTimetable = lazy(() => import('./DailyReportTimetable'));
 const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodSubstitutionView'));

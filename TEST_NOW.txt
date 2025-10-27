@@ -1,0 +1,98 @@
+╔════════════════════════════════════════════════════════════════════════╗
+║                                                                        ║
+║   ✅ NEW DEPLOYMENT CREATED - VERSION 34                              ║
+║                                                                        ║
+║   URL Updated: https://script.google.com/macros/s/                    ║
+║   AKfycbxb3eCcrPwNyzeaYZJBFPyxESd2xWnnhjt2Q_XmnH-UXGneJyGHvxCrFMCow   ║
+║   _iNGjGp/exec                                                         ║
+║                                                                        ║
+╚════════════════════════════════════════════════════════════════════════╝
+
+
+✅ COMPLETED STEPS:
+═══════════════════
+
+1. ✅ Created new Code.gs in Apps Script from local fixed file
+2. ✅ Deployed as new version with new URL
+3. ✅ Updated frontend/.env with new deployment URL
+4. ✅ Restarted dev server (running at http://localhost:5173/)
+
+
+🧪 NOW TEST THE FIX:
+═══════════════════
+
+1. Open browser: http://localhost:5173/
+
+2. Login as HM user:
+   - Use your HM credentials
+   - Verify you see "IT Lab Substitutions" in the menu
+
+3. Click "IT Lab Substitutions"
+
+4. Click "Generate Drafts" button
+
+5. EXPECTED RESULT:
+   ✅ Should see: "Drafts generated successfully"
+   ✅ Should see: List of draft substitutions
+   ✅ Should see: Teacher dropdowns populated
+   ❌ Should NOT see: "Unknown action" error
+
+6. Test other features:
+   - Change a teacher in the dropdown
+   - Click "Submit to Substitutions"
+   - Verify it creates entries in Substitutions sheet
+
+
+📊 WHAT WAS FIXED:
+═══════════════════
+
+BEFORE (Version 33):
+- IT Lab handlers were in doGet() function
+- Frontend sends POST requests
+- POST requests go to doPost() function
+- doPost() didn't have IT Lab handlers
+- Result: "Unknown action" error
+
+AFTER (Version 34):
+- IT Lab handlers moved to doPost() function
+- Frontend sends POST requests
+- POST requests go to doPost() function  
+- doPost() HAS IT Lab handlers now
+- Result: Should work! ✅
+
+
+🔍 IF IT STILL DOESN'T WORK:
+════════════════════════════
+
+1. Clear browser cache (Ctrl+Shift+Delete)
+2. Hard refresh page (Ctrl+F5)
+3. Check browser console (F12) for errors
+4. Verify in Apps Script that Code.gs has IT Lab handlers in doPost
+5. Check line ~4445 in deployed Code.gs should show:
+   if (action === 'generateITLabDrafts') {
+
+6. Verify the deployment is active:
+   - Go to Apps Script → Deploy → Manage deployments
+   - Should show latest version as active
+
+7. Test manually in Apps Script:
+   - Run: generateITLabDrafts(new Date().toISOString().split('T')[0])
+   - Should create draft entries in "IT Lab Drafts" sheet
+
+
+📝 DEPLOYMENT INFO:
+═══════════════════
+
+Old URL (v33 - BROKEN):
+https://script.google.com/macros/s/AKfycbw3ZfAnzMyZvsdkuwbeNwxMNyPbdZvr53b4EsKzSFa4MMPjHym0pVwihVjLTXlNiqbK/exec
+
+New URL (v34 - FIXED):
+https://script.google.com/macros/s/AKfycbxb3eCcrPwNyzeaYZJBFPyxESd2xWnnhjt2Q_XmnH-UXGneJyGHvxCrFMCow_iNGjGp/exec
+
+Frontend .env: ✅ UPDATED
+Dev server: ✅ RESTARTED
+
+
+═══════════════════════════════════════════════════════════════════════
+
+Next step: TEST in the browser!
