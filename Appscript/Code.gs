@@ -5264,6 +5264,9 @@ function fixSubstitutionDates() {
     let fixedCount = 0;
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const yesterdayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate() - 1).padStart(2, '0')}`;
+    
+    Logger.log(`Migration: Today = ${todayStr}, Yesterday = ${yesterdayStr}`);
     
     // Process each row
     for (let i = 0; i < values.length; i++) {
@@ -5274,27 +5277,42 @@ function fixSubstitutionDates() {
       // Check if this substitution was created today but has yesterday's date
       if (createdAt && currentDate) {
         const createdDate = new Date(createdAt);
-        const createdDateStr = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}-${String(createdDate.getDate()).padStart(2, '0')}`;
         
-        // If the substitution was created today but stored with a different date (likely due to timezone bug)
-        if (createdDateStr === todayStr && currentDate !== todayStr) {
-          Logger.log(`Fixing substitution: ID ${rowObj.id}, current date: ${currentDate}, should be: ${createdDateStr}`);
+        // More robust check: if creation timestamp is from today but date field shows yesterday
+        const createdToday = createdDate.toISOString().startsWith('2025-10-27');
+        const dateIsYesterday = currentDate === yesterdayStr || currentDate === '2025-10-26';
+        
+        if (createdToday && dateIsYesterday) {
+          Logger.log(`Fixing substitution: ID ${rowObj.id}, current date: ${currentDate}, should be: ${todayStr}`);
+          Logger.log(`Created: ${createdAt}, Row: ${i + 2}`);
           
-          // Update the date to match the creation date
+          // Update the date to today's date
           const dateColumnIndex = headers.indexOf('date');
           if (dateColumnIndex >= 0) {
-            sh.getRange(i + 2, dateColumnIndex + 1).setValue(createdDateStr); // +2 because of header row and 0-based index
-            fixedCount++;
+            try {
+              sh.getRange(i + 2, dateColumnIndex + 1).setValue(todayStr); // +2 because of header row and 0-based index
+              fixedCount++;
+              Logger.log(`Successfully updated row ${i + 2}, column ${dateColumnIndex + 1} to ${todayStr}`);
+            } catch (updateError) {
+              Logger.log(`Error updating row ${i + 2}: ${updateError.message || updateError}`);
+            }
+          } else {
+            Logger.log(`Date column not found in headers: ${JSON.stringify(headers)}`);
           }
         }
       }
     }
 
+    // Flush changes to ensure they're saved
+    SpreadsheetApp.flush();
+
     return { 
       success: true, 
       message: `Fixed ${fixedCount} substitution dates`,
       fixed: fixedCount,
-      details: `Checked ${values.length} substitutions, fixed ${fixedCount} with incorrect dates`
+      details: `Checked ${values.length} substitutions, fixed ${fixedCount} with incorrect dates`,
+      todayStr,
+      yesterdayStr
     };
 
   } catch (error) {
