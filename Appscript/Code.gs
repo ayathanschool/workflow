@@ -292,9 +292,10 @@ function _normalizeDayName(input) {
 function _isoDateString(date) {
   if (!date) return '';
   
-  // If it's already in the correct format, return as-is
-  if (typeof date === 'string' && date.match(/^\d{4}-\d{2}-\d{2}$/)) {
-    return date;
+  // If it's already a clean YYYY-MM-DD string, return as-is without any processing
+  const dateStr = String(date).trim();
+  if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    return dateStr;
   }
   
   let d;
@@ -304,15 +305,20 @@ function _isoDateString(date) {
       // This is an ISO timestamp, parse it
       d = new Date(date);
     } else if (date.includes('-') && date.split('-').length === 3) {
-      // This looks like YYYY-MM-DD or MM-DD-YYYY format
+      // This looks like YYYY-MM-DD format - but still need to validate
       const parts = date.split('-');
       if (parts[0].length === 4) {
-        // YYYY-MM-DD format - create as local date
-        d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-      } else {
-        // Try parsing as regular date
-        d = new Date(date);
+        // YYYY-MM-DD format - Return directly without timezone conversion
+        // This avoids timezone issues when dates are stored as strings
+        const normalized = `${parts[0]}-${String(parts[1]).padStart(2, '0')}-${String(parts[2]).padStart(2, '0')}`;
+        // Validate it's a real date
+        const testDate = new Date(`${normalized}T00:00:00`);
+        if (!isNaN(testDate.getTime())) {
+          return normalized;
+        }
       }
+      // Fall through to regular parsing if validation fails
+      d = new Date(date);
     } else {
       // Parse as regular date
       d = new Date(date);
@@ -329,8 +335,11 @@ function _isoDateString(date) {
     return String(date || '');
   }
   
-  // Format as ISO date string YYYY-MM-DD using local timezone
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // Format as ISO date string YYYY-MM-DD using UTC to avoid timezone shifts
+  const year = d.getUTCFullYear();
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 /**
