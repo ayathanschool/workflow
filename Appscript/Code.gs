@@ -335,7 +335,27 @@ function _isoDateString(date) {
     return String(date || '');
   }
   
-  // Format as ISO date string YYYY-MM-DD using UTC to avoid timezone shifts
+  // CRITICAL: For Date objects, we need to handle the IST timezone context
+  // Google Sheets stores dates as Date objects at 18:30 UTC (which is midnight IST the next day)
+  // We should interpret these as LOCAL dates (IST), not UTC dates
+  
+  // Check if this looks like a midnight-ish time in IST (stored as 18:30-19:00 UTC prev day)
+  const utcHours = d.getUTCHours();
+  const utcMinutes = d.getUTCMinutes();
+  
+  // If time is 18:00-19:59 UTC (which maps to 23:30-01:29 IST), this is likely a date stored in IST context
+  // Add 5.5 hours to convert from UTC to IST and use that date
+  if (utcHours >= 18 && utcHours < 20) {
+    // This is likely stored as IST midnight (which is 18:30 UTC previous day)
+    // Use IST interpretation by adding 5.5 hours
+    const istTime = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+    const year = istTime.getUTCFullYear();
+    const month = String(istTime.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(istTime.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  
+  // Otherwise use UTC date (for timestamps that are clearly not date-only values)
   const year = d.getUTCFullYear();
   const month = String(d.getUTCMonth() + 1).padStart(2, '0');
   const day = String(d.getUTCDate()).padStart(2, '0');
