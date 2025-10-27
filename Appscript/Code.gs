@@ -2447,6 +2447,37 @@ function doGet(e) {
       }
     }
     
+    // Debug action to inspect raw substitution data types
+    if (action === 'debugSubstitutionDates') {
+      try {
+        const sh = _getSheet('Substitutions');
+        const headers = _headers(sh);
+        const values = _rows(sh);
+        
+        // Get recent substitutions (last 10)
+        const recent = values.slice(-10).map((row, idx) => {
+          const obj = _indexByHeader(row, headers);
+          const dateValue = obj.date;
+          const createdValue = obj.createdAt;
+          
+          return {
+            rowNum: values.length - 10 + idx + 2, // +2 for header and 1-based
+            dateValue: String(dateValue),
+            dateType: typeof dateValue,
+            dateIsDate: dateValue instanceof Date,
+            createdValue: String(createdValue),
+            createdType: typeof createdValue,
+            period: obj.period,
+            class: obj.class
+          };
+        });
+        
+        return _respond({ count: values.length, recent });
+      } catch (err) {
+        return _respond({ error: String(err.message || err) });
+      }
+    }
+    
     /**
      * Get all substitutions for a specific date
      * 
