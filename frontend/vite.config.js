@@ -11,13 +11,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react({
       // Enable Fast Refresh for better development performance
-      fastRefresh: true,
-      // Babel config for optimizations
-      babel: {
-        plugins: isProd ? [
-          ['transform-remove-console', { exclude: ['error', 'warn'] }]
-        ] : []
-      }
+      fastRefresh: true
     })],
     build: {
       sourcemap: !isProd,
