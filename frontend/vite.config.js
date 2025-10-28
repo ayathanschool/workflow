@@ -9,9 +9,27 @@ export default defineConfig(({ mode }) => {
   const isProd = mode === 'production';
 
   return {
-    plugins: [react()],
+    plugins: [react({
+      // Enable Fast Refresh for better development performance
+      fastRefresh: true,
+      // Babel config for optimizations
+      babel: {
+        plugins: isProd ? [
+          ['transform-remove-console', { exclude: ['error', 'warn'] }]
+        ] : []
+      }
+    })],
     build: {
       sourcemap: !isProd,
+      // Optimize build performance
+      minify: isProd ? 'terser' : false,
+      terserOptions: isProd ? {
+        compress: {
+          drop_console: true,
+          drop_debugger: true,
+          pure_funcs: ['console.log', 'console.info']
+        }
+      } : undefined,
       // Optimize chunks for production
       rollupOptions: {
         output: {
@@ -25,7 +43,13 @@ export default defineConfig(({ mode }) => {
           } : undefined
         }
       },
-      chunkSizeWarningLimit: 600
+      chunkSizeWarningLimit: 600,
+      // Optimize CSS
+      cssCodeSplit: true,
+      // Enable build cache
+      reportCompressedSize: false,
+      // Increase chunk size limit
+      assetsInlineLimit: 4096
     },
     resolve: {
       alias: {

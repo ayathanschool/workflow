@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Calendar, Download, Filter, RefreshCw, UserPlus, FileText, FileSpreadsheet, Eye, EyeOff, Table, CheckCircle, XCircle, Clock, Monitor } from 'lucide-react';
 import { toISTDateString, formatDateForInput, parseApiDate, formatLocalDate, periodToTimeString } from '../utils/dateUtils';
 import * as api from '../api';
+import { debounce } from '../utils/performanceUtils';
 
-const EnhancedSubstitutionView = ({ user, periodTimes }) => {
+const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
   // State Management
   const [selectedDate, setSelectedDate] = useState(formatDateForInput(new Date()));
   const [timetableData, setTimetableData] = useState([]);
@@ -251,16 +252,23 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
     }
   };
 
-  // Get unique teachers and classes for filters
-  const uniqueTeachers = [...new Set(timetableData.map(item => item.teacherName).filter(Boolean))].sort();
-  const uniqueClasses = [...new Set(timetableData.map(item => item.class).filter(Boolean))].sort();
+  // Get unique teachers and classes for filters - MEMOIZED for performance
+  const uniqueTeachers = useMemo(() => 
+    [...new Set(timetableData.map(item => item.teacherName).filter(Boolean))].sort(),
+    [timetableData]
+  );
+  
+  const uniqueClasses = useMemo(() => 
+    [...new Set(timetableData.map(item => item.class).filter(Boolean))].sort(),
+    [timetableData]
+  );
 
-  // Force refresh all data
-  const refreshAllData = async () => {
+  // Force refresh all data - MEMOIZED with useCallback
+  const refreshAllData = useCallback(async () => {
     setDataRefreshKey(prev => prev + 1);
     await fetchTimetableData();
     await fetchSubstitutionData();
-  };
+  }, [selectedDate]);
 
   // We now receive periodTimes from props, so we don't need to fetch them
 
@@ -272,12 +280,15 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
     }
   }, [selectedDate, dataRefreshKey]);
 
-  // Filter timetable data
-  const filteredTimetable = timetableData.filter(item => {
-    const teacherMatch = !teacherFilter || item.teacherName?.toLowerCase().includes(teacherFilter.toLowerCase());
-    const classMatch = !classFilter || item.class?.toLowerCase().includes(classFilter.toLowerCase());
-    return teacherMatch && classMatch;
-  });
+  // Filter timetable data - MEMOIZED for performance
+  const filteredTimetable = useMemo(() => 
+    timetableData.filter(item => {
+      const teacherMatch = !teacherFilter || item.teacherName?.toLowerCase().includes(teacherFilter.toLowerCase());
+      const classMatch = !classFilter || item.class?.toLowerCase().includes(classFilter.toLowerCase());
+      return teacherMatch && classMatch;
+    }),
+    [timetableData, teacherFilter, classFilter]
+  );
 
   // Get period time display using the utility function and custom times if available
   const getPeriodTime = (period) => {
@@ -434,6 +445,8 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
           groupedTimetable[period].map(item => {
             const substitution = showWithSubstitutions ? getSubstitutionForPeriod(parseInt(period), item.class) : null;
             const hasSubstitution = !!substitution;
+            const isItLab = isItLabPeriod(item.subject);
+            const itLabSupport = isItLab ? getAssignedItLabSupport(parseInt(period), item.class) : null;
             
             return {
               period: period,
@@ -443,7 +456,8 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
                 `${item.subject} → ${substitution.substituteSubject}` : item.subject,
               teacher: hasSubstitution && showWithSubstitutions ? 
                 `${item.teacherName} → ${substitution.substituteTeacher}` : item.teacherName,
-              status: hasSubstitution ? 'Substituted' : 'Regular',
+              itLabSupport: itLabSupport || '',
+              status: hasSubstitution ? 'Substituted' : (isItLab ? 'IT Lab' : 'Regular'),
               note: hasSubstitution ? substitution.note : ''
             };
           })
@@ -475,18 +489,20 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
                   <th>Class</th>
                   <th>Subject</th>
                   <th>Teacher</th>
+                  <th>IT Lab Support</th>
                   <th>Status</th>
                   <th>Note</th>
                 </tr>
               </thead>
               <tbody>
                 ${tableData.map(row => `
-                  <tr class="${row.status.toLowerCase()}">
+                  <tr class="${row.status.toLowerCase().replace(' ', '-')}">
                     <td>${row.period}</td>
                     <td>${row.time}</td>
                     <td>${row.class}</td>
                     <td>${row.subject}</td>
                     <td>${row.teacher}</td>
+                    <td>${row.itLabSupport || '-'}</td>
                     <td>${row.status}</td>
                     <td>${row.note}</td>
                   </tr>
@@ -515,7 +531,7 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
   const exportToExcel = () => {
     try {
       // Create CSV content for Excel compatibility
-      const headers = ['Period', 'Time', 'Class', 'Subject', 'Teacher', 'Status', 'Note'];
+      const headers = ['Period', 'Time', 'Class', 'Subject', 'Teacher', 'IT Lab Support', 'Status', 'Note'];
       
       const csvData = Object.keys(groupedTimetable)
         .sort((a, b) => parseInt(a) - parseInt(b))
@@ -523,6 +539,8 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
           groupedTimetable[period].map(item => {
             const substitution = showWithSubstitutions ? getSubstitutionForPeriod(parseInt(period), item.class) : null;
             const hasSubstitution = !!substitution;
+            const isItLab = isItLabPeriod(item.subject);
+            const itLabSupport = isItLab ? getAssignedItLabSupport(parseInt(period), item.class) : null;
             
             return [
               period,
@@ -532,7 +550,8 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
                 `${item.subject} → ${substitution.substituteSubject}` : item.subject,
               hasSubstitution && showWithSubstitutions ? 
                 `${item.teacherName} → ${substitution.substituteTeacher}` : item.teacherName,
-              hasSubstitution ? 'Substituted' : 'Regular',
+              itLabSupport || '',
+              hasSubstitution ? 'Substituted' : (isItLab ? 'IT Lab' : 'Regular'),
               hasSubstitution ? substitution.note : ''
             ];
           })
@@ -1097,6 +1116,6 @@ const EnhancedSubstitutionView = ({ user, periodTimes }) => {
       )}
     </div>
   );
-};
+});
 
 export default EnhancedSubstitutionView;

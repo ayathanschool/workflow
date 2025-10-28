@@ -18,9 +18,10 @@ const devLog = (...args) => { if (__DEV_LOG__) console.log('[api]', ...args); };
 const apiCache = new Map();
 const pendingRequests = new Map();
 
-// Cache duration in milliseconds
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-const SHORT_CACHE_DURATION = 30 * 1000; // 30 seconds for frequently changing data
+// Cache duration in milliseconds - Optimized for speed
+const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes (increased from 5)
+const SHORT_CACHE_DURATION = 60 * 1000; // 60 seconds (increased from 30)
+const LONG_CACHE_DURATION = 30 * 60 * 1000; // 30 minutes for rarely changing data
 
 function getCacheKey(url) {
   return url;
