@@ -2179,12 +2179,39 @@ const App = () => {
   // Scheme Approvals View
   const SchemeApprovalsView = () => {
     const [pendingSchemes, setPendingSchemes] = useState([]);
+    const [allSchemes, setAllSchemes] = useState([]); // Store all schemes for filter options
+    const [showFilters, setShowFilters] = useState(false);
+    const [filters, setFilters] = useState({
+      teacher: '',
+      class: '',
+      subject: '',
+      month: ''
+    });
 
-    // Load pending schemes for HM on mount
+    // Get unique values for dropdowns
+    const uniqueTeachers = [...new Set(allSchemes.map(s => s.teacherName).filter(Boolean))].sort();
+    const uniqueClasses = [...new Set(allSchemes.map(s => s.class).filter(Boolean))].sort();
+    const uniqueSubjects = [...new Set(allSchemes.map(s => s.subject).filter(Boolean))].sort();
+    const uniqueMonths = [...new Set(allSchemes.map(s => s.month).filter(Boolean))].sort();
+
+    // Load all schemes once for filter options
+    useEffect(() => {
+      async function fetchAllSchemes() {
+        try {
+          const data = await api.getPendingPlans(1, 1000, '', '', '', ''); // Get all for filter options
+          setAllSchemes(Array.isArray(data?.plans) ? data.plans : []);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+      fetchAllSchemes();
+    }, []);
+
+    // Load filtered schemes
     useEffect(() => {
       async function fetchPendingSchemes() {
         try {
-          const data = await api.getPendingPlans(1, 50, '', '', '', '');
+          const data = await api.getPendingPlans(1, 50, filters.teacher, filters.class, filters.subject, filters.month);
           // The API returns an object with a `plans` array
           setPendingSchemes(Array.isArray(data?.plans) ? data.plans : []);
         } catch (err) {
@@ -2192,7 +2219,7 @@ const App = () => {
         }
       }
       fetchPendingSchemes();
-    }, []);
+    }, [filters]);
 
     const handleApproveScheme = async (schemeId) => {
       try {
@@ -2217,12 +2244,84 @@ const App = () => {
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">Scheme Approvals</h1>
           <div className="flex space-x-3">
-            <button className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700">
+            <button 
+              onClick={() => setShowFilters(!showFilters)}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700"
+            >
               <Filter className="h-4 w-4 mr-2" />
-              Filter
+              {showFilters ? 'Hide Filters' : 'Show Filters'}
             </button>
           </div>
         </div>
+
+        {/* Filter Panel */}
+        {showFilters && (
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Filter Schemes</h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Teacher</label>
+                <select
+                  value={filters.teacher}
+                  onChange={(e) => setFilters({ ...filters, teacher: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">All Teachers</option>
+                  {uniqueTeachers.map(teacher => (
+                    <option key={teacher} value={teacher}>{teacher}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Class</label>
+                <select
+                  value={filters.class}
+                  onChange={(e) => setFilters({ ...filters, class: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">All Classes</option>
+                  {uniqueClasses.map(cls => (
+                    <option key={cls} value={cls}>{cls}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Subject</label>
+                <select
+                  value={filters.subject}
+                  onChange={(e) => setFilters({ ...filters, subject: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">All Subjects</option>
+                  {uniqueSubjects.map(subject => (
+                    <option key={subject} value={subject}>{subject}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Month</label>
+                <select
+                  value={filters.month}
+                  onChange={(e) => setFilters({ ...filters, month: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">All Months</option>
+                  {uniqueMonths.map(month => (
+                    <option key={month} value={month}>{month}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => setFilters({ teacher: '', class: '', subject: '', month: '' })}
+                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+              >
+                Clear Filters
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200">
@@ -2282,19 +2381,45 @@ const App = () => {
   // Lesson Approvals View
   const LessonApprovalsView = () => {
     const [pendingLessons, setPendingLessons] = useState([]);
+    const [allLessons, setAllLessons] = useState([]); // Store all lessons for filter options
+    const [showFilters, setShowFilters] = useState(false);
+    const [filters, setFilters] = useState({
+      teacher: '',
+      class: '',
+      subject: '',
+      status: 'Pending Review'
+    });
 
-    // Load pending lesson reviews on mount (HM only)
+    // Get unique values for dropdowns
+    const uniqueTeachers = [...new Set(allLessons.map(l => l.teacherName).filter(Boolean))].sort();
+    const uniqueClasses = [...new Set(allLessons.map(l => l.class).filter(Boolean))].sort();
+    const uniqueSubjects = [...new Set(allLessons.map(l => l.subject).filter(Boolean))].sort();
+
+    // Load all lessons once for filter options
+    useEffect(() => {
+      async function fetchAllLessons() {
+        try {
+          const data = await api.getPendingLessonReviews('', '', '', ''); // Get all for filter options
+          setAllLessons(Array.isArray(data) ? data : []);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+      fetchAllLessons();
+    }, []);
+
+    // Load filtered lessons
     useEffect(() => {
       async function fetchPendingLessons() {
         try {
-          const data = await api.getPendingLessonReviews('', '', '', 'Pending Review');
+          const data = await api.getPendingLessonReviews(filters.teacher, filters.class, filters.subject, filters.status);
           setPendingLessons(Array.isArray(data) ? data : []);
         } catch (err) {
           console.error(err);
         }
       }
       fetchPendingLessons();
-    }, []);
+    }, [filters]);
 
     const handleApproveLesson = async (lpId, status) => {
       try {
@@ -2310,12 +2435,85 @@ const App = () => {
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">Lesson Plan Approvals</h1>
           <div className="flex space-x-3">
-            <button className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700">
+            <button 
+              onClick={() => setShowFilters(!showFilters)}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700"
+            >
               <Filter className="h-4 w-4 mr-2" />
-              Filter
+              {showFilters ? 'Hide Filters' : 'Show Filters'}
             </button>
           </div>
         </div>
+
+        {/* Filter Panel */}
+        {showFilters && (
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Filter Lesson Plans</h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Teacher</label>
+                <select
+                  value={filters.teacher}
+                  onChange={(e) => setFilters({ ...filters, teacher: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">All Teachers</option>
+                  {uniqueTeachers.map(teacher => (
+                    <option key={teacher} value={teacher}>{teacher}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Class</label>
+                <select
+                  value={filters.class}
+                  onChange={(e) => setFilters({ ...filters, class: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">All Classes</option>
+                  {uniqueClasses.map(cls => (
+                    <option key={cls} value={cls}>{cls}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Subject</label>
+                <select
+                  value={filters.subject}
+                  onChange={(e) => setFilters({ ...filters, subject: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">All Subjects</option>
+                  {uniqueSubjects.map(subject => (
+                    <option key={subject} value={subject}>{subject}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                <select
+                  value={filters.status}
+                  onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="Pending Review">Pending Review</option>
+                  <option value="Ready">Ready</option>
+                  <option value="Needs Rework">Needs Rework</option>
+                  <option value="Rejected">Rejected</option>
+                  <option value="">All</option>
+                </select>
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => setFilters({ teacher: '', class: '', subject: '', status: 'Pending Review' })}
+                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+              >
+                Clear Filters
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200">
