@@ -1099,6 +1099,223 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
     }
   }, [studentsCache, marksCache, calculateGrade]);
 
+  // Helper function to handle marks change
+  const handleMarksChange = useCallback((index, field, value) => {
+    const newRows = [...marksRows];
+    newRows[index][field] = value;
+    
+    // Auto-calculate total, percentage, and grade when marks change
+    if (field === 'internal' || field === 'external') {
+      const total = calculateTotal(newRows[index], selectedExam);
+      const percentage = calculatePercentage(newRows[index], selectedExam.totalMax, selectedExam);
+      const grade = calculateGrade(percentage, selectedExam.class);
+      
+      newRows[index].total = total;
+      newRows[index].percentage = percentage;
+      newRows[index].grade = grade;
+    }
+    
+    setMarksRows(newRows);
+  }, [marksRows, selectedExam, calculateGrade]);
+  
+  // Helper function to calculate total marks
+  const calculateTotal = useCallback((row, exam = selectedExam) => {
+    const external = Number(row.external) || 0;
+    if (examHasInternalMarks(exam)) {
+      const internal = Number(row.internal) || 0;
+      return internal + external;
+    }
+    return external;
+  }, [selectedExam]);
+  
+  // Helper function to calculate percentage
+  const calculatePercentage = useCallback((row, maxMarks, exam = selectedExam) => {
+    if (!maxMarks) return '';
+    const total = calculateTotal(row, exam);
+    return Math.round((total / maxMarks) * 100);
+  }, [calculateTotal, selectedExam]);
+
+  // Submit marks to the backend
+  const handleSubmitMarks = useCallback(async () => {
+    if (!selectedExam || !user) return;
+    
+    try {
+      setIsLoading(true);
+      setApiError('');
+      
+      // Format marks data
+      const marks = marksRows.map(row => ({
+        admNo: row.admNo,
+        studentName: row.studentName,
+        internal: Number(row.internal) || 0,
+        external: Number(row.external) || 0
+      }));
+      
+      // Submit to API
+      const result = await api.submitExamMarks({
+        examId: selectedExam.examId,
+        class: selectedExam.class,
+        subject: selectedExam.subject,
+        teacherEmail: user.email,
+        teacherName: user.name || user.email,
+        marks
+      });
+      
+      // Support both response formats for compatibility
+      if (result && (result.ok || result.submitted)) {
+        setToast({ type: 'success', text: 'Marks saved successfully' });
+        setTimeout(() => setToast(null), 3000);
+        setShowMarksForm(false);
+      } else {
+        throw new Error(result?.error || 'Failed to save marks');
+      }
+    } catch (err) {
+      console.error('Error submitting marks:', err);
+      setApiError(`Failed to save marks: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedExam, user, marksRows, setToast, setIsLoading, setApiError, setShowMarksForm]);
+
+  // Bulk Marks Upload Functions
+  const handleBulkMarksFileChange = useCallback(async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setBulkMarksFile(file);
+    
+    try {
+      const text = await file.text();
+      const rows = text.split('\n').map(row => row.split(',').map(cell => cell.trim()));
+      
+      // Remove empty rows
+      const validRows = rows.filter(row => row.some(cell => cell));
+      
+      if (validRows.length < 2) {
+        setApiError('CSV file must have at least a header row and one data row');
+        return;
+      }
+      
+      // Expected headers: admNo, studentName, internal (optional), external
+      const headers = validRows[0].map(h => h.toLowerCase().replace(/\s+/g, ''));
+      const dataRows = validRows.slice(1);
+      
+      // Validate headers
+      const requiredHeaders = ['admno', 'studentname', 'external'];
+      const hasRequiredHeaders = requiredHeaders.every(h => headers.includes(h));
+      
+      if (!hasRequiredHeaders) {
+        setApiError('CSV must have columns: admNo, studentName, external (and optionally internal)');
+        return;
+      }
+      
+      // Parse data
+      const parsedData = dataRows.map(row => {
+        const data = {};
+        headers.forEach((header, index) => {
+          data[header] = row[index] || '';
+        });
+        
+        return {
+          admNo: data.admno || '',
+          studentName: data.studentname || '',
+          internal: data.internal || '',
+          external: data.external || '',
+        };
+      }).filter(row => row.admNo && row.studentName);
+      
+      setBulkMarksData(parsedData);
+      setBulkMarksPreview(parsedData.slice(0, 5)); // Show first 5 rows as preview
+      setApiError('');
+      
+    } catch (error) {
+      console.error('Error parsing CSV:', error);
+      setApiError('Error parsing CSV file: ' + error.message);
+    }
+  }, [setBulkMarksFile, setBulkMarksData, setBulkMarksPreview, setApiError]);
+
+  const handleBulkMarksUpload = useCallback(async () => {
+    if (!selectedExam || !bulkMarksData.length) return;
+    
+    try {
+      setIsLoading(true);
+      setApiError('');
+      
+      // Process bulk data and auto-calculate totals, percentages, and grades
+      const processedMarks = bulkMarksData.map(row => {
+        const internal = Number(row.internal) || 0;
+        const external = Number(row.external) || 0;
+        const total = examHasInternalMarks(selectedExam) ? internal + external : external;
+        const percentage = selectedExam.totalMax ? Math.round((total / selectedExam.totalMax) * 100) : 0;
+        const grade = calculateGrade(percentage, selectedExam.class);
+        
+        return {
+          admNo: row.admNo,
+          studentName: row.studentName,
+          internal: internal,
+          external: external,
+          total: total,
+          percentage: percentage,
+          grade: grade
+        };
+      });
+      
+      // Submit to API
+      const result = await api.submitExamMarks({
+        examId: selectedExam.examId,
+        class: selectedExam.class,
+        subject: selectedExam.subject,
+        teacherEmail: user.email,
+        teacherName: user.name || user.email,
+        marks: processedMarks
+      });
+      
+      if (result && (result.ok || result.submitted)) {
+        setToast({ type: 'success', text: `Bulk marks uploaded successfully for ${processedMarks.length} students` });
+        setTimeout(() => setToast(null), 3000);
+        
+        // Reset bulk upload state
+        setShowBulkMarksUpload(false);
+        setBulkMarksFile(null);
+        setBulkMarksData([]);
+        setBulkMarksPreview([]);
+        
+        // Clear cache to show updated data
+        setStudentsCache(new Map());
+        setMarksCache(new Map());
+      } else {
+        throw new Error(result?.error || 'Failed to upload bulk marks');
+      }
+    } catch (err) {
+      console.error('Error uploading bulk marks:', err);
+      setApiError(`Failed to upload bulk marks: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedExam, bulkMarksData, user, calculateGrade, setToast, setShowBulkMarksUpload, setBulkMarksFile, setBulkMarksData, setBulkMarksPreview, setStudentsCache, setMarksCache, setIsLoading, setApiError]);
+
+  const downloadMarksSample = useCallback(() => {
+    // Create sample CSV content
+    const sampleData = [
+      ['admNo', 'studentName', 'internal', 'external'],
+      ['5885', 'Aarav R Menon', '10', '15'],
+      ['5933', 'Abhimanyu A', '12', '18'],
+      ['5890', 'Abhinand V K', '11', '17']
+    ];
+    
+    const csvContent = sampleData.map(row => row.join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = 'exam_marks_sample.csv';
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  }, []);
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -2128,223 +2345,6 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
       )}
     </div>
   );
-  
-  // Helper function to handle marks change
-  function handleMarksChange(index, field, value) {
-    const newRows = [...marksRows];
-    newRows[index][field] = value;
-    
-    // Auto-calculate total, percentage, and grade when marks change
-    if (field === 'internal' || field === 'external') {
-      const total = calculateTotal(newRows[index], selectedExam);
-      const percentage = calculatePercentage(newRows[index], selectedExam.totalMax, selectedExam);
-      const grade = calculateGrade(percentage, selectedExam.class);
-      
-      newRows[index].total = total;
-      newRows[index].percentage = percentage;
-      newRows[index].grade = grade;
-    }
-    
-    setMarksRows(newRows);
-  }
-  
-  // Helper function to calculate total marks
-  function calculateTotal(row, exam = selectedExam) {
-    const external = Number(row.external) || 0;
-    if (examHasInternalMarks(exam)) {
-      const internal = Number(row.internal) || 0;
-      return internal + external;
-    }
-    return external;
-  }
-  
-  // Helper function to calculate percentage
-  function calculatePercentage(row, maxMarks, exam = selectedExam) {
-    if (!maxMarks) return '';
-    const total = calculateTotal(row, exam);
-    return Math.round((total / maxMarks) * 100);
-  }
-  
-  // Submit marks to the backend
-  async function handleSubmitMarks() {
-    if (!selectedExam || !user) return;
-    
-    try {
-      setIsLoading(true);
-      setApiError('');
-      
-      // Format marks data
-      const marks = marksRows.map(row => ({
-        admNo: row.admNo,
-        studentName: row.studentName,
-        internal: Number(row.internal) || 0,
-        external: Number(row.external) || 0
-      }));
-      
-      // Submit to API
-      const result = await api.submitExamMarks({
-        examId: selectedExam.examId,
-        class: selectedExam.class,
-        subject: selectedExam.subject,
-        teacherEmail: user.email,
-        teacherName: user.name || user.email,
-        marks
-      });
-      
-      // Support both response formats for compatibility
-      if (result && (result.ok || result.submitted)) {
-        setToast({ type: 'success', text: 'Marks saved successfully' });
-        setTimeout(() => setToast(null), 3000);
-        setShowMarksForm(false);
-      } else {
-        throw new Error(result?.error || 'Failed to save marks');
-      }
-    } catch (err) {
-      console.error('Error submitting marks:', err);
-      setApiError(`Failed to save marks: ${err.message || 'Unknown error'}`);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  // Bulk Marks Upload Functions
-  const handleBulkMarksFileChange = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    setBulkMarksFile(file);
-    
-    try {
-      const text = await file.text();
-      const rows = text.split('\n').map(row => row.split(',').map(cell => cell.trim()));
-      
-      // Remove empty rows
-      const validRows = rows.filter(row => row.some(cell => cell));
-      
-      if (validRows.length < 2) {
-        setApiError('CSV file must have at least a header row and one data row');
-        return;
-      }
-      
-      // Expected headers: admNo, studentName, internal (optional), external
-      const headers = validRows[0].map(h => h.toLowerCase().replace(/\s+/g, ''));
-      const dataRows = validRows.slice(1);
-      
-      // Validate headers
-      const requiredHeaders = ['admno', 'studentname', 'external'];
-      const hasRequiredHeaders = requiredHeaders.every(h => headers.includes(h));
-      
-      if (!hasRequiredHeaders) {
-        setApiError('CSV must have columns: admNo, studentName, external (and optionally internal)');
-        return;
-      }
-      
-      // Parse data
-      const parsedData = dataRows.map(row => {
-        const data = {};
-        headers.forEach((header, index) => {
-          data[header] = row[index] || '';
-        });
-        
-        return {
-          admNo: data.admno || '',
-          studentName: data.studentname || '',
-          internal: data.internal || '',
-          external: data.external || '',
-        };
-      }).filter(row => row.admNo && row.studentName);
-      
-      setBulkMarksData(parsedData);
-      setBulkMarksPreview(parsedData.slice(0, 5)); // Show first 5 rows as preview
-      setApiError('');
-      
-    } catch (error) {
-      console.error('Error parsing CSV:', error);
-      setApiError('Error parsing CSV file: ' + error.message);
-    }
-  };
-
-  const handleBulkMarksUpload = async () => {
-    if (!selectedExam || !bulkMarksData.length) return;
-    
-    try {
-      setIsLoading(true);
-      setApiError('');
-      
-      // Process bulk data and auto-calculate totals, percentages, and grades
-      const processedMarks = bulkMarksData.map(row => {
-        const internal = Number(row.internal) || 0;
-        const external = Number(row.external) || 0;
-        const total = examHasInternalMarks(selectedExam) ? internal + external : external;
-        const percentage = selectedExam.totalMax ? Math.round((total / selectedExam.totalMax) * 100) : 0;
-        const grade = calculateGrade(percentage, selectedExam.class);
-        
-        return {
-          admNo: row.admNo,
-          studentName: row.studentName,
-          internal: internal,
-          external: external,
-          total: total,
-          percentage: percentage,
-          grade: grade
-        };
-      });
-      
-      // Submit to API
-      const result = await api.submitExamMarks({
-        examId: selectedExam.examId,
-        class: selectedExam.class,
-        subject: selectedExam.subject,
-        teacherEmail: user.email,
-        teacherName: user.name || user.email,
-        marks: processedMarks
-      });
-      
-      if (result && (result.ok || result.submitted)) {
-        setToast({ type: 'success', text: `Bulk marks uploaded successfully for ${processedMarks.length} students` });
-        setTimeout(() => setToast(null), 3000);
-        
-        // Reset bulk upload state
-        setShowBulkMarksUpload(false);
-        setBulkMarksFile(null);
-        setBulkMarksData([]);
-        setBulkMarksPreview([]);
-        
-        // Clear cache to show updated data
-        setStudentsCache(new Map());
-        setMarksCache(new Map());
-      } else {
-        throw new Error(result?.error || 'Failed to upload bulk marks');
-      }
-    } catch (err) {
-      console.error('Error uploading bulk marks:', err);
-      setApiError(`Failed to upload bulk marks: ${err.message || 'Unknown error'}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const downloadMarksSample = () => {
-    // Create sample CSV content
-    const sampleData = [
-      ['admNo', 'studentName', 'internal', 'external'],
-      ['5885', 'Aarav R Menon', '10', '15'],
-      ['5933', 'Abhimanyu A', '12', '18'],
-      ['5890', 'Abhinand V K', '11', '17']
-    ];
-    
-    const csvContent = sampleData.map(row => row.join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.style.display = 'none';
-    a.href = url;
-    a.download = 'exam_marks_sample.csv';
-    document.body.appendChild(a);
-    a.click();
-    window.URL.revokeObjectURL(url);
-    document.body.removeChild(a);
-  };
 };
 
 export default React.memo(ExamManagement);
