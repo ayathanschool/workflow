@@ -1960,7 +1960,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {marksRows.map((row, index) => (
-                      <tr key={row.admNo} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <tr key={`marks-${index}-${row.admNo}`} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">{row.admNo}</td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">{row.studentName}</td>
                         {/* Only show internal marks input if exam has internal marks */}
@@ -2187,7 +2187,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {examMarks.map((row, index) => (
-                      <tr key={row.admNo} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <tr key={`exam-marks-${index}-${row.admNo}`} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">{row.admNo}</td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">{row.studentName}</td>
                         {examHasInternalMarks(viewExamMarks) && (
@@ -2287,7 +2287,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
                           const grade = calculateGrade(percentage, selectedExam.class);
                           
                           return (
-                            <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                            <tr key={`bulk-preview-${index}-${row.admNo}`} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                               <td className="px-4 py-2 text-sm">{row.admNo}</td>
                               <td className="px-4 py-2 text-sm">{row.studentName}</td>
                               {examHasInternalMarks(selectedExam) && (
