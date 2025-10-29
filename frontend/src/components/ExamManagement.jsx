@@ -86,6 +86,12 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
   const [marksRows, setMarksRows] = useState([]);
   const [selectedExam, setSelectedExam] = useState(null);
 
+  // Bulk marks upload state
+  const [showBulkMarksUpload, setShowBulkMarksUpload] = useState(false);
+  const [bulkMarksFile, setBulkMarksFile] = useState(null);
+  const [bulkMarksData, setBulkMarksData] = useState([]);
+  const [bulkMarksPreview, setBulkMarksPreview] = useState([]);
+
   const [viewExamMarks, setViewExamMarks] = useState(null);
   const [examMarks, setExamMarks] = useState([]);
   
@@ -1621,6 +1627,16 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
                           >
                             Edit Marks
                           </button>
+                          <button 
+                            onClick={() => {
+                              setSelectedExam(exam);
+                              setShowBulkMarksUpload(true);
+                            }}
+                            className="text-orange-600 hover:text-orange-900 mr-2"
+                            title="Upload marks from CSV file"
+                          >
+                            Bulk Upload
+                          </button>
                           {/* Edit Exam Button - only visible to headmasters */}
                           {normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster')) && (
                             <button 
@@ -1975,6 +1991,141 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
           </div>
         </div>
       )}
+      
+      {/* Bulk Marks Upload Modal */}
+      {showBulkMarksUpload && selectedExam && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-semibold mb-4 flex justify-between items-center">
+              <span>Bulk Upload Marks: {selectedExam.examName || `${selectedExam.examType} - ${selectedExam.class} - ${selectedExam.subject}`}</span>
+              <button 
+                onClick={() => {
+                  setShowBulkMarksUpload(false);
+                  setBulkMarksFile(null);
+                  setBulkMarksData([]);
+                  setBulkMarksPreview([]);
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </h2>
+            
+            <div className="space-y-4">
+              {/* Instructions */}
+              <div className="bg-blue-50 border border-blue-200 rounded p-4">
+                <h3 className="font-medium text-blue-900 mb-2">Instructions:</h3>
+                <ul className="text-sm text-blue-800 space-y-1">
+                  <li>• Upload a CSV file with columns: <strong>admNo, studentName, external</strong> {examHasInternalMarks(selectedExam) && <span>and optionally <strong>internal</strong></span>}</li>
+                  <li>• First row should contain column headers</li>
+                  <li>• Grades and totals will be calculated automatically</li>
+                  <li>• Download sample file below for reference</li>
+                </ul>
+                <button
+                  onClick={downloadMarksSample}
+                  className="mt-2 text-blue-600 hover:text-blue-800 underline text-sm"
+                >
+                  📥 Download Sample CSV File
+                </button>
+              </div>
+              
+              {/* File Upload */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select CSV File
+                </label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleBulkMarksFileChange}
+                  className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none"
+                />
+              </div>
+              
+              {/* Preview */}
+              {bulkMarksPreview.length > 0 && (
+                <div>
+                  <h3 className="font-medium text-gray-900 mb-2">Preview (First 5 rows):</h3>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 border border-gray-300">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Adm No</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Student Name</th>
+                          {examHasInternalMarks(selectedExam) && (
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Internal</th>
+                          )}
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">External</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">%</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Grade</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {bulkMarksPreview.map((row, index) => {
+                          const internal = Number(row.internal) || 0;
+                          const external = Number(row.external) || 0;
+                          const total = examHasInternalMarks(selectedExam) ? internal + external : external;
+                          const percentage = selectedExam.totalMax ? Math.round((total / selectedExam.totalMax) * 100) : 0;
+                          const grade = calculateGrade(percentage, selectedExam.class);
+                          
+                          return (
+                            <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                              <td className="px-4 py-2 text-sm">{row.admNo}</td>
+                              <td className="px-4 py-2 text-sm">{row.studentName}</td>
+                              {examHasInternalMarks(selectedExam) && (
+                                <td className="px-4 py-2 text-sm">{row.internal || '-'}</td>
+                              )}
+                              <td className="px-4 py-2 text-sm">{row.external || '-'}</td>
+                              <td className="px-4 py-2 text-sm">{total}</td>
+                              <td className="px-4 py-2 text-sm">{percentage}%</td>
+                              <td className="px-4 py-2 text-sm">{grade}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {bulkMarksData.length > 5 && (
+                    <p className="text-sm text-gray-600 mt-2">
+                      ...and {bulkMarksData.length - 5} more rows
+                    </p>
+                  )}
+                </div>
+              )}
+              
+              {/* Error Display */}
+              {apiError && (
+                <div className="bg-red-50 border border-red-200 rounded p-3 text-red-700">
+                  {apiError}
+                </div>
+              )}
+              
+              {/* Action Buttons */}
+              <div className="flex justify-end space-x-3 pt-4">
+                <button
+                  onClick={() => {
+                    setShowBulkMarksUpload(false);
+                    setBulkMarksFile(null);
+                    setBulkMarksData([]);
+                    setBulkMarksPreview([]);
+                  }}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleBulkMarksUpload}
+                  disabled={!bulkMarksData.length || isLoading}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isLoading ? 'Uploading...' : `Upload ${bulkMarksData.length} Records`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
   
@@ -2055,6 +2206,145 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
       setIsLoading(false);
     }
   }
+
+  // Bulk Marks Upload Functions
+  const handleBulkMarksFileChange = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setBulkMarksFile(file);
+    
+    try {
+      const text = await file.text();
+      const rows = text.split('\n').map(row => row.split(',').map(cell => cell.trim()));
+      
+      // Remove empty rows
+      const validRows = rows.filter(row => row.some(cell => cell));
+      
+      if (validRows.length < 2) {
+        setApiError('CSV file must have at least a header row and one data row');
+        return;
+      }
+      
+      // Expected headers: admNo, studentName, internal (optional), external
+      const headers = validRows[0].map(h => h.toLowerCase().replace(/\s+/g, ''));
+      const dataRows = validRows.slice(1);
+      
+      // Validate headers
+      const requiredHeaders = ['admno', 'studentname', 'external'];
+      const hasRequiredHeaders = requiredHeaders.every(h => headers.includes(h));
+      
+      if (!hasRequiredHeaders) {
+        setApiError('CSV must have columns: admNo, studentName, external (and optionally internal)');
+        return;
+      }
+      
+      // Parse data
+      const parsedData = dataRows.map(row => {
+        const data = {};
+        headers.forEach((header, index) => {
+          data[header] = row[index] || '';
+        });
+        
+        return {
+          admNo: data.admno || '',
+          studentName: data.studentname || '',
+          internal: data.internal || '',
+          external: data.external || '',
+        };
+      }).filter(row => row.admNo && row.studentName);
+      
+      setBulkMarksData(parsedData);
+      setBulkMarksPreview(parsedData.slice(0, 5)); // Show first 5 rows as preview
+      setApiError('');
+      
+    } catch (error) {
+      console.error('Error parsing CSV:', error);
+      setApiError('Error parsing CSV file: ' + error.message);
+    }
+  };
+
+  const handleBulkMarksUpload = async () => {
+    if (!selectedExam || !bulkMarksData.length) return;
+    
+    try {
+      setIsLoading(true);
+      setApiError('');
+      
+      // Process bulk data and auto-calculate totals, percentages, and grades
+      const processedMarks = bulkMarksData.map(row => {
+        const internal = Number(row.internal) || 0;
+        const external = Number(row.external) || 0;
+        const total = examHasInternalMarks(selectedExam) ? internal + external : external;
+        const percentage = selectedExam.totalMax ? Math.round((total / selectedExam.totalMax) * 100) : 0;
+        const grade = calculateGrade(percentage, selectedExam.class);
+        
+        return {
+          admNo: row.admNo,
+          studentName: row.studentName,
+          internal: internal,
+          external: external,
+          total: total,
+          percentage: percentage,
+          grade: grade
+        };
+      });
+      
+      // Submit to API
+      const result = await api.submitExamMarks({
+        examId: selectedExam.examId,
+        class: selectedExam.class,
+        subject: selectedExam.subject,
+        teacherEmail: user.email,
+        teacherName: user.name || user.email,
+        marks: processedMarks
+      });
+      
+      if (result && (result.ok || result.submitted)) {
+        setToast({ type: 'success', text: `Bulk marks uploaded successfully for ${processedMarks.length} students` });
+        setTimeout(() => setToast(null), 3000);
+        
+        // Reset bulk upload state
+        setShowBulkMarksUpload(false);
+        setBulkMarksFile(null);
+        setBulkMarksData([]);
+        setBulkMarksPreview([]);
+        
+        // Clear cache to show updated data
+        setStudentsCache(new Map());
+        setMarksCache(new Map());
+      } else {
+        throw new Error(result?.error || 'Failed to upload bulk marks');
+      }
+    } catch (err) {
+      console.error('Error uploading bulk marks:', err);
+      setApiError(`Failed to upload bulk marks: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const downloadMarksSample = () => {
+    // Create sample CSV content
+    const sampleData = [
+      ['admNo', 'studentName', 'internal', 'external'],
+      ['5885', 'Aarav R Menon', '10', '15'],
+      ['5933', 'Abhimanyu A', '12', '18'],
+      ['5890', 'Abhinand V K', '11', '17']
+    ];
+    
+    const csvContent = sampleData.map(row => row.join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = 'exam_marks_sample.csv';
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  };
 };
 
 export default React.memo(ExamManagement);
