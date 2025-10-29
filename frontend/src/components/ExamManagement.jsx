@@ -2014,61 +2014,6 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
     return Math.round((total / maxMarks) * 100);
   }
   
-  // Helper function to calculate grade based on percentage and class
-  function calculateGrade(percentage, examClass) {
-    if (!percentage && percentage !== 0) return '';
-    
-    // Extract class number from class string (e.g., "STD 3A" -> 3, "STD 10B" -> 10)
-    const classMatch = examClass?.match(/(\d+)/);
-    const classNumber = classMatch ? parseInt(classMatch[1]) : 0;
-    
-    // Primary classes (1-5): Use descriptive grades
-    if (classNumber >= 1 && classNumber <= 5) {
-      if (percentage >= 90) return 'Outstanding';
-      if (percentage >= 80) return 'Excellent';
-      if (percentage >= 70) return 'Very Good';
-      if (percentage >= 60) return 'Good';
-      if (percentage >= 50) return 'Satisfactory';
-      if (percentage >= 40) return 'Needs Improvement';
-      if (percentage >= 33) return 'Unsatisfactory';
-      return 'Needs Attention';
-    }
-    
-    // Middle classes (6-8): Use letter grades with +/-
-    if (classNumber >= 6 && classNumber <= 8) {
-      if (percentage >= 91) return 'A1';
-      if (percentage >= 81) return 'A2';
-      if (percentage >= 71) return 'B1';
-      if (percentage >= 61) return 'B2';
-      if (percentage >= 51) return 'C1';
-      if (percentage >= 41) return 'C2';
-      if (percentage >= 33) return 'D';
-      return 'E';
-    }
-    
-    // High school classes (9-12): Use traditional letter grades
-    if (classNumber >= 9 && classNumber <= 12) {
-      if (percentage >= 90) return 'A+';
-      if (percentage >= 80) return 'A';
-      if (percentage >= 70) return 'B+';
-      if (percentage >= 60) return 'B';
-      if (percentage >= 50) return 'C+';
-      if (percentage >= 40) return 'C';
-      if (percentage >= 33) return 'D';
-      return 'F';
-    }
-    
-    // Default fallback for unknown classes
-    if (percentage >= 90) return 'A+';
-    if (percentage >= 80) return 'A';
-    if (percentage >= 70) return 'B+';
-    if (percentage >= 60) return 'B';
-    if (percentage >= 50) return 'C+';
-    if (percentage >= 40) return 'C';
-    if (percentage >= 33) return 'D';
-    return 'F';
-  }
-  
   // Submit marks to the backend
   async function handleSubmitMarks() {
     if (!selectedExam || !user) return;
