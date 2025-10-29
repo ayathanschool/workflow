@@ -94,6 +94,107 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
   const [studentsCache, setStudentsCache] = useState(new Map());
   const [marksCache, setMarksCache] = useState(new Map());
   
+  // Cache management functions
+  const clearCache = useCallback(() => {
+    console.log('🗑️ Clearing all caches');
+    setStudentsCache(new Map());
+    setMarksCache(new Map());
+    setApiError('Cache cleared successfully');
+    setTimeout(() => setApiError(''), 2000);
+  }, []);
+
+  const refreshExamData = useCallback(async () => {
+    if (!selectedExam) return;
+    
+    console.log('🔄 Refreshing exam data for:', selectedExam);
+    setIsLoading(true);
+    
+    try {
+      // Clear caches for this specific exam
+      setStudentsCache(prev => {
+        const newCache = new Map(prev);
+        newCache.delete(selectedExam.class);
+        return newCache;
+      });
+      
+      setMarksCache(prev => {
+        const newCache = new Map(prev);
+        newCache.delete(selectedExam.examId);
+        return newCache;
+      });
+      
+      // Re-fetch data by calling openMarksForm
+      const updatedOpenMarksForm = async (exam) => {
+        setSelectedExam(exam);
+        setIsLoading(true);
+        setApiError('');
+        
+        try {
+          console.log('🔍 Opening marks form for exam:', exam);
+          
+          // Fetch fresh data without cache
+          console.log('📚 Fetching students for class:', exam.class);
+          const students = await api.getStudents(exam.class);
+          console.log('✅ Students fetched:', students);
+          setStudentsCache(prev => new Map(prev.set(exam.class, students)));
+          
+          console.log('📊 Fetching marks for examId:', exam.examId);
+          const marks = await api.getExamMarks(exam.examId);
+          console.log('✅ Marks fetched:', marks);
+          setMarksCache(prev => new Map(prev.set(exam.examId, marks)));
+          
+          // Validate data
+          if (!Array.isArray(students) || students.length === 0) {
+            throw new Error(`No students found for class ${exam.class}`);
+          }
+          
+          // Create marks rows for each student, pre-populating with existing marks
+          const marksMap = {};
+          if (Array.isArray(marks)) {
+            marks.forEach(mark => {
+              if (mark && mark.admNo) {
+                marksMap[mark.admNo] = mark;
+              }
+            });
+          }
+          
+          console.log('📝 Creating marks rows for', students.length, 'students');
+          
+          // Create a row for each student
+          const rows = students.map(student => {
+            const existingMark = marksMap[student.admNo] || {};
+            return {
+              admNo: student.admNo,
+              studentName: student.name,
+              internal: existingMark.internal || '',
+              external: existingMark.external || '',
+              total: existingMark.total || '',
+              percentage: existingMark.percentage || '',
+              grade: existingMark.grade || ''
+            };
+          });
+          
+          console.log('✅ Marks rows created:', rows.length);
+          setMarksRows(rows);
+          setShowMarksForm(true);
+        } catch (error) {
+          console.error('❌ Error in openMarksForm:', error);
+          setApiError(error.message || 'Failed to load exam data');
+        } finally {
+          setIsLoading(false);
+        }
+      };
+      
+      await updatedOpenMarksForm(selectedExam);
+      
+    } catch (error) {
+      console.error('❌ Error refreshing exam data:', error);
+      setApiError('Failed to refresh exam data: ' + error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedExam]);
+  
   // State for editing exams
   const [showEditExamForm, setShowEditExamForm] = useState(false);
   const [editExamData, setEditExamData] = useState(null);
@@ -610,12 +711,6 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
     }
   };
 
-  // Helper to clear cache when data changes
-  const clearCache = useCallback(() => {
-    setStudentsCache(new Map());
-    setMarksCache(new Map());
-  }, []);
-
   // Helper to reload exams list from backend and set local state
   const reloadExams = async () => {
     try {
@@ -701,6 +796,8 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
     setApiError('');
     
     try {
+      console.log('🔍 Opening marks form for exam:', exam);
+      
       // Check cache first to avoid duplicate API calls
       const cacheKey = `${exam.class}_${exam.examId}`;
       
@@ -709,14 +806,27 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
       
       // Fetch students only if not cached
       if (!students) {
+        console.log('📚 Fetching students for class:', exam.class);
         students = await api.getStudents(exam.class);
+        console.log('✅ Students fetched:', students);
         setStudentsCache(prev => new Map(prev.set(exam.class, students)));
+      } else {
+        console.log('📚 Using cached students for class:', exam.class);
       }
       
       // Fetch marks only if not cached
       if (!marks) {
+        console.log('📊 Fetching marks for examId:', exam.examId);
         marks = await api.getExamMarks(exam.examId);
+        console.log('✅ Marks fetched:', marks);
         setMarksCache(prev => new Map(prev.set(exam.examId, marks)));
+      } else {
+        console.log('📊 Using cached marks for examId:', exam.examId);
+      }
+      
+      // Validate data
+      if (!Array.isArray(students) || students.length === 0) {
+        throw new Error(`No students found for class ${exam.class}`);
       }
       
       // Create marks rows for each student, pre-populating with existing marks
@@ -729,20 +839,33 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
         });
       }
       
+      console.log('📝 Creating marks rows for', students.length, 'students');
+      
       // Create a row for each student
-      const rows = Array.isArray(students) ? students.map(student => {
+      const rows = students.map(student => {
         const existingMark = marksMap[student.admNo] || {};
+        
+        // For external-only exams, if external is empty but total exists, use total as external
+        let external = existingMark.external || '';
+        let total = existingMark.total || '';
+        
+        // If this is an external-only exam and external is empty but total has value
+        if (!examHasInternalMarks(exam) && !external && total) {
+          external = total;
+        }
+        
         return {
           admNo: student.admNo,
           studentName: student.name,
           internal: existingMark.internal || '',
-          external: existingMark.external || '',
-          total: existingMark.total || '',
+          external: external,
+          total: total,
           percentage: existingMark.percentage || '',
           grade: existingMark.grade || ''
         };
-      }) : [];
+      });
       
+      console.log('✅ Marks rows created:', rows.length);
       setMarksRows(rows);
       setShowMarksForm(true);
     } catch (err) {
@@ -858,12 +981,22 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
       // Create a row for each student
       const rows = Array.isArray(students) ? students.map(student => {
         const existingMark = marksMap[student.admNo] || {};
+        
+        // For external-only exams, if external is empty but total exists, use total as external
+        let external = existingMark.external || '';
+        let total = existingMark.total || '';
+        
+        // If this is an external-only exam and external is empty but total has value
+        if (!examHasInternalMarks(exam) && !external && total) {
+          external = total;
+        }
+        
         return {
           admNo: student.admNo,
           studentName: student.name,
           internal: existingMark.internal || '',
-          external: existingMark.external || '',
-          total: existingMark.total || '',
+          external: external,
+          total: total,
           percentage: existingMark.percentage || '',
           grade: existingMark.grade || ''
         };
@@ -1443,12 +1576,29 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
           <div className="bg-white rounded-xl shadow-lg p-6 max-w-5xl w-full max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-semibold mb-4 flex justify-between items-center">
               <span>Enter Marks: {selectedExam.examName || `${selectedExam.examType} - ${selectedExam.class} - ${selectedExam.subject}`}</span>
-              <button 
-                onClick={() => setShowMarksForm(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={refreshExamData}
+                  disabled={isLoading}
+                  className="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600 disabled:opacity-50"
+                  title="Refresh exam data"
+                >
+                  🔄 Refresh
+                </button>
+                <button 
+                  onClick={clearCache}
+                  className="px-3 py-1 bg-orange-500 text-white rounded text-sm hover:bg-orange-600"
+                  title="Clear all cache"
+                >
+                  🗑️ Clear Cache
+                </button>
+                <button 
+                  onClick={() => setShowMarksForm(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ✕
+                </button>
+              </div>
             </h2>
             
             <div className="mb-4 flex justify-between items-center">
