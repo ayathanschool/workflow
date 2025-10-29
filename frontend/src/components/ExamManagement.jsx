@@ -85,7 +85,6 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
   const [showMarksForm, setShowMarksForm] = useState(false);
   const [marksRows, setMarksRows] = useState([]);
   const [selectedExam, setSelectedExam] = useState(null);
-  const [gradeBoundaries, setGradeBoundaries] = useState([]);
 
   const [viewExamMarks, setViewExamMarks] = useState(null);
   const [examMarks, setExamMarks] = useState([]);
@@ -94,7 +93,71 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
   const [studentsCache, setStudentsCache] = useState(new Map());
   const [marksCache, setMarksCache] = useState(new Map());
   
-  // Cache management functions
+  // State for grade boundaries
+  const [gradeBoundaries, setGradeBoundaries] = useState([]);
+  const [gradeBoundariesLoaded, setGradeBoundariesLoaded] = useState(false);
+
+  // Load grade boundaries on component mount
+  useEffect(() => {
+    const loadGradeBoundaries = async () => {
+      try {
+        const boundaries = await api.getGradeBoundaries();
+        setGradeBoundaries(boundaries);
+        setGradeBoundariesLoaded(true);
+        console.log('📊 Grade boundaries loaded:', boundaries);
+      } catch (error) {
+        console.error('❌ Error loading grade boundaries:', error);
+        setGradeBoundariesLoaded(true); // Still mark as loaded to prevent infinite loading
+      }
+    };
+    
+    if (!gradeBoundariesLoaded) {
+      loadGradeBoundaries();
+    }
+  }, [gradeBoundariesLoaded]);
+
+  // Calculate grade using backend grade boundaries
+  const calculateGrade = useCallback((percentage, className) => {
+    if (!gradeBoundariesLoaded || !gradeBoundaries.length) {
+      // Fallback calculation while loading or if no boundaries
+      if (percentage >= 90) return 'A+';
+      if (percentage >= 80) return 'A';
+      if (percentage >= 70) return 'B+';
+      if (percentage >= 60) return 'B';
+      if (percentage >= 50) return 'C+';
+      if (percentage >= 40) return 'C';
+      if (percentage >= 30) return 'D';
+      return 'E';
+    }
+
+    // Determine standard group
+    const getStandardGroup = (cls) => {
+      if (!cls) return '';
+      const match = String(cls).match(/(\d+)/);
+      if (!match) return '';
+      const num = Number(match[1]);
+      if (isNaN(num)) return '';
+      if (num <= 4) return 'Std 1-4';
+      if (num <= 8) return 'Std 5-8';
+      return 'Std 9-12';
+    };
+
+    const stdGroup = getStandardGroup(className);
+    
+    // Find appropriate grade boundary
+    const boundaries = gradeBoundaries
+      .filter(b => b.standardGroup === stdGroup)
+      .sort((a, b) => b.minPercentage - a.minPercentage); // Sort descending
+
+    for (const boundary of boundaries) {
+      if (percentage >= boundary.minPercentage && percentage <= boundary.maxPercentage) {
+        return boundary.grade;
+      }
+    }
+
+    // Return lowest grade if no boundary found
+    return boundaries.length > 0 ? boundaries[boundaries.length - 1].grade : 'E';
+  }, [gradeBoundaries, gradeBoundariesLoaded]);
   const clearCache = useCallback(() => {
     console.log('🗑️ Clearing all caches');
     setStudentsCache(new Map());
@@ -853,6 +916,21 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
         if (!examHasInternalMarks(exam) && !external && total) {
           external = total;
         }
+
+        // Recalculate percentage and grade using current grading system
+        let percentage = existingMark.percentage || '';
+        let grade = existingMark.grade || '';
+        
+        if (external || existingMark.internal) {
+          const calculatedTotal = examHasInternalMarks(exam) 
+            ? (Number(existingMark.internal) || 0) + (Number(external) || 0)
+            : (Number(external) || 0);
+          
+          if (exam.totalMax && calculatedTotal > 0) {
+            percentage = Math.round((calculatedTotal / exam.totalMax) * 100);
+            grade = calculateGrade(percentage, exam.class);
+          }
+        }
         
         return {
           admNo: student.admNo,
@@ -860,8 +938,8 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
           internal: existingMark.internal || '',
           external: external,
           total: total,
-          percentage: existingMark.percentage || '',
-          grade: existingMark.grade || ''
+          percentage: percentage,
+          grade: grade
         };
       });
       
@@ -874,7 +952,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
     } finally {
       setIsLoading(false);
     }
-  }, [studentsCache, marksCache]);
+  }, [studentsCache, marksCache, calculateGrade]);
 
   // Open edit exam form
   const openEditExamForm = (exam) => {
@@ -991,14 +1069,17 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
           external = total;
         }
         
+        // Calculate percentage and grade using the new class-specific grading system
+        const calculatedPercentage = total && exam.totalMax ? Math.round((total / exam.totalMax) * 100) : 0;
+        
         return {
           admNo: student.admNo,
           studentName: student.name,
           internal: existingMark.internal || '',
           external: external,
           total: total,
-          percentage: existingMark.percentage || '',
-          grade: existingMark.grade || ''
+          percentage: calculatedPercentage,
+          grade: calculateGrade(calculatedPercentage, exam.class)
         };
       }) : [];
       
@@ -1010,7 +1091,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
     } finally {
       setIsLoading(false);
     }
-  }, [studentsCache, marksCache]);
+  }, [studentsCache, marksCache, calculateGrade]);
 
   return (
     <div className="space-y-6">
@@ -1674,7 +1755,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">{calculateTotal(row, selectedExam)}</td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">{calculatePercentage(row, selectedExam.totalMax, selectedExam)}</td>
-                        <td className="px-4 py-2 whitespace-nowrap text-sm">{calculateGrade(calculatePercentage(row, selectedExam.totalMax, selectedExam))}</td>
+                        <td className="px-4 py-2 whitespace-nowrap text-sm">{calculateGrade(calculatePercentage(row, selectedExam.totalMax, selectedExam), selectedExam.class)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1901,6 +1982,18 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
   function handleMarksChange(index, field, value) {
     const newRows = [...marksRows];
     newRows[index][field] = value;
+    
+    // Auto-calculate total, percentage, and grade when marks change
+    if (field === 'internal' || field === 'external') {
+      const total = calculateTotal(newRows[index], selectedExam);
+      const percentage = calculatePercentage(newRows[index], selectedExam.totalMax, selectedExam);
+      const grade = calculateGrade(percentage, selectedExam.class);
+      
+      newRows[index].total = total;
+      newRows[index].percentage = percentage;
+      newRows[index].grade = grade;
+    }
+    
     setMarksRows(newRows);
   }
   
@@ -1921,10 +2014,51 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
     return Math.round((total / maxMarks) * 100);
   }
   
-  // Helper function to calculate grade based on percentage
-  function calculateGrade(percentage) {
+  // Helper function to calculate grade based on percentage and class
+  function calculateGrade(percentage, examClass) {
     if (!percentage && percentage !== 0) return '';
     
+    // Extract class number from class string (e.g., "STD 3A" -> 3, "STD 10B" -> 10)
+    const classMatch = examClass?.match(/(\d+)/);
+    const classNumber = classMatch ? parseInt(classMatch[1]) : 0;
+    
+    // Primary classes (1-5): Use descriptive grades
+    if (classNumber >= 1 && classNumber <= 5) {
+      if (percentage >= 90) return 'Outstanding';
+      if (percentage >= 80) return 'Excellent';
+      if (percentage >= 70) return 'Very Good';
+      if (percentage >= 60) return 'Good';
+      if (percentage >= 50) return 'Satisfactory';
+      if (percentage >= 40) return 'Needs Improvement';
+      if (percentage >= 33) return 'Unsatisfactory';
+      return 'Needs Attention';
+    }
+    
+    // Middle classes (6-8): Use letter grades with +/-
+    if (classNumber >= 6 && classNumber <= 8) {
+      if (percentage >= 91) return 'A1';
+      if (percentage >= 81) return 'A2';
+      if (percentage >= 71) return 'B1';
+      if (percentage >= 61) return 'B2';
+      if (percentage >= 51) return 'C1';
+      if (percentage >= 41) return 'C2';
+      if (percentage >= 33) return 'D';
+      return 'E';
+    }
+    
+    // High school classes (9-12): Use traditional letter grades
+    if (classNumber >= 9 && classNumber <= 12) {
+      if (percentage >= 90) return 'A+';
+      if (percentage >= 80) return 'A';
+      if (percentage >= 70) return 'B+';
+      if (percentage >= 60) return 'B';
+      if (percentage >= 50) return 'C+';
+      if (percentage >= 40) return 'C';
+      if (percentage >= 33) return 'D';
+      return 'F';
+    }
+    
+    // Default fallback for unknown classes
     if (percentage >= 90) return 'A+';
     if (percentage >= 80) return 'A';
     if (percentage >= 70) return 'B+';

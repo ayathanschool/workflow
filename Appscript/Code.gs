@@ -574,6 +574,66 @@ function _parsePost(e) {
 }
 
 /**
+ * Initialize proper Indian school grade boundaries if they don't exist
+ * Call this function manually to set up grade boundaries for different standards
+ */
+function initializeGradeBoundaries() {
+  const sh = _getSheet('GradeBoundaries');
+  _ensureHeaders(sh, SHEETS.GradeBoundaries);
+  
+  // Check if data already exists
+  const existingData = _rows(sh);
+  if (existingData.length > 0) {
+    Logger.log('Grade boundaries already exist');
+    return 'Grade boundaries already exist';
+  }
+  
+  // Define proper Indian school grade boundaries
+  const gradeBoundaries = [
+    // Standards 1-4 (Elementary) - Simple grading
+    { standardGroup: 'Std 1-4', grade: 'Excellent', minPercentage: 90, maxPercentage: 100 },
+    { standardGroup: 'Std 1-4', grade: 'Very Good', minPercentage: 80, maxPercentage: 89 },
+    { standardGroup: 'Std 1-4', grade: 'Good', minPercentage: 70, maxPercentage: 79 },
+    { standardGroup: 'Std 1-4', grade: 'Satisfactory', minPercentage: 60, maxPercentage: 69 },
+    { standardGroup: 'Std 1-4', grade: 'Needs Improvement', minPercentage: 35, maxPercentage: 59 },
+    { standardGroup: 'Std 1-4', grade: 'Unsatisfactory', minPercentage: 0, maxPercentage: 34 },
+    
+    // Standards 5-8 (Middle School) - Grade points
+    { standardGroup: 'Std 5-8', grade: 'A1', minPercentage: 91, maxPercentage: 100 },
+    { standardGroup: 'Std 5-8', grade: 'A2', minPercentage: 81, maxPercentage: 90 },
+    { standardGroup: 'Std 5-8', grade: 'B1', minPercentage: 71, maxPercentage: 80 },
+    { standardGroup: 'Std 5-8', grade: 'B2', minPercentage: 61, maxPercentage: 70 },
+    { standardGroup: 'Std 5-8', grade: 'C1', minPercentage: 51, maxPercentage: 60 },
+    { standardGroup: 'Std 5-8', grade: 'C2', minPercentage: 41, maxPercentage: 50 },
+    { standardGroup: 'Std 5-8', grade: 'D', minPercentage: 33, maxPercentage: 40 },
+    { standardGroup: 'Std 5-8', grade: 'E', minPercentage: 0, maxPercentage: 32 },
+    
+    // Standards 9-12 (High School) - Traditional letter grades
+    { standardGroup: 'Std 9-12', grade: 'A+', minPercentage: 95, maxPercentage: 100 },
+    { standardGroup: 'Std 9-12', grade: 'A', minPercentage: 85, maxPercentage: 94 },
+    { standardGroup: 'Std 9-12', grade: 'B+', minPercentage: 75, maxPercentage: 84 },
+    { standardGroup: 'Std 9-12', grade: 'B', minPercentage: 65, maxPercentage: 74 },
+    { standardGroup: 'Std 9-12', grade: 'C+', minPercentage: 55, maxPercentage: 64 },
+    { standardGroup: 'Std 9-12', grade: 'C', minPercentage: 45, maxPercentage: 54 },
+    { standardGroup: 'Std 9-12', grade: 'D', minPercentage: 35, maxPercentage: 44 },
+    { standardGroup: 'Std 9-12', grade: 'F', minPercentage: 0, maxPercentage: 34 }
+  ];
+  
+  // Add the data to the sheet
+  gradeBoundaries.forEach(boundary => {
+    sh.appendRow([
+      boundary.standardGroup,
+      boundary.grade,
+      boundary.minPercentage,
+      boundary.maxPercentage
+    ]);
+  });
+  
+  Logger.log('Grade boundaries initialized successfully');
+  return 'Grade boundaries initialized successfully';
+}
+
+/**
  * ====== Data Model ======
  * Sheets and expected columns
  */
@@ -3958,8 +4018,9 @@ function doPost(e) {
       marks.forEach(m => {
         const adm = String(m.admNo || '');
         const name = String(m.studentName || '');
-        const ce = Number(m.ce || 0);
-        const te = Number(m.te || 0);
+        // Support both old format (ce/te) and new format (internal/external)
+        const ce = Number(m.ce || m.internal || 0);
+        const te = Number(m.te || m.external || 0);
         const total = ce + te;
         
         // Calculate grade using the exam's total max marks and class
