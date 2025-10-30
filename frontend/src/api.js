@@ -2,8 +2,8 @@
 // Configure this to your deployed Google Apps Script Web App URL (ends with /exec)
 // In development we proxy requests via Vite at /gas to avoid CORS issues.
 const PROD_BASE = import.meta.env.VITE_GAS_WEB_APP_URL || '';
-// Temporarily use production URL directly to bypass proxy issues
-const BASE_URL = PROD_BASE; // import.meta.env.DEV ? '/gas' : PROD_BASE;
+// Use proxy in development to avoid CORS issues
+const BASE_URL = import.meta.env.DEV ? '/gas' : PROD_BASE;
 
 // Export BASE_URL for components that need to build direct URLs
 export function getBaseUrl() {
@@ -225,6 +225,11 @@ export async function submitPlan(email, planData) {
 
 export async function getPendingPlans(page=1, pageSize=10, teacher='', cls='', subject='', month='') {
   const q = new URLSearchParams({ action: 'getPendingPlans', page, pageSize, teacher, class: cls, subject, month })
+  return getJSON(`${BASE_URL}?${q.toString()}`)
+}
+
+export async function getAllPlans(page=1, pageSize=10, teacher='', cls='', subject='', status='', month='') {
+  const q = new URLSearchParams({ action: 'getAllPlans', page, pageSize, teacher, class: cls, subject, status, month })
   return getJSON(`${BASE_URL}?${q.toString()}`)
 }
 
@@ -478,6 +483,11 @@ export async function createExam(email, examData) {
   return postJSON(`${BASE_URL}?action=createExam`, { email, ...examData })
 }
 
+// Create exam with custom ID (for bulk upload)
+export async function createExamWithId(email, examData) {
+  return postJSON(`${BASE_URL}?action=createExamWithId`, { email, ...examData })
+}
+
 // Create multiple exams at once for different subjects with the same grading settings.
 // Payload should include class, examType, hasInternalMarks, internalMax, externalMax, 
 // and an array of subject+date pairs.
@@ -545,11 +555,6 @@ export async function getStudentReportCard(examType, admNo = '', cls = '') {
 // Administrative API
 // Fetch all plans (schemes and lesson plans) with optional filters.
 // Parameters: teacher (email or part of name), class, subject, status.
-export async function getAllPlans(teacher = '', cls = '', subject = '', status = '') {
-  const q = new URLSearchParams({ action: 'getAllPlans', teacher, class: cls, subject, status })
-  return getJSON(`${BASE_URL}?${q.toString()}`)
-}
-
 // Fetch all approved schemes across the school, used to populate teacher dropdowns
 export async function getAllApprovedSchemes() {
   try {

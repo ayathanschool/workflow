@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, Bell, Search, Filter, RefreshCw, Loader } from 'lucide-react';
+import { Plus, Bell, Search, Filter, RefreshCw, Loader, Upload, Download, ChevronUp, ChevronDown } from 'lucide-react';
 import * as api from '../api';
 import { todayIST, parseApiDate, formatShortDate } from '../utils/dateUtils';
 
@@ -86,11 +86,12 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
   const [marksRows, setMarksRows] = useState([]);
   const [selectedExam, setSelectedExam] = useState(null);
 
-  // Bulk marks upload state
-  const [showBulkMarksUpload, setShowBulkMarksUpload] = useState(false);
-  const [bulkMarksFile, setBulkMarksFile] = useState(null);
-  const [bulkMarksData, setBulkMarksData] = useState([]);
-  const [bulkMarksPreview, setBulkMarksPreview] = useState([]);
+  // Global bulk upload state (replacing per-exam bulk upload)
+  const [showGlobalBulkUpload, setShowGlobalBulkUpload] = useState(false);
+  const [globalBulkFile, setGlobalBulkFile] = useState(null);
+  const [globalBulkData, setGlobalBulkData] = useState([]);
+  const [globalBulkPreview, setGlobalBulkPreview] = useState([]);
+  const [bulkUploadProgress, setBulkUploadProgress] = useState({ current: 0, total: 0 });
 
   const [viewExamMarks, setViewExamMarks] = useState(null);
   const [examMarks, setExamMarks] = useState([]);
@@ -124,6 +125,11 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
 
   // Calculate grade using backend grade boundaries
   const calculateGrade = useCallback((percentage, className) => {
+    // Handle absent students
+    if (percentage === 'Absent' || percentage === null || percentage === undefined) {
+      return 'Absent';
+    }
+    
     if (!gradeBoundariesLoaded || !gradeBoundaries.length) {
       // Fallback calculation while loading or if no boundaries
       if (percentage >= 90) return 'A+';
@@ -1120,6 +1126,11 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
   
   // Helper function to calculate total marks
   const calculateTotal = useCallback((row, exam = selectedExam) => {
+    // Check if student is absent (marked with 'A' in external marks)
+    if (row.external && row.external.toString().toUpperCase() === 'A') {
+      return 'Absent';
+    }
+    
     const external = Number(row.external) || 0;
     if (examHasInternalMarks(exam)) {
       const internal = Number(row.internal) || 0;
@@ -1132,6 +1143,10 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
   const calculatePercentage = useCallback((row, maxMarks, exam = selectedExam) => {
     if (!maxMarks) return '';
     const total = calculateTotal(row, exam);
+    
+    // Return 'Absent' if student was absent
+    if (total === 'Absent') return 'Absent';
+    
     return Math.round((total / maxMarks) * 100);
   }, [calculateTotal, selectedExam]);
 
@@ -1177,144 +1192,328 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
     }
   }, [selectedExam, user, marksRows, setToast, setIsLoading, setApiError, setShowMarksForm]);
 
-  // Bulk Marks Upload Functions
-  const handleBulkMarksFileChange = useCallback(async (event) => {
+  // Global Bulk Upload Functions (Optimized)
+  const validateGlobalBulkCSV = useCallback(async (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const csv = e.target.result;
+          const lines = csv.split('\n').filter(line => line.trim());
+          
+          if (lines.length < 2) {
+            reject(new Error('CSV file must have at least a header row and one data row'));
+            return;
+          }
+
+          const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+          
+          // Required columns for global bulk upload
+          const requiredColumns = ['examid', 'admno', 'studentname'];
+          const missingRequired = requiredColumns.filter(col => 
+            !headers.some(h => h.includes(col))
+          );
+          
+          if (missingRequired.length > 0) {
+            reject(new Error(`Missing required columns: ${missingRequired.join(', ')}`));
+            return;
+          }
+
+          // Parse data rows (limit to 1000 for performance)
+          const data = [];
+          for (let i = 1; i < Math.min(lines.length, 1001); i++) {
+            const values = lines[i].split(',').map(v => v.trim());
+            if (values.length !== headers.length) continue;
+            
+            const row = {};
+            headers.forEach((header, index) => {
+              const cleanHeader = header.replace(/[^a-z0-9]/g, '');
+              row[cleanHeader] = values[index];
+            });
+            
+            // Validate required data
+            if (row.examid && row.admno && row.studentname) {
+              // Use the full readable examId as the actual exam ID (no UUID extraction)
+              let examId = row.examid.trim();
+              
+              // Remove any UUID part if present (e.g., "TermTest1_Std5A_Math (uuid)" becomes "TermTest1_Std5A_Math")
+              const uuidMatch = examId.match(/^(.+?)\s*\([a-f0-9\-]{36}\)$/i);
+              if (uuidMatch) {
+                examId = uuidMatch[1].trim(); // Use the human-readable part only
+              }
+              
+              // Add processed row with meaningful examId
+              data.push({
+                ...row,
+                examId: examId, // Use meaningful name as exam ID
+                admNo: row.admno || '',
+                studentName: row.studentname || '',
+                internal: row.internal || '',
+                external: row.external || ''
+              });
+            }
+          }
+
+          if (data.length === 0) {
+            reject(new Error('No valid data rows found'));
+            return;
+          }
+
+          resolve(data);
+        } catch (error) {
+          reject(new Error(`Failed to parse CSV: ${error.message}`));
+        }
+      };
+      reader.readAsText(file);
+    });
+  }, []);
+
+  const handleGlobalBulkFileChange = useCallback(async (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
-    setBulkMarksFile(file);
-    
-    try {
-      const text = await file.text();
-      const rows = text.split('\n').map(row => row.split(',').map(cell => cell.trim()));
-      
-      // Remove empty rows
-      const validRows = rows.filter(row => row.some(cell => cell));
-      
-      if (validRows.length < 2) {
-        setApiError('CSV file must have at least a header row and one data row');
-        return;
-      }
-      
-      // Expected headers: admNo, studentName, internal (optional), external
-      const headers = validRows[0].map(h => h.toLowerCase().replace(/\s+/g, ''));
-      const dataRows = validRows.slice(1);
-      
-      // Validate headers
-      const requiredHeaders = ['admno', 'studentname', 'external'];
-      const hasRequiredHeaders = requiredHeaders.every(h => headers.includes(h));
-      
-      if (!hasRequiredHeaders) {
-        setApiError('CSV must have columns: admNo, studentName, external (and optionally internal)');
-        return;
-      }
-      
-      // Parse data
-      const parsedData = dataRows.map(row => {
-        const data = {};
-        headers.forEach((header, index) => {
-          data[header] = row[index] || '';
-        });
-        
-        return {
-          admNo: data.admno || '',
-          studentName: data.studentname || '',
-          internal: data.internal || '',
-          external: data.external || '',
-        };
-      }).filter(row => row.admNo && row.studentName);
-      
-      setBulkMarksData(parsedData);
-      setBulkMarksPreview(parsedData.slice(0, 5)); // Show first 5 rows as preview
-      setApiError('');
-      
-    } catch (error) {
-      console.error('Error parsing CSV:', error);
-      setApiError('Error parsing CSV file: ' + error.message);
-    }
-  }, [setBulkMarksFile, setBulkMarksData, setBulkMarksPreview, setApiError]);
+    setGlobalBulkFile(file);
+    setGlobalBulkData([]);
+    setGlobalBulkPreview([]);
+    setApiError('');
 
-  const handleBulkMarksUpload = useCallback(async () => {
-    if (!selectedExam || !bulkMarksData.length) return;
-    
     try {
       setIsLoading(true);
-      setApiError('');
+      const data = await validateGlobalBulkCSV(file);
+      setGlobalBulkData(data);
       
-      // Process bulk data and auto-calculate totals, percentages, and grades
-      const processedMarks = bulkMarksData.map(row => {
-        const internal = Number(row.internal) || 0;
-        const external = Number(row.external) || 0;
-        const total = examHasInternalMarks(selectedExam) ? internal + external : external;
-        const percentage = selectedExam.totalMax ? Math.round((total / selectedExam.totalMax) * 100) : 0;
-        const grade = calculateGrade(percentage, selectedExam.class);
+      // Create preview with calculated totals and grades
+      const preview = data.slice(0, 5).map(row => {
+        const internal = parseFloat(row.internal || row.ce || 0);
+        const external = parseFloat(row.external || row.te || 0);
+        const total = internal + external;
         
+        // Find exam to get class for grading
+        const exam = exams.find(e => e.examId === row.examid);
+        const percentage = exam && exam.totalMax ? (total / exam.totalMax) * 100 : 0;
+        const grade = exam ? calculateGrade(percentage, exam.class) : 'N/A';
+
         return {
-          admNo: row.admNo,
-          studentName: row.studentName,
-          internal: internal,
-          external: external,
-          total: total,
-          percentage: percentage,
-          grade: grade
+          ...row,
+          calculatedInternal: internal,
+          calculatedExternal: external,
+          calculatedTotal: total,
+          calculatedPercentage: Math.round(percentage),
+          calculatedGrade: grade,
+          examFound: !!exam
         };
       });
       
-      // Submit to API
-      const result = await api.submitExamMarks({
-        examId: selectedExam.examId,
-        class: selectedExam.class,
-        subject: selectedExam.subject,
-        teacherEmail: user.email,
-        teacherName: user.name || user.email,
-        marks: processedMarks
-      });
-      
-      if (result && (result.ok || result.submitted)) {
-        setToast({ type: 'success', text: `Bulk marks uploaded successfully for ${processedMarks.length} students` });
-        setTimeout(() => setToast(null), 3000);
-        
-        // Reset bulk upload state
-        setShowBulkMarksUpload(false);
-        setBulkMarksFile(null);
-        setBulkMarksData([]);
-        setBulkMarksPreview([]);
-        
-        // Clear cache to show updated data
-        setStudentsCache(new Map());
-        setMarksCache(new Map());
-      } else {
-        throw new Error(result?.error || 'Failed to upload bulk marks');
-      }
-    } catch (err) {
-      console.error('Error uploading bulk marks:', err);
-      setApiError(`Failed to upload bulk marks: ${err.message || 'Unknown error'}`);
+      setGlobalBulkPreview(preview);
+      setApiError(`✅ File validated successfully! ${data.length} records ready for upload.`);
+    } catch (error) {
+      setApiError(`❌ ${error.message}`);
+      setGlobalBulkFile(null);
     } finally {
       setIsLoading(false);
     }
-  }, [selectedExam, bulkMarksData, user, calculateGrade, setToast, setShowBulkMarksUpload, setBulkMarksFile, setBulkMarksData, setBulkMarksPreview, setStudentsCache, setMarksCache, setIsLoading, setApiError]);
+  }, [exams, calculateGrade, validateGlobalBulkCSV]);
 
-  const downloadMarksSample = useCallback(() => {
-    // Create sample CSV content
-    const sampleData = [
-      ['admNo', 'studentName', 'internal', 'external'],
-      ['5885', 'Aarav R Menon', '10', '15'],
-      ['5933', 'Abhimanyu A', '12', '18'],
-      ['5890', 'Abhinand V K', '11', '17']
-    ];
+  const handleGlobalBulkUpload = useCallback(async () => {
+    if (!globalBulkData.length || !user) return;
+
+    try {
+      setIsLoading(true);
+      setBulkUploadProgress({ current: 0, total: globalBulkData.length });
+      
+      // Group data by examId for efficient processing
+      const examGroups = {};
+      globalBulkData.forEach(row => {
+        if (!examGroups[row.examid]) {
+          examGroups[row.examid] = [];
+        }
+        examGroups[row.examid].push(row);
+      });
+
+      let totalProcessed = 0;
+      let totalErrors = 0;
+      const errorDetails = [];
+
+      // Process each exam group
+      for (const [examId, marks] of Object.entries(examGroups)) {
+        let exam = exams.find(e => e.examId === examId);
+        
+        // If exam doesn't exist, create it automatically from the examId
+        if (!exam) {
+          console.log(`Creating new exam with ID: ${examId}`);
+          
+          // Parse examId to extract exam details (format: "TermTest1_Std5A_Math")
+          const parts = examId.split('_');
+          let examType = parts[0] || 'General Exam';
+          let className = '';
+          let subject = '';
+          
+          if (parts.length >= 3) {
+            className = parts[1] || '';
+            subject = parts.slice(2).join('_') || '';
+          } else if (parts.length === 2) {
+            // Could be "TermTest1_Math" or "Std5A_Math"
+            if (parts[1].match(/^std\d+/i)) {
+              className = parts[1];
+              subject = examType; // Fallback
+              examType = 'General Exam';
+            } else {
+              subject = parts[1];
+            }
+          }
+          
+          // Create exam with meaningful ID
+          try {
+            const examData = {
+              examId: examId, // Use the meaningful ID directly
+              class: className,
+              subject: subject,
+              examType: examType,
+              hasInternalMarks: className.match(/std[89]|std10/i) ? true : false, // STD 8-10 have internal marks
+              internalMax: className.match(/std[89]|std10/i) ? 20 : 0,
+              externalMax: 80,
+              totalMax: className.match(/std[89]|std10/i) ? 100 : 80,
+              date: new Date().toISOString().slice(0, 10)
+            };
+            
+            const createResult = await api.createExamWithId(user.email, examData);
+            
+            if (createResult && createResult.examId) {
+              // Fetch the newly created exam
+              await new Promise(resolve => setTimeout(resolve, 500)); // Brief delay for backend
+              const updatedExams = await api.getAllExams();
+              exam = updatedExams.find(e => e.examId === examId);
+              
+              if (exam) {
+                // Update local exams state
+                setExams(updatedExams);
+                console.log(`✅ Created exam: ${examId}`);
+              }
+            }
+          } catch (createError) {
+            console.error(`Failed to create exam ${examId}:`, createError);
+            totalErrors += marks.length;
+            errorDetails.push(`Failed to create exam ${examId}: ${createError.message}`);
+            continue;
+          }
+        }
+        
+        if (!exam) {
+          console.warn(`Exam still not found after creation attempt: ${examId}`);
+          totalErrors += marks.length;
+          errorDetails.push(`Exam ${examId} not found and could not be created`);
+          continue;
+        }
+
+        const marksData = marks.map(row => ({
+          admNo: row.admno,
+          studentName: row.studentname,
+          internal: parseFloat(row.internal || row.ce || 0),
+          external: parseFloat(row.external || row.te || 0)
+        }));
+
+        try {
+          const result = await api.submitExamMarks({
+            examId: examId,
+            class: exam.class,
+            subject: exam.subject,
+            teacherEmail: user.email,
+            teacherName: user.name || user.email,
+            marks: marksData
+          });
+
+          if (result && (result.ok || result.submitted)) {
+            totalProcessed += marks.length;
+          } else {
+            totalErrors += marks.length;
+            errorDetails.push(`Failed to upload marks for exam ${examId}`);
+          }
+        } catch (error) {
+          totalErrors += marks.length;
+          errorDetails.push(`Error uploading exam ${examId}: ${error.message}`);
+        }
+
+        setBulkUploadProgress(prev => ({ ...prev, current: prev.current + marks.length }));
+      }
+
+      // Show results
+      if (totalErrors === 0) {
+        setToast({ 
+          type: 'success', 
+          text: `🎉 Bulk upload completed successfully! ${totalProcessed} records uploaded.` 
+        });
+      } else {
+        setToast({ 
+          type: 'warning', 
+          text: `⚠️ Bulk upload completed with issues. Processed: ${totalProcessed}, Errors: ${totalErrors}` 
+        });
+        console.warn('Bulk upload errors:', errorDetails);
+      }
+
+      // Reset state
+      setShowGlobalBulkUpload(false);
+      setGlobalBulkFile(null);
+      setGlobalBulkData([]);
+      setGlobalBulkPreview([]);
+      setBulkUploadProgress({ current: 0, total: 0 });
+      
+      // Clear caches to show updated data
+      setStudentsCache(new Map());
+      setMarksCache(new Map());
+
+    } catch (error) {
+      setApiError(`❌ Bulk upload failed: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [globalBulkData, exams, user, calculateGrade, setToast, setStudentsCache, setMarksCache]);
+
+  const generateSampleCSV = useCallback(() => {
+    const headers = ['examId', 'admNo', 'studentName', 'internal', 'external'];
     
-    const csvContent = sampleData.map(row => row.join(',')).join('\n');
+    // Create human-readable exam identifiers that will be used as actual exam IDs
+    const getReadableExamId = (exam) => {
+      return `${exam.examType}_${exam.class}_${exam.subject}`.replace(/\s+/g, '_');
+    };
+    
+    let sampleData = [];
+    
+    if (exams && exams.length > 0) {
+      // Use real exam data to create sample
+      const sampleExams = exams.slice(0, 3); // Take first 3 exams as example
+      
+      sampleExams.forEach((exam, index) => {
+        const readableId = getReadableExamId(exam);
+        // Add sample students for each exam (using readable ID as actual exam ID)
+        sampleData.push([readableId, '1001', 'John Doe', exam.hasInternalMarks ? '18' : '0', '72']);
+        sampleData.push([readableId, '1002', 'Jane Smith', exam.hasInternalMarks ? '19' : '0', '68']);
+        if (index === 0) { // Add extra student for first exam
+          sampleData.push([readableId, '1003', 'Mike Johnson', exam.hasInternalMarks ? '20' : '0', '75']);
+        }
+      });
+    } else {
+      // Fallback sample data with meaningful exam IDs
+      sampleData = [
+        ['TermTest1_Std5A_Math', '1001', 'John Doe', '18', '72'],
+        ['TermTest1_Std5A_Math', '1002', 'Jane Smith', '19', '68'], 
+        ['TermTest1_Std5A_Science', '1001', 'John Doe', '0', '85'],
+        ['TermTest1_Std5A_Science', '1002', 'Jane Smith', '0', '78'],
+        ['Quarterly_Std6B_English', '1003', 'Mike Johnson', '20', '75']
+      ];
+    }
+    
+    const csvContent = [headers, ...sampleData]
+      .map(row => row.join(','))
+      .join('\n');
+    
     const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.style.display = 'none';
-    a.href = url;
-    a.download = 'exam_marks_sample.csv';
-    document.body.appendChild(a);
-    a.click();
-    window.URL.revokeObjectURL(url);
-    document.body.removeChild(a);
-  }, []);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'exam_marks_bulk_upload_sample.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [exams]);
 
   return (
     <div className="space-y-6">
@@ -1361,6 +1560,141 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
           )}
         </div>
       </div>
+
+      {/* Global Bulk Upload Section */}
+      {normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster')) && (
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow-sm p-6 border border-blue-200">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900 flex items-center">
+              <Upload className="h-5 w-5 mr-2 text-blue-600" />
+              Global Bulk Upload Marks
+            </h2>
+            <button
+              onClick={() => setShowGlobalBulkUpload(!showGlobalBulkUpload)}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center text-sm"
+            >
+              {showGlobalBulkUpload ? (
+                <>
+                  <ChevronUp className="h-4 w-4 mr-1" />
+                  Hide
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-4 w-4 mr-1" />
+                  Upload Marks
+                </>
+              )}
+            </button>
+          </div>
+
+          {showGlobalBulkUpload && (
+            <div className="space-y-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h3 className="font-medium text-blue-900 mb-2">How to use Global Bulk Upload:</h3>
+                <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+                  <li>Upload a single CSV file containing marks for multiple exams</li>
+                  <li>CSV format: examId, admNo, studentName, internal, external</li>
+                  <li>Use readable exam IDs from sample CSV (e.g., TermTest1_Std5A_Math (uuid))</li>
+                  <li>Can also use direct UUIDs if you have them</li>
+                  <li>Leave internal or external empty if not applicable</li>
+                </ul>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex-1 min-w-0">
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleGlobalBulkFileChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  />
+                </div>
+                <button
+                  onClick={generateSampleCSV}
+                  className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 text-sm flex items-center"
+                >
+                  <Download className="h-4 w-4 mr-1" />
+                  Sample CSV
+                </button>
+                <button
+                  onClick={handleGlobalBulkUpload}
+                  disabled={!globalBulkFile || globalBulkData.length === 0}
+                  className={`px-6 py-2 rounded-lg text-sm font-medium flex items-center ${
+                    globalBulkFile && globalBulkData.length > 0
+                      ? 'bg-green-600 text-white hover:bg-green-700'
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  }`}
+                >
+                  <Upload className="h-4 w-4 mr-1" />
+                  Upload All Marks
+                </button>
+              </div>
+
+              {/* Progress Indicator */}
+              {bulkUploadProgress.total > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-blue-900">
+                      Uploading Marks Progress
+                    </span>
+                    <span className="text-sm text-blue-700">
+                      {bulkUploadProgress.current} / {bulkUploadProgress.total}
+                    </span>
+                  </div>
+                  <div className="w-full bg-blue-200 rounded-full h-2">
+                    <div 
+                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                      style={{ 
+                        width: `${(bulkUploadProgress.current / bulkUploadProgress.total) * 100}%` 
+                      }}
+                    ></div>
+                  </div>
+                  <p className="text-xs text-blue-600 mt-1">
+                    Processing marks upload... Please wait.
+                  </p>
+                </div>
+              )}
+
+              {globalBulkData.length > 0 && (
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <h4 className="font-medium text-gray-900 mb-2">Preview ({globalBulkData.length} rows):</h4>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-xs">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left py-1 px-2">Exam ID</th>
+                          <th className="text-left py-1 px-2">Adm No</th>
+                          <th className="text-left py-1 px-2">Student</th>
+                          <th className="text-left py-1 px-2">Internal</th>
+                          <th className="text-left py-1 px-2">External</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {globalBulkData.slice(0, 5).map((row, index) => (
+                          <tr key={`global-bulk-${index}-${row.admNo || index}`} className="border-b">
+                            <td className="py-1 px-2">{row.examId}</td>
+                            <td className="py-1 px-2">{row.admNo}</td>
+                            <td className="py-1 px-2">{row.studentName}</td>
+                            <td className="py-1 px-2">{row.internal || '-'}</td>
+                            <td className="py-1 px-2">{row.external || '-'}</td>
+                          </tr>
+                        ))}
+                        {globalBulkData.length > 5 && (
+                          <tr key="global-bulk-more-rows">
+                            <td colSpan="5" className="py-1 px-2 text-gray-500 italic">
+                              ... and {globalBulkData.length - 5} more rows
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Exam Creation Form */}
       {showExamForm && (
@@ -1819,7 +2153,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
                   return (
                     <tr key={exam.examId} className={rowClassName}>
                       <td className="px-6 py-4 whitespace-nowrap font-medium">
-                        {exam.examName || `${exam.examType} - ${exam.class} - ${exam.subject}`}
+                        {exam.examId}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">{exam.class}</td>
                       <td className="px-6 py-4 whitespace-nowrap">{exam.subject}</td>
@@ -1843,16 +2177,6 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
                             className="text-green-600 hover:text-green-900 mr-2"
                           >
                             Edit Marks
-                          </button>
-                          <button 
-                            onClick={() => {
-                              setSelectedExam(exam);
-                              setShowBulkMarksUpload(true);
-                            }}
-                            className="text-orange-600 hover:text-orange-900 mr-2"
-                            title="Upload marks from CSV file"
-                          >
-                            Bulk Upload
                           </button>
                           {/* Edit Exam Button - only visible to headmasters */}
                           {normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster')) && (
@@ -1960,30 +2284,30 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {marksRows.map((row, index) => (
-                      <tr key={`marks-${index}-${row.admNo}`} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <tr key={`marks-${index}-${row.admNo || 'unknown-' + index}`} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">{row.admNo}</td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">{row.studentName}</td>
                         {/* Only show internal marks input if exam has internal marks */}
                         {examHasInternalMarks(selectedExam) && (
                           <td className="px-4 py-2 whitespace-nowrap">
                             <input 
-                              type="number" 
-                              min="0" 
-                              max={selectedExam.internalMax || 0} 
+                              type="text" 
                               value={row.internal} 
                               onChange={(e) => handleMarksChange(index, 'internal', e.target.value)}
-                              className="w-16 px-2 py-1 border border-gray-300 rounded-md"
+                              className="w-16 px-2 py-1 border border-gray-300 rounded-md text-center"
+                              placeholder="0-{selectedExam.internalMax || 0}"
+                              title="Enter marks or leave blank if not applicable"
                             />
                           </td>
                         )}
                         <td className="px-4 py-2 whitespace-nowrap">
                           <input 
-                            type="number" 
-                            min="0" 
-                            max={selectedExam.externalMax || 0} 
+                            type="text" 
                             value={row.external} 
                             onChange={(e) => handleMarksChange(index, 'external', e.target.value)}
-                            className="w-16 px-2 py-1 border border-gray-300 rounded-md"
+                            className="w-16 px-2 py-1 border border-gray-300 rounded-md text-center"
+                            placeholder="0-{selectedExam.externalMax || 0} or A"
+                            title="Enter marks (0-{selectedExam.externalMax || 0}) or 'A' for Absent"
                           />
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">{calculateTotal(row, selectedExam)}</td>
@@ -2187,7 +2511,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {examMarks.map((row, index) => (
-                      <tr key={`exam-marks-${index}-${row.admNo}`} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <tr key={`exam-marks-${index}-${row.admNo || 'unknown-' + index}`} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">{row.admNo}</td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">{row.studentName}</td>
                         {examHasInternalMarks(viewExamMarks) && (
@@ -2204,141 +2528,6 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
                     ))}
                   </tbody>
                 </table>
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* Bulk Marks Upload Modal */}
-      {showBulkMarksUpload && selectedExam && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <h2 className="text-xl font-semibold mb-4 flex justify-between items-center">
-              <span>Bulk Upload Marks: {selectedExam.examName || `${selectedExam.examType} - ${selectedExam.class} - ${selectedExam.subject}`}</span>
-              <button 
-                onClick={() => {
-                  setShowBulkMarksUpload(false);
-                  setBulkMarksFile(null);
-                  setBulkMarksData([]);
-                  setBulkMarksPreview([]);
-                }}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                ✕
-              </button>
-            </h2>
-            
-            <div className="space-y-4">
-              {/* Instructions */}
-              <div className="bg-blue-50 border border-blue-200 rounded p-4">
-                <h3 className="font-medium text-blue-900 mb-2">Instructions:</h3>
-                <ul className="text-sm text-blue-800 space-y-1">
-                  <li>• Upload a CSV file with columns: <strong>admNo, studentName, external</strong> {examHasInternalMarks(selectedExam) && <span>and optionally <strong>internal</strong></span>}</li>
-                  <li>• First row should contain column headers</li>
-                  <li>• Grades and totals will be calculated automatically</li>
-                  <li>• Download sample file below for reference</li>
-                </ul>
-                <button
-                  onClick={downloadMarksSample}
-                  className="mt-2 text-blue-600 hover:text-blue-800 underline text-sm"
-                >
-                  📥 Download Sample CSV File
-                </button>
-              </div>
-              
-              {/* File Upload */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select CSV File
-                </label>
-                <input
-                  type="file"
-                  accept=".csv"
-                  onChange={handleBulkMarksFileChange}
-                  className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none"
-                />
-              </div>
-              
-              {/* Preview */}
-              {bulkMarksPreview.length > 0 && (
-                <div>
-                  <h3 className="font-medium text-gray-900 mb-2">Preview (First 5 rows):</h3>
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200 border border-gray-300">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Adm No</th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Student Name</th>
-                          {examHasInternalMarks(selectedExam) && (
-                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Internal</th>
-                          )}
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">External</th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">%</th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Grade</th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {bulkMarksPreview.map((row, index) => {
-                          const internal = Number(row.internal) || 0;
-                          const external = Number(row.external) || 0;
-                          const total = examHasInternalMarks(selectedExam) ? internal + external : external;
-                          const percentage = selectedExam.totalMax ? Math.round((total / selectedExam.totalMax) * 100) : 0;
-                          const grade = calculateGrade(percentage, selectedExam.class);
-                          
-                          return (
-                            <tr key={`bulk-preview-${index}-${row.admNo}`} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                              <td className="px-4 py-2 text-sm">{row.admNo}</td>
-                              <td className="px-4 py-2 text-sm">{row.studentName}</td>
-                              {examHasInternalMarks(selectedExam) && (
-                                <td className="px-4 py-2 text-sm">{row.internal || '-'}</td>
-                              )}
-                              <td className="px-4 py-2 text-sm">{row.external || '-'}</td>
-                              <td className="px-4 py-2 text-sm">{total}</td>
-                              <td className="px-4 py-2 text-sm">{percentage}%</td>
-                              <td className="px-4 py-2 text-sm">{grade}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  {bulkMarksData.length > 5 && (
-                    <p className="text-sm text-gray-600 mt-2">
-                      ...and {bulkMarksData.length - 5} more rows
-                    </p>
-                  )}
-                </div>
-              )}
-              
-              {/* Error Display */}
-              {apiError && (
-                <div className="bg-red-50 border border-red-200 rounded p-3 text-red-700">
-                  {apiError}
-                </div>
-              )}
-              
-              {/* Action Buttons */}
-              <div className="flex justify-end space-x-3 pt-4">
-                <button
-                  onClick={() => {
-                    setShowBulkMarksUpload(false);
-                    setBulkMarksFile(null);
-                    setBulkMarksData([]);
-                    setBulkMarksPreview([]);
-                  }}
-                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleBulkMarksUpload}
-                  disabled={!bulkMarksData.length || isLoading}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isLoading ? 'Uploading...' : `Upload ${bulkMarksData.length} Records`}
-                </button>
-              </div>
             </div>
           </div>
         </div>

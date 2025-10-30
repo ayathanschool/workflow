@@ -242,6 +242,114 @@ function _uuid() {
   return Utilities.getUuid();
 }
 
+/**
+ * Test function for exam ID generation - can be called manually from Apps Script editor
+ */
+/**
+ * Generate a readable exam ID from exam details
+ * Format: ExamType_Class_Subject (e.g., T1_10A_ENG, UT2_9B_MATH)
+ */
+function _generateExamId(examType, className, subject) {
+  // Helper function to abbreviate exam types
+  function abbreviateExamType(type) {
+    const typeMap = {
+      'term 1': 'T1',
+      'term1': 'T1', 
+      'term 2': 'T2',
+      'term2': 'T2',
+      'term 3': 'T3',
+      'term3': 'T3',
+      'unit test 1': 'UT1',
+      'unit test1': 'UT1',
+      'unit test 2': 'UT2', 
+      'unit test2': 'UT2',
+      'unit test 3': 'UT3',
+      'unit test3': 'UT3',
+      'quarterly': 'Q',
+      'half yearly': 'HY',
+      'annual': 'ANN',
+      'revision test': 'RT',
+      'model exam': 'ME'
+    };
+    
+    const normalized = (type || '').toLowerCase().trim();
+    return typeMap[normalized] || type.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+  
+  // Helper function to abbreviate subjects
+  function abbreviateSubject(subj) {
+    const subjectMap = {
+      'english': 'ENG',
+      'english grammar': 'ENGG',
+      'mathematics': 'MATH',
+      'maths': 'MATH',
+      'science': 'SCI',
+      'physics': 'PHY',
+      'chemistry': 'CHEM',
+      'biology': 'BIO',
+      'malayalam': 'MAL',
+      'hindi': 'HIN',
+      'social science': 'SS',
+      'history': 'HIST',
+      'geography': 'GEO',
+      'computer science': 'CS',
+      'it theory': 'ITT',
+      'it lab': 'ITL',
+      'physical education': 'PE',
+      'moral science': 'MS'
+    };
+    
+    const normalized = (subj || '').toLowerCase().trim();
+    return subjectMap[normalized] || subj.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+  
+  // Helper function to clean class name
+  function cleanClassName(cls) {
+    // Extract just the class and section (e.g., "STD 10A" -> "10A")
+    const match = (cls || '').match(/(\d+[A-Z]?)/i);
+    return match ? match[1].toUpperCase() : cls.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+  
+  const examTypeAbbr = abbreviateExamType(examType);
+  const classAbbr = cleanClassName(className);
+  const subjectAbbr = abbreviateSubject(subject);
+  
+  return `${examTypeAbbr}_${classAbbr}_${subjectAbbr}`;
+}
+
+/**
+ * Check if an exam ID already exists and generate a unique one if needed
+ */
+function _generateUniqueExamId(examType, className, subject) {
+  const baseId = _generateExamId(examType, className, subject);
+  const sh = _getSheet('Exams');
+  const headers = _headers(sh);
+  const examIdIndex = headers.indexOf('examId');
+  
+  if (examIdIndex === -1) {
+    return baseId; // No existing exams
+  }
+  
+  // Get all existing exam IDs
+  const data = sh.getDataRange().getValues();
+  const existingIds = data.slice(1).map(row => row[examIdIndex]).filter(Boolean);
+  
+  // If base ID doesn't exist, use it
+  if (!existingIds.includes(baseId)) {
+    return baseId;
+  }
+  
+  // If it exists, add a suffix
+  let counter = 1;
+  let uniqueId = `${baseId}_${counter}`;
+  while (existingIds.includes(uniqueId)) {
+    counter++;
+    uniqueId = `${baseId}_${counter}`;
+  }
+  
+  return uniqueId;
+}
+
 function _todayISO() {
   const tz = Session.getScriptTimeZone();
   const d = new Date();
@@ -1043,6 +1151,44 @@ function doGet(e) {
       const headers = _headers(sh);
       let list = _rows(sh).map(r => _indexByHeader(r, headers))
         .filter(p => String(p.status || 'Pending') === 'Pending');
+      if (teacher) list = list.filter(p => String(p.teacherEmail||'').toLowerCase() === teacher || String(p.teacherName||'').toLowerCase().indexOf(teacher) !== -1);
+      if (cls) list = list.filter(p => p.class === cls);
+      if (subject) list = list.filter(p => p.subject === subject);
+      if (month) list = list.filter(p => p.month === month);
+      const totalCount = list.length;
+      const start = (page-1)*pageSize;
+      const end = start + pageSize;
+      const pageItems = list.slice(start, end).map(p => ({
+        schemeId: String(p.schemeId),
+        teacherName: String(p.teacherName||''),
+        class: String(p.class||''),
+        subject: String(p.subject||''),
+        chapter: String(p.chapter||''),
+        month: String(p.month||''),
+        noOfSessions: Number(p.noOfSessions||0),
+        status: String(p.status || 'Pending')
+      }));
+      return _respond({ plans: pageItems, totalCount, page, pageSize });
+    }
+
+    if (action === 'getAllPlans') {
+      const page = Number(e.parameter.page || 1);
+      const pageSize = Number(e.parameter.pageSize || 10);
+      const teacher = (e.parameter.teacher || '').toLowerCase().trim();
+      const cls = (e.parameter['class'] || '').trim();
+      const subject = (e.parameter.subject || '').trim();
+      const status = (e.parameter.status || '').trim();
+      const month = (e.parameter.month || '').trim();
+
+      const sh = _getSheet('Schemes');
+      const headers = _headers(sh);
+      let list = _rows(sh).map(r => _indexByHeader(r, headers));
+      
+      // Filter by status only if specified
+      if (status) {
+        list = list.filter(p => String(p.status || 'Pending') === status);
+      }
+      
       if (teacher) list = list.filter(p => String(p.teacherEmail||'').toLowerCase() === teacher || String(p.teacherName||'').toLowerCase().indexOf(teacher) !== -1);
       if (cls) list = list.filter(p => p.class === cls);
       if (subject) list = list.filter(p => p.subject === subject);
@@ -2774,16 +2920,34 @@ function doGet(e) {
           
           const subjectData = studentMarksMap[studentAdmNo].subjects[subject];
           
-          // Better parsing for numeric values
+          // Better parsing for numeric values with absent handling
           const parseNumber = (val) => {
             if (val === null || val === undefined || val === '') return 0;
+            // Handle absent students (-1 stored value)
+            if (String(val).toUpperCase() === 'A' || Number(val) === -1) return -1;
             const num = parseFloat(String(val).replace(/[^\d.-]/g, ''));
             return isNaN(num) ? 0 : num;
           };
           
-          subjectData.ce += parseNumber(mark.ce);
-          subjectData.te += parseNumber(mark.te);
-          subjectData.total += parseNumber(mark.total);
+          const ceValue = parseNumber(mark.ce);
+          const teValue = parseNumber(mark.te);
+          const totalValue = parseNumber(mark.total);
+          
+          // Check if any value indicates absent
+          const isAbsent = ceValue === -1 || teValue === -1 || totalValue === -1;
+          
+          if (isAbsent) {
+            // If student is absent, mark the entire subject as absent
+            subjectData.ce = -1;
+            subjectData.te = -1;
+            subjectData.total = -1;
+            subjectData.grade = 'Absent';
+          } else {
+            // Only add if not already marked as absent
+            if (subjectData.ce !== -1) subjectData.ce += ceValue;
+            if (subjectData.te !== -1) subjectData.te += teValue;
+            if (subjectData.total !== -1) subjectData.total += totalValue;
+          }
           subjectData.count += 1;
           
           // Use the latest grade (assuming all exams of same type have same grading)
@@ -2799,12 +2963,22 @@ function doGet(e) {
           const avgSubjects = {};
           Object.values(student.subjects).forEach(subjectData => {
             if (subjectData.count > 0) {
-              avgSubjects[subjectData.subject] = {
-                ce: Math.round(subjectData.ce / subjectData.count),
-                te: Math.round(subjectData.te / subjectData.count),
-                total: Math.round(subjectData.total / subjectData.count),
-                grade: subjectData.grade
-              };
+              // Handle absent students
+              if (subjectData.ce === -1 || subjectData.te === -1 || subjectData.total === -1) {
+                avgSubjects[subjectData.subject] = {
+                  ce: 'Absent',
+                  te: 'Absent',
+                  total: 'Absent',
+                  grade: 'Absent'
+                };
+              } else {
+                avgSubjects[subjectData.subject] = {
+                  ce: Math.round(subjectData.ce / subjectData.count),
+                  te: Math.round(subjectData.te / subjectData.count),
+                  total: Math.round(subjectData.total / subjectData.count),
+                  grade: subjectData.grade
+                };
+              }
             }
           });
           
@@ -3493,7 +3667,10 @@ function doPost(e) {
       const sh = _getSheet('Exams');
       _ensureHeaders(sh, SHEETS.Exams);
       const now = new Date().toISOString();
-      const examId = _uuid();
+      
+      // Generate readable exam ID based on exam details
+      const examId = _generateUniqueExamId(data.examType, data.class, data.subject);
+      
       // Normalize date to ISO format (YYYY-MM-DD)
       let examDate = '';
       if (data.date) {
@@ -3574,6 +3751,73 @@ function doPost(e) {
       }
   return _respond({ submitted: true, examId });
     }
+
+    if (action === 'createExamWithId') {
+      // Create exam with custom ID (for bulk upload)
+      // Similar to createExam but uses provided examId instead of generating UUID
+      
+      const creatorEmail = (data.email||'').toLowerCase().trim();
+      const customExamId = data.examId || '';
+      
+      if (!creatorEmail || !customExamId) {
+        return _respond({ error: 'Creator email and examId are required' });
+      }
+      
+      // Check if exam with this ID already exists
+      const sh = _getSheet('Exams');
+      _ensureHeaders(sh, SHEETS.Exams);
+      const headers = _headers(sh);
+      const examIdIdx = headers.indexOf('examId');
+      
+      if (examIdIdx >= 0) {
+        const last = sh.getLastRow();
+        if (last >= 2) {
+          const values = sh.getRange(2, 1, last - 1, headers.length).getValues();
+          const existingExam = values.find(row => String(row[examIdIdx]) === String(customExamId));
+          if (existingExam) {
+            return _respond({ error: `Exam with ID '${customExamId}' already exists` });
+          }
+        }
+      }
+      
+      const now = new Date().toISOString();
+      let examDate = '';
+      if (data.date) {
+        if (/^\d{4}-\d{2}-\d{2}/.test(data.date)) {
+          examDate = data.date;
+        } else {
+          const parsed = new Date(data.date);
+          if (!isNaN(parsed.getTime())) {
+            examDate = parsed.toISOString().slice(0, 10);
+          }
+        }
+      }
+      
+      // Create descriptive exam name
+      const examName = `${data.examType || 'Exam'} - ${data.class || ''} - ${data.subject || ''}`;
+      
+      // Use class-based logic for internal marks if not specified
+      const autoHasInternalMarks = _classHasInternalMarks(data.class || '');
+      const finalHasInternalMarks = data.hasInternalMarks !== undefined ? Boolean(data.hasInternalMarks) : autoHasInternalMarks;
+      
+      sh.appendRow([
+        customExamId, // Use provided ID instead of UUID
+        creatorEmail,
+        data.creatorName || '',
+        data.class || '',
+        data.subject || '',
+        data.examType || '',
+        finalHasInternalMarks,
+        Number(data.internalMax||0),
+        Number(data.externalMax||0),
+        Number(data.totalMax||0),
+        examDate,
+        now,
+        examName
+      ]);
+      
+      return _respond({ submitted: true, examId: customExamId });
+    }
     
     if (action === 'createBulkExams') {
       // Create multiple exams at once for different subjects with the same grading settings
@@ -3616,7 +3860,8 @@ function doPost(e) {
           const { subject, date } = subjectExam;
           if (!subject) continue;
           
-          const examId = _uuid();
+          // Generate readable exam ID for each subject
+          const examId = _generateUniqueExamId(examType, cls, subject);
           examIds.push(examId);
           
           // Normalize date to ISO format (YYYY-MM-DD)
@@ -4018,14 +4263,21 @@ function doPost(e) {
       marks.forEach(m => {
         const adm = String(m.admNo || '');
         const name = String(m.studentName || '');
+        
+        // Handle absent students (marked with 'A' in external marks)
+        const externalValue = m.te || m.external || '';
+        const isAbsent = String(externalValue).toUpperCase() === 'A';
+        
         // Support both old format (ce/te) and new format (internal/external)
-        const ce = Number(m.ce || m.internal || 0);
-        const te = Number(m.te || m.external || 0);
-        const total = ce + te;
+        const ce = isAbsent ? -1 : Number(m.ce || m.internal || 0);
+        const te = isAbsent ? -1 : Number(m.te || m.external || 0);
+        const total = isAbsent ? -1 : ce + te;
         
         // Calculate grade using the exam's total max marks and class
         let grade = '';
-        if (exam && exam.totalMax && total > 0) {
+        if (isAbsent) {
+          grade = 'Absent';
+        } else if (exam && exam.totalMax && total > 0) {
           const percentage = (total / Number(exam.totalMax)) * 100;
           grade = _calculateGradeFromBoundaries(percentage, exam.class || cls);
         }
@@ -4195,10 +4447,15 @@ function doPost(e) {
           const studentAdm = String(mark.admNo || '');
           const studentName = String(mark.studentName || '');
           const subject = String(mark.subject || '');
+          
+          // Handle absent students properly (-1 stored value means absent)
           const internal = Number(mark.internal || 0);
           const external = Number(mark.external || 0);
           const total = Number(mark.total || 0);
           const grade = String(mark.grade || 'N/A').trim();
+          
+          // Check if student was absent (stored as -1)
+          const isAbsent = internal === -1 || external === -1 || total === -1;
           
           if (!studentMap[studentAdm]) {
             studentMap[studentAdm] = {
@@ -4209,10 +4466,10 @@ function doPost(e) {
           }
           
           studentMap[studentAdm].subjects[subject] = {
-            internal: internal,
-            external: external,
-            total: total,
-            grade: grade
+            internal: isAbsent ? 'Absent' : internal,
+            external: isAbsent ? 'Absent' : external,
+            total: isAbsent ? 'Absent' : total,
+            grade: isAbsent ? 'Absent' : grade
           };
         });
         
@@ -4679,15 +4936,6 @@ function createTestUsers() {
 /**
  * TEST FUNCTIONS - Use these in Apps Script editor to verify functionality
  */
-
-/**
- * Test function to add hasInternalMarks column - run this in Apps Script editor
- */
-function testAddHasInternalMarksColumn() {
-  const result = addHasInternalMarksColumnToExams();
-  console.log('Migration result:', result);
-  return result;
-}
 
 /**
  * Test the substitution workflow manually

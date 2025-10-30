@@ -324,12 +324,12 @@ const App = () => {
   // Prefetch common data when user logs in
   useEffect(() => {
     if (user) {
-      // Prefetch common data in parallel to warm up cache
+      // Prefetch common data in parallel to warm up cache - with error handling
       Promise.all([
-        api.getAllClasses().catch(() => []),
-        api.getSubjects().catch(() => []),
-        api.getGradeTypes().catch(() => [])
-      ]).catch(() => {});
+        api.getAllClasses().catch((err) => { console.warn('Failed to prefetch classes:', err); return []; }),
+        api.getGradeTypes().catch((err) => { console.warn('Failed to prefetch grade types:', err); return []; })
+        // Temporarily removed getSubjects() due to API issues
+      ]).catch((err) => { console.warn('Prefetch failed:', err); });
     }
   }, [user?.email]);
 
@@ -385,9 +385,8 @@ const App = () => {
         { id: 'exam-marks', label: 'Exam Marks', icon: Award },
         { id: 'report-card', label: 'Report Card', icon: FileText }
       );
-      // Additional management views for the headmaster: view all plans and daily reports.
+      // Additional management views for the headmaster
       items.push(
-        { id: 'all-plans', label: 'All Plans', icon: Clipboard },
         { id: 'daily-reports-management', label: 'All Reports', icon: FileText },
         { id: 'lesson-progress', label: 'Lesson Progress', icon: TrendingUp }
       );
@@ -820,8 +819,6 @@ const App = () => {
         return <ClassDataView />;
       case 'class-students':
         return <ClassStudentsView />;
-      case 'all-plans':
-        return <AllPlansView />;
       case 'daily-reports-management':
         return <DailyReportsManagementView />;
       case 'class-period-timetable':
@@ -852,11 +849,10 @@ const App = () => {
     const handleSubmit = async (e) => {
       e.preventDefault();
       if (!user) return;
+      
       try {
-        // Submit the scheme of work to the backend using the global
-        // withSubmit helper so the user sees a submitting overlay and
-        // a toast on success/failure.
-        await withSubmit('Submitting scheme...', () => api.submitPlan(user.email, {
+        // Submit the scheme with timetable validation
+        const schemeData = {
           teacherName: user.name || '',
           class: formData.class,
           subject: formData.subject,
@@ -865,14 +861,70 @@ const App = () => {
           chapter: formData.chapter,
           month: formData.month,
           noOfSessions: formData.noOfSessions
-        }));
-        // Refresh schemes list to include the newly submitted scheme and
-        // reflect its status.  getTeacherSchemes() returns all schemes
-        // submitted by this teacher.
+        };
+        
+        const response = await api.submitPlan(user.email, schemeData);
+        
+        // Check if validation failed
+        if (!response.ok && response.error === 'Session count mismatch') {
+          const validation = response.validation;
+          
+          let confirmMessage = `${validation.message}\n\n`;
+          
+          if (validation.timetableDetails && validation.timetableDetails.length > 0) {
+            confirmMessage += `Your allocated periods:\n`;
+            confirmMessage += validation.timetableDetails.map(d => `• ${d.day} Period ${d.period}`).join('\n');
+            confirmMessage += `\n\n`;
+          }
+          
+          confirmMessage += `You requested ${validation.requestedSessions} sessions but have ${validation.actualPeriodsPerWeek} periods allocated.\n\n`;
+          
+          if (validation.noTimetableFound) {
+            confirmMessage += `No timetable found for ${formData.class} ${formData.subject}.\nPlease contact administration to verify timetable setup.\n\n`;
+            confirmMessage += `Click OK to submit anyway, or Cancel to review.`;
+          } else {
+            confirmMessage += `Options:\n`;
+            confirmMessage += `• Click OK to change sessions to ${validation.suggestion} (recommended)\n`;
+            confirmMessage += `• Click Cancel to submit anyway (requires HM approval)`;
+          }
+          
+          const userChoice = confirm(confirmMessage);
+          
+          if (userChoice && !validation.noTimetableFound) {
+            // Update form with recommended sessions
+            setFormData(prev => ({
+              ...prev,
+              noOfSessions: validation.suggestion
+            }));
+            setToast({ type: 'info', text: `Sessions updated to ${validation.suggestion} to match your timetable.` });
+            return;
+          } else if (!userChoice || validation.noTimetableFound) {
+            // Force submit with override
+            const overrideData = {
+              ...schemeData,
+              forceSubmit: true,
+              validationWarning: validation.message
+            };
+            
+            await withSubmit('Submitting scheme with override...', () => api.submitPlan(user.email, overrideData));
+            setToast({ type: 'warning', text: 'Scheme submitted with timetable override. HM review required.' });
+          }
+        } else if (response.ok) {
+          // Success - normal submission
+          const message = response.validation?.message || 'Scheme submitted successfully!';
+          setToast({ type: 'success', text: message });
+        } else {
+          // Other error
+          throw new Error(response.error || 'Submission failed');
+        }
+        
+        // Refresh schemes list
         const list = await api.getTeacherSchemes(user.email);
         setSchemes(Array.isArray(list) ? list : []);
+        
       } catch (err) {
         console.error('Failed to submit scheme:', err);
+        setToast({ type: 'error', text: `Failed to submit scheme: ${err.message}` });
       } finally {
         setShowForm(false);
         setFormData({
@@ -1053,6 +1105,7 @@ const App = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Month</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sessions</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
@@ -1064,6 +1117,7 @@ const App = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{scheme.subject}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{scheme.chapter}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{scheme.month}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{scheme.noOfSessions || 0}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
                         scheme.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
@@ -2185,23 +2239,41 @@ const App = () => {
       teacher: '',
       class: '',
       subject: '',
-      month: ''
+      status: 'Pending' // Default to pending for approvals
     });
 
-    // Get unique values for dropdowns
-    const uniqueTeachers = [...new Set(allSchemes.map(s => s.teacherName).filter(Boolean))].sort();
-    const uniqueClasses = [...new Set(allSchemes.map(s => s.class).filter(Boolean))].sort();
-    const uniqueSubjects = [...new Set(allSchemes.map(s => s.subject).filter(Boolean))].sort();
-    const uniqueMonths = [...new Set(allSchemes.map(s => s.month).filter(Boolean))].sort();
+    // Get unique values for dropdowns - optimized with useMemo
+    const uniqueTeachers = useMemo(() => {
+      return [...new Set(allSchemes.map(s => s.teacherName).filter(Boolean))].sort();
+    }, [allSchemes]);
+    
+    const uniqueClasses = useMemo(() => {
+      return [...new Set(allSchemes.map(s => s.class).filter(Boolean))].sort();
+    }, [allSchemes]);
+    
+    const uniqueSubjects = useMemo(() => {
+      return [...new Set(allSchemes.map(s => s.subject).filter(Boolean))].sort();
+    }, [allSchemes]);
+
+    // Debug logging for filter options (reduced frequency)
+    useEffect(() => {
+      console.log('Scheme Filter options - Teachers:', uniqueTeachers, 'Classes:', uniqueClasses, 'Subjects:', uniqueSubjects);
+    }, [uniqueTeachers, uniqueClasses, uniqueSubjects]);
 
     // Load all schemes once for filter options
     useEffect(() => {
       async function fetchAllSchemes() {
         try {
-          const data = await api.getPendingPlans(1, 1000, '', '', '', ''); // Get all for filter options
-          setAllSchemes(Array.isArray(data?.plans) ? data.plans : []);
+          console.log('Fetching all schemes for filter options...');
+          const data = await api.getAllPlans(1, 1000, '', '', '', '', ''); // Get all schemes regardless of status
+          // Backend returns array directly, not wrapped in .plans
+          const schemes = Array.isArray(data) ? data : (Array.isArray(data?.plans) ? data.plans : []);
+          console.log('Processed schemes for filters:', schemes.length, 'schemes loaded');
+          setAllSchemes(schemes);
         } catch (err) {
-          console.error(err);
+          console.error('Error fetching schemes for filters:', err);
+          // Set empty array as fallback to prevent filter UI from breaking
+          setAllSchemes([]);
         }
       }
       fetchAllSchemes();
@@ -2211,11 +2283,34 @@ const App = () => {
     useEffect(() => {
       async function fetchPendingSchemes() {
         try {
-          const data = await api.getPendingPlans(1, 50, filters.teacher, filters.class, filters.subject, filters.month);
-          // The API returns an object with a `plans` array
-          setPendingSchemes(Array.isArray(data?.plans) ? data.plans : []);
+          // Ensure empty strings for "All" selections  
+          const teacherFilter = filters.teacher === '' ? '' : filters.teacher;
+          const classFilter = filters.class === '' ? '' : filters.class;
+          const subjectFilter = filters.subject === '' ? '' : filters.subject;
+          
+          let data;
+          if (filters.status === '' || filters.status === 'All') {
+            // Use the new getAllPlans API to get all schemes regardless of status
+            data = await api.getAllPlans(1, 200, teacherFilter, classFilter, subjectFilter, '', '');
+          } else if (filters.status === 'Pending') {
+            // For "Pending (All)", get all schemes and filter client-side for any pending status
+            const allData = await api.getAllPlans(1, 200, teacherFilter, classFilter, subjectFilter, '', '');
+            const allSchemes = Array.isArray(allData) ? allData : (Array.isArray(allData?.plans) ? allData.plans : []);
+            // Filter to include all pending variations
+            data = allSchemes.filter(scheme => 
+              scheme.status && scheme.status.toLowerCase().includes('pending')
+            );
+          } else {
+            // Use getAllPlans with specific status filter
+            data = await api.getAllPlans(1, 200, teacherFilter, classFilter, subjectFilter, filters.status, '');
+          }
+          
+          // Backend returns array directly, not wrapped in .plans  
+          const schemes = Array.isArray(data) ? data : (Array.isArray(data?.plans) ? data.plans : []);
+          console.log(`Filtered schemes: ${schemes.length} results for status "${filters.status || 'All'}"`);
+          setPendingSchemes(schemes);
         } catch (err) {
-          console.error(err);
+          console.error('Error fetching filtered schemes:', err);
         }
       }
       fetchPendingSchemes();
@@ -2299,22 +2394,24 @@ const App = () => {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Month</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
                 <select
-                  value={filters.month}
-                  onChange={(e) => setFilters({ ...filters, month: e.target.value })}
+                  value={filters.status}
+                  onChange={(e) => setFilters({ ...filters, status: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="">All Months</option>
-                  {uniqueMonths.map(month => (
-                    <option key={month} value={month}>{month}</option>
-                  ))}
+                  <option value="Pending">Pending (All)</option>
+                  <option value="Pending - Validation Override">Pending - Override</option>
+                  <option value="Pending - No Timetable">Pending - No Timetable</option>
+                  <option value="Approved">Approved</option>
+                  <option value="Rejected">Rejected</option>
+                  <option value="">All</option>
                 </select>
               </div>
             </div>
             <div className="mt-4 flex justify-end">
               <button
-                onClick={() => setFilters({ teacher: '', class: '', subject: '', month: '' })}
+                onClick={() => setFilters({ teacher: '', class: '', subject: '', status: 'Pending' })}
                 className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
               >
                 Clear Filters
@@ -2325,7 +2422,28 @@ const App = () => {
 
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-lg font-medium text-gray-900">Pending Schemes of Work</h2>
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-medium text-gray-900">
+                {filters.status === 'Approved' ? 'Approved Schemes' : 
+                 filters.status === 'Pending' ? 'Pending Schemes' : 'All Schemes'} 
+                ({pendingSchemes.length})
+              </h2>
+              {/* Active Filter Status Display */}
+              <div className="flex gap-2 text-sm">
+                {filters.teacher && (
+                  <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded">Teacher: {filters.teacher}</span>
+                )}
+                {filters.class && (
+                  <span className="px-2 py-1 bg-green-100 text-green-800 rounded">Class: {filters.class}</span>
+                )}
+                {filters.subject && (
+                  <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded">Subject: {filters.subject}</span>
+                )}
+                {filters.status && filters.status !== 'Pending' && (
+                  <span className="px-2 py-1 bg-orange-100 text-orange-800 rounded">Status: {filters.status}</span>
+                )}
+              </div>
+            </div>
           </div>
           <div className="overflow-x-auto responsive-table">
             <table className="min-w-full divide-y divide-gray-200">
@@ -2336,6 +2454,7 @@ const App = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sessions</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
@@ -2347,23 +2466,50 @@ const App = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{scheme.subject}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{scheme.chapter}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{scheme.noOfSessions}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {scheme.status === 'Approved' ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          ✓ Approved
+                        </span>
+                      ) : scheme.status === 'Rejected' ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                          ✗ Rejected
+                        </span>
+                      ) : scheme.status === 'Pending - Validation Override' ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                          ⚠️ Override
+                        </span>
+                      ) : scheme.status === 'Pending - No Timetable' ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                          📋 No Timetable
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                          ⏳ Pending
+                        </span>
+                      )}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <button 
-                        onClick={() => handleApproveScheme(scheme.schemeId)}
-                        className="text-green-600 hover:text-green-900 mr-3 px-3 py-1 bg-green-100 rounded"
-                      >
-                        Approve
-                      </button>
-                      <button 
-                        onClick={() => handleRejectScheme(scheme.schemeId)}
-                        className="text-red-600 hover:text-red-900 px-3 py-1 bg-red-100 rounded"
-                      >
-                        Reject
-                      </button>
+                      {(scheme.status === 'Pending' || scheme.status === 'Pending - Validation Override' || scheme.status === 'Pending - No Timetable') && (
+                        <>
+                          <button 
+                            onClick={() => handleApproveScheme(scheme.schemeId)}
+                            className="text-green-600 hover:text-green-900 mr-3 px-3 py-1 bg-green-100 rounded"
+                          >
+                            Approve
+                          </button>
+                          <button 
+                            onClick={() => handleRejectScheme(scheme.schemeId)}
+                            className="text-red-600 hover:text-red-900 mr-3 px-3 py-1 bg-red-100 rounded"
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
                       <button type="button"
                         onClick={() => openLessonView(scheme)}
-                        className="text-blue-600 hover:text-blue-900 ml-3"
-                        title="View lesson"
+                        className="text-blue-600 hover:text-blue-900"
+                        title="View scheme details"
                       >
                         <Eye className="h-4 w-4" />
                       </button>
@@ -2387,22 +2533,40 @@ const App = () => {
       teacher: '',
       class: '',
       subject: '',
-      status: 'Pending Review'
+      status: 'Pending Review' // Default to pending for approvals
     });
 
-    // Get unique values for dropdowns
-    const uniqueTeachers = [...new Set(allLessons.map(l => l.teacherName).filter(Boolean))].sort();
-    const uniqueClasses = [...new Set(allLessons.map(l => l.class).filter(Boolean))].sort();
-    const uniqueSubjects = [...new Set(allLessons.map(l => l.subject).filter(Boolean))].sort();
+    // Get unique values for dropdowns - optimized with useMemo
+    const uniqueTeachers = useMemo(() => {
+      return [...new Set(allLessons.map(l => l.teacherName).filter(Boolean))].sort();
+    }, [allLessons]);
+    
+    const uniqueClasses = useMemo(() => {
+      return [...new Set(allLessons.map(l => l.class).filter(Boolean))].sort();
+    }, [allLessons]);
+    
+    const uniqueSubjects = useMemo(() => {
+      return [...new Set(allLessons.map(l => l.subject).filter(Boolean))].sort();
+    }, [allLessons]);
 
-    // Load all lessons once for filter options
+    // Debug logging for lesson filter options (reduced frequency)
+    useEffect(() => {
+      console.log('Lesson Filter options - Teachers:', uniqueTeachers, 'Classes:', uniqueClasses, 'Subjects:', uniqueSubjects);
+    }, [uniqueTeachers, uniqueClasses, uniqueSubjects]);
+
+    // Load all lessons once for reference
     useEffect(() => {
       async function fetchAllLessons() {
         try {
-          const data = await api.getPendingLessonReviews('', '', '', ''); // Get all for filter options
-          setAllLessons(Array.isArray(data) ? data : []);
+          console.log('Fetching all lessons for filter options...');
+          const data = await api.getPendingLessonReviews('', '', '', ''); // Get all for reference
+          const lessons = Array.isArray(data) ? data : [];
+          console.log('Processed lessons for filters:', lessons.length, 'lessons loaded');
+          setAllLessons(lessons);
         } catch (err) {
-          console.error(err);
+          console.error('Error fetching lessons for filters:', err);
+          // Set empty array as fallback to prevent filter UI from breaking
+          setAllLessons([]);
         }
       }
       fetchAllLessons();
@@ -2412,10 +2576,18 @@ const App = () => {
     useEffect(() => {
       async function fetchPendingLessons() {
         try {
-          const data = await api.getPendingLessonReviews(filters.teacher, filters.class, filters.subject, filters.status);
-          setPendingLessons(Array.isArray(data) ? data : []);
+          // Ensure empty strings for "All" selections
+          const teacherFilter = filters.teacher === '' ? '' : filters.teacher;
+          const classFilter = filters.class === '' ? '' : filters.class;
+          const subjectFilter = filters.subject === '' ? '' : filters.subject;
+          const statusFilter = filters.status === '' || filters.status === 'All' ? '' : filters.status;
+          
+          const data = await api.getPendingLessonReviews(teacherFilter, classFilter, subjectFilter, statusFilter);
+          const lessons = Array.isArray(data) ? data : [];
+          console.log(`Filtered lessons: ${lessons.length} results for status "${filters.status || 'All'}"`);
+          setPendingLessons(lessons);
         } catch (err) {
-          console.error(err);
+          console.error('Error fetching filtered lessons:', err);
         }
       }
       fetchPendingLessons();
@@ -2517,7 +2689,28 @@ const App = () => {
 
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-lg font-medium text-gray-900">Pending Lesson Plans</h2>
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-medium text-gray-900">
+                {filters.status === 'Ready' ? 'Approved Lesson Plans' : 
+                 filters.status === 'Pending Review' ? 'Pending Lesson Plans' : 'All Lesson Plans'} 
+                ({pendingLessons.length})
+              </h2>
+              {/* Active Filter Status Display */}
+              <div className="flex gap-2 text-sm">
+                {filters.teacher && (
+                  <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded">Teacher: {filters.teacher}</span>
+                )}
+                {filters.class && (
+                  <span className="px-2 py-1 bg-green-100 text-green-800 rounded">Class: {filters.class}</span>
+                )}
+                {filters.subject && (
+                  <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded">Subject: {filters.subject}</span>
+                )}
+                {filters.status && filters.status !== 'Pending Review' && (
+                  <span className="px-2 py-1 bg-orange-100 text-orange-800 rounded">Status: {filters.status}</span>
+                )}
+              </div>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -2528,6 +2721,7 @@ const App = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Session</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
@@ -2539,26 +2733,69 @@ const App = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{lesson.subject}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{lesson.chapter}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{lesson.session}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {lesson.status === 'Ready' ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          ✓ Ready
+                        </span>
+                      ) : lesson.status === 'Needs Rework' ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                          ⚠ Needs Rework
+                        </span>
+                      ) : lesson.status === 'Rejected' ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                          ✗ Rejected
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                          ⏳ Pending Review
+                        </span>
+                      )}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <button 
-                        onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
-                        className="text-green-600 hover:text-green-900 mr-3 px-3 py-1 bg-green-100 rounded"
+                      {lesson.status === 'Pending Review' && (
+                        <>
+                          <button 
+                            onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
+                            className="text-green-600 hover:text-green-900 mr-3 px-3 py-1 bg-green-100 rounded"
+                          >
+                            Approve
+                          </button>
+                          <button 
+                            onClick={() => handleApproveLesson(lesson.lpId, 'Needs Rework')}
+                            className="text-yellow-600 hover:text-yellow-900 mr-3 px-3 py-1 bg-yellow-100 rounded"
+                          >
+                            Rework
+                          </button>
+                          <button 
+                            onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
+                            className="text-red-600 hover:text-red-900 mr-3 px-3 py-1 bg-red-100 rounded"
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
+                      {lesson.status === 'Needs Rework' && (
+                        <>
+                          <button 
+                            onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
+                            className="text-green-600 hover:text-green-900 mr-3 px-3 py-1 bg-green-100 rounded"
+                          >
+                            Approve
+                          </button>
+                          <button 
+                            onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
+                            className="text-red-600 hover:text-red-900 mr-3 px-3 py-1 bg-red-100 rounded"
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
+                      <button type="button" 
+                        className="text-blue-600 hover:text-blue-900" 
+                        onClick={() => openLessonView(lesson)} 
+                        title="View lesson details"
                       >
-                        Ready
-                      </button>
-                      <button 
-                        onClick={() => handleApproveLesson(lesson.lpId, 'Needs Rework')}
-                        className="text-yellow-600 hover:text-yellow-900 mr-3 px-3 py-1 bg-yellow-100 rounded"
-                      >
-                        Rework
-                      </button>
-                      <button 
-                        onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
-                        className="text-red-600 hover:text-red-900 mr-3 px-3 py-1 bg-red-100 rounded"
-                      >
-                        Reject
-                      </button>
-                      <button type="button" className="text-blue-600 hover:text-blue-900" onClick={() => openLessonView(lesson)} title="View lesson">
                         <Eye className="h-4 w-4" />
                       </button>
                     </td>
