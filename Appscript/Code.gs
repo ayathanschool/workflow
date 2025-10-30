@@ -1209,6 +1209,45 @@ function doGet(e) {
       return _respond({ plans: pageItems, totalCount, page, pageSize });
     }
 
+    if (action === 'getAllSchemes') {
+      // Same as getAllPlans but only returns schemes, not lesson plans
+      const page = Number(e.parameter.page || 1);
+      const pageSize = Number(e.parameter.pageSize || 10);
+      const teacher = (e.parameter.teacher || '').toLowerCase().trim();
+      const cls = (e.parameter['class'] || '').trim();
+      const subject = (e.parameter.subject || '').trim();
+      const status = (e.parameter.status || '').trim();
+      const month = (e.parameter.month || '').trim();
+
+      const sh = _getSheet('Schemes');
+      const headers = _headers(sh);
+      let list = _rows(sh).map(r => _indexByHeader(r, headers));
+      
+      // Filter by status only if specified
+      if (status) {
+        list = list.filter(p => String(p.status || 'Pending') === status);
+      }
+      
+      if (teacher) list = list.filter(p => String(p.teacherEmail||'').toLowerCase() === teacher || String(p.teacherName||'').toLowerCase().indexOf(teacher) !== -1);
+      if (cls) list = list.filter(p => p.class === cls);
+      if (subject) list = list.filter(p => p.subject === subject);
+      if (month) list = list.filter(p => p.month === month);
+      const totalCount = list.length;
+      const start = (page-1)*pageSize;
+      const end = start + pageSize;
+      const pageItems = list.slice(start, end).map(p => ({
+        schemeId: String(p.schemeId),
+        teacherName: String(p.teacherName||''),
+        class: String(p.class||''),
+        subject: String(p.subject||''),
+        chapter: String(p.chapter||''),
+        month: String(p.month||''),
+        noOfSessions: Number(p.noOfSessions||0),
+        status: String(p.status || 'Pending')
+      }));
+      return _respond({ plans: pageItems, totalCount, page, pageSize });
+    }
+
     if (action === 'getLessonReviewFilters') {
       const sh = _getSheet('LessonPlans');
       const headers = _headers(sh);
