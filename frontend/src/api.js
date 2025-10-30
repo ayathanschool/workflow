@@ -575,6 +575,24 @@ export async function getAllApprovedSchemes() {
   }
 }
 
+// Fetch all schemes (not lesson plans) with optional filters
+export async function getAllSchemes(page=1, pageSize=10, teacher='', cls='', subject='', status='', month='') {
+  try {
+    const res = await getAllPlans(page, pageSize, teacher, cls, subject, status, month);
+    // Some deployments return { plans: [...] }, others return an array directly
+    const plans = Array.isArray(res) ? res : (Array.isArray(res?.plans) ? res.plans : []);
+    // Filter for schemes only using the same heuristic as getAllApprovedSchemes
+    const schemes = plans.filter((item) => {
+      const looksLikeScheme = !!(item?.schemeId) || (item?.noOfSessions != null);
+      return looksLikeScheme;
+    });
+    return schemes;
+  } catch (err) {
+    console.warn('getAllSchemes failed:', err?.message || err);
+    throw err;
+  }
+}
+
 // Retrieve daily reports across the school.  Useful for headmasters to
 // browse all reports.  Optional filters: teacher, class, subject,
 // date, fromDate, toDate, status (completion status).

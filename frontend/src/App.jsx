@@ -2265,7 +2265,7 @@ const App = () => {
       async function fetchAllSchemes() {
         try {
           console.log('Fetching all schemes for filter options...');
-          const data = await api.getAllPlans(1, 1000, '', '', '', '', ''); // Get all schemes regardless of status
+          const data = await api.getAllSchemes(1, 1000, '', '', '', '', ''); // Get all schemes regardless of status
           // Backend returns array directly, not wrapped in .plans
           const schemes = Array.isArray(data) ? data : (Array.isArray(data?.plans) ? data.plans : []);
           console.log('Processed schemes for filters:', schemes.length, 'schemes loaded');
@@ -2290,19 +2290,19 @@ const App = () => {
           
           let data;
           if (filters.status === '' || filters.status === 'All') {
-            // Use the new getAllPlans API to get all schemes regardless of status
-            data = await api.getAllPlans(1, 200, teacherFilter, classFilter, subjectFilter, '', '');
+            // Use the new getAllSchemes API to get all schemes regardless of status
+            data = await api.getAllSchemes(1, 200, teacherFilter, classFilter, subjectFilter, '', '');
           } else if (filters.status === 'Pending') {
             // For "Pending (All)", get all schemes and filter client-side for any pending status
-            const allData = await api.getAllPlans(1, 200, teacherFilter, classFilter, subjectFilter, '', '');
+            const allData = await api.getAllSchemes(1, 200, teacherFilter, classFilter, subjectFilter, '', '');
             const allSchemes = Array.isArray(allData) ? allData : (Array.isArray(allData?.plans) ? allData.plans : []);
             // Filter to include all pending variations
             data = allSchemes.filter(scheme => 
               scheme.status && scheme.status.toLowerCase().includes('pending')
             );
           } else {
-            // Use getAllPlans with specific status filter
-            data = await api.getAllPlans(1, 200, teacherFilter, classFilter, subjectFilter, filters.status, '');
+            // Use getAllSchemes with specific status filter
+            data = await api.getAllSchemes(1, 200, teacherFilter, classFilter, subjectFilter, filters.status, '');
           }
           
           // Backend returns array directly, not wrapped in .plans  
