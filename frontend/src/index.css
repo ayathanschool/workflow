@@ -116,6 +116,27 @@
   }
 }
 
+/* Force allow screen rotation - important for PWA */
+@media screen {
+  html, body {
+    transform: rotate(0deg);
+    transition: transform 0.3s ease;
+  }
+  
+  /* Ensure viewport respects device orientation */
+  html {
+    width: 100vw;
+    height: 100vh;
+    overflow-x: hidden;
+  }
+  
+  body {
+    min-height: 100vh;
+    width: 100%;
+    overflow-x: hidden;
+  }
+}
+
 /* PWA fullscreen support */
 @media (display-mode: standalone) {
   /* Add top padding to account for status bar on mobile */

@@ -12,7 +12,10 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="AyathanWorkflow" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-orientations" content="portrait landscape" />
+    <!-- Explicitly allow all orientations -->
+    <meta name="screen-orientation" content="any" />
+    <!-- Remove specific orientation constraint for Apple devices -->
+    <!-- <meta name="apple-mobile-web-app-orientations" content="portrait landscape" /> -->
     
     <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json" />
@@ -111,6 +114,27 @@
             });
         });
       }
+      
+      // Handle orientation changes and ensure proper viewport adjustment
+      function handleOrientationChange() {
+        setTimeout(() => {
+          if (window.screen && window.screen.orientation && window.screen.orientation.unlock) {
+            window.screen.orientation.unlock().catch(() => {
+              // Silently fail if orientation unlock is not available
+            });
+          }
+          
+          // Force viewport recalculation
+          const viewport = document.querySelector('meta[name=viewport]');
+          if (viewport) {
+            viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, viewport-fit=cover');
+          }
+        }, 100);
+      }
+      
+      // Listen for orientation changes
+      window.addEventListener('orientationchange', handleOrientationChange);
+      window.addEventListener('resize', handleOrientationChange);
     </script>
   </head>
   <body>
