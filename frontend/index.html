@@ -12,8 +12,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="AyathanWorkflow" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <!-- Explicitly allow all orientations -->
-    <meta name="screen-orientation" content="any" />
+    
+    <!-- Samsung-specific orientation fixes -->
+    <meta name="screen-orientation" content="natural" />
+    <meta name="x5-orientation" content="auto" />
+    <meta name="x5-fullscreen" content="true" />
+    <meta name="browsermode" content="application" />
+    
+    <!-- Force no orientation lock -->
+    <meta name="format-detection" content="telephone=no" />
     <!-- Remove specific orientation constraint for Apple devices -->
     <!-- <meta name="apple-mobile-web-app-orientations" content="portrait landscape" /> -->
     
@@ -118,10 +125,23 @@
       // Handle orientation changes and ensure proper viewport adjustment
       function handleOrientationChange() {
         setTimeout(() => {
-          if (window.screen && window.screen.orientation && window.screen.orientation.unlock) {
-            window.screen.orientation.unlock().catch(() => {
-              // Silently fail if orientation unlock is not available
-            });
+          // Samsung-specific orientation unlock
+          if (window.screen && window.screen.orientation) {
+            if (window.screen.orientation.unlock) {
+              window.screen.orientation.unlock().catch(() => {
+                // Silently fail if orientation unlock is not available
+              });
+            }
+            
+            // Try to unlock all possible orientations on Samsung
+            try {
+              window.screen.orientation.lock('natural').catch(() => {});
+              setTimeout(() => {
+                window.screen.orientation.unlock().catch(() => {});
+              }, 100);
+            } catch (e) {
+              // Ignore errors on unsupported devices
+            }
           }
           
           // Force viewport recalculation
@@ -129,12 +149,51 @@
           if (viewport) {
             viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, viewport-fit=cover');
           }
+          
+          // Force layout recalculation for Samsung tablets
+          document.body.style.height = '100vh';
+          document.body.style.width = '100vw';
+          document.documentElement.style.height = '100vh';
+          document.documentElement.style.width = '100vw';
+          
+          // Trigger resize event
+          window.dispatchEvent(new Event('resize'));
         }, 100);
       }
       
+      // Samsung-specific orientation detection
+      function detectAndFixOrientation() {
+        const isLandscape = window.innerWidth > window.innerHeight;
+        const isSamsung = navigator.userAgent.toLowerCase().includes('samsung') || 
+                         navigator.userAgent.toLowerCase().includes('sm-');
+        
+        if (isSamsung) {
+          console.log('Samsung device detected, applying orientation fixes');
+          
+          // Force unlock orientation
+          if (window.screen && window.screen.orientation && window.screen.orientation.unlock) {
+            window.screen.orientation.unlock().catch(() => {});
+          }
+          
+          // Override any existing orientation locks
+          document.body.setAttribute('data-orientation', isLandscape ? 'landscape' : 'portrait');
+        }
+      }
+      
       // Listen for orientation changes
-      window.addEventListener('orientationchange', handleOrientationChange);
-      window.addEventListener('resize', handleOrientationChange);
+      window.addEventListener('orientationchange', () => {
+        handleOrientationChange();
+        setTimeout(detectAndFixOrientation, 200);
+      });
+      window.addEventListener('resize', () => {
+        handleOrientationChange();
+        setTimeout(detectAndFixOrientation, 200);
+      });
+      
+      // Run on load
+      window.addEventListener('load', () => {
+        setTimeout(detectAndFixOrientation, 500);
+      });
     </script>
   </head>
   <body>

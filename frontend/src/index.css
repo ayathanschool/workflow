@@ -137,6 +137,61 @@
   }
 }
 
+/* Samsung-specific orientation fixes */
+@media screen and (orientation: landscape) {
+  /* Force landscape support on Samsung devices */
+  html {
+    height: 100vh !important;
+    width: 100vw !important;
+  }
+  
+  body {
+    height: 100vh !important;
+    width: 100vw !important;
+    transform: none !important;
+  }
+  
+  #root {
+    height: 100vh !important;
+    width: 100vw !important;
+    transform: none !important;
+  }
+}
+
+/* Aggressive landscape mode handling for tablets */
+@media screen and (min-width: 768px) {
+  html, body, #root {
+    height: 100vh !important;
+    width: 100vw !important;
+    overflow: auto !important;
+  }
+  
+  /* Force natural device dimensions */
+  .container, .max-w-7xl, .mx-auto {
+    max-width: none !important;
+    width: 100% !important;
+  }
+}
+
+/* Samsung tablet specific fixes */
+@media screen and (min-width: 800px) and (min-height: 600px) {
+  /* Force landscape mode readiness */
+  body {
+    transform: none !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+  }
+  
+  #root {
+    width: 100vw !important;
+    height: 100vh !important;
+    overflow: auto !important;
+  }
+}
+
 /* PWA fullscreen support */
 @media (display-mode: standalone) {
   /* Add top padding to account for status bar on mobile */
