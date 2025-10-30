@@ -45,3 +45,39 @@ temp/
 # Backup files
 *.backup
 *.bak
+*_backup.*
+*_broken.*
+*_temp.*
+*_fixed.*
+*_half.*
+*_correct.*
+
+# Temporary development files
+*.txt
+!README.txt
+COMPLETE_*.txt
+DEBUG_*.txt
+DEPLOY_*.txt
+REDEPLOY_*.txt
+SUCCESS*.txt
+TEST_*.txt
+
+# Development archives
+archive-cleanup/
+archive/temp-files/
+archive/old-docs/
+archive/frontend-backups/
+archive/appscript-backups/
+
+# Temporary scripts
+clear-*.js
+test-*.js
+
+# Documentation artifacts
+*_DEPLOYMENT.md
+*_INTEGRATION_*.md
+*_SETUP.md
+
+# Google Apps Script backups
+Code.gs.backup-*
+Code_*.gs
