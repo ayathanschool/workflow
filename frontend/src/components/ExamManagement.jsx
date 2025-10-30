@@ -1338,6 +1338,14 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
       for (const [examId, marks] of Object.entries(examGroups)) {
         let exam = exams.find(e => e.examId === examId);
         
+        // Check if examId is UUID format and show warning
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(examId);
+        if (isUUID) {
+          totalErrors += marks.length;
+          errorDetails.push(`❌ Exam ID "${examId}" is in UUID format. Please use readable format like "T1_10A_ENG", "T2_9B_MATH", etc.`);
+          continue;
+        }
+        
         // If exam doesn't exist, create it automatically from the examId
         if (!exam) {
           console.log(`Creating new exam with ID: ${examId}`);
@@ -1594,8 +1602,9 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
                 <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
                   <li>Upload a single CSV file containing marks for multiple exams</li>
                   <li>CSV format: examId, admNo, studentName, internal, external</li>
-                  <li>Use readable exam IDs from sample CSV (e.g., TermTest1_Std5A_Math (uuid))</li>
-                  <li>Can also use direct UUIDs if you have them</li>
+                  <li><strong>Use readable exam IDs:</strong> T1_10A_ENG, T2_9B_MATH, UT1_8A_SCI, etc.</li>
+                  <li><strong>Format:</strong> ExamType_Class_Subject (e.g., T1_10A_ENG)</li>
+                  <li>❌ Do NOT use UUID format (long random strings)</li>
                   <li>Leave internal or external empty if not applicable</li>
                 </ul>
               </div>
