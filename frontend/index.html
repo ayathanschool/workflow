@@ -128,16 +128,33 @@
           // Samsung-specific orientation unlock
           if (window.screen && window.screen.orientation) {
             if (window.screen.orientation.unlock) {
-              window.screen.orientation.unlock().catch(() => {
-                // Silently fail if orientation unlock is not available
-              });
+              try {
+                const unlockResult = window.screen.orientation.unlock();
+                if (unlockResult && typeof unlockResult.catch === 'function') {
+                  unlockResult.catch(() => {
+                    // Silently fail if orientation unlock is not available
+                  });
+                }
+              } catch (e) {
+                // Ignore errors on unsupported devices
+              }
             }
             
             // Try to unlock all possible orientations on Samsung
             try {
-              window.screen.orientation.lock('natural').catch(() => {});
+              const lockResult = window.screen.orientation.lock('natural');
+              if (lockResult && typeof lockResult.catch === 'function') {
+                lockResult.catch(() => {});
+              }
               setTimeout(() => {
-                window.screen.orientation.unlock().catch(() => {});
+                try {
+                  const unlockResult = window.screen.orientation.unlock();
+                  if (unlockResult && typeof unlockResult.catch === 'function') {
+                    unlockResult.catch(() => {});
+                  }
+                } catch (e) {
+                  // Ignore errors
+                }
               }, 100);
             } catch (e) {
               // Ignore errors on unsupported devices
@@ -172,7 +189,14 @@
           
           // Force unlock orientation
           if (window.screen && window.screen.orientation && window.screen.orientation.unlock) {
-            window.screen.orientation.unlock().catch(() => {});
+            try {
+              const unlockResult = window.screen.orientation.unlock();
+              if (unlockResult && typeof unlockResult.catch === 'function') {
+                unlockResult.catch(() => {});
+              }
+            } catch (e) {
+              // Ignore errors on unsupported devices
+            }
           }
           
           // Override any existing orientation locks

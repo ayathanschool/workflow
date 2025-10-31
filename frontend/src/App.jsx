@@ -1233,23 +1233,11 @@ const App = () => {
           // Load data silently
           // Fetch all schemes submitted by this teacher and filter to approved
           try {
-            // We'll fetch ALL approved schemes that match teacher's classes/subjects, not just ones they submitted
-            const allSchemes = await api.getAllApprovedSchemes();
-            let approved = [];
-            
-            if (Array.isArray(allSchemes)) {
-              // Filter based on teacher's classes/subjects
-              if (Array.isArray(user.classes) && Array.isArray(user.subjects)) {
-                approved = allSchemes.filter(scheme => {
-                  const matchesClass = user.classes.some(cls => normKeyLocal(cls) === normKeyLocal(scheme.class));
-                  const matchesSubject = user.subjects.some(subj => normKeyLocal(subj) === normKeyLocal(scheme.subject));
-                  return matchesClass && matchesSubject && String(scheme.status || '').toLowerCase() === 'approved';
-                });
-              } else {
-                // Fallback to just filtering by status
-                approved = allSchemes.filter(s => String(s.status || '').toLowerCase() === 'approved');
-              }
-            }
+            // Use the teacher's own schemes (this was the original working approach)
+            const teacherSchemes = await api.getTeacherSchemes(user.email);
+            const approved = Array.isArray(teacherSchemes)
+              ? teacherSchemes.filter(s => String(s.status || '').toLowerCase() === 'approved')
+              : [];
             setApprovedSchemes(approved);
           } catch (err) {
             console.warn('Error loading approved schemes:', err);
