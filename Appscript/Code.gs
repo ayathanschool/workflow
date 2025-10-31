@@ -3804,8 +3804,9 @@ function doPost(e) {
               '', // teacherName
               s.admNo || '',
               s.name || '',
-              '', // internal
-              '', // external
+              data.examType || '', // examType
+              '', // internal (ce)
+              '', // external (te)
               '', // total
               '', // grade (empty until marks are submitted)
               createdAt
@@ -4000,8 +4001,9 @@ function doPost(e) {
                 '', // teacherName
                 s.admNo || '',
                 s.name || '',
-                '', // internal
-                '', // external
+                examType || '', // examType
+                '', // internal (ce)
+                '', // external (te)
                 '', // total
                 '', // grade (empty until marks are submitted)
                 createdAt
