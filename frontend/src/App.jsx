@@ -2266,9 +2266,10 @@ const App = () => {
         try {
           console.log('Fetching all schemes for filter options...');
           const data = await api.getAllSchemes(1, 1000, '', '', '', '', ''); // Get all schemes regardless of status
+          console.log('Raw API response for all schemes:', data);
           // Backend returns array directly, not wrapped in .plans
           const schemes = Array.isArray(data) ? data : (Array.isArray(data?.plans) ? data.plans : []);
-          console.log('Processed schemes for filters:', schemes.length, 'schemes loaded');
+          console.log('Processed schemes for filters:', schemes.length, 'schemes loaded', schemes.slice(0, 3));
           setAllSchemes(schemes);
         } catch (err) {
           console.error('Error fetching schemes for filters:', err);
@@ -2287,30 +2288,20 @@ const App = () => {
           const teacherFilter = filters.teacher === '' ? '' : filters.teacher;
           const classFilter = filters.class === '' ? '' : filters.class;
           const subjectFilter = filters.subject === '' ? '' : filters.subject;
+          const statusFilter = filters.status === '' || filters.status === 'All' ? '' : filters.status;
           
-          let data;
-          if (filters.status === '' || filters.status === 'All') {
-            // Use the new getAllSchemes API to get all schemes regardless of status
-            data = await api.getAllSchemes(1, 200, teacherFilter, classFilter, subjectFilter, '', '');
-          } else if (filters.status === 'Pending') {
-            // For "Pending (All)", get all schemes and filter client-side for any pending status
-            const allData = await api.getAllSchemes(1, 200, teacherFilter, classFilter, subjectFilter, '', '');
-            const allSchemes = Array.isArray(allData) ? allData : (Array.isArray(allData?.plans) ? allData.plans : []);
-            // Filter to include all pending variations
-            data = allSchemes.filter(scheme => 
-              scheme.status && scheme.status.toLowerCase().includes('pending')
-            );
-          } else {
-            // Use getAllSchemes with specific status filter
-            data = await api.getAllSchemes(1, 200, teacherFilter, classFilter, subjectFilter, filters.status, '');
-          }
+          console.log('Fetching schemes with filters:', { teacherFilter, classFilter, subjectFilter, statusFilter });
+          
+          // Use getAllSchemes API with status filter directly - backend handles exact matching
+          const data = await api.getAllSchemes(1, 200, teacherFilter, classFilter, subjectFilter, statusFilter, '');
           
           // Backend returns array directly, not wrapped in .plans  
           const schemes = Array.isArray(data) ? data : (Array.isArray(data?.plans) ? data.plans : []);
-          console.log(`Filtered schemes: ${schemes.length} results for status "${filters.status || 'All'}"`);
+          console.log(`Filtered schemes: ${schemes.length} results for status "${filters.status || 'All'}"`, schemes);
           setPendingSchemes(schemes);
         } catch (err) {
           console.error('Error fetching filtered schemes:', err);
+          setPendingSchemes([]); // Set empty array on error to prevent UI breaking
         }
       }
       fetchPendingSchemes();

@@ -128,16 +128,33 @@
           // Samsung-specific orientation unlock
           if (window.screen && window.screen.orientation) {
             if (window.screen.orientation.unlock) {
-              window.screen.orientation.unlock().catch(() => {
-                // Silently fail if orientation unlock is not available
-              });
+              try {
+                const unlockPromise = window.screen.orientation.unlock();
+                if (unlockPromise && typeof unlockPromise.catch === 'function') {
+                  unlockPromise.catch(() => {
+                    // Silently fail if orientation unlock is not available
+                  });
+                }
+              } catch (e) {
+                // Ignore errors
+              }
             }
             
             // Try to unlock all possible orientations on Samsung
             try {
-              window.screen.orientation.lock('natural').catch(() => {});
+              const lockPromise = window.screen.orientation.lock('natural');
+              if (lockPromise && typeof lockPromise.catch === 'function') {
+                lockPromise.catch(() => {});
+              }
               setTimeout(() => {
-                window.screen.orientation.unlock().catch(() => {});
+                try {
+                  const unlockPromise2 = window.screen.orientation.unlock();
+                  if (unlockPromise2 && typeof unlockPromise2.catch === 'function') {
+                    unlockPromise2.catch(() => {});
+                  }
+                } catch (e) {
+                  // Ignore errors
+                }
               }, 100);
             } catch (e) {
               // Ignore errors on unsupported devices
@@ -172,7 +189,14 @@
           
           // Force unlock orientation
           if (window.screen && window.screen.orientation && window.screen.orientation.unlock) {
-            window.screen.orientation.unlock().catch(() => {});
+            try {
+              const unlockPromise = window.screen.orientation.unlock();
+              if (unlockPromise && typeof unlockPromise.catch === 'function') {
+                unlockPromise.catch(() => {});
+              }
+            } catch (e) {
+              // Ignore errors
+            }
           }
           
           // Override any existing orientation locks
