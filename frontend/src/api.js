@@ -1,9 +1,7 @@
 // src/api.js
 // Configure this to your deployed Google Apps Script Web App URL (ends with /exec)
-// In development we proxy requests via Vite at /gas to avoid CORS issues.
-const PROD_BASE = import.meta.env.VITE_GAS_WEB_APP_URL || 'https://script.google.com/macros/s/AKfycbww7JKjuayjOF8d7IhcgvG8OVMPUrF9ULkVuMIfAsh6yKpAjdZ6uMxtz_avhbWhmBXW/exec';
-// Use direct backend URL in both development and production to avoid proxy issues
-const BASE_URL = PROD_BASE;
+// PRODUCTION: Uses this URL for both development and Vercel deployment
+const BASE_URL = 'https://script.google.com/macros/s/AKfycbww7JKjuayjOF8d7IhcgvG8OVMPUrF9ULkVuMIfAsh6yKpAjdZ6uMxtz_avhbWhmBXW/exec';
 
 // Export BASE_URL for components that need to build direct URLs
 export function getBaseUrl() {
