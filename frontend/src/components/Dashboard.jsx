@@ -172,25 +172,6 @@ const Dashboard = ({ user, hasRole, hasAnyRole }) => {
           <p className="text-gray-600">Use the navigation menu to access your school workflow tools.</p>
         </div>
       )}
-
-      {/* Analytics Section for HM */}
-      {user && hasRole('h m') && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Submission Trends</h2>
-            <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg">
-              <p className="text-gray-500">Submission trends chart would appear here</p>
-            </div>
-          </div>
-          
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Approval Rates</h2>
-            <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg">
-              <p className="text-gray-500">Approval rates chart would appear here</p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

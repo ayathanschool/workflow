@@ -148,18 +148,22 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
     
     try {
       // console.log('Fetching timetable for date:', selectedDate);
-      const response = await api.getDailyTimetableForDate(selectedDate);
+      const response = await api.getDailyTimetableForDate(selectedDate, { noCache: true });
       // console.log('Timetable data response:', response);
       
       logApiCall('getDailyTimetableForDate', { date: selectedDate }, response);
 
       if (response && Array.isArray(response)) {
+        console.log('Setting timetable data:', response.length, 'entries');
+        console.log('Sample entry:', response[0]);
         setTimetableData(response);
         setError(''); // Clear any previous errors
       } else if (response && response.success && response.data) {
+        console.log('Setting timetable data from response.data:', response.data.length, 'entries');
         setTimetableData(response.data);
         setError(''); // Clear any previous errors
       } else {
+        console.error('Invalid timetable response format:', response);
         setError(response?.error || 'Failed to fetch timetable');
         setTimetableData([]);
       }
@@ -383,6 +387,7 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
       // Handle different response formats - be more lenient with success detection
       const isSuccess = (
         response?.success === true || 
+        response?.submitted === true ||
         response?.status === 'success' || 
         response?.message?.toLowerCase().includes('success')
       );
@@ -409,10 +414,12 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
         setTimeout(async () => {
           try {
             console.log('Refreshing data after assignment...');
+            console.log('Current timetable data before refresh:', timetableData.length, 'entries');
             // Refresh data
             await fetchSubstitutionData();
             await fetchTimetableData();
             console.log('Data refresh completed');
+            console.log('Timetable data after refresh:', timetableData.length, 'entries');
           } catch (refreshError) {
             console.error('Error refreshing data:', refreshError);
           }
@@ -1038,8 +1045,8 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
                 >
                   <option value="">Select a teacher...</option>
                   {availableTeachers.map(teacher => (
-                    <option key={teacher.email || teacher.name} value={teacher.name}>
-                      {teacher.name} ({teacher.subjects?.join(', ')})
+                    <option key={teacher.email || teacher.name} value={teacher.email}>
+                      {teacher.name} ({teacher.email})
                     </option>
                   ))}
                 </select>

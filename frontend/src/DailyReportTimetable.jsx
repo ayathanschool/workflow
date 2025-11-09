@@ -5,7 +5,7 @@ import {
   getTeacherDailyReportsForDate,
   submitDailyReport,
   getApprovedLessonPlansForReport,
-  getTeacherLessonDelays,
+  getPlannedLessonForPeriod,
 } from "./api";
 import { todayIST, formatLocalDate, periodToTimeString } from "./utils/dateUtils";
 
@@ -36,6 +36,7 @@ export default function DailyReportTimetable({ user }) {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lessonDelays, setLessonDelays] = useState([]);
+  const [appSettings, setAppSettings] = useState(null);  // Store app settings with period times
 
   const email = user?.email || "";
   const teacherName = user?.name || "";
@@ -67,22 +68,28 @@ export default function DailyReportTimetable({ user }) {
       console.log('🔍 Loading timetable for:', { email, date, user });
       
       // Start all initial API calls in parallel
-      const [tt, rep, delays] = await Promise.all([
+      const [tt, rep] = await Promise.all([
         getTeacherDailyTimetable(email, date),            // [{period, class, subject, teacherName, chapter}]
         getTeacherDailyReportsForDate(email, date),       // [{class, subject, period, planType, lessonPlanId, status}]
-        getTeacherLessonDelays(teacherName).catch(err => {
-          console.warn("Could not load lesson delays:", err);
-          return [];
-        })
       ]);
 
       console.log('📅 Timetable response:', tt);
       console.log('📝 Reports response:', rep);
-      console.log('⏰ Delays response:', delays);
       console.log('🐛 Debug info from API:', tt?.debug);
+      
+      // DEBUG: Check reports structure
+      console.log('🔍 Reports is array?', Array.isArray(rep));
+      console.log('🔍 Reports length:', rep?.length);
+      console.log('🔍 Reports.data is array?', Array.isArray(rep?.data));
+      console.log('🔍 Reports.data length:', rep?.data?.length);
+      if (rep && rep.length > 0) {
+        console.log('🔍 First report:', rep[0]);
+      } else if (rep?.data && rep.data.length > 0) {
+        console.log('🔍 First report from .data:', rep.data[0]);
+      }
 
-      // Set delays immediately
-      setLessonDelays(delays || []);
+      // No lesson delays loaded (feature removed)
+      setLessonDelays([]);
 
       // Normalize timetable list - handle both array and structured response
       let ttList = [];
@@ -101,9 +108,23 @@ export default function DailyReportTimetable({ user }) {
 
       // status map: Submitted/Not Submitted
       const sm = {};
-      (Array.isArray(rep) ? rep : []).forEach(r => {
-        sm[`${r.period}|${r.class}|${r.subject}`] = r.status || "Not Submitted";
+      
+      // CRITICAL FIX: API wraps response in {status, data, timestamp}
+      // Need to unwrap the .data property to get actual reports array
+      console.log('🔍 Reports response structure:', rep);
+      const reportsArray = Array.isArray(rep?.data) ? rep.data : (Array.isArray(rep) ? rep : []);
+      console.log('🔍 Reports array extracted:', reportsArray.length, 'reports');
+      
+      // Create report map by period key for easy lookup
+      const reportMap = {};
+      reportsArray.forEach(r => {
+        const k = `${r.period}|${r.class}|${r.subject}`;
+        sm[k] = r.status || "Submitted";  // Mark as submitted
+        reportMap[k] = r;  // Store the full report for later use
+        console.log(`  ✓ Mapped report: ${k} -> status: ${sm[k]}`);
       });
+      
+      console.log(`📊 Status map created with ${Object.keys(sm).length} submitted reports`);
       setStatusMap(sm);
 
       // Fetch lesson plans for each unique class/subject combination (OPTIMIZED - parallel calls)
@@ -136,23 +157,98 @@ export default function DailyReportTimetable({ user }) {
       setLessonPlansMap(lessonPlansMap);
       console.log('✅ Lesson plans loaded for', Object.keys(lessonPlansMap).length, 'combinations');
 
-      // initialize drafts for not-submitted rows
+      // Initialize drafts for not-submitted rows WITH AUTO-FILL from planned lessons
+      // AND populate with existing report data for submitted reports (for display)
       const nextDrafts = {};
-      ttList.forEach(r => {
+      
+      // Fetch planned lessons for each period in parallel
+      console.log('🔍 Fetching planned lessons for', ttList.length, 'periods...');
+      const plannedLessonPromises = ttList.map(async (r) => {
         const k = keyOf(r);
-        if (!sm[k] || sm[k] === "Not Submitted") {
+        
+        // If already submitted, populate with existing report data
+        if (sm[k] && sm[k] !== "Not Submitted") {
+          const existingReport = reportMap[k];
+          if (existingReport) {
+            console.log(`📄 Populating period ${r.period} with submitted report data`);
+            return [k, { type: 'submitted', data: existingReport }];
+          }
+        }
+        
+        try {
+          // Fetch planned lesson for this specific period
+          console.log(`🔎 Fetching planned lesson: date=${date}, period=${r.period}, class=${r.class}, subject=${r.subject}`);
+          const plannedLesson = await getPlannedLessonForPeriod(email, date, r.period, r.class, r.subject);
+          console.log(`📦 Response for period ${r.period}:`, plannedLesson);
+          return [k, { type: 'planned', data: plannedLesson }];
+        } catch (err) {
+          console.warn(`Failed to fetch planned lesson for ${r.class}/${r.subject} period ${r.period}:`, err);
+          return [k, { type: 'none', data: null }];
+        }
+      });
+      
+      const plannedLessonResults = await Promise.all(plannedLessonPromises);
+      
+      // Build drafts with auto-filled data OR submitted report data
+      plannedLessonResults.forEach(([k, result], index) => {
+        const r = ttList[index];
+        
+        if (result.type === 'submitted') {
+          // Populate with existing submitted report data
+          const report = result.data;
+          nextDrafts[k] = {
+            planType: report.planType || "not planned",
+            lessonPlanId: report.lessonPlanId || "",
+            chapter: report.chapter || "",
+            sessionNo: Number(report.sessionNo || 0),
+            objectives: report.objectives || "",
+            activities: report.activities || "",
+            completed: report.completed || "Not Started",
+            notes: report.notes || "",
+            _isSubstitution: r.isSubstitution || false,
+            _originalTeacher: r.originalTeacher || '',
+            _session: report.sessionNo || report.session || '',  // Add session for display
+            _submitted: true  // Mark as submitted for UI
+          };
+          console.log(`✅ Populated period ${r.period} with submitted report (planType: ${report.planType}, lessonPlanId: ${report.lessonPlanId}, sessionNo: ${report.sessionNo})`);
+        } else if (result.type === 'planned' && result.data?.success && result.data?.hasPlannedLesson && result.data?.lessonPlan) {
+          // Auto-fill with planned lesson
+          const lp = result.data.lessonPlan;
+          console.log(`✨ Auto-filling period ${r.period} with lesson plan: ${lp.lpId}`);
+          
+          nextDrafts[k] = {
+            planType: "in plan",
+            lessonPlanId: lp.lpId,
+            chapter: lp.chapter || "",
+            sessionNo: Number(lp.sessionNo || lp.session || 0),
+            objectives: lp.learningObjectives || "",
+            activities: lp.teachingMethods || "",
+            completed: "Not Started",
+            notes: "",
+            _isSubstitution: r.isSubstitution || false,
+            _originalTeacher: r.originalTeacher || '',
+            _session: lp.session || ''
+          };
+        } else {
+          // No planned lesson - unplanned period
+          console.log(`⚠️ No planned lesson for period ${r.period} (${r.class}/${r.subject})`);
           nextDrafts[k] = {
             planType: "not planned",
             lessonPlanId: "",
             chapter: r.chapter || "",
+            sessionNo: 0,
             objectives: "",
             activities: "",
             completed: "Not Started",
             notes: "",
+            _isSubstitution: r.isSubstitution || false,
+            _originalTeacher: r.originalTeacher || ''
           };
         }
       });
+      
       setDrafts(nextDrafts);
+      console.log('✅ Auto-filled', Object.keys(nextDrafts).length, 'periods (including submitted reports)');
 
       if (!ttList.length) {
         const debugInfo = tt?.debug || {};
@@ -165,6 +261,29 @@ export default function DailyReportTimetable({ user }) {
       setLoading(false);
     }
   }
+
+  // Fetch app settings (including period times) once on mount
+  useEffect(() => {
+    async function fetchSettings() {
+      try {
+        console.log('📊 Fetching app settings...');
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'https://script.google.com/macros/d/AKfycbxHRU5UKqr-eVLHsRzXmqQzqjqBN4qqNSqHbZqNPlHCB8s8wjVqQHrF-Mz-N_3dHJ3n/usercache'}?action=getAppSettings`);
+        const data = await response.json();
+        console.log('✅ App settings received:', data?.data);
+        
+        // Extract the data from the wrapped response
+        const settings = data?.data || data;
+        if (settings && (settings.periodTimesWeekday || settings.periodTimesFriday)) {
+          setAppSettings(settings);
+          console.log('✅ App settings loaded with period times');
+        }
+      } catch (err) {
+        console.warn('⚠️ Failed to fetch app settings, using defaults:', err);
+        // Continue with defaults (hardcoded in dateUtils)
+      }
+    }
+    fetchSettings();
+  }, []);
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [date, email]);
 
@@ -235,6 +354,7 @@ export default function DailyReportTimetable({ user }) {
         planType: d.planType || "not planned",
         lessonPlanId: d.lessonPlanId || "",
         chapter: d.chapter || r.chapter || "",
+        sessionNo: Number(d.sessionNo || 0),
         objectives: d.objectives || "",
         activities: d.activities || "",
         completed: d.completed || "Not Started",
@@ -242,7 +362,11 @@ export default function DailyReportTimetable({ user }) {
       };
 
       const res = await submitDailyReport(payload);
-      if (res && (res.ok || res.submitted)) {
+      
+      // Unwrap the response (backend wraps in {status, data, timestamp})
+      const result = res.data || res;
+      
+      if (result && (result.ok || result.submitted)) {
         // mark as submitted
         setStatusMap(m => ({ ...m, [k]: "Submitted" }));
         // clear draft for that row
@@ -252,6 +376,10 @@ export default function DailyReportTimetable({ user }) {
           return copy;
         });
         setMessage("Report submitted successfully!");
+      } else if (result && result.error === 'duplicate') {
+        // Already submitted - treat as success
+        setStatusMap(m => ({ ...m, [k]: "Submitted" }));
+        setMessage(result.message || "Report already submitted for this period");
       } else {
         setMessage("Failed to submit report.");
       }
@@ -342,6 +470,34 @@ export default function DailyReportTimetable({ user }) {
         </div>
       )}
 
+      {/* Simplified Instructions */}
+      <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="flex items-start gap-3">
+          <div className="flex-shrink-0">
+            <svg className="h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-blue-900 mb-2">Quick Daily Reporting Guide:</h3>
+            <ul className="text-xs text-blue-800 space-y-1.5">
+              <li className="flex items-start gap-2">
+                <span className="font-bold">📚 Pre-planned:</span>
+                <span>Lesson details auto-filled from approved plans - just select completion status!</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="font-bold">⚠️ Unplanned:</span>
+                <span>Enter chapter and activities manually, then select completion status.</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="font-bold">✓ Quick Submit:</span>
+                <span>Select completion status, add notes (optional), and submit - that's it!</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       {displayDate && (
         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
           <p className="text-blue-800 font-medium">{displayDate}</p>
@@ -371,15 +527,12 @@ export default function DailyReportTimetable({ user }) {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">Period</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Class</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[140px]">Subject</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Plan Type</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Chapter</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">Objectives</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">Activities</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[140px]">Completed</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px]">Notes</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Period</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">Class</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Subject</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[300px]">Lesson Details</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[140px]">Completion</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">Notes</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Action</th>
                 </tr>
               </thead>
@@ -389,83 +542,137 @@ export default function DailyReportTimetable({ user }) {
                   const submitted = statusMap[k] === "Submitted";
                   const d = drafts[k] || {};
                   const isLoading = saving[k];
+                  const isPlanned = d.planType === "in plan" && d.lessonPlanId;
+                  const isSubstitution = d._isSubstitution || r.isSubstitution || false;
+                  
+                  // Row background color based on status
+                  let rowBgClass = "";
+                  if (submitted) {
+                    rowBgClass = "bg-green-50";
+                  } else if (isPlanned && !isSubstitution) {
+                    rowBgClass = "bg-blue-50"; // Planned lesson
+                  } else if (isSubstitution) {
+                    rowBgClass = "bg-purple-50"; // Substitution
+                  } else {
+                    rowBgClass = "bg-yellow-50"; // Unplanned
+                  }
+                  
                   return (
-                    <tr key={k} className={submitted ? "bg-green-50" : ""}>
+                    <tr key={k} className={rowBgClass}>
+                      {/* Period with icons */}
                       <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                        #{r.period}
-                        <div className="text-xs text-gray-500 mt-1">{periodToTimeString(r.period)}</div>
+                        <div className="flex items-center gap-2">
+                          #{r.period}
+                          {isPlanned && !isSubstitution && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800" title="Pre-planned lesson">
+                              📚
+                            </span>
+                          )}
+                          {isSubstitution && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800" title={`Substitution for ${d._originalTeacher || 'another teacher'}`}>
+                              🔄
+                            </span>
+                          )}
+                          {!isPlanned && !isSubstitution && !submitted && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800" title="Unplanned period">
+                              ⚠️
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {periodToTimeString(r.period, 
+                            // Get the right period times based on day: Friday vs weekday
+                            new Date(date + 'T00:00:00').getDay() === 5 
+                              ? appSettings?.periodTimesFriday 
+                              : appSettings?.periodTimesWeekday
+                          )}
+                        </div>
+                        {isSubstitution && d._originalTeacher && (
+                          <div className="text-xs text-purple-600 mt-1">For: {d._originalTeacher}</div>
+                        )}
                       </td>
+                      
+                      {/* Class */}
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{r.class}</td>
+                      
+                      {/* Subject */}
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{r.subject}</td>
+                      
+                      {/* Lesson Details - Read-only info card */}
                       <td className="px-4 py-3">
                         <div className="space-y-2">
-                          <select
-                            id={`planType-${k}`}
-                            name={`planType-${k}`}
-                            value={d.planType || "not planned"}
-                            disabled={submitted}
-                            onChange={e => setDraft(k, "planType", e.target.value)}
-                            className="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                          >
-                            {PLAN_TYPES.map(opt => (
-                              <option key={opt} value={opt}>{opt}</option>
-                            ))}
-                          </select>
-                          {d.planType === "in plan" && (
-                            <select
-                              id={`lessonPlan-${k}`}
-                              name={`lessonPlan-${k}`}
-                              value={d.lessonPlanId || ""}
-                              disabled={submitted}
-                              onChange={e => handleLessonPlanChange(k, e.target.value)}
-                              className="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                            >
-                              <option value="">Select Lesson Plan</option>
-                              {(lessonPlansMap[`${r.class}|${r.subject}`] || []).map(plan => (
-                                <option key={plan.lpId} value={plan.lpId}>
-                                  {plan.chapter} (Session {plan.session})
-                                </option>
-                              ))}
-                            </select>
+                          {/* Header badge */}
+                          {isPlanned && d.lessonPlanId ? (
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-green-50 border border-green-200 text-green-800">
+                                ✓ Pre-planned {(d._session || d.sessionNo) ? `(Session ${d._session || d.sessionNo})` : ''}
+                              </span>
+                              {!submitted && (
+                                <button
+                                  type="button"
+                                  onClick={() => setDraft(k, "planType", "not planned")}
+                                  className="text-xs text-gray-600 hover:text-gray-900 underline"
+                                >
+                                  Change
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-gray-100 border border-gray-300 text-gray-700">
+                              ⚠️ Unplanned Period
+                            </span>
+                          )}
+                          
+                          {/* Lesson info */}
+                          {d.chapter && (
+                            <div className="text-xs bg-white border border-gray-200 rounded p-2">
+                              <div className="font-semibold text-gray-700 mb-1">📖 {d.chapter}</div>
+                              {d.objectives && (
+                                <div className="text-gray-600 mb-1">
+                                  <span className="font-medium">Objectives:</span> {d.objectives}
+                                </div>
+                              )}
+                              {d.activities && (
+                                <div className="text-gray-600">
+                                  <span className="font-medium">Activities:</span> {d.activities}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          
+                          {/* Manual entry for unplanned */}
+                          {!isPlanned && !submitted && (
+                            <div className="space-y-2">
+                              <input
+                                id={`chapter-${k}`}
+                                type="text"
+                                placeholder="Chapter/Topic taught"
+                                value={d.chapter || ""}
+                                onChange={e => setDraft(k, "chapter", e.target.value)}
+                                className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              />
+                              <textarea
+                                id={`objectives-${k}`}
+                                placeholder="Brief objectives"
+                                value={d.objectives || ""}
+                                onChange={e => setDraft(k, "objectives", e.target.value)}
+                                className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                rows="2"
+                              />
+                              <textarea
+                                id={`activities-${k}`}
+                                placeholder="Activities done"
+                                value={d.activities || ""}
+                                onChange={e => setDraft(k, "activities", e.target.value)}
+                                className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                rows="2"
+                              />
+                            </div>
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <input
-                          id={`chapter-${k}`}
-                          name={`chapter-${k}`}
-                          type="text"
-                          placeholder="Chapter name"
-                          disabled={submitted}
-                          value={d.chapter || r.chapter || ""}
-                          onChange={e => setDraft(k, "chapter", e.target.value)}
-                          className="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <textarea
-                          id={`objectives-${k}`}
-                          name={`objectives-${k}`}
-                          placeholder="Brief objectives"
-                          disabled={submitted}
-                          value={d.objectives || ""}
-                          onChange={e => setDraft(k, "objectives", e.target.value)}
-                          className="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                          rows="2"
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <textarea
-                          id={`activities-${k}`}
-                          name={`activities-${k}`}
-                          placeholder="What was done"
-                          disabled={submitted}
-                          value={d.activities || ""}
-                          onChange={e => setDraft(k, "activities", e.target.value)}
-                          className="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                          rows="2"
-                        />
-                      </td>
+                      
+                      {/* Completion Status - REQUIRED FIELD */}
                       <td className="px-4 py-3">
                         <select
                           id={`completed-${k}`}
@@ -473,33 +680,37 @@ export default function DailyReportTimetable({ user }) {
                           value={d.completed || "Not Started"}
                           disabled={submitted}
                           onChange={e => setDraft(k, "completed", e.target.value)}
-                          className="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                          className="w-full text-sm border border-gray-300 rounded px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 font-medium"
                         >
                           {COMPLETION.map(opt => (
                             <option key={opt} value={opt}>{opt}</option>
                           ))}
                         </select>
                       </td>
+                      
+                      {/* Notes - Optional */}
                       <td className="px-4 py-3">
                         <textarea
                           id={`notes-${k}`}
                           name={`notes-${k}`}
-                          placeholder="Extra notes"
+                          placeholder="Any additional notes (optional)"
                           disabled={submitted}
                           value={d.notes || ""}
                           onChange={e => setDraft(k, "notes", e.target.value)}
-                          className="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                          className="w-full text-sm border border-gray-300 rounded px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
                           rows="2"
                         />
                       </td>
+                      
+                      {/* Action */}
                       <td className="px-4 py-3">
                         {submitted ? (
-                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                            Submitted
+                          <span className="inline-flex px-3 py-1.5 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                            ✓ Submitted
                           </span>
                         ) : (
                           <button
-                            className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                            className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors w-full"
                             onClick={() => handleSubmitOne(r)}
                             disabled={isLoading}
                           >
@@ -512,7 +723,7 @@ export default function DailyReportTimetable({ user }) {
                 })}
                 {rows.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={10} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                       No periods scheduled for this date.
                     </td>
                   </tr>

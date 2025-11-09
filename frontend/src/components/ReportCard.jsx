@@ -163,47 +163,77 @@ const ReportCard = () => {
       // Call API with examType (selectedExam now contains the examType directly)
       const data = await api.getStudentReportCard(selectedExam, selectedStudent, selectedClass);
       
+      console.log('=== RAW API RESPONSE ===');
+      console.log('Full data:', JSON.stringify(data, null, 2));
+      console.log('data.students:', data?.students);
+      console.log('data.students.length:', data?.students?.length);
+      
       if (data && !data.error && data.students && data.students.length > 0) {
         // Find the student data in the response
         const studentData = data.students.find(s => 
           String(s.admNo || '') === selectedStudent
         ) || data.students[0]; // Fallback to first student if not found
         
+        console.log('Student data from backend:', JSON.stringify(studentData, null, 2));
+        
         // Transform the subjects data from backend format to frontend format
-        // Group by examType for proper display
+        // Backend returns: { subjects: { "English": { internal, external, total, grade, ... }, ... } }
         const examTypeGroups = {};
         
-        if (data.subjects && studentData.subjects) {
-          data.subjects.forEach(subjectName => {
-            const subjectMarks = studentData.subjects[subjectName] || {};
+        if (studentData && studentData.subjects) {
+          // Get the exam type (use selectedExam or data.examType)
+          const examType = data.examType || selectedExam || 'General';
+          examTypeGroups[examType] = [];
+          
+          // Iterate through subjects object
+          Object.keys(studentData.subjects).forEach(subjectName => {
+            const subjectMarks = studentData.subjects[subjectName];
             
-            // Get examType from the marks (if available) or use selectedExam as default
-            const examType = subjectMarks.examType || selectedExam || 'General';
+            console.log(`Subject ${subjectName}:`, {
+              ce: subjectMarks.ce,
+              te: subjectMarks.te,
+              internal: subjectMarks.internal,
+              external: subjectMarks.external,
+              total: subjectMarks.total,
+              hasInternalMarks: subjectMarks.hasInternalMarks
+            });
             
-            if (!examTypeGroups[examType]) {
-              examTypeGroups[examType] = [];
-            }
+            // CRITICAL DEBUG: Log the exact values
+            console.log(`RAW VALUES - ce type: ${typeof subjectMarks.ce}, value: ${subjectMarks.ce}`);
+            console.log(`RAW VALUES - te type: ${typeof subjectMarks.te}, value: ${subjectMarks.te}`);
             
             examTypeGroups[examType].push({
               name: subjectName,
-              ce: subjectMarks.ce || 0,
-              te: subjectMarks.te || 0,
-              total: subjectMarks.total || 0,
-              grade: subjectMarks.grade || 'N/A'
+              // SIMPLIFIED: Just use the raw values from backend
+              ce: subjectMarks.ce,
+              te: subjectMarks.te,
+              total: subjectMarks.total,
+              grade: subjectMarks.grade || 'N/A',
+              percentage: subjectMarks.percentage || 0,
+              maxMarks: subjectMarks.maxMarks || 100,
+              hasInternalMarks: subjectMarks.hasInternalMarks
             });
           });
         }
         
+        console.log('Transformed examTypeGroups:', examTypeGroups);
+        
         setReportData({
           student: {
-            Name: student?.name || student?.Name || studentData?.studentName || 'Unknown',
-            Class: student?.class || student?.Class || selectedClass,
-            AdmNo: student?.admNo || student?.AdmNo || selectedStudent
+            Name: student?.name || student?.Name || studentData?.name || 'Unknown',
+            Class: student?.class || student?.Class || studentData?.class || selectedClass,
+            AdmNo: student?.admNo || student?.AdmNo || studentData?.admNo || selectedStudent
           },
           exam: { examType: selectedExam, examName: selectedExam },
           examTypeGroups: examTypeGroups,
           subjects: Object.values(examTypeGroups).flat(), // Keep for backward compatibility
-          summary: data.summary || {}
+          summary: {
+            totalMarks: studentData?.totalMarks || 0,
+            maxMarks: studentData?.maxMarks || 0,
+            percentage: studentData?.percentage || 0,
+            grade: studentData?.grade || 'N/A',
+            subjectCount: studentData?.subjectCount || 0
+          }
         });
       } else {
         setError(data?.error || "Failed to generate report card. No data found.");
@@ -369,22 +399,37 @@ const ReportCard = () => {
                         </thead>
                         <tbody>
                           {subjects && subjects.length > 0 ? (
-                            subjects.map((subject, index) => (
-                              <tr key={index}>
-                                <td className="border border-gray-300 dark:border-gray-600 px-4 py-2">{subject.name || "Unknown Subject"}</td>
-                                {hasInternalMarks && (
-                                  <>
-                                    <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center">{subject.ce || "-"}</td>
-                                    <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center">{subject.te || "-"}</td>
-                                  </>
-                                )}
-                                {!hasInternalMarks && (
-                                  <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center">{subject.te || "-"}</td>
-                                )}
-                                <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center font-semibold">{subject.total || "-"}</td>
-                                <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center font-semibold">{subject.grade || "-"}</td>
-                              </tr>
-                            ))
+                            subjects.map((subject, index) => {
+                              // SIMPLIFIED: Just check if ce exists and is not null
+                              const showInternal = hasInternalMarks && subject.ce !== null && subject.ce !== undefined;
+                              
+                              console.log(`Rendering ${subject.name}: ce=${subject.ce}, te=${subject.te}, showInternal=${showInternal}, hasInternalMarks=${hasInternalMarks}`);
+                              
+                              return (
+                                <tr key={index}>
+                                  <td className="border border-gray-300 dark:border-gray-600 px-4 py-2">{subject.name || "Unknown Subject"}</td>
+                                  {hasInternalMarks && (
+                                    <>
+                                      <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center">
+                                        {subject.ce !== null && subject.ce !== undefined ? subject.ce : "-"}
+                                      </td>
+                                      <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center">
+                                        {subject.te !== null && subject.te !== undefined ? subject.te : "-"}
+                                      </td>
+                                    </>
+                                  )}
+                                  {!hasInternalMarks && (
+                                    <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center">
+                                      {subject.te !== null && subject.te !== undefined ? subject.te : "-"}
+                                    </td>
+                                  )}
+                                  <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center font-semibold">
+                                    {subject.total !== null && subject.total !== undefined ? subject.total : "-"}
+                                  </td>
+                                  <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center font-semibold">{subject.grade || "-"}</td>
+                                </tr>
+                              );
+                            })
                           ) : (
                             <tr>
                               <td colSpan={hasInternalMarks ? "5" : "4"} className="border border-gray-300 dark:border-gray-600 px-4 py-8 text-center text-gray-500">

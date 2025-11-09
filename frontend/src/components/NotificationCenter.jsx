@@ -5,8 +5,26 @@ import { formatDistanceToNow } from 'date-fns';
 
 const NotificationCenter = () => {
   const [isOpen, setIsOpen] = useState(false);
+  const [dropdownPosition, setDropdownPosition] = useState('right-0');
   const { notifications, unreadCount, markAsRead, markAllAsRead, clearAll, removeNotification } = useNotifications();
   const dropdownRef = useRef(null);
+  const buttonRef = useRef(null);
+
+  // Calculate dropdown position to prevent overflow
+  useEffect(() => {
+    if (isOpen && buttonRef.current) {
+      const buttonRect = buttonRef.current.getBoundingClientRect();
+      const dropdownWidth = 320; // 80 * 4 (w-80 = 320px)
+      const viewportWidth = window.innerWidth;
+      const spaceOnRight = viewportWidth - buttonRect.right;
+      
+      if (spaceOnRight < dropdownWidth) {
+        setDropdownPosition('right-0 transform -translate-x-64');
+      } else {
+        setDropdownPosition('right-0');
+      }
+    }
+  }, [isOpen]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -44,6 +62,7 @@ const NotificationCenter = () => {
     <div className="relative" ref={dropdownRef}>
       {/* Notification Bell */}
       <button
+        ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
         className="relative p-2 text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-lg"
       >
@@ -57,7 +76,7 @@ const NotificationCenter = () => {
 
       {/* Dropdown */}
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-96 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+        <div className={`absolute mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-50 ${dropdownPosition}`}>
           {/* Header */}
           <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
             <h3 className="text-lg font-medium text-gray-900">

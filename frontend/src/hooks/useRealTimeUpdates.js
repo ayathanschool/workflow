@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNotifications } from '../contexts/NotificationContext';
 
 export const useRealTimeUpdates = (user, interval = 30000) => {
+  // Temporarily disabled to prevent error loops
   const [isPolling, setIsPolling] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [updateCount, setUpdateCount] = useState(0);
@@ -98,7 +99,8 @@ export const useRealTimeUpdates = (user, interval = 30000) => {
   }, [user?.email, lastUpdate, success, warning, info]);
 
   const startPolling = useCallback(() => {
-    if (intervalRef.current) return; // Already polling
+    // Temporarily disabled to prevent error loops
+    return;
     
     // console.log('Starting real-time updates...');
     fetchUpdates(); // Initial fetch

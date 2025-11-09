@@ -2,8 +2,11 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Plus, Bell, Search, Filter, RefreshCw, Loader, Upload, Download, ChevronUp, ChevronDown } from 'lucide-react';
 import * as api from '../api';
 import { todayIST, parseApiDate, formatShortDate } from '../utils/dateUtils';
+import { useNotifications } from '../contexts/NotificationContext';
 
-const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) => {
+const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
+  // Get notification functions
+  const { success, error, warning, info } = useNotifications();
   // Helper function to determine if exam has internal marks
   const examHasInternalMarks = (exam) => {
     if (!exam) return false;
@@ -600,8 +603,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
       });
       
       // Show success message
-      setToast({ type: 'success', text: 'Exam created successfully' });
-      setTimeout(() => setToast(null), 3000);
+      success('Exam Created', 'Exam created successfully');
       
       // Refresh exams list with proper role-based filtering
       await reloadExams();
@@ -759,11 +761,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
       });
       
       // Show success message
-      setToast({ 
-        type: 'success', 
-        text: `Successfully created ${selectedSubjects.length} exams` 
-      });
-      setTimeout(() => setToast(null), 3000);
+      success('Bulk Exams Created', `Successfully created ${selectedSubjects.length} exams`);
       
       // Refresh exams list
       await reloadExams();
@@ -1019,8 +1017,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
       });
       
       // Show success message
-      setToast({ type: 'success', text: 'Exam updated successfully' });
-      setTimeout(() => setToast(null), 3000);
+      success('Exam Updated', 'Exam updated successfully');
       
       // Refresh exams list
       reloadExams();
@@ -1072,14 +1069,12 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
       const rows = Array.isArray(students) ? students.map(student => {
         const existingMark = marksMap[student.admNo] || {};
         
-        // For external-only exams, if external is empty but total exists, use total as external
-        let external = existingMark.external || '';
-        let total = existingMark.total || '';
-        
-        // If this is an external-only exam and external is empty but total has value
-        if (!examHasInternalMarks(exam) && !external && total) {
-          external = total;
-        }
+        // FIXED: Backend returns 'ce' and 'te' from ExamMarks sheet
+        // ce = Continuous Evaluation (Internal)
+        // te = Term Exam (External)
+        const internal = existingMark.ce || existingMark.internal || '';
+        const external = existingMark.te || existingMark.external || '';
+        const total = existingMark.total || '';
         
         // Calculate percentage and grade using the new class-specific grading system
         const calculatedPercentage = total && exam.totalMax ? Math.round((total / exam.totalMax) * 100) : 0;
@@ -1087,7 +1082,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
         return {
           admNo: student.admNo,
           studentName: student.name,
-          internal: existingMark.internal || '',
+          internal: internal,
           external: external,
           total: total,
           percentage: calculatedPercentage,
@@ -1178,8 +1173,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
       
       // Support both response formats for compatibility
       if (result && (result.ok || result.submitted)) {
-        setToast({ type: 'success', text: 'Marks saved successfully' });
-        setTimeout(() => setToast(null), 3000);
+        success('Marks Saved', 'Marks saved successfully');
         setShowMarksForm(false);
       } else {
         throw new Error(result?.error || 'Failed to save marks');
@@ -1190,7 +1184,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
     } finally {
       setIsLoading(false);
     }
-  }, [selectedExam, user, marksRows, setToast, setIsLoading, setApiError, setShowMarksForm]);
+  }, [selectedExam, user, marksRows, setIsLoading, setApiError, setShowMarksForm]);
 
   // Global Bulk Upload Functions (Optimized)
   const validateGlobalBulkCSV = useCallback(async (file) => {
@@ -1446,15 +1440,9 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
 
       // Show results
       if (totalErrors === 0) {
-        setToast({ 
-          type: 'success', 
-          text: `🎉 Bulk upload completed successfully! ${totalProcessed} records uploaded.` 
-        });
+        success('Bulk Upload Complete', `🎉 Bulk upload completed successfully! ${totalProcessed} records uploaded.`);
       } else {
-        setToast({ 
-          type: 'warning', 
-          text: `⚠️ Bulk upload completed with issues. Processed: ${totalProcessed}, Errors: ${totalErrors}` 
-        });
+        warning('Upload Issues', `⚠️ Bulk upload completed with issues. Processed: ${totalProcessed}, Errors: ${totalErrors}`);
         console.warn('Bulk upload errors:', errorDetails);
       }
 
@@ -1474,7 +1462,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, setToast, userRolesNorm }) 
     } finally {
       setIsLoading(false);
     }
-  }, [globalBulkData, exams, user, calculateGrade, setToast, setStudentsCache, setMarksCache]);
+  }, [globalBulkData, exams, user, calculateGrade, setStudentsCache, setMarksCache]);
 
   const generateSampleCSV = useCallback(() => {
     const headers = ['examId', 'admNo', 'studentName', 'internal', 'external'];

@@ -1,4 +1,4 @@
-import * as api from './api'
+﻿import * as api from './api'
 import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import LoginForm from './auth/LoginForm';
 import LoadingSplash from './auth/LoadingSplash';
@@ -14,16 +14,15 @@ import PWAInstallBanner from './components/PWAInstallBanner';
 // import { useRealTimeUpdates } from './hooks/useRealTimeUpdates';
 
 // Lazy load heavy components for better performance
-const AdvancedAnalytics = lazy(() => import('./components/AdvancedAnalytics'));
 const SmartReminders = lazy(() => import('./components/SmartReminders'));
 const SubstitutionModule = lazy(() => import('./components/SubstitutionModule'));
 const EnhancedSubstitutionView = lazy(() => import('./components/EnhancedSubstitutionView'));
 const DailyReportTimetable = lazy(() => import('./DailyReportTimetable'));
 const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodSubstitutionView'));
-const CalendarPage = lazy(() => import('./pages/CalendarPage'));
 const ExamManagement = lazy(() => import('./components/ExamManagement'));
 const ReportCard = lazy(() => import('./components/ReportCard'));
-const LessonProgressTracker = lazy(() => import('./components/LessonProgressTracker'));
+const SchemeLessonPlanning = lazy(() => import('./components/SchemeLessonPlanning'));
+const HMDailyOversight = lazy(() => import('./components/HMDailyOversight'));
 
 // Keep lightweight components as regular imports
 import AppLayout from './components/AppLayout';
@@ -67,7 +66,8 @@ import {
   FileCheck,
   FileClock,
   RefreshCw,
-  LayoutGrid
+  LayoutGrid,
+  ClipboardCheck
 } from 'lucide-react';
 
 // Common utility functions to avoid duplication
@@ -112,7 +112,9 @@ const App = () => {
   useEffect(() => {
     async function fetchAppSettings() {
       try {
-        const settings = await api.getAppSettings();
+        // Temporarily disabled to prevent errors
+        // const settings = await api.getAppSettings();
+        const settings = null; // Use default settings
         if (settings) {
           setAppSettings({
             lessonPlanningDay: settings.lessonPlanningDay || '',
@@ -128,10 +130,12 @@ const App = () => {
     fetchAppSettings();
   }, []);
 
-  // ----- GLOBAL submit overlay + toast -----
+  // ----- GLOBAL submit overlay -----
   const [submitting, setSubmitting] = useState({ active:false, message:'' });
-  const [toast, setToast] = useState(null);
   const [viewModal, setViewModal] = useState(null);
+
+  // Get notification functions
+  const { success, error, warning, info } = useNotifications();
 
   // Lesson view modal state
   const [viewLesson, setViewLesson] = useState(null);
@@ -154,38 +158,51 @@ const App = () => {
     </div>
   );
 
+  // Format date helper
+  const formatDate = (dateString) => {
+    if (!dateString) return '-';
+    try {
+      const date = new Date(dateString);
+      // Format as: Nov 02, 2025 (6:30 PM) or just Nov 02, 2025 depending on time
+      const options = { 
+        year: 'numeric', 
+        month: 'short', 
+        day: '2-digit'
+      };
+      const formattedDate = date.toLocaleDateString('en-US', options);
+      
+      // Check if time is significant (not midnight)
+      const hasTime = date.getHours() !== 0 || date.getMinutes() !== 0;
+      if (hasTime) {
+        const timeOptions = { hour: 'numeric', minute: '2-digit', hour12: true };
+        const formattedTime = date.toLocaleTimeString('en-US', timeOptions);
+        return `${formattedDate} (${formattedTime})`;
+      }
+      
+      return formattedDate;
+    } catch (e) {
+      return dateString; // Return original if parsing fails
+    }
+  };
+
   const withSubmit = async (message, fn) => {
     setSubmitting({ active:true, message });
     try {
       await fn();
-      // Use notification system for success
-      notificationSystem.success('Success!', message || 'Operation completed successfully');
-      setToast({ type: 'success', text: message || 'Success' });
-      setTimeout(() => setToast(null), 1800);
+      // Use new notification system for success
+      success('Success!', message || 'Operation completed successfully');
     } catch (err) {
       console.error('submit error', err);
-      // Use notification system for errors
-      notificationSystem.error('Error!', err?.message || 'An error occurred');
+      // Use new notification system for errors
+      error('Error!', err?.message || 'An error occurred');
       // surface as global api-error event so other parts of app can react
       window.dispatchEvent(new CustomEvent('api-error', { detail: { message: err?.message || String(err) } }));
-      setToast({ type: 'error', text: err?.message || 'Error occurred' });
-      setTimeout(() => setToast(null), 3000);
       throw err;
     } finally {
       setSubmitting({ active:false, message: '' });
     }
 
   };
-
-  const Toast = () => (
-    toast ? (
-      <div className="fixed top-4 right-4 z-[1100]">
-        <div className={`px-4 py-2 rounded shadow text-sm ${toast.type==='success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-          {toast.text}
-        </div>
-      </div>
-    ) : null
-  );
 
   const ViewModal = () => (
     viewModal ? (
@@ -231,26 +248,73 @@ const App = () => {
   const LessonModal = () => (
     showLessonModal && viewLesson ? (
       <div className="fixed inset-0 z-[1250] flex items-center justify-center bg-black/40">
-        <div className="bg-white w-full max-w-2xl rounded-xl shadow-lg p-6 mx-4">
-          <div className="flex justify-between items-start">
+        <div className="bg-white w-full max-w-2xl rounded-xl shadow-lg p-6 mx-4 max-h-[90vh] overflow-y-auto">
+          <div className="flex justify-between items-start mb-4">
             <h3 className="text-lg font-semibold text-gray-900">{viewLesson.title || viewLesson.chapter || viewLesson.lpId || viewLesson.schemeId || viewLesson.class || 'Details'}</h3>
             <button onClick={closeLessonView} className="text-gray-500 hover:text-gray-700">
               <X className="h-5 w-5" />
             </button>
           </div>
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Detail label="Class" value={viewLesson.class} />
-            <Detail label="Subject" value={viewLesson.subject} />
-            <Detail label="Chapter/Session" value={viewLesson.chapter || viewLesson.session || ''} />
-            <Detail label="Teacher" value={viewLesson.teacherName || viewLesson.teacher || ''} />
-            <div className="md:col-span-2">
-              <h4 className="text-sm font-medium text-gray-700">Objectives</h4>
-              <div className="mt-1 text-sm text-gray-800 whitespace-pre-wrap">{viewLesson.objectives || '-'}</div>
-              <h4 className="text-sm font-medium text-gray-700 mt-3">Activities</h4>
-              <div className="mt-1 text-sm text-gray-800 whitespace-pre-wrap">{viewLesson.activities || '-'}</div>
+          <div className="space-y-4">
+            {/* Basic Info Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4 border-b border-gray-200">
+              <Detail label="Class" value={viewLesson.class} />
+              <Detail label="Subject" value={viewLesson.subject} />
+              <Detail label="Chapter" value={viewLesson.chapter} />
+              <Detail label="Session" value={viewLesson.session} />
+              <Detail label="Teacher" value={viewLesson.teacherName || viewLesson.teacher || ''} />
+              <Detail label="Status" value={viewLesson.status} />
+              {viewLesson.selectedDate && <Detail label="Date" value={formatDate(viewLesson.selectedDate)} />}
+              {viewLesson.selectedPeriod && <Detail label="Period" value={viewLesson.selectedPeriod} />}
             </div>
+            
+            {/* Learning Objectives */}
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 mb-2">Learning Objectives</h4>
+              <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded">
+                {viewLesson.learningObjectives || viewLesson.objectives || '-'}
+              </div>
+            </div>
+            
+            {/* Teaching Methods */}
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 mb-2">Teaching Methods</h4>
+              <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded">
+                {viewLesson.teachingMethods || viewLesson.activities || '-'}
+              </div>
+            </div>
+            
+            {/* Resources Required */}
+            {viewLesson.resourcesRequired && (
+              <div>
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Resources Required</h4>
+                <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded">
+                  {viewLesson.resourcesRequired}
+                </div>
+              </div>
+            )}
+            
+            {/* Assessment Methods */}
+            {viewLesson.assessmentMethods && (
+              <div>
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Assessment Methods</h4>
+                <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded">
+                  {viewLesson.assessmentMethods}
+                </div>
+              </div>
+            )}
+            
+            {/* Review Comments (if any) */}
+            {viewLesson.reviewComments && (
+              <div className="border-t border-gray-200 pt-4">
+                <h4 className="text-sm font-medium text-red-700 mb-2">Review Comments</h4>
+                <div className="text-sm text-gray-800 whitespace-pre-wrap bg-red-50 p-3 rounded">
+                  {viewLesson.reviewComments}
+                </div>
+              </div>
+            )}
           </div>
-          <div className="mt-6 flex justify-end">
+          <div className="mt-6 flex justify-end border-t border-gray-200 pt-4">
             <button onClick={closeLessonView} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">Close</button>
           </div>
         </div>
@@ -263,6 +327,15 @@ const App = () => {
   const [activeView, setActiveView] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
+
+  // Send notification modal state - moved to app level for testing
+  const [showSendNotification, setShowSendNotification] = useState(false);
+  const [notificationData, setNotificationData] = useState({
+    title: '',
+    message: '',
+    priority: 'normal',
+    recipients: 'all'
+  });
 
   // Real-time updates - temporarily disabled to prevent infinite loops
   // const { isPolling, updateCount, lastUpdate } = useRealTimeUpdates(user);
@@ -345,10 +418,9 @@ const App = () => {
       items.push(
         { id: 'schemes', label: 'Schemes of Work', icon: Book },
         { id: 'lesson-plans', label: 'Lesson Plans', icon: BookOpen },
+        { id: 'scheme-lesson-planning', label: 'Scheme-Based Planning', icon: BookCheck },
         { id: 'timetable', label: 'Timetable', icon: Calendar },
-        { id: 'calendar', label: 'Calendar', icon: CalendarDays },
         { id: 'reports', label: 'Daily Reports', icon: FileText },
-        { id: 'lesson-progress', label: 'Lesson Progress', icon: TrendingUp },
         { id: 'smart-reminders', label: 'Smart Reminders', icon: Bell }
       );
       // Teachers and class teachers can also manage exams: view available exams,
@@ -376,19 +448,17 @@ const App = () => {
       items.push(
         { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
         { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
+        { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
-        { id: 'calendar', label: 'School Calendar', icon: Calendar },
-        { id: 'analytics', label: 'Analytics', icon: BarChart2 },
         { id: 'smart-reminders', label: 'Smart Reminders', icon: Bell },
         { id: 'exam-marks', label: 'Exam Marks', icon: Award },
         { id: 'report-card', label: 'Report Card', icon: FileText }
       );
       // Additional management views for the headmaster
       items.push(
-        { id: 'daily-reports-management', label: 'All Reports', icon: FileText },
-        { id: 'lesson-progress', label: 'Lesson Progress', icon: TrendingUp }
+        { id: 'daily-reports-management', label: 'All Reports', icon: FileText }
       );
     }
 
@@ -401,7 +471,47 @@ const App = () => {
   };
 
   // Dashboard component
-  const Dashboard = () => {
+  const Dashboard = ({ 
+    showSendNotification, 
+    setShowSendNotification, 
+    notificationData, 
+    setNotificationData 
+  }) => {
+    // Get notification functions
+    const { success, error, warning, info } = useNotifications();
+    
+    // Substitution notifications state
+    const [substitutionNotifications, setSubstitutionNotifications] = useState([]);
+    
+    // Load substitution notifications for current user
+    useEffect(() => {
+      if (user?.email) {
+        loadSubstitutionNotifications();
+      }
+    }, [user]);
+    
+    const loadSubstitutionNotifications = async () => {
+      try {
+        const response = await api.getSubstitutionNotifications(user.email);
+        if (response && response.notifications) {
+          setSubstitutionNotifications(response.notifications);
+        }
+      } catch (error) {
+        console.error('Error loading substitution notifications:', error);
+      }
+    };
+    
+    const acknowledgeNotification = async (notificationId) => {
+      try {
+        await api.acknowledgeSubstitutionNotification(user.email, notificationId);
+        success('Acknowledged', 'Substitution assignment acknowledged successfully');
+        loadSubstitutionNotifications(); // Reload to remove acknowledged notification
+      } catch (error) {
+        console.error('Error acknowledging notification:', error);
+        error('Error', 'Failed to acknowledge notification');
+      }
+    };
+
     // Insights state holds counts used to populate the summary cards.  When the
     // logged‑in user is the headmaster ("H M" role) we fetch global counts
     // from the API.  For teachers/class teachers we compute counts based on
@@ -417,6 +527,44 @@ const App = () => {
       pendingReports: 0
     });
 
+    // Send notification modal state - now using app-level state
+    // const [showSendNotification, setShowSendNotification] = useState(true); // Removed - moved to app level
+    // const [notificationData, setNotificationData] = useState({
+    //   title: '',
+    //   message: '',
+    //   priority: 'normal',
+    //   recipients: 'all'
+    // });
+
+    // Test notification function for development
+    const testNotifications = () => {
+      success('Success!', 'Your lesson plan has been approved');
+      setTimeout(() => {
+        warning('Warning!', 'You have a deadline approaching in 2 days');
+      }, 1000);
+      setTimeout(() => {
+        error('Error!', 'Failed to submit report. Please try again.');
+      }, 2000);
+      setTimeout(() => {
+        info('Info', 'System maintenance scheduled for tonight at 10 PM');
+      }, 3000);
+    };
+
+    // Send custom notification function
+    const sendCustomNotification = async (title, message, priority, recipients) => {
+      try {
+        const result = await api.sendCustomNotification(user.email, title, message, priority, recipients);
+        if (result.success) {
+          success('Notification Sent!', result.message);
+          setShowSendNotification(false);
+        } else {
+          error('Send Failed', result.error || 'Failed to send notification');
+        }
+      } catch (err) {
+        error('Send Error', err.message || 'An error occurred while sending notification');
+      }
+    };
+
     useEffect(() => {
       async function fetchDashboardData() {
         try {
@@ -424,16 +572,24 @@ const App = () => {
           
           // Headmaster view: use HM insights and classes count
           if (hasRole('h m')) {
+            console.log('Fetching HM dashboard data...');
             const hmData = await api.getHmInsights();
+            console.log('HM insights received:', hmData);
+            
             const classes = await api.getAllClasses();
-            setInsights({
+            console.log('Classes received:', classes);
+            
+            const newInsights = {
               planCount: hmData?.planCount || 0,
               lessonCount: hmData?.lessonCount || 0,
               teacherCount: hmData?.teacherCount || 0,
               classCount: Array.isArray(classes) ? classes.length : 0,
               subjectCount: 0,
               pendingReports: 0
-            });
+            };
+            
+            console.log('Setting insights to:', newInsights);
+            setInsights(newInsights);
           } else if (hasAnyRole(['teacher','class teacher','daily reporting teachers'])) {
             // Teacher view: compute classes and subjects from user object
             const classCount = Array.isArray(user.classes) ? user.classes.length : 0;
@@ -477,6 +633,16 @@ const App = () => {
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
           <div className="flex items-center space-x-4">
+            {/* Send Notification Button - HM Only */}
+            {user && hasRole('h m') && (
+              <button 
+                onClick={() => setShowSendNotification(true)}
+                className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                title="Send Notification"
+              >
+                📢 Send Notice
+              </button>
+            )}
             <NotificationCenter />
           </div>
         </div>
@@ -577,25 +743,6 @@ const App = () => {
             <p className="text-gray-600">Use the navigation menu to access your school workflow tools.</p>
           </div>
         )}
-
-        {/* Analytics Section for HM */}
-  {user && hasRole('h m') && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-medium text-gray-900 mb-4">Submission Trends</h2>
-              <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg">
-                <p className="text-gray-500">Submission trends chart would appear here</p>
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-medium text-gray-900 mb-4">Approval Rates</h2>
-              <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg">
-                <p className="text-gray-500">Approval rates chart would appear here</p>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   };
@@ -623,14 +770,18 @@ const App = () => {
   // Keep root user state in sync when googleAuth.user changes (first login or restore)
   useEffect(() => {
     if (googleAuth?.user) {
+      console.log('Google auth user detected, syncing to app state:', googleAuth.user);
       const gu = googleAuth.user;
       const roles = Array.isArray(gu.roles) ? gu.roles : (gu.roles ? String(gu.roles).split(',').map(s=>s.trim()).filter(Boolean) : []);
       setUser(prev => {
         if (!prev || prev.email !== gu.email) {
+          console.log('Setting user state from Google auth');
           return { ...gu, roles };
         }
         return prev;
       });
+      // Clear loading state explicitly
+      setLoading(false);
     }
   }, [googleAuth?.user?.email]);
 
@@ -781,19 +932,22 @@ const App = () => {
           {(() => {
             switch (activeView) {
         case 'dashboard':
-          return <Dashboard />;
+          return <Dashboard 
+            showSendNotification={showSendNotification} 
+            setShowSendNotification={setShowSendNotification}
+            notificationData={notificationData}
+            setNotificationData={setNotificationData}
+          />;
         case 'schemes':
           return <SchemesView />;
         case 'lesson-plans':
           return <LessonPlansView />;
+        case 'scheme-lesson-planning':
+          return <SchemeLessonPlanning userEmail={user?.email} userName={user?.name} />;
         case 'timetable':
           return <TimetableView />;
-      case 'calendar':
-        return <CalendarPage user={user} />;
       case 'reports':
         return <ReportsView />;
-      case 'lesson-progress':
-        return <LessonProgressTracker user={user} />;
       case 'hm-dashboard':
         // hm-dashboard should reuse the main Dashboard to avoid duplicate UIs
         return <Dashboard />;
@@ -803,16 +957,16 @@ const App = () => {
         return <SchemeApprovalsView />;
       case 'lesson-approvals':
         return <LessonApprovalsView />;
+      case 'daily-oversight':
+        return <HMDailyOversight user={user} />;
       case 'substitutions':
         return <EnhancedSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
       case 'full-timetable':
         return <FullTimetableView />;
-      case 'analytics':
-        return <AdvancedAnalytics user={user} />;
       case 'smart-reminders':
         return <SmartReminders user={user} />;
       case 'exam-marks':
-        return <ExamManagement user={user} withSubmit={withSubmit} setToast={setToast} />;
+        return <ExamManagement user={user} withSubmit={withSubmit} />;
       case 'report-card':
         return <ReportCard user={user} />;
       case 'class-data':
@@ -851,6 +1005,8 @@ const App = () => {
       if (!user) return;
       
       try {
+        setSubmitting({ active: true, message: 'Submitting scheme...' });
+        
         // Submit the scheme with timetable validation
         const schemeData = {
           teacherName: user.name || '',
@@ -863,11 +1019,16 @@ const App = () => {
           noOfSessions: formData.noOfSessions
         };
         
+        console.log('Submitting scheme data:', schemeData);
         const response = await api.submitPlan(user.email, schemeData);
+        console.log('Scheme submission response:', response);
+        
+        // Unwrap the response (backend wraps in {status, data, timestamp})
+        const result = response.data || response;
         
         // Check if validation failed
-        if (!response.ok && response.error === 'Session count mismatch') {
-          const validation = response.validation;
+        if (!result.ok && result.error === 'Session count mismatch') {
+          const validation = result.validation;
           
           let confirmMessage = `${validation.message}\n\n`;
           
@@ -896,7 +1057,7 @@ const App = () => {
               ...prev,
               noOfSessions: validation.suggestion
             }));
-            setToast({ type: 'info', text: `Sessions updated to ${validation.suggestion} to match your timetable.` });
+            info('Timetable Adjustment', `Sessions updated to ${validation.suggestion} to match your timetable.`);
             return;
           } else if (!userChoice || validation.noTimetableFound) {
             // Force submit with override
@@ -907,15 +1068,15 @@ const App = () => {
             };
             
             await withSubmit('Submitting scheme with override...', () => api.submitPlan(user.email, overrideData));
-            setToast({ type: 'warning', text: 'Scheme submitted with timetable override. HM review required.' });
+            warning('Override Required', 'Scheme submitted with timetable override. HM review required.');
           }
-        } else if (response.ok) {
+        } else if (result.ok) {
           // Success - normal submission
-          const message = response.validation?.message || 'Scheme submitted successfully!';
-          setToast({ type: 'success', text: message });
+          const message = result.validation?.message || 'Scheme submitted successfully!';
+          success('Scheme Submitted', message);
         } else {
           // Other error
-          throw new Error(response.error || 'Submission failed');
+          throw new Error(result.error || 'Submission failed');
         }
         
         // Refresh schemes list
@@ -924,8 +1085,14 @@ const App = () => {
         
       } catch (err) {
         console.error('Failed to submit scheme:', err);
-        setToast({ type: 'error', text: `Failed to submit scheme: ${err.message}` });
+        console.error('Error details:', {
+          message: err.message,
+          stack: err.stack,
+          response: err.response
+        });
+        error('Submission Failed', `Failed to submit scheme: ${err.message}`);
       } finally {
+        setSubmitting({ active: false, message: '' });
         setShowForm(false);
         setFormData({
           class: '',
@@ -1227,7 +1394,11 @@ const App = () => {
           const timetableData = await api.getTeacherWeeklyTimetable(user.email);
           setTimetableSlots(Array.isArray(timetableData) ? timetableData : []);
           // Teacher lesson plans
+          console.log('Fetching teacher lesson plans for:', user.email);
           const plans = await api.getTeacherLessonPlans(user.email);
+          console.log('Teacher lesson plans response:', plans);
+          console.log('Plans is array?', Array.isArray(plans));
+          console.log('Plans length:', plans?.length);
           setLessonPlans(Array.isArray(plans) ? plans : []);
           
           // Load data silently
@@ -1293,11 +1464,7 @@ const App = () => {
       } else if (!existingPlan && (!isAllowedPlanningDay)) {
         setPlanningRestricted(true);
         const displayDay = normalizedSettingDay || 'the configured day';
-        setToast({ 
-          type: 'error', 
-          text: `Lesson planning is only allowed on ${displayDay}.` 
-        });
-        setTimeout(() => setToast(null), 3000);
+        error('Planning Restricted', `Lesson planning is only allowed on ${displayDay}.`);
         return;
       }
       
@@ -1440,11 +1607,7 @@ const App = () => {
         });
         
         if (duplicate) {
-          setToast({ 
-            type: 'error', 
-            text: 'A lesson plan already exists for this class/subject/session/date/chapter combination. Duplicate not allowed.' 
-          });
-          setTimeout(() => setToast(null), 3000);
+          error('Duplicate Detected', 'A lesson plan already exists for this class/subject/session/date/chapter combination. Duplicate not allowed.');
           return;
         }
       }
@@ -1463,9 +1626,13 @@ const App = () => {
             teacherEmail: user?.email || '',
             teacherName: user?.name || ''
           });
+          
+          // Unwrap the response (backend wraps in {status, data, timestamp})
+          const result = res.data || res;
+          
           // If server responded with an error payload, throw to trigger error handling
-          if (res && res.error) throw new Error(res.error);
-          return res;
+          if (result && result.error) throw new Error(result.error);
+          return result;
         });
         // Refresh lesson plans list from backend
         if (user) {
@@ -1511,8 +1678,7 @@ const App = () => {
                   notes: ''
                 }));
                 setShowPreparationForm(true);
-                setToast({ type: 'error', text: 'Duplicate detected: opened existing lesson plan for editing.' });
-                setTimeout(() => setToast(null), 3000);
+                warning('Duplicate Plan', 'Duplicate detected: opened existing lesson plan for editing.');
                 return;
               }
             }
@@ -1670,94 +1836,33 @@ const App = () => {
           </div>
         )}
 
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Upcoming Timetable Slots</h2>
-            <p className="text-sm text-gray-500 mt-1">Prepare lesson plans for your scheduled classes</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Day</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Period</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {timetableSlots.flatMap(day => 
-                  day.periods.map((period, index) => {
-                    const lessonPlan = lessonPlans.find(
-                      plan => normKeyLocal(plan.class) === normKeyLocal(period.class) && 
-                              normKeyLocal(plan.subject) === normKeyLocal(period.subject) && 
-                              Number(plan.session) === Number(period.period) &&
-                              String(plan.date || '') === String(day.date || '')
-                    );
-                    
-                    // Process timetable slot
-                    
-                    return (
-                      <tr key={`${day.date}-${index}`}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {day.date}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {day.day}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {period.period}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {period.class}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {period.subject}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          {lessonPlan ? (
-                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                              lessonPlan.status === 'Pending Preparation' 
-                                ? 'bg-yellow-100 text-yellow-800' 
-                                : lessonPlan.status === 'Pending Review' 
-                                  ? 'bg-blue-100 text-blue-800' 
-                                  : 'bg-green-100 text-green-800'
-                            }`}>
-                              {lessonPlan.status}
-                            </span>
-                          ) : (
-                            <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-                              Not Prepared
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          <button
-                            onClick={() => handlePrepareLesson({
-                              ...period,
-                              date: day.date,
-                              day: day.day,
-                              lpId: lessonPlan?.lpId || `lp-${Date.now()}`
-                            })}
-                            className={`${
-                              lessonPlan && lessonPlan.status !== 'Pending Preparation' && lessonPlan.status !== 'Needs Rework'
-                                ? 'bg-gray-300 cursor-not-allowed'
-                                : 'bg-blue-600 hover:bg-blue-700'
-                            } text-white px-3 py-1 rounded text-sm`}
-                            disabled={lessonPlan && lessonPlan.status !== 'Pending Preparation' && lessonPlan.status !== 'Needs Rework'}
-                          >
-                            {lessonPlan ? 'Edit' : 'Prepare'}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+        {/* DISABLED: Old Lesson Plan Submission - Replaced by Scheme-based Planning */}
+        {/* Migration Notice */}
+        <div className="bg-blue-50 border-l-4 border-blue-400 rounded-lg overflow-hidden mb-6">
+          <div className="px-6 py-4">
+            <div className="flex items-start">
+              <div className="flex-shrink-0">
+                <svg className="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div className="ml-3 flex-1">
+                <h3 className="text-lg font-medium text-blue-800">📋 New Lesson Planning System</h3>
+                <div className="mt-2 text-sm text-blue-700">
+                  <p className="mb-2">Lesson plans are now created through the <strong>Scheme-based Lesson Planning</strong> workflow for better organization and tracking.</p>
+                  <p className="mb-3">Navigate to <strong>Schemes → Select Chapter → Create Lesson Plan</strong> to prepare your lesson plans.</p>
+                  <div className="bg-white bg-opacity-50 rounded px-3 py-2 text-xs">
+                    <strong>Benefits:</strong>
+                    <ul className="list-disc ml-4 mt-1 space-y-1">
+                      <li>Linked to approved schemes and chapters</li>
+                      <li>Better session tracking and progress monitoring</li>
+                      <li>Prevents duplicate period assignments</li>
+                      <li>Organized by academic structure</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -2139,6 +2244,43 @@ const App = () => {
         </div>
       </div>
 
+      {/* Substitution Notifications */}
+      {substitutionNotifications.length > 0 && (
+        <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded-lg">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <Bell className="h-5 w-5 text-amber-400" />
+            </div>
+            <div className="ml-3 flex-1">
+              <h3 className="text-sm font-medium text-amber-800">
+                Substitution Assignments ({substitutionNotifications.length})
+              </h3>
+              <div className="mt-2 space-y-2">
+                {substitutionNotifications.map((notification) => (
+                  <div key={notification.id} className="bg-white p-3 rounded border border-amber-200">
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <h4 className="font-medium text-gray-900">{notification.title}</h4>
+                        <p className="text-sm text-gray-600 mt-1">{notification.message}</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {new Date(notification.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => acknowledgeNotification(notification.id)}
+                        className="ml-3 px-3 py-1 text-xs font-medium text-green-700 bg-green-100 hover:bg-green-200 rounded-md transition-colors"
+                      >
+                        Acknowledge
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
           <div className="flex items-center">
@@ -2215,6 +2357,23 @@ const App = () => {
           </p>
         </div>
       </div>
+
+      {/* Send Notification Modal */}
+      {showSendNotification && (
+        <div className="fixed inset-0 bg-red-500 bg-opacity-90 z-[9999] flex items-center justify-center">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 border-8 border-blue-500">
+            <div className="p-4 text-center">
+              <h1 className="text-2xl font-bold text-red-600">TEST MODAL IS WORKING!</h1>
+              <button 
+                onClick={() => setShowSendNotification(false)}
+                className="mt-4 px-4 py-2 bg-red-600 text-white rounded"
+              >
+                Close Test Modal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
   };
@@ -3537,13 +3696,16 @@ const App = () => {
         try {
           let data;
           const needServerFilter = !!(filterClass || filterTeacher || searchDate);
+          console.log('[FullTimetableView] Fetching timetable, needServerFilter:', needServerFilter);
           if (needServerFilter) {
             data = await api.getFullTimetableFiltered(filterClass || '', '', filterTeacher || '', searchDate || '');
           } else {
             data = await api.getFullTimetable();
           }
+          console.log('[FullTimetableView] Received data:', data);
           if (cancelled) return;
           const ft = Array.isArray(data) ? data : [];
+          console.log('[FullTimetableView] Setting fullTimetable:', ft.length, 'days');
           setFullTimetable(ft);
           // Derive filter lists from current data
           const classes = new Set();
@@ -4063,8 +4225,7 @@ const App = () => {
         .filter(r => (r.internal != null) || (r.external != null));
 
       if (changed.length === 0) {
-        setToast({ type:'success', text:'No changes to save.' });
-        setTimeout(() => setToast(null), 2000);
+        info('No Changes', 'No changes to save.');
         return;
       }
 
@@ -5137,6 +5298,13 @@ const App = () => {
     }
 
     if (!effectiveUser) {
+      console.log('No effectiveUser, checking auth state:', {
+        googleLoading: googleAuth?.loading,
+        googleUser: googleAuth?.user?.email,
+        localUser: localUser?.email,
+        user: user?.email
+      });
+      
       return (
         <>
           {apiError && (
@@ -5152,13 +5320,147 @@ const App = () => {
         </>
       );
     }
+    
+    console.log('Rendering dashboard for user:', effectiveUser?.email);
 
     return (
       <div className={`min-h-screen ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'} transition-colors duration-300`}>
-        {/* Global submit overlay and toast rendered at app root */}
+        {/* Send Notification Modal */}
+        {showSendNotification && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-[99999] flex items-center justify-center">
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-medium text-gray-900">Send Notice</h3>
+                  <button
+                    onClick={() => setShowSendNotification(false)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              
+              <div className="p-6">
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    console.log('Sending notification:', notificationData);
+                    const response = await api.sendCustomNotification(
+                      user.email,
+                      notificationData.title,
+                      notificationData.message,
+                      notificationData.priority.toUpperCase(),
+                      notificationData.recipients
+                    );
+                    console.log('Notification sent successfully:', response);
+                    
+                    // Show success message
+                    alert(`Notice "${notificationData.title}" sent successfully to ${notificationData.recipients}!`);
+                    
+                    // Reset form and close modal
+                    setNotificationData({
+                      title: '',
+                      message: '',
+                      priority: 'normal',
+                      recipients: 'all'
+                    });
+                    setShowSendNotification(false);
+                  } catch (error) {
+                    console.error('Error sending notification:', error);
+                    alert('Error sending notification: ' + error.message);
+                  }
+                }}>
+                  <div className="space-y-4">
+                    <div>
+                      <label htmlFor="notificationTitle" className="block text-sm font-medium text-gray-700 mb-1">
+                        Title
+                      </label>
+                      <input
+                        type="text"
+                        id="notificationTitle"
+                        value={notificationData.title}
+                        onChange={(e) => setNotificationData({...notificationData, title: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="e.g., Assembly Notice"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="notificationMessage" className="block text-sm font-medium text-gray-700 mb-1">
+                        Message
+                      </label>
+                      <textarea
+                        id="notificationMessage"
+                        rows="3"
+                        value={notificationData.message}
+                        onChange={(e) => setNotificationData({...notificationData, message: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="e.g., All should assemble in main hall at 10:30 AM"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="notificationPriority" className="block text-sm font-medium text-gray-700 mb-1">
+                        Priority
+                      </label>
+                      <select
+                        id="notificationPriority"
+                        value={notificationData.priority}
+                        onChange={(e) => setNotificationData({...notificationData, priority: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="normal">Normal</option>
+                        <option value="high">High</option>
+                        <option value="urgent">Urgent</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label htmlFor="notificationRecipients" className="block text-sm font-medium text-gray-700 mb-1">
+                        Send To
+                      </label>
+                      <select
+                        id="notificationRecipients"
+                        value={notificationData.recipients}
+                        onChange={(e) => setNotificationData({...notificationData, recipients: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="all">All Staff</option>
+                        <option value="teachers">Teachers Only</option>
+                        <option value="class_teachers">Class Teachers Only</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end space-x-3 mt-6">
+                    <button
+                      type="button"
+                      onClick={() => setShowSendNotification(false)}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+                    >
+                      Send Notice
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Global submit overlay rendered at app root */}
         <SubmitOverlay />
         <LessonModal />
-        <Toast />
         {apiError && (
           <div className="fixed top-4 right-4 z-50">
             <div className="bg-red-100 text-red-800 px-4 py-2 rounded shadow flex items-center space-x-3">

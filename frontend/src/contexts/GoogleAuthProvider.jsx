@@ -114,8 +114,12 @@ function InnerAuthProvider({ children }) {
 				};
 				
 				// Exchange Google auth info with backend
-				const appUser = await backendGoogleLogin(googleAuthPayload);
-				console.log("Backend login success:", appUser);
+				const response = await backendGoogleLogin(googleAuthPayload);
+				console.log("Backend login response:", response);
+				
+				// Extract user data from wrapped response {status, data, timestamp}
+				const appUser = response?.data || response;
+				console.log("Extracted user data:", appUser);
 				
 				const r = Array.isArray(appUser.roles) ? appUser.roles : (appUser.role ? [appUser.role] : []);
 				setUser(appUser);

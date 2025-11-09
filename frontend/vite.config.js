@@ -5,7 +5,7 @@ import { resolve } from 'path'
 export default defineConfig(({ mode }) => {
   // Load env variables
   const env = loadEnv(mode, process.cwd(), '');
-  const gasTarget = env.VITE_GAS_WEB_APP_URL || 'https://script.google.com';
+  const gasTarget = env.VITE_GAS_WEB_APP_URL || 'https://script.google.com/macros/s/AKfycbzOhVixHw69AjIZUmR8vP8f4mpDiGqguf27Aq7XqzdiThoDHgFOKVPxkleLQW7hz0gU/exec';
   const isProd = mode === 'production';
 
   return {
@@ -30,7 +30,7 @@ export default defineConfig(({ mode }) => {
           manualChunks: isProd ? {
             'react-vendor': ['react', 'react-dom'],
             'charts': ['recharts'],
-            'calendar': ['react-big-calendar', 'date-fns'],
+            'date-utils': ['date-fns'],
             'icons': ['lucide-react'],
             'ui-libs': ['@headlessui/react', 'react-transition-group'],
             'auth': ['@react-oauth/google', 'jwt-decode']
@@ -59,16 +59,8 @@ export default defineConfig(({ mode }) => {
         port: 5173,
         timeout: 120000,
         overlay: true
-      },
-      // Proxy API calls to the Google Apps Script URL during development to avoid CORS
-      proxy: {
-        '/gas': {
-          target: gasTarget,
-          changeOrigin: true,
-          secure: true,
-          rewrite: (path) => path.replace(/^\/gas/, '')
-        }
       }
+      // Proxy disabled - using direct backend URL to avoid connection issues
     }
   }
 })

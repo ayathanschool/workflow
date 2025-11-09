@@ -160,11 +160,11 @@ const NotificationContainer = () => {
     .slice(0, 5); // Max 5 toasts
 
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-2">
+    <div className="fixed top-4 right-4 z-50 space-y-2 w-80 max-w-[calc(100vw-2rem)]">
       {toastNotifications.map((notification) => (
         <div
           key={notification.id}
-          className={`max-w-sm w-full shadow-lg rounded-lg pointer-events-auto ${getBackgroundColor(notification.type)} border animate-in slide-in-from-right duration-300`}
+          className={`w-full shadow-lg rounded-lg pointer-events-auto ${getBackgroundColor(notification.type)} border animate-in slide-in-from-right duration-300`}
         >
           <div className="p-4">
             <div className="flex items-start">
