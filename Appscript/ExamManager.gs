@@ -114,8 +114,9 @@ function submitExamMarks(data) {
   
   // Process each student's marks
   for (const studentMark of marks) {
-    const ce = parseInt(studentMark.ce) || 0;
-    const te = parseInt(studentMark.te) || 0;
+    // Accept both ce/te (old) and internal/external (new) field names
+    const ce = parseInt(studentMark.ce || studentMark.internal) || 0;
+    const te = parseInt(studentMark.te || studentMark.external) || 0;
     const total = ce + te;
     const grade = _calculateGradeFromBoundaries((total / exam.totalMax) * 100, exam.class);
     
