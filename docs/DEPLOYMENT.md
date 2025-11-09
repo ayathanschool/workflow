@@ -20,7 +20,7 @@
 3. Execute as: "Me"
 4. Who has access: "Anyone"
 5. Click "Deploy"
-6. Copy the deployment URL
+6. Copy the deployment URL (Current URL: `https://script.google.com/macros/s/AKfycbzl5qSv_YbAC_JUJmiCK03ArBMaPxaHmyBPwBqh488cqsrJ554fBs0MDQFC3WG6Hbp1/exec`)
 
 ## Frontend Deployment
 
@@ -49,8 +49,8 @@ npm run build
 ## Configuration
 
 ### Update API URL
-1. Copy your Google Apps Script deployment URL
-2. Update `REACT_APP_API_URL` in environment variables
+1. Copy your Google Apps Script deployment URL: `https://script.google.com/macros/s/AKfycbzl5qSv_YbAC_JUJmiCK03ArBMaPxaHmyBPwBqh488cqsrJ554fBs0MDQFC3WG6Hbp1/exec`
+2. Update `VITE_GAS_WEB_APP_URL` in environment variables
 3. Redeploy frontend
 
 ### Setup Users
