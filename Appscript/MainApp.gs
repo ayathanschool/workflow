@@ -1318,16 +1318,16 @@ function _handleGetDailyReportsForDate(params) {
 function _handleGetLessonPlansForDate(params) {
   try {
     const date = params.date || _todayISO();
-    const normalizedDate = _isoDateString(date);
+    const normalizedDate = _isoDateIST(date);
     Logger.log(`Getting lesson plans for date: ${normalizedDate}`);
     
     // Get all lesson plans for this date
-    const lpSh = _getSheet('LessonPlanSettings');
+    const lpSh = _getSheet('LessonPlans');
     const lpHeaders = _headers(lpSh);
     const allLessonPlans = _rows(lpSh).map(row => _indexByHeader(row, lpHeaders))
       .filter(lp => {
         if (!lp || !lp.selectedDate) return false;
-        const lpDate = _isoDateString(lp.selectedDate);
+        const lpDate = _isoDateIST(lp.selectedDate);
         return lpDate === normalizedDate;
       });
     

@@ -166,6 +166,7 @@ const HMDailyOversight = ({ user }) => {
 
       {/* Statistics Cards - Only show for Daily Reports */}
       {activeTab === 'reports' && (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
@@ -235,63 +236,64 @@ const HMDailyOversight = ({ user }) => {
 
       {/* Filters - Only show for Daily Reports */}
       {activeTab === 'reports' && (
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">Filters</h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Teacher</label>
-            <select
-              value={filters.teacher}
-              onChange={e => setFilters({ ...filters, teacher: e.target.value })}
-              className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">All Teachers</option>
-              {teachers.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">Filters</h3>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Teacher</label>
+              <select
+                value={filters.teacher}
+                onChange={e => setFilters({ ...filters, teacher: e.target.value })}
+                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">All Teachers</option>
+                {teachers.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Class</label>
+              <select
+                value={filters.class}
+                onChange={e => setFilters({ ...filters, class: e.target.value })}
+                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">All Classes</option>
+                {classes.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Subject</label>
+              <select
+                value={filters.subject}
+                onChange={e => setFilters({ ...filters, subject: e.target.value })}
+                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">All Subjects</option>
+                {subjects.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Status</label>
+              <select
+                value={filters.status}
+                onChange={e => setFilters({ ...filters, status: e.target.value })}
+                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="all">All</option>
+                <option value="submitted">Submitted Only</option>
+                <option value="pending">Pending Only</option>
+              </select>
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Class</label>
-            <select
-              value={filters.class}
-              onChange={e => setFilters({ ...filters, class: e.target.value })}
-              className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          {(filters.teacher || filters.class || filters.subject || filters.status !== 'all') && (
+            <button
+              onClick={() => setFilters({ teacher: '', class: '', subject: '', status: 'all' })}
+              className="mt-3 text-xs text-blue-600 hover:text-blue-800 font-medium"
             >
-              <option value="">All Classes</option>
-              {classes.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Subject</label>
-            <select
-              value={filters.subject}
-              onChange={e => setFilters({ ...filters, subject: e.target.value })}
-              className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">All Subjects</option>
-              {subjects.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Status</label>
-            <select
-              value={filters.status}
-              onChange={e => setFilters({ ...filters, status: e.target.value })}
-              className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="all">All</option>
-              <option value="submitted">Submitted Only</option>
-              <option value="pending">Pending Only</option>
-            </select>
-          </div>
+              Clear all filters
+            </button>
+          )}
         </div>
-        {(filters.teacher || filters.class || filters.subject || filters.status !== 'all') && (
-          <button
-            onClick={() => setFilters({ teacher: '', class: '', subject: '', status: 'all' })}
-            className="mt-3 text-xs text-blue-600 hover:text-blue-800 font-medium"
-          >
-            Clear all filters
-          </button>
-        )}
-      </div>
       )}
 
       {/* Daily Reports Table */}
@@ -367,10 +369,9 @@ const HMDailyOversight = ({ user }) => {
                   </td>
                 </tr>
               )}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
         </div>
-      </div>
       )}
 
       {/* Lesson Plans Table */}
@@ -464,6 +465,7 @@ const HMDailyOversight = ({ user }) => {
 
       {/* Summary Footer */}
       {activeTab === 'reports' && (
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm text-gray-600">
