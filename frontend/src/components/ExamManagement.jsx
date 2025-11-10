@@ -154,8 +154,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       if (isNaN(num)) return '';
       if (num >= 1 && num <= 4) return 'Std 1-4';
       if (num >= 5 && num <= 8) return 'Std 5-8';
-      if (num >= 9 && num <= 10) return 'Std 9-10';
-      if (num >= 11 && num <= 12) return 'Std 11-12';
+      if (num >= 9 && num <= 12) return 'Std 9-12';  // Combined group for 9-12
       return '';
     };
 
@@ -1181,13 +1180,21 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       });
       
       console.log('Backend Response:', result);
+      console.log('Response details:', {
+        hasOk: result?.ok,
+        hasSubmitted: result?.submitted,
+        hasError: result?.error,
+        fullResponse: JSON.stringify(result)
+      });
       
       // Support both response formats for compatibility
       if (result && (result.ok || result.submitted)) {
         success('Marks Saved', 'Marks saved successfully');
         setShowMarksForm(false);
       } else {
-        throw new Error(result?.error || 'Failed to save marks');
+        const errorMsg = result?.error || 'Failed to save marks';
+        console.error('❌ SAVE FAILED:', errorMsg);
+        throw new Error(errorMsg);
       }
     } catch (err) {
       console.error('Error submitting marks:', err);
@@ -2219,7 +2226,20 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       {/* Marks Entry Form */}
       {showMarksForm && selectedExam && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-lg p-6 max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-lg p-6 max-w-5xl w-full max-h-[90vh] overflow-y-auto relative">
+            {/* Loading Overlay */}
+            {isLoading && (
+              <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10 rounded-xl">
+                <div className="flex flex-col items-center">
+                  <svg className="animate-spin h-10 w-10 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <p className="mt-2 text-sm text-gray-600">Saving marks...</p>
+                </div>
+              </div>
+            )}
+            
             <h2 className="text-xl font-semibold mb-4 flex justify-between items-center">
               <span>Enter Marks: {selectedExam.examName || `${selectedExam.examType} - ${selectedExam.class} - ${selectedExam.subject}`}</span>
               <div className="flex items-center gap-2">

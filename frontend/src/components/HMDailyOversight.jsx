@@ -1,12 +1,14 @@
 // HMDailyOversight.jsx - HM Dashboard for Daily Report Tracking
 import React, { useState, useEffect } from 'react';
-import { getDailyReportsForDate } from '../api';
+import { getDailyReportsForDate, getLessonPlansForDate } from '../api';
 import { todayIST, formatLocalDate } from '../utils/dateUtils';
 
 const HMDailyOversight = ({ user }) => {
   const [date, setDate] = useState(todayIST());
   const [reports, setReports] = useState([]);
+  const [lessonPlans, setLessonPlans] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('reports'); // 'reports' or 'lessonplans'
   const [stats, setStats] = useState({
     totalPeriods: 0,
     submitted: 0,
@@ -28,6 +30,7 @@ const HMDailyOversight = ({ user }) => {
 
   useEffect(() => {
     loadDailyReports();
+    loadLessonPlans();
   }, [date]);
 
   async function loadDailyReports() {
@@ -48,6 +51,22 @@ const HMDailyOversight = ({ user }) => {
       setReports([]);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadLessonPlans() {
+    try {
+      const response = await getLessonPlansForDate(date);
+      console.log('Lesson plans response:', response);
+      
+      // Unwrap the response
+      const result = response.data || response;
+      const plansData = result.lessonPlans || [];
+
+      setLessonPlans(plansData);
+    } catch (err) {
+      console.error('Failed to load lesson plans:', err);
+      setLessonPlans([]);
     }
   }
 
@@ -97,8 +116,8 @@ const HMDailyOversight = ({ user }) => {
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Daily Report Oversight</h1>
-          <p className="text-sm text-gray-600 mt-1">Track teacher daily reporting and completion status</p>
+          <h1 className="text-2xl font-bold text-gray-900">Daily Oversight</h1>
+          <p className="text-sm text-gray-600 mt-1">Track daily reports and lesson plans</p>
         </div>
         <div className="flex items-center gap-3">
           <label htmlFor="oversight-date" className="text-sm font-medium text-gray-700">Date:</label>
@@ -119,8 +138,34 @@ const HMDailyOversight = ({ user }) => {
         </div>
       </div>
 
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Tab Navigation */}
+      <div className="border-b border-gray-200">
+        <nav className="-mb-px flex space-x-8">
+          <button
+            onClick={() => setActiveTab('reports')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'reports'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            📊 Daily Reports ({reports.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('lessonplans')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'lessonplans'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            📚 Lesson Plans ({lessonPlans.length})
+          </button>
+        </nav>
+      </div>
+
+      {/* Statistics Cards - Only show for Daily Reports */}
+      {activeTab === 'reports' && (
         <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
@@ -186,9 +231,10 @@ const HMDailyOversight = ({ user }) => {
           </div>
         </div>
       </div>
+      )}
 
-      {/* Filters */}
-      <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+      {/* Filters - Only show for Daily Reports */}
+      {activeTab === 'reports' && (
         <h3 className="text-sm font-semibold text-gray-700 mb-3">Filters</h3>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
@@ -246,9 +292,10 @@ const HMDailyOversight = ({ user }) => {
           </button>
         )}
       </div>
+      )}
 
-      {/* Reports Table */}
-      <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+      {/* Daily Reports Table */}
+      {activeTab === 'reports' && (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
@@ -320,13 +367,103 @@ const HMDailyOversight = ({ user }) => {
                   </td>
                 </tr>
               )}
+          </tbody>
+        </table>
+        </div>
+      </div>
+      )}
+
+      {/* Lesson Plans Table */}
+      {activeTab === 'lessonplans' && (
+      <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">Period</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teacher</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">Session</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">LP Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Completion</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Notes</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {lessonPlans.map((lp, idx) => (
+                <tr key={idx} className={
+                  lp.lpStatus === 'Approved' ? 'bg-green-50' : 
+                  lp.lpStatus === 'Pending Review' ? 'bg-yellow-50' : 
+                  lp.lpStatus === 'Rejected' ? 'bg-red-50' : 
+                  'bg-white'
+                }>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                    #{lp.period}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 font-medium">
+                    {lp.class}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                    {lp.teacher}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                    {lp.subject}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-900">
+                    {lp.chapter || '-'}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-center text-gray-900">
+                    {lp.sessionNo || '-'}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm">
+                    <span className={`inline-flex px-2 py-1 text-xs font-medium rounded ${
+                      lp.lpStatus === 'Approved' 
+                        ? 'bg-green-100 text-green-800'
+                        : lp.lpStatus === 'Pending Review'
+                        ? 'bg-yellow-100 text-yellow-800'
+                        : lp.lpStatus === 'Rejected'
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-gray-100 text-gray-800'
+                    }`}>
+                      {lp.lpStatus === 'Pending Review' ? '⏳ Pending' : 
+                       lp.lpStatus === 'Approved' ? '✓ Approved' : 
+                       lp.lpStatus === 'Rejected' ? '✗ Rejected' : 
+                       lp.lpStatus || 'Draft'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-sm">
+                    <span className={`inline-flex px-2 py-1 text-xs font-medium rounded ${
+                      lp.completionStatus === 'Fully Completed' 
+                        ? 'bg-green-100 text-green-800'
+                        : lp.completionStatus === 'Partially Completed'
+                        ? 'bg-yellow-100 text-yellow-800'
+                        : 'bg-gray-100 text-gray-800'
+                    }`}>
+                      {lp.completionStatus}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">
+                    {lp.notes || lp.reviewComments || '-'}
+                  </td>
+                </tr>
+              ))}
+              {lessonPlans.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
+                    No lesson plans found for this date.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
+      )}
 
       {/* Summary Footer */}
-      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+      {activeTab === 'reports' && (
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm text-gray-600">
@@ -338,6 +475,32 @@ const HMDailyOversight = ({ user }) => {
           </div>
         </div>
       </div>
+      )}
+
+      {/* Lesson Plans Summary Footer */}
+      {activeTab === 'lessonplans' && (
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex gap-6">
+            <p className="text-sm text-gray-600">
+              Total: <span className="font-semibold">{lessonPlans.length}</span>
+            </p>
+            <p className="text-sm text-yellow-600">
+              ⏳ Pending: <span className="font-semibold">{lessonPlans.filter(lp => lp.lpStatus === 'Pending Review').length}</span>
+            </p>
+            <p className="text-sm text-green-600">
+              ✓ Approved: <span className="font-semibold">{lessonPlans.filter(lp => lp.lpStatus === 'Approved').length}</span>
+            </p>
+            <p className="text-sm text-red-600">
+              ✗ Rejected: <span className="font-semibold">{lessonPlans.filter(lp => lp.lpStatus === 'Rejected').length}</span>
+            </p>
+          </div>
+          <div className="text-sm text-gray-600">
+            Last updated: {formatLocalDate(date)}
+          </div>
+        </div>
+      </div>
+      )}
     </div>
   );
 };

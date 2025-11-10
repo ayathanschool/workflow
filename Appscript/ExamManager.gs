@@ -256,10 +256,8 @@ function _standardGroup(cls) {
     return 'Std 1-4';
   } else if (classNum >= 5 && classNum <= 8) {
     return 'Std 5-8';
-  } else if (classNum >= 9 && classNum <= 10) {
-    return 'Std 9-10';
-  } else if (classNum >= 11 && classNum <= 12) {
-    return 'Std 11-12';
+  } else if (classNum >= 9 && classNum <= 12) {
+    return 'Std 9-12';  // Combined group for classes 9-12
   }
   
   return 'Default';
@@ -270,7 +268,7 @@ function _standardGroup(cls) {
  */
 function _classHasInternalMarks(cls) {
   const standardGroup = _standardGroup(cls);
-  return ['Std 9-10', 'Std 11-12'].includes(standardGroup);
+  return ['Std 9-12'].includes(standardGroup);  // Use combined group
 }
 
 /**
@@ -581,5 +579,87 @@ function getStudentPerformance(cls) {
   } catch (error) {
     Logger.log('Error in getStudentPerformance: ' + error.message);
     return { success: false, error: error.message, students: [] };
+  }
+}
+
+/**
+ * ADMIN FUNCTION: Recalculate all grades in ExamMarks sheet
+ * Run this once after deploying Version 130 to fix existing grades
+ * This will update all grades to use correct "Std 9-12" boundaries
+ */
+function recalculateAllGrades() {
+  try {
+    Logger.log('Starting grade recalculation...');
+    
+    // Get ExamMarks sheet
+    const marksSh = _getSheet('ExamMarks');
+    const headers = _headers(marksSh);
+    const data = marksSh.getDataRange().getValues();
+    
+    if (data.length <= 1) {
+      Logger.log('No marks to recalculate');
+      return { success: true, message: 'No marks found', updated: 0 };
+    }
+    
+    // Find column indexes
+    const classCol = headers.indexOf('class') + 1;
+    const totalCol = headers.indexOf('total') + 1;
+    const gradeCol = headers.indexOf('grade') + 1;
+    
+    // Get Exams data for totalMax values
+    const examSh = _getSheet('Exams');
+    const examHeaders = _headers(examSh);
+    const exams = _rows(examSh).map(r => _indexByHeader(r, examHeaders));
+    
+    if (!classCol || !totalCol || !gradeCol) {
+      return { error: 'Required columns not found in ExamMarks sheet' };
+    }
+    
+    let updatedCount = 0;
+    
+    // Process each row (skip header)
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const rowNum = i + 1;
+      
+      const examId = row[headers.indexOf('examId')];
+      const className = row[headers.indexOf('class')];
+      const total = Number(row[headers.indexOf('total')] || 0);
+      const oldGrade = row[headers.indexOf('grade')];
+      
+      // Find exam to get totalMax
+      const exam = exams.find(e => e.examId === examId);
+      if (!exam) {
+        Logger.log(`Row ${rowNum}: Exam ${examId} not found, skipping`);
+        continue;
+      }
+      
+      const totalMax = Number(exam.totalMax || exam.internalMax + exam.externalMax || 100);
+      const percentage = totalMax > 0 ? (total / totalMax) * 100 : 0;
+      
+      // Recalculate grade using current Version 130 logic
+      const newGrade = _calculateGradeFromBoundaries(percentage, className);
+      
+      // Update only if grade changed
+      if (oldGrade !== newGrade) {
+        marksSh.getRange(rowNum, gradeCol).setValue(newGrade);
+        updatedCount++;
+        Logger.log(`Row ${rowNum}: ${className} - ${total}/${totalMax} (${percentage.toFixed(1)}%) - Changed ${oldGrade} → ${newGrade}`);
+      }
+    }
+    
+    Logger.log(`Grade recalculation complete. Updated ${updatedCount} out of ${data.length - 1} records.`);
+    
+    return {
+      success: true,
+      message: `Successfully recalculated grades`,
+      totalRecords: data.length - 1,
+      updated: updatedCount,
+      unchanged: (data.length - 1) - updatedCount
+    };
+    
+  } catch (error) {
+    Logger.log('Error in recalculateAllGrades: ' + error.message);
+    return { success: false, error: error.message };
   }
 }

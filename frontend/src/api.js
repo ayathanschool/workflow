@@ -317,6 +317,11 @@ export async function getDailyReportsForDate(date) {
   return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION)
 }
 
+export async function getLessonPlansForDate(date) {
+  const q = new URLSearchParams({ action: 'getLessonPlansForDate', date })
+  return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION)
+}
+
 export async function getAllClasses() {
   const response = await getJSON(`${BASE_URL}?action=getAllClasses`);
   // Unwrap the response: backend returns { status, data, timestamp }
@@ -577,7 +582,9 @@ export async function updateExam(examData) {
 // teacherEmail, teacherName and an array of marks ({ admNo, studentName,
 // internal, external }).  Returns { ok: true } on success.
 export async function submitExamMarks(data) {
-  return postJSON(`${BASE_URL}?action=submitExamMarks`, data)
+  const result = await postJSON(`${BASE_URL}?action=submitExamMarks`, data);
+  // Backend wraps response in { status, data, timestamp }, so unwrap it
+  return result?.data || result;
 }
 
 // Retrieve all marks for a given examId.  Returns an array of mark records.

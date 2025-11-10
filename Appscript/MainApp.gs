@@ -279,6 +279,10 @@ function doGet(e) {
       return _handleGetDailyReportsForDate(e.parameter);
     }
     
+    if (action === 'getLessonPlansForDate') {
+      return _handleGetLessonPlansForDate(e.parameter);
+    }
+    
     // === APP SETTINGS ROUTES ===
     if (action === 'getAppSettings') {
       return _handleGetAppSettings();
@@ -1303,6 +1307,100 @@ function _handleGetDailyReportsForDate(params) {
     
   } catch (error) {
     Logger.log('Error getting daily reports for date: ' + error.message);
+    return _respond({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Get all lesson plans for a specific date (for HM Daily Oversight)
+ * Shows: Class, Period, Teacher, Subject, Chapter, Session No, LP Status, Completion Status, Notes
+ */
+function _handleGetLessonPlansForDate(params) {
+  try {
+    const date = params.date || _todayISO();
+    const normalizedDate = _isoDateString(date);
+    Logger.log(`Getting lesson plans for date: ${normalizedDate}`);
+    
+    // Get all lesson plans for this date
+    const lpSh = _getSheet('LessonPlanSettings');
+    const lpHeaders = _headers(lpSh);
+    const allLessonPlans = _rows(lpSh).map(row => _indexByHeader(row, lpHeaders))
+      .filter(lp => {
+        if (!lp || !lp.selectedDate) return false;
+        const lpDate = _isoDateString(lp.selectedDate);
+        return lpDate === normalizedDate;
+      });
+    
+    Logger.log(`Found ${allLessonPlans.length} lesson plans for ${normalizedDate}`);
+    
+    // Get daily reports to check completion status
+    const drSh = _getSheet('DailyReports');
+    const drHeaders = _headers(drSh);
+    const dailyReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders))
+      .filter(report => {
+        if (!report || !report.date) return false;
+        const reportDate = _isoDateIST(report.date);
+        return reportDate === normalizedDate;
+      });
+    
+    // Create report map by lessonPlanId for quick lookup
+    const reportMap = {};
+    dailyReports.forEach(report => {
+      if (report.lessonPlanId) {
+        reportMap[report.lessonPlanId] = report;
+      }
+    });
+    
+    // Build result with all lesson plan details
+    const result = allLessonPlans.map(lp => {
+      const report = reportMap[lp.lpId];
+      
+      return {
+        lpId: lp.lpId || '',
+        class: lp.class || '',
+        period: Number(lp.selectedPeriod || 0),
+        teacher: lp.teacherName || '',
+        teacherEmail: lp.teacherEmail || '',
+        subject: lp.subject || '',
+        chapter: lp.chapter || '',
+        sessionNo: lp.session || '',
+        lpStatus: lp.status || 'draft', // Pending Review, Approved, Rejected
+        completionStatus: report ? (report.completed || 'Not Started') : 'Not Started',
+        notes: report ? (report.notes || '') : '',
+        reviewComments: lp.reviewComments || '',
+        submittedAt: lp.submittedAt || '',
+        reviewedAt: lp.reviewedAt || '',
+        learningObjectives: lp.learningObjectives || '',
+        teachingMethods: lp.teachingMethods || '',
+        resourcesRequired: lp.resourcesRequired || '',
+        assessmentMethods: lp.assessmentMethods || '',
+        dailyReportSubmitted: !!report
+      };
+    });
+    
+    // Sort by period, then class
+    result.sort((a, b) => {
+      if (a.period !== b.period) return a.period - b.period;
+      return a.class.localeCompare(b.class);
+    });
+    
+    Logger.log(`Returning ${result.length} lesson plan records`);
+    
+    return _respond({
+      success: true,
+      date: normalizedDate,
+      lessonPlans: result,
+      stats: {
+        total: result.length,
+        pendingReview: result.filter(lp => lp.lpStatus === 'Pending Review').length,
+        approved: result.filter(lp => lp.lpStatus === 'Approved').length,
+        rejected: result.filter(lp => lp.lpStatus === 'Rejected').length,
+        completed: result.filter(lp => lp.completionStatus === 'Fully Completed').length
+      }
+    });
+    
+  } catch (error) {
+    Logger.log('Error getting lesson plans for date: ' + error.message);
     return _respond({ success: false, error: error.message });
   }
 }
