@@ -2538,7 +2538,7 @@ const App = () => {
                   onChange={(e) => setFilters({ ...filters, status: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="Pending">Pending (All)</option>
+                  <option value="Pending">Pending</option>
                   <option value="Pending - Validation Override">Pending - Override</option>
                   <option value="Pending - No Timetable">Pending - No Timetable</option>
                   <option value="Approved">Approved</option>
@@ -2587,70 +2587,72 @@ const App = () => {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teacher</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sessions</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teacher</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter</th>
+                  <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">Sessions</th>
+                  <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Status</th>
+                  <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {pendingSchemes.map((scheme) => (
                   <tr key={scheme.schemeId}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{scheme.teacherName}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{scheme.class}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{scheme.subject}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{scheme.chapter}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{scheme.noOfSessions}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-3 py-4 text-sm text-gray-900">{scheme.teacherName}</td>
+                    <td className="px-3 py-4 text-sm text-gray-900">{scheme.class}</td>
+                    <td className="px-3 py-4 text-sm text-gray-900">{scheme.subject}</td>
+                    <td className="px-3 py-4 text-sm text-gray-900">{scheme.chapter}</td>
+                    <td className="px-2 py-4 text-sm text-gray-900 text-center">{scheme.noOfSessions}</td>
+                    <td className="px-2 py-4">
                       {scheme.status === 'Approved' ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                           ✓ Approved
                         </span>
                       ) : scheme.status === 'Rejected' ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
                           ✗ Rejected
                         </span>
                       ) : scheme.status === 'Pending - Validation Override' ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
                           ⚠️ Override
                         </span>
                       ) : scheme.status === 'Pending - No Timetable' ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                          📋 No Timetable
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                          📋 No TT
                         </span>
                       ) : (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                           ⏳ Pending
                         </span>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {(scheme.status === 'Pending' || scheme.status === 'Pending - Validation Override' || scheme.status === 'Pending - No Timetable') && (
-                        <>
-                          <button 
-                            onClick={() => handleApproveScheme(scheme.schemeId)}
-                            className="text-green-600 hover:text-green-900 mr-3 px-3 py-1 bg-green-100 rounded"
-                          >
-                            Approve
-                          </button>
-                          <button 
-                            onClick={() => handleRejectScheme(scheme.schemeId)}
-                            className="text-red-600 hover:text-red-900 mr-3 px-3 py-1 bg-red-100 rounded"
-                          >
-                            Reject
-                          </button>
-                        </>
-                      )}
-                      <button type="button"
-                        onClick={() => openLessonView(scheme)}
-                        className="text-blue-600 hover:text-blue-900"
-                        title="View scheme details"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
+                    <td className="px-2 py-4 text-sm text-gray-500">
+                      <div className="flex items-center gap-2">
+                        {(scheme.status === 'Pending' || scheme.status === 'Pending - Validation Override' || scheme.status === 'Pending - No Timetable') && (
+                          <>
+                            <button 
+                              onClick={() => handleApproveScheme(scheme.schemeId)}
+                              className="text-green-600 hover:text-green-900 px-2 py-1 bg-green-100 rounded text-xs"
+                            >
+                              Approve
+                            </button>
+                            <button 
+                              onClick={() => handleRejectScheme(scheme.schemeId)}
+                              className="text-red-600 hover:text-red-900 px-2 py-1 bg-red-100 rounded text-xs"
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        <button type="button"
+                          onClick={() => openLessonView(scheme)}
+                          className="text-blue-600 hover:text-blue-900"
+                          title="View scheme details"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
