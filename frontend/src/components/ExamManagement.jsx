@@ -152,9 +152,11 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       if (!match) return '';
       const num = Number(match[1]);
       if (isNaN(num)) return '';
-      if (num <= 4) return 'Std 1-4';
-      if (num <= 8) return 'Std 5-8';
-      return 'Std 9-12';
+      if (num >= 1 && num <= 4) return 'Std 1-4';
+      if (num >= 5 && num <= 8) return 'Std 5-8';
+      if (num >= 9 && num <= 10) return 'Std 9-10';
+      if (num >= 11 && num <= 12) return 'Std 11-12';
+      return '';
     };
 
     const stdGroup = getStandardGroup(className);
@@ -2292,7 +2294,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                               value={row.internal} 
                               onChange={(e) => handleMarksChange(index, 'internal', e.target.value)}
                               className="w-16 px-2 py-1 border border-gray-300 rounded-md text-center"
-                              placeholder="0-{selectedExam.internalMax || 0}"
+                              placeholder={`0-${selectedExam.internalMax || 0}`}
                               title="Enter marks or leave blank if not applicable"
                             />
                           </td>
@@ -2303,8 +2305,8 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                             value={row.external} 
                             onChange={(e) => handleMarksChange(index, 'external', e.target.value)}
                             className="w-16 px-2 py-1 border border-gray-300 rounded-md text-center"
-                            placeholder="0-{selectedExam.externalMax || 0} or A"
-                            title="Enter marks (0-{selectedExam.externalMax || 0}) or 'A' for Absent"
+                            placeholder={`0-${selectedExam.externalMax || 0} or A`}
+                            title={`Enter marks (0-${selectedExam.externalMax || 0}) or 'A' for Absent`}
                           />
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">{calculateTotal(row, selectedExam)}</td>
