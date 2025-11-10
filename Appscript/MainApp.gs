@@ -1001,30 +1001,53 @@ function _handleGetPendingLessonPlans(params) {
  */
 function _handleGetAllSchemes(params) {
   try {
-    Logger.log('=== Getting All Schemes ===');
-    const sh = _getSheet('Schemes');
-    Logger.log('Schemes sheet retrieved');
+    Logger.log('=== Getting All Schemes with Filters ===');
+    Logger.log(`Filter params: ${JSON.stringify(params)}`);
     
+    const sh = _getSheet('Schemes');
     const headers = _headers(sh);
-    Logger.log(`Headers: ${JSON.stringify(headers)}`);
     
     const allRows = _rows(sh);
     Logger.log(`Total rows found: ${allRows.length}`);
     
-    const schemes = allRows
-      .map(row => {
-        const obj = _indexByHeader(row, headers);
-        Logger.log(`Row mapped: schemeId=${obj.schemeId}, status=${obj.status}`);
-        return obj;
-      })
-      .filter(scheme => {
-        const isValid = scheme && scheme.schemeId;
-        Logger.log(`Filtering: schemeId=${scheme?.schemeId}, valid=${isValid}`);
-        return isValid;
-      });
+    let schemes = allRows
+      .map(row => _indexByHeader(row, headers))
+      .filter(scheme => scheme && scheme.schemeId);
     
-    Logger.log(`Loaded ${schemes.length} schemes total`);
-    Logger.log(`Schemes data: ${JSON.stringify(schemes)}`);
+    Logger.log(`Valid schemes before filtering: ${schemes.length}`);
+    
+    // Apply filters
+    if (params.teacher && params.teacher !== '') {
+      const teacherLower = params.teacher.toLowerCase();
+      schemes = schemes.filter(scheme =>
+        String(scheme.teacherName || '').toLowerCase().includes(teacherLower) ||
+        String(scheme.teacherEmail || '').toLowerCase().includes(teacherLower)
+      );
+      Logger.log(`After teacher filter (${params.teacher}): ${schemes.length}`);
+    }
+    
+    if (params.class && params.class !== '') {
+      schemes = schemes.filter(scheme =>
+        String(scheme.class || '').toLowerCase() === params.class.toLowerCase()
+      );
+      Logger.log(`After class filter (${params.class}): ${schemes.length}`);
+    }
+    
+    if (params.subject && params.subject !== '') {
+      schemes = schemes.filter(scheme =>
+        String(scheme.subject || '').toLowerCase() === params.subject.toLowerCase()
+      );
+      Logger.log(`After subject filter (${params.subject}): ${schemes.length}`);
+    }
+    
+    if (params.status && params.status !== '' && params.status !== 'All') {
+      schemes = schemes.filter(scheme =>
+        String(scheme.status || '') === params.status
+      );
+      Logger.log(`After status filter (${params.status}): ${schemes.length}`);
+    }
+    
+    Logger.log(`Final filtered schemes: ${schemes.length}`);
     
     return _respond(schemes);
   } catch (error) {
