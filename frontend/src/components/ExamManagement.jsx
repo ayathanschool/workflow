@@ -1163,6 +1163,13 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         external: Number(row.external) || 0
       }));
       
+      // Debug logging
+      console.log('=== SUBMITTING MARKS ===');
+      console.log('Selected Exam:', selectedExam);
+      console.log('Exam ID:', selectedExam?.examId);
+      console.log('Marks Count:', marks.length);
+      console.log('Sample Mark:', marks[0]);
+      
       // Submit to API
       const result = await api.submitExamMarks({
         examId: selectedExam.examId,
@@ -1172,6 +1179,8 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         teacherName: user.name || user.email,
         marks
       });
+      
+      console.log('Backend Response:', result);
       
       // Support both response formats for compatibility
       if (result && (result.ok || result.submitted)) {
