@@ -13,6 +13,7 @@ export default function SubstitutionModule() {
   const [substitutions, setSubstitutions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [freeTeachers, setFreeTeachers] = useState({});
+  const [loadingFreeTeachers, setLoadingFreeTeachers] = useState(false);
   // Track selected substitute per period-class row: { '<period>-<class>': identifierOrObject }
   const [selectedSubstitutes, setSelectedSubstitutes] = useState({});
   // Track which rows are currently being assigned: { '<period>-<class>': boolean }
@@ -121,6 +122,8 @@ export default function SubstitutionModule() {
     async function fetchTimetable() {
       if (!date) return;
       setLoading(true);
+      setLoadingFreeTeachers(true); // Set loading state immediately
+      console.log('🔄 Starting to load timetable and free teachers for date:', date);
       try {
         // Fetch the full daily timetable for the selected date
         const dailyTimetable = await api.getDailyTimetableForDate(date);
@@ -135,12 +138,16 @@ export default function SubstitutionModule() {
           return (a.class || '').localeCompare(b.class || '');
         });
 
-        if (mounted) setTimetable(filteredTimetable);
+        if (mounted) {
+          setTimetable(filteredTimetable);
+          console.log('✅ Timetable loaded, still loading free teachers...');
+        }
 
         // Refresh substitutions for the date
         if (mounted) await refreshAssigned(date);
 
         // Fetch free teachers for each period
+        console.log('🔍 Fetching free teachers for', filteredTimetable.length, 'slots');
         const teachersMap = {};
         const uniquePeriods = [...new Set(filteredTimetable.map(slot => slot.period))];
         
@@ -165,13 +172,18 @@ export default function SubstitutionModule() {
           }
         }
 
-        if (mounted) setFreeTeachers(teachersMap);
+        if (mounted) {
+          setFreeTeachers(teachersMap);
+          setLoadingFreeTeachers(false);
+          console.log('✅ Free teachers loaded for', Object.keys(teachersMap).length, 'periods');
+        }
       } catch (err) {
         console.error('Error fetching timetable or substitutes:', err);
         if (mounted) {
           setTimetable([]);
           setSubstitutions([]);
           setFreeTeachers({});
+          setLoadingFreeTeachers(false);
         }
       } finally {
         if (mounted) setLoading(false);
@@ -184,7 +196,11 @@ export default function SubstitutionModule() {
   
   // Handle substitute teacher assignment
   async function handleSubstituteAssign(period, classname, subject, substituteTeacher, originalTeacher) {
-    if (!substituteTeacher || !period || !classname) return false;
+    if (!substituteTeacher || !period || !classname) {
+      setAssignError('Please select a substitute teacher');
+      setTimeout(() => setAssignError(null), 3000);
+      return false;
+    }
     
     const rowKey = `${period}-${classname}`;
     setAssignError(null);
@@ -198,7 +214,7 @@ export default function SubstitutionModule() {
       
       console.log('Assigning substitution:', { date, period, class: classname, substitute: substituteIdentifier });
       
-      await api.assignSubstitution({
+      const result = await api.assignSubstitution({
         date,
         absentTeacher: originalTeacher || absentTeacher || 'Unknown', // Use original teacher if available
         period,
@@ -207,6 +223,8 @@ export default function SubstitutionModule() {
         substituteTeacher: substituteIdentifier,
         substituteSubject: subject // Default to same subject
       });
+      
+      console.log('Assignment result:', result);
 
       // Immediately show the assignment in UI (optimistic update)
       const newSub = {
@@ -526,6 +544,16 @@ export default function SubstitutionModule() {
                   const isItLab = isItLabPeriod(slot.subject);
                   const isItLabAssigning = itLabAssigning[rowKey] || false;
                   
+                  // Debug log for first row only
+                  if (index === 0) {
+                    console.log('🎯 First row render:', {
+                      loadingFreeTeachers,
+                      availableTeachersCount: availableTeachers.length,
+                      freeTeachersKeys: Object.keys(freeTeachers),
+                      period: slot.period
+                    });
+                  }
+                  
                   return (
                     <tr key={rowKey} className={`${theme === 'dark' ? 
                       (index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-750') :
@@ -555,26 +583,40 @@ export default function SubstitutionModule() {
                         ) : (
                           <div className="flex items-center space-x-2">
                             <div className="flex-1">
-                              <select
-                                className={`w-full border rounded px-2 py-1 ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} transition-colors duration-300`}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  const found = availableTeachers.find(t => (t.email === val || t.name === val));
-                                  setSelectedSubstitutes(prev => ({ ...prev, [rowKey]: found || val }));
-                                }}
-                                value={selectedSubstitutes[rowKey] ? (selectedSubstitutes[rowKey].email || selectedSubstitutes[rowKey].name || selectedSubstitutes[rowKey]) : ''}
-                                disabled={loading || isAssigning || availableTeachers.length === 0}
-                              >
-                                <option value="">Select teacher</option>
-                                {availableTeachers.map((teacher, idx) => (
-                                  <option
-                                    key={`${(teacher && (teacher.email || teacher.name)) || String(teacher) || 'free'}-${idx}`}
-                                    value={(teacher && (teacher.email || teacher.name)) || String(teacher)}
+                              {loadingFreeTeachers ? (
+                                <div className="flex items-center text-gray-500 text-sm">
+                                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                                  Loading teachers...
+                                </div>
+                              ) : (
+                                <>
+                                  <select
+                                    className={`w-full border rounded px-2 py-1 ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} transition-colors duration-300`}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      const found = availableTeachers.find(t => (t.email === val || t.name === val));
+                                      setSelectedSubstitutes(prev => ({ ...prev, [rowKey]: found || val }));
+                                    }}
+                                    value={selectedSubstitutes[rowKey] ? (selectedSubstitutes[rowKey].email || selectedSubstitutes[rowKey].name || selectedSubstitutes[rowKey]) : ''}
+                                    disabled={loading || isAssigning || availableTeachers.length === 0}
                                   >
-                                    {(teacher && (teacher.name || teacher.email)) || String(teacher)}
-                                  </option>
-                                ))}
-                              </select>
+                                    <option value="">Select teacher</option>
+                                    {availableTeachers.map((teacher, idx) => (
+                                      <option
+                                        key={`${(teacher && (teacher.email || teacher.name)) || String(teacher) || 'free'}-${idx}`}
+                                        value={(teacher && (teacher.email || teacher.name)) || String(teacher)}
+                                      >
+                                        {(teacher && (teacher.name || teacher.email)) || String(teacher)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {availableTeachers.length > 0 && (
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                      Note: Absent teachers may also appear if needed
+                                    </p>
+                                  )}
+                                </>
+                              )}
                             </div>
                             <div>
                               <button
@@ -584,7 +626,7 @@ export default function SubstitutionModule() {
                                   await handleSubstituteAssign(slot.period, slot.class, slot.subject, sel, slot.teacher);
                                   // Note: handleSubstituteAssign now clears the selection automatically
                                 }}
-                                disabled={loading || isAssigning || !selectedSubstitutes[rowKey]}
+                                disabled={loading || isAssigning || !selectedSubstitutes[rowKey] || loadingFreeTeachers}
                               >
                                 {isAssigning ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" /> : null}
                                 Assign
@@ -604,26 +646,40 @@ export default function SubstitutionModule() {
                           ) : (
                             <div className="flex items-center space-x-2">
                               <div className="flex-1">
-                                <select
-                                  className={`w-full border rounded px-2 py-1 ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} transition-colors duration-300`}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    const found = availableTeachers.find(t => (t.email === val || t.name === val));
-                                    setSelectedItLabSupport(prev => ({ ...prev, [rowKey]: found || val }));
-                                  }}
-                                  value={selectedItLabSupport[rowKey] ? (selectedItLabSupport[rowKey].email || selectedItLabSupport[rowKey].name || selectedItLabSupport[rowKey]) : ''}
-                                  disabled={loading || isItLabAssigning || availableTeachers.length === 0}
-                                >
-                                  <option value="">Select IT support</option>
-                                  {availableTeachers.map((teacher, idx) => (
-                                    <option
-                                      key={`itlab-${(teacher && (teacher.email || teacher.name)) || String(teacher) || 'free'}-${idx}`}
-                                      value={(teacher && (teacher.email || teacher.name)) || String(teacher)}
+                                {loadingFreeTeachers ? (
+                                  <div className="flex items-center text-gray-500 text-sm">
+                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                                    Loading teachers...
+                                  </div>
+                                ) : (
+                                  <>
+                                    <select
+                                      className={`w-full border rounded px-2 py-1 ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} transition-colors duration-300`}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        const found = availableTeachers.find(t => (t.email === val || t.name === val));
+                                        setSelectedItLabSupport(prev => ({ ...prev, [rowKey]: found || val }));
+                                      }}
+                                      value={selectedItLabSupport[rowKey] ? (selectedItLabSupport[rowKey].email || selectedItLabSupport[rowKey].name || selectedItLabSupport[rowKey]) : ''}
+                                      disabled={loading || isItLabAssigning || availableTeachers.length === 0}
                                     >
-                                      {(teacher && (teacher.name || teacher.email)) || String(teacher)}
-                                    </option>
-                                  ))}
-                                </select>
+                                      <option value="">Select IT support</option>
+                                      {availableTeachers.map((teacher, idx) => (
+                                        <option
+                                          key={`itlab-${(teacher && (teacher.email || teacher.name)) || String(teacher) || 'free'}-${idx}`}
+                                          value={(teacher && (teacher.email || teacher.name)) || String(teacher)}
+                                        >
+                                          {(teacher && (teacher.name || teacher.email)) || String(teacher)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    {availableTeachers.length > 0 && (
+                                      <p className="text-xs text-blue-500 dark:text-blue-400 mt-1">
+                                        Note: Absent teachers may also appear if needed
+                                      </p>
+                                    )}
+                                  </>
+                                )}
                               </div>
                               <div>
                                 <button
@@ -632,7 +688,7 @@ export default function SubstitutionModule() {
                                     const sel = selectedItLabSupport[rowKey];
                                     await handleItLabSupportAssign(slot.period, slot.class, sel);
                                   }}
-                                  disabled={loading || isItLabAssigning || !selectedItLabSupport[rowKey]}
+                                  disabled={loading || isItLabAssigning || !selectedItLabSupport[rowKey] || loadingFreeTeachers}
                                 >
                                   {isItLabAssigning ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" /> : null}
                                   <Monitor className="h-4 w-4 mr-1" />

@@ -5,109 +5,422 @@
  */
 
 /**
- * Check if today is the designated lesson plan preparation day
+ * Check if lesson plan preparation is allowed for this session
+ * SIMPLIFIED LOGIC: Allow preparation any day if:
+ * 1. It's an extended session (beyond original scheme count), OR
+ * 2. For Session 1 of new chapter: Previous chapter's LAST SESSION must be marked "Chapter Complete" in daily reports
+ * 3. For Session 2+: Previous session must have a daily report submitted
+ * 
+ * Note: Completion percentage is NOT used for validation - only "Chapter Complete" marking matters.
  */
-function _isTodayPreparationDay() {
+function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
   try {
-    const settingsSheet = _getSheet('Settings');
-    const settingsHeaders = _headers(settingsSheet);
-    const settingsData = _rows(settingsSheet).map(row => _indexByHeader(row, settingsHeaders));
+    // Ensure sessionNumber is a number
+    const sessionNum = parseInt(sessionNumber);
+    // Ensure noOfSessions is a number
+    const originalSessionCount = parseInt(scheme.noOfSessions || '2');
     
-    const preparationDayRow = settingsData.find(row => (row.key || '').trim() === 'lessonplan_preparation_day');
-    const preparationDay = (preparationDayRow?.value || 'Friday').trim().toLowerCase();
+    // DEBUG LOGGING
+    Logger.log(`=== PERMISSION CHECK ===`);
+    Logger.log(`Chapter: ${chapter.name || chapter}`);
+    Logger.log(`Session Number: ${sessionNum} (original: ${sessionNumber}, type: ${typeof sessionNumber})`);
+    Logger.log(`Original Session Count: ${originalSessionCount} (original: ${scheme.noOfSessions}, type: ${typeof scheme.noOfSessions})`);
+    Logger.log(`Scheme ID: ${scheme.schemeId}`);
+    Logger.log(`Comparison: ${sessionNum} > ${originalSessionCount} = ${sessionNum > originalSessionCount}`);
     
-    const today = new Date();
-    const todayDayName = _dayName(_isoDateString(today)).toLowerCase();
+    // ALWAYS allow extended sessions (beyond original scheme count)
+    if (sessionNum > originalSessionCount) {
+      Logger.log(`✅ Session ${sessionNum} is EXTENDED (beyond original ${originalSessionCount}) - ALLOWED ANY DAY`);
+      return {
+        allowed: true,
+        reason: 'extended_session',
+        message: `Extended session ${sessionNum} can be prepared any day`
+      };
+    } else {
+      Logger.log(`Session ${sessionNum} is NOT extended (${sessionNum} <= ${originalSessionCount})`);
+    }
     
-    Logger.log(`Today: ${todayDayName}, Preparation day: ${preparationDay}`);
+    // For Session 1 of any chapter: Check if there are incomplete chapters
+    if (sessionNum === 1) {
+      try {
+        const drSh = _getSheet('DailyReports');
+        const drHeaders = _headers(drSh);
+        const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
+        
+        // Find reports for this teacher/class/subject
+        const teacherReports = allReports.filter(report => {
+          const matchesTeacher = String(report.teacherEmail || '').toLowerCase() === String(scheme.teacherEmail || '').toLowerCase();
+          const matchesClass = String(report.class || '') === String(scheme.class || '');
+          const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
+          
+          return matchesTeacher && matchesClass && matchesSubject;
+        });
+        
+        // Check if this is the very first chapter (no reports exist yet)
+        if (teacherReports.length === 0) {
+          Logger.log(`No previous reports - allowing first chapter session 1`);
+          return {
+            allowed: true,
+            reason: 'first_chapter',
+            message: `First chapter of the scheme can be prepared any day`
+          };
+        }
+        
+        // Get all unique chapters that have been started (have daily reports)
+        const startedChapters = [...new Set(teacherReports.map(r => String(r.chapter || '')))];
+        Logger.log(`Started chapters for ${scheme.teacherEmail}: ${startedChapters.join(', ')}`);
+        
+        // Check if the current chapter being prepared already has reports
+        const currentChapterStarted = startedChapters.includes(String(chapter.name || ''));
+        
+        if (currentChapterStarted) {
+          // This chapter was already started, allow continuation
+          Logger.log(`Chapter ${chapter.name} already started - allowing session 1 (re-preparation)`);
+          return {
+            allowed: true,
+            reason: 'chapter_restart',
+            message: `Continuing previously started chapter`
+          };
+        }
+        
+        // NEW CHAPTER - Check if ALL previously started chapters are marked complete
+        const incompletedChapters = [];
+        
+        // Get all schemes for reference
+        const schemesSheet = _getSheet('Schemes');
+        const schemesHeaders = _headers(schemesSheet);
+        const allSchemes = _rows(schemesSheet).map(row => _indexByHeader(row, schemesHeaders));
+        
+        for (const chapterName of startedChapters) {
+          // Get all reports for this chapter
+          const chapterReports = teacherReports.filter(report => 
+            String(report.chapter || '') === chapterName
+          );
+          
+          if (chapterReports.length === 0) continue;
+          
+          // Find ALL session numbers that exist for this chapter (including extended)
+          const sessionNumbers = chapterReports
+            .map(r => Number(r.sessionNo || 0))
+            .filter(n => n > 0);
+          
+          if (sessionNumbers.length === 0) {
+            incompletedChapters.push(chapterName);
+            continue;
+          }
+          
+          // Get the HIGHEST session number (this could be an extended session)
+          const lastSessionNo = Math.max(...sessionNumbers);
+          
+          // Get the scheme's original session count for this chapter
+          const chapterScheme = allSchemes.find(s => 
+            String(s.chapter || '').toLowerCase() === chapterName.toLowerCase() &&
+            String(s.teacherEmail || '').toLowerCase() === String(scheme.teacherEmail || '').toLowerCase() &&
+            String(s.class || '') === String(scheme.class || '') &&
+            String(s.subject || '') === String(scheme.subject || '')
+          );
+          
+          const originalSessionCount = chapterScheme ? parseInt(chapterScheme.noOfSessions || 2) : 2;
+          
+          Logger.log(`Chapter "${chapterName}" - Original sessions: ${originalSessionCount}, Highest session with report: ${lastSessionNo}`);
+          
+          // Check if ALL sessions from 1 to lastSessionNo have daily reports
+          let missingSessions = [];
+          
+          for (let i = 1; i <= lastSessionNo; i++) {
+            const sessionReport = chapterReports.find(r => Number(r.sessionNo) === i);
+            
+            if (!sessionReport) {
+              missingSessions.push(i);
+            }
+          }
+          
+          if (missingSessions.length > 0) {
+            incompletedChapters.push(`${chapterName} (Missing daily reports for session(s): ${missingSessions.join(', ')})`);
+            Logger.log(`Chapter "${chapterName}" incomplete - missing sessions: ${missingSessions.join(', ')}`);
+            continue;
+          }
+          
+          // Check if the LAST SESSION is marked "Chapter Complete"
+          const lastSessionReport = chapterReports.find(report => 
+            Number(report.sessionNo) === lastSessionNo
+          );
+          
+          const isMarkedComplete = lastSessionReport && 
+            String(lastSessionReport.completed || '').toLowerCase().includes('chapter complete');
+          
+          Logger.log(`Chapter "${chapterName}" - Last session ${lastSessionNo} marked complete: ${isMarkedComplete}, completed field: "${lastSessionReport?.completed}"`);
+          
+          if (!isMarkedComplete) {
+            incompletedChapters.push(`${chapterName} (Last session ${lastSessionNo} not marked "Chapter Complete")`);
+            Logger.log(`Chapter "${chapterName}" incomplete - last session not marked complete`);
+            continue;
+          }
+          
+          Logger.log(`Chapter "${chapterName}" - All sessions complete and last session marked "Chapter Complete"`);
+        }
+        
+        if (incompletedChapters.length > 0) {
+          Logger.log(`Found incomplete chapters: ${incompletedChapters.join(', ')} - blocking new chapter`);
+          return {
+            allowed: false,
+            reason: 'previous_chapters_incomplete',
+            message: `Previous chapter must be completed before preparing session 1 of new chapter. Incomplete: ${incompletedChapters.join(', ')}. Mark "Chapter Complete" in the last session's daily report.`
+          };
+        }
+        
+        // All previous chapters completed - allow new chapter
+        Logger.log(`All previous chapters completed - allowing new chapter ${chapter.name}`);
+        return {
+          allowed: true,
+          reason: 'previous_chapters_completed',
+          message: `All previous chapters completed - new chapter can be prepared`
+        };
+        
+      } catch (drError) {
+        Logger.log(`Error checking previous chapter completion: ${drError.message}`);
+        // If error, allow by default to prevent blocking
+        return {
+          allowed: true,
+          reason: 'error_fallback',
+          message: 'Preparation allowed (error checking previous chapter)'
+        };
+      }
+    }
     
-    return todayDayName === preparationDay;
+    // For sessions 2+ within same chapter: Check if previous session exists in daily reports
+    // This allows continuing within the same chapter
+    try {
+      const drSh = _getSheet('DailyReports');
+      const drHeaders = _headers(drSh);
+      const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
+      
+      // First, check if this chapter has ANY reports (is it started?)
+      const chapterReports = allReports.filter(report => {
+        const matchesTeacher = String(report.teacherEmail || '').toLowerCase() === String(scheme.teacherEmail || '').toLowerCase();
+        const matchesChapter = String(report.chapter || '') === String(chapter.name || '');
+        const matchesClass = String(report.class || '') === String(scheme.class || '');
+        const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
+        
+        return matchesTeacher && matchesChapter && matchesClass && matchesSubject;
+      });
+      
+      // If chapter has no reports, check if previous chapters are complete
+      if (chapterReports.length === 0) {
+        Logger.log(`No reports for chapter ${chapter.name} yet - checking previous chapters`);
+        
+        // Get all reports for this teacher/class/subject
+        const teacherReports = allReports.filter(report => {
+          const matchesTeacher = String(report.teacherEmail || '').toLowerCase() === String(scheme.teacherEmail || '').toLowerCase();
+          const matchesClass = String(report.class || '') === String(scheme.class || '');
+          const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
+          
+          return matchesTeacher && matchesClass && matchesSubject;
+        });
+        
+        // If no reports at all, allow (first chapter)
+        if (teacherReports.length === 0) {
+          Logger.log(`No previous reports - allowing first chapter`);
+          return {
+            allowed: true,
+            reason: 'first_chapter',
+            message: `First chapter can be prepared any day`
+          };
+        }
+        
+        // Check if all previous chapters are complete
+        const startedChapters = [...new Set(teacherReports.map(r => String(r.chapter || '')))];
+        const incompletedChapters = [];
+        
+        // Get all schemes for reference
+        const schemesSheet = _getSheet('Schemes');
+        const schemesHeaders = _headers(schemesSheet);
+        const allSchemes = _rows(schemesSheet).map(row => _indexByHeader(row, schemesHeaders));
+        
+        for (const chapterName of startedChapters) {
+          const prevChapterReports = teacherReports.filter(report => 
+            String(report.chapter || '') === chapterName
+          );
+          
+          if (prevChapterReports.length === 0) continue;
+          
+          const sessionNumbers = prevChapterReports
+            .map(r => Number(r.sessionNo || 0))
+            .filter(n => n > 0);
+          
+          if (sessionNumbers.length === 0) {
+            incompletedChapters.push(chapterName);
+            continue;
+          }
+          
+          const lastSessionNo = Math.max(...sessionNumbers);
+          
+          // Get the scheme's original session count for this chapter
+          const chapterScheme = allSchemes.find(s => 
+            String(s.chapter || '').toLowerCase() === chapterName.toLowerCase() &&
+            String(s.teacherEmail || '').toLowerCase() === String(scheme.teacherEmail || '').toLowerCase() &&
+            String(s.class || '') === String(scheme.class || '') &&
+            String(s.subject || '') === String(scheme.subject || '')
+          );
+          
+          const originalSessionCount = chapterScheme ? parseInt(chapterScheme.noOfSessions || 2) : 2;
+          
+          // Check if ALL sessions from 1 to lastSessionNo have daily reports
+          let missingSessions = [];
+          
+          for (let i = 1; i <= lastSessionNo; i++) {
+            const sessionReport = prevChapterReports.find(r => Number(r.sessionNo) === i);
+            
+            if (!sessionReport) {
+              missingSessions.push(i);
+            }
+          }
+          
+          if (missingSessions.length > 0) {
+            incompletedChapters.push(`${chapterName} (Missing session(s): ${missingSessions.join(', ')})`);
+            continue;
+          }
+          
+          // Check if the LAST SESSION is marked "Chapter Complete"
+          const lastSessionReport = prevChapterReports.find(report => 
+            Number(report.sessionNo) === lastSessionNo
+          );
+          
+          const isMarkedComplete = lastSessionReport && 
+            String(lastSessionReport.completed || '').toLowerCase().includes('chapter complete');
+          
+          if (!isMarkedComplete) {
+            incompletedChapters.push(`${chapterName} (Last session ${lastSessionNo} not marked "Chapter Complete")`);
+            continue;
+          }
+        }
+        
+        if (incompletedChapters.length > 0) {
+          Logger.log(`Previous chapters incomplete - blocking new chapter ${chapter.name}`);
+          return {
+            allowed: false,
+            reason: 'previous_chapters_incomplete',
+            message: `Previous chapter must be completed before preparing session 1 of ${chapter.name}. Incomplete: ${incompletedChapters.join(', ')}. Mark "Chapter Complete" in the last session's daily report.`
+          };
+        }
+        
+        // All previous chapters complete - allow this new chapter
+        Logger.log(`All previous chapters complete - allowing new chapter ${chapter.name}`);
+        return {
+          allowed: true,
+          reason: 'previous_chapters_completed',
+          message: `All previous chapters completed - new chapter can be prepared`
+        };
+      }
+      
+      // Chapter has reports - check if previous session has daily report submitted
+      const previousSessionReport = chapterReports.find(report => 
+        Number(report.sessionNo) === sessionNum - 1
+      );
+      
+      if (!previousSessionReport) {
+        Logger.log(`Previous session ${sessionNum - 1} not found - blocking session ${sessionNum}`);
+        return {
+          allowed: false,
+          reason: 'previous_session_not_completed',
+          message: `Previous session ${sessionNum - 1} of "${chapter.name}" must have a daily report submitted before preparing session ${sessionNum}`
+        };
+      }
+      
+      // CRITICAL FIX: Check if CURRENT session we're trying to create is beyond the original count
+      // This means previous session MUST be the last original session and MUST be marked complete
+      if (sessionNum > originalSessionCount) {
+        // Trying to create extended session - previous session MUST be last original and marked complete
+        const isMarkedComplete = String(previousSessionReport.completed || '').toLowerCase().includes('chapter complete');
+        
+        Logger.log(`Attempting to create extended session ${sessionNum} (beyond original ${originalSessionCount}). Previous session ${sessionNum - 1} marked complete: ${isMarkedComplete}, completed field: "${previousSessionReport.completed}"`);
+        
+        if (!isMarkedComplete) {
+          return {
+            allowed: false,
+            reason: 'last_session_not_marked_complete',
+            message: `Cannot create extended session ${sessionNum}. Session ${sessionNum - 1} is the last original session of "${chapter.name}". Please mark it as "Chapter Complete" in the daily report first.`
+          };
+        }
+      }
+      
+      Logger.log(`Previous session ${sessionNum - 1} has daily report - allowing session ${sessionNum}`);
+      return {
+        allowed: true,
+        reason: 'continuing_chapter',
+        message: `Continuing same chapter - session ${sessionNum} can be prepared any day`
+      };
+      
+    } catch (drError) {
+      Logger.log(`Error checking previous session: ${drError.message}`);
+      return {
+        allowed: true,
+        reason: 'error_fallback',
+        message: 'Preparation allowed (error checking previous session)'
+      };
+    }
+    
   } catch (error) {
-    Logger.log(`Error checking preparation day: ${error.message}`);
-    return true; // Allow by default if error
+    Logger.log(`Error checking preparation permission: ${error.message}`);
+    // If error, allow by default
+    return {
+      allowed: true,
+      reason: 'error_fallback',
+      message: 'Preparation allowed (error in day check)'
+    };
   }
 }
 
 /**
- * Calculate lesson planning date range based on Settings
+ * Calculate lesson planning date range - show till end of current month
+ * SIMPLIFIED: No preparation day restriction, just show available periods till month-end
  */
 function _calculateLessonPlanningDateRange() {
   try {
-    const settingsSheet = _getSheet('Settings');
-    const settingsHeaders = _headers(settingsSheet);
-    const settingsData = _rows(settingsSheet).map(row => _indexByHeader(row, settingsHeaders));
-    
-    // Get configuration from Settings
-    const preparationDayRow = settingsData.find(row => (row.key || '').trim() === 'lessonplan_preparation_day');
-    const daysAheadRow = settingsData.find(row => (row.key || '').trim() === 'lessonplan_days_ahead');
-    const deferredDaysRow = settingsData.find(row => (row.key || '').trim() === 'lessonplan_deferred_days');
-    
-    // Parse values with defaults
-    const preparationDay = (preparationDayRow?.value || 'Monday').trim();
-    const daysAhead = parseInt(daysAheadRow?.value || '7'); // Total days to show from start
-    // Handle empty string or '0' for deferredDays - treat empty as 0
-    let deferredDays = 5; // default
-    if (deferredDaysRow && deferredDaysRow.value !== undefined && deferredDaysRow.value !== null) {
-      const deferredValue = String(deferredDaysRow.value).trim();
-      if (deferredValue === '' || deferredValue === '0') {
-        deferredDays = 0;
-      } else {
-        deferredDays = parseInt(deferredValue) || 5;
-      }
-    }
-    
-    Logger.log(`Lesson planning config: Preparation day=${preparationDay}, Deferred days=${deferredDays}, Days ahead=${daysAhead}`);
-    
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todayDayName = _dayName(_isoDateString(today));
     
-    // Check if today is preparation day
-    const isPreparationDay = todayDayName.toLowerCase() === preparationDay.toLowerCase();
-    
-    // Calculate start date (today + deferred days)
+    // Start from today
     const startDate = new Date(today);
-    startDate.setDate(startDate.getDate() + deferredDays);
     
-    // Calculate end date (start date + days ahead - 1)
-    const endDate = new Date(startDate);
-    endDate.setDate(endDate.getDate() + daysAhead - 1);
+    // End at last day of current month
+    const endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    endDate.setHours(0, 0, 0, 0);
     
     // Format as ISO date strings
     const startDateString = _isoDateString(startDate);
     const endDateString = _isoDateString(endDate);
     
-    Logger.log(`TODAY: ${_isoDateString(today)} (${todayDayName}), Is preparation day: ${isPreparationDay}`);
-    Logger.log(`DEFERRED DAYS: ${deferredDays}, DAYS AHEAD: ${daysAhead}`);
-    Logger.log(`CALCULATED START: ${startDateString} (${_dayName(startDateString)})`);
-    Logger.log(`CALCULATED END: ${endDateString} (${_dayName(endDateString)})`);
-    Logger.log(`Planning window: ${startDateString} to ${endDateString}`);
+    const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+    
+    Logger.log(`=== LESSON PLANNING DATE RANGE (TILL MONTH END) ===`);
+    Logger.log(`TODAY: ${_isoDateString(today)}`);
+    Logger.log(`START: ${startDateString}`);
+    Logger.log(`END: ${endDateString} (Last day of month)`);
+    Logger.log(`TOTAL DAYS: ${totalDays}`);
     
     return {
       startDate: startDateString,
       endDate: endDateString,
-      deferredDays: deferredDays,
-      daysAhead: daysAhead,
-      preparationDay: preparationDay,
-      isPreparationDay: isPreparationDay,
-      canSubmit: isPreparationDay
+      deferredDays: 0,
+      daysAhead: totalDays,
+      preparationDay: 'Any', // No longer restricted by day
+      isPreparationDay: true, // Always true - any day allowed
+      canSubmit: true
     };
   } catch (error) {
     Logger.log(`Error calculating date range: ${error.message}, using defaults`);
-    // Default: show next week (5 days from today, 7 days duration)
+    // Default: rest of current month
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const startDate = new Date(today);
-    startDate.setDate(startDate.getDate() + 5);
-    const endDate = new Date(startDate);
-    endDate.setDate(endDate.getDate() + 6);
+    const endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
     
     return {
-      startDate: _isoDateString(startDate),
+      startDate: _isoDateString(today),
       endDate: _isoDateString(endDate),
-      deferredDays: 5,
-      daysAhead: 7,
-      preparationDay: 'Monday',
+      deferredDays: 0,
+      daysAhead: Math.ceil((endDate - today) / (1000 * 60 * 60 * 24)) + 1,
+      preparationDay: 'Any',
       isPreparationDay: true,
       canSubmit: true
     };
@@ -373,23 +686,14 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
 
 /**
  * Create lesson plan for specific scheme chapter session
- * WITH DOCUMENT LOCK AND UNIQUE KEY CONSTRAINT
+ * WITH DOCUMENT LOCK AND INTELLIGENT PREPARATION DAY CHECK
  */
 function createSchemeLessonPlan(lessonPlanData) {
   var lock = LockService.getDocumentLock();
   try {
     Logger.log(`Creating scheme-based lesson plan: ${JSON.stringify(lessonPlanData)}`);
     
-    // Check if today is the preparation day
-    const isPreparationDay = _isTodayPreparationDay();
-    if (!isPreparationDay) {
-      const dateRange = _calculateLessonPlanningDateRange();
-      const errorMsg = `Lesson plans can only be submitted on ${dateRange.preparationDay}. Today is ${_dayName(_isoDateString(new Date()))}`;
-      Logger.log(`ERROR: ${errorMsg}`);
-      return { success: false, error: errorMsg };
-    }
-    
-    // Validate required fields
+    // Validate required fields first
     const requiredFields = ['schemeId', 'chapter', 'session', 'teacherEmail', 'selectedDate', 'selectedPeriod'];
     const missing = requiredFields.filter(field => !String(lessonPlanData[field] ?? '').trim());
     if (missing.length) {
@@ -397,6 +701,40 @@ function createSchemeLessonPlan(lessonPlanData) {
       Logger.log(`ERROR: ${errorMsg}`);
       return { success: false, error: errorMsg };
     }
+    
+    // Get scheme details to check session type
+    const schemeDetails = _getSchemeDetails(lessonPlanData.schemeId);
+    if (!schemeDetails) {
+      return { success: false, error: 'Scheme not found' };
+    }
+    
+    // Parse scheme chapters to get chapter info
+    const schemeChapters = _parseSchemeChapters(schemeDetails);
+    const chapter = schemeChapters.find(ch => 
+      String(ch.name || '').toLowerCase() === String(lessonPlanData.chapter || '').toLowerCase()
+    );
+    
+    if (!chapter) {
+      return { success: false, error: 'Chapter not found in scheme' };
+    }
+    
+    // NEW: Check if preparation is allowed for this specific session
+    const preparationCheck = _isPreparationAllowedForSession(
+      chapter, 
+      parseInt(lessonPlanData.session), 
+      schemeDetails
+    );
+    
+    if (!preparationCheck.allowed) {
+      Logger.log(`ERROR: ${preparationCheck.message}`);
+      return { 
+        success: false, 
+        error: preparationCheck.message,
+        reason: preparationCheck.reason
+      };
+    }
+    
+    Logger.log(`✅ Preparation allowed: ${preparationCheck.message} (${preparationCheck.reason})`);
     
     Logger.log(`All required fields present. Proceeding with validation...`);
     
@@ -470,9 +808,6 @@ function createSchemeLessonPlan(lessonPlanData) {
       return { success: false, error: errorMsg };
     }
     
-    // Get scheme details for class/subject
-    const schemeDetails = _getSchemeDetails(lessonPlanData.schemeId) || {};
-    
     // Prepare row data
     const finalStatus = lessonPlanData.status === 'submitted' ? 'Pending Review' : (lessonPlanData.status || 'draft');
     
@@ -510,7 +845,7 @@ function createSchemeLessonPlan(lessonPlanData) {
     return {
       success: true,
       lessonPlanId: lpId,
-      message: 'Lesson plan created successfully',
+      message: `Lesson plan created successfully (${preparationCheck.reason})`,
       data: {
         lpId: lpId,
         schemeId: lessonPlanData.schemeId,
@@ -518,7 +853,8 @@ function createSchemeLessonPlan(lessonPlanData) {
         session: lessonPlanData.session,
         selectedDate: isoDate,
         selectedPeriod: periodStr,
-        uniqueKey: uniqueKey
+        uniqueKey: uniqueKey,
+        preparationReason: preparationCheck.reason
       }
     };
   } catch (error) {
@@ -614,29 +950,107 @@ function _parseSchemeChapters(scheme) {
 
 /**
  * Generate sessions for a chapter
- * NO MOCK DATA - just use session numbers
+ * Includes original sessions + extended sessions if needed based on completion rates
  */
 function _generateSessionsForChapter(chapter, scheme) {
   try {
     // USE THE SCHEME'S noOfSessions FIELD - this is the actual number the teacher specified
-    let sessionCount = parseInt(scheme.noOfSessions || 2);
+    let originalSessionCount = parseInt(scheme.noOfSessions || 2);
     
-    Logger.log(`Generating ${sessionCount} sessions for chapter: ${chapter.name}`);
+    Logger.log(`Generating sessions for chapter: ${chapter.name}, original sessions: ${originalSessionCount}`);
+    
+    // Check daily reports to see if extended sessions are needed
+    // LOGIC: Show extended session if all original sessions have reports BUT last session NOT marked "Chapter Complete"
+    let extendedSessionCount = originalSessionCount;
+    try {
+      const drSh = _getSheet('DailyReports');
+      const drHeaders = _headers(drSh);
+      const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
+      
+      // Find daily reports for this chapter by this teacher
+      const chapterReports = allReports.filter(report => {
+        const matchesTeacher = String(report.teacherEmail || '').toLowerCase() === String(scheme.teacherEmail || '').toLowerCase();
+        const matchesChapter = String(report.chapter || '') === String(chapter.name || '');
+        const matchesClass = String(report.class || '') === String(scheme.class || '');
+        const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
+        
+        return matchesTeacher && matchesChapter && matchesClass && matchesSubject;
+      });
+      
+      if (chapterReports.length > 0) {
+        Logger.log(`=== EXTENDED SESSION CHECK ===`);
+        Logger.log(`Found ${chapterReports.length} daily reports for chapter ${chapter.name}`);
+        Logger.log(`Teacher: ${scheme.teacherEmail}, Class: ${scheme.class}, Subject: ${scheme.subject}`);
+        Logger.log(`Original session count: ${originalSessionCount}`);
+        
+        // Check if ALL original sessions (1 to originalSessionCount) have daily reports
+        let allOriginalSessionsHaveReports = true;
+        let missingSessions = [];
+        
+        for (let i = 1; i <= originalSessionCount; i++) {
+          const sessionReport = chapterReports.find(report => 
+            Number(report.sessionNo) === i
+          );
+          
+          if (sessionReport) {
+            Logger.log(`✓ Session ${i}: Daily report exists`);
+          } else {
+            Logger.log(`✗ Session ${i}: No daily report found`);
+            allOriginalSessionsHaveReports = false;
+            missingSessions.push(i);
+          }
+        }
+        
+        Logger.log(`All original sessions have reports: ${allOriginalSessionsHaveReports}`);
+        
+        if (allOriginalSessionsHaveReports) {
+          // All original sessions have reports - check if last session is marked "Chapter Complete"
+          const lastSessionReport = chapterReports.find(report => 
+            Number(report.sessionNo) === originalSessionCount
+          );
+          
+          const isMarkedComplete = lastSessionReport && 
+            String(lastSessionReport.completed || '').toLowerCase().includes('chapter complete');
+          
+          Logger.log(`Last session (${originalSessionCount}) marked "Chapter Complete": ${isMarkedComplete}`);
+          Logger.log(`Last session completed field: "${lastSessionReport?.completed}"`);
+          
+          if (!isMarkedComplete) {
+            // All sessions have reports BUT last not marked complete - show extended session
+            extendedSessionCount = originalSessionCount + 1;
+            Logger.log(`🔄 EXTENDING: Sessions count ${originalSessionCount} → ${extendedSessionCount} (last session not marked "Chapter Complete")`);
+          } else {
+            Logger.log(`✅ Last session marked "Chapter Complete" - no extension needed`);
+          }
+        } else {
+          Logger.log(`❌ Cannot show extended session - missing reports for sessions: ${missingSessions.join(', ')}`);
+        }
+      } else {
+        Logger.log(`No daily reports found for chapter ${chapter.name} - using original session count`);
+      }
+      
+    } catch (drError) {
+      Logger.log(`Error checking daily reports for extended sessions: ${drError.message}`);
+      // Continue with original session count if error
+    }
     
     const sessions = [];
-    for (let i = 1; i <= sessionCount; i++) {
-      // NO GENERIC NAMES - just use "Session X"
+    for (let i = 1; i <= extendedSessionCount; i++) {
+      const isExtended = i > originalSessionCount;
       sessions.push({
         sessionNumber: i,
-        sessionName: `Session ${i}`,
-        estimatedDuration: '45 minutes'
+        sessionName: `Session ${i}${isExtended ? ' (Extended)' : ''}`,
+        estimatedDuration: '45 minutes',
+        isExtended: isExtended
       });
     }
+    
+    Logger.log(`Generated ${sessions.length} sessions (${originalSessionCount} original + ${extendedSessionCount - originalSessionCount} extended)`);
     
     return sessions;
   } catch (error) {
     Logger.log(`Error generating sessions for chapter: ${error.message}`);
-    return [{ sessionNumber: 1, sessionName: 'Session 1', estimatedDuration: '45 minutes' }];
+    return [{ sessionNumber: 1, sessionName: 'Session 1', estimatedDuration: '45 minutes', isExtended: false }];
   }
 }
 
@@ -747,11 +1161,28 @@ function _validatePeriodAvailability(teacherEmail, date, period) {
  */
 function _getSchemeDetails(schemeId) {
   try {
+    Logger.log(`=== FETCHING SCHEME DETAILS ===`);
+    Logger.log(`Scheme ID: ${schemeId}`);
+    
     const schemesSheet = _getSheet('Schemes');
     const schemesHeaders = _headers(schemesSheet);
     const allSchemes = _rows(schemesSheet).map(row => _indexByHeader(row, schemesHeaders));
     
+    Logger.log(`Total schemes in sheet: ${allSchemes.length}`);
+    
     const scheme = allSchemes.find(s => s.schemeId === schemeId);
+    
+    if (scheme) {
+      Logger.log(`✅ Scheme found:`);
+      Logger.log(`  - Chapter: ${scheme.chapter}`);
+      Logger.log(`  - noOfSessions: ${scheme.noOfSessions} (type: ${typeof scheme.noOfSessions})`);
+      Logger.log(`  - Class: ${scheme.class}`);
+      Logger.log(`  - Subject: ${scheme.subject}`);
+      Logger.log(`  - Teacher: ${scheme.teacherEmail}`);
+    } else {
+      Logger.log(`❌ Scheme NOT found with ID: ${schemeId}`);
+    }
+    
     return scheme || {};
   } catch (error) {
     Logger.log(`Error getting scheme details: ${error.message}`);

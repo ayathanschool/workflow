@@ -4,6 +4,59 @@
  * Think of these like a toolbox that other parts of your system use
  */
 
+// PERFORMANCE: Request-scoped cache for sheet data
+var REQUEST_SHEET_CACHE = {};
+var REQUEST_SETTINGS_CACHE = null;
+
+/**
+ * Clear request cache (call at start of each request)
+ */
+function _clearRequestCache() {
+  REQUEST_SHEET_CACHE = {};
+  REQUEST_SETTINGS_CACHE = null;
+}
+
+/**
+ * Get cached sheet data with headers
+ * PERFORMANCE: Avoids multiple reads of same sheet in single request
+ */
+function _getCachedSheetData(sheetName) {
+  if (!REQUEST_SHEET_CACHE[sheetName]) {
+    const sheet = _getSheet(sheetName);
+    const headers = _headers(sheet);
+    const rows = _rows(sheet);
+    REQUEST_SHEET_CACHE[sheetName] = {
+      headers: headers,
+      data: rows.map(row => _indexByHeader(row, headers))
+    };
+    Logger.log(`[CACHE] Loaded ${sheetName}: ${rows.length} rows`);
+  } else {
+    Logger.log(`[CACHE HIT] ${sheetName}`);
+  }
+  return REQUEST_SHEET_CACHE[sheetName];
+}
+
+/**
+ * Get cached Settings data as key-value object
+ * PERFORMANCE: Settings rarely change, cache for entire request
+ */
+function _getCachedSettings() {
+  if (!REQUEST_SETTINGS_CACHE) {
+    const settingsData = _getCachedSheetData('Settings').data;
+    REQUEST_SETTINGS_CACHE = {};
+    settingsData.forEach(row => {
+      const key = (row.key || '').trim();
+      if (key) {
+        REQUEST_SETTINGS_CACHE[key] = row.value;
+      }
+    });
+    Logger.log(`[CACHE] Loaded Settings: ${Object.keys(REQUEST_SETTINGS_CACHE).length} keys`);
+  } else {
+    Logger.log(`[CACHE HIT] Settings`);
+  }
+  return REQUEST_SETTINGS_CACHE;
+}
+
 /**
  * Get the main spreadsheet
  */
@@ -26,6 +79,13 @@ function _getSheet(name) {
 }
 
 /**
+ * Get or create a sheet - alias for _getSheet for consistency
+ */
+function _getOrCreateSheet(name) {
+  return _getSheet(name);
+}
+
+/**
  * Get the column headers from the first row of a sheet
  */
 function _headers(sh) {
@@ -39,8 +99,33 @@ function _headers(sh) {
  */
 function _ensureHeaders(sh, cols) {
   const h = _headers(sh);
+  
+  // If sheet is completely empty, add headers
   if (h.filter(Boolean).length === 0) {
     sh.getRange(1,1,1,cols.length).setValues([cols]);
+    return;
+  }
+  
+  // If sheet has data but headers are different, update them
+  let needsUpdate = false;
+  
+  // Check if we need more columns
+  if (cols.length > h.length) {
+    needsUpdate = true;
+  }
+  
+  // Check if any headers are missing or different
+  for (let i = 0; i < cols.length; i++) {
+    if (h[i] !== cols[i]) {
+      needsUpdate = true;
+      break;
+    }
+  }
+  
+  if (needsUpdate) {
+    // Update the header row with the new headers
+    sh.getRange(1, 1, 1, cols.length).setValues([cols]);
+    Logger.log(`Updated headers for sheet ${sh.getName()}: ${cols.join(', ')}`);
   }
 }
 

@@ -42,7 +42,10 @@ function assignSubstitution(data) {
     data.substituteTeacher || '',
     data.substituteSubject || data.regularSubject || '',
     data.note || '',
-    now
+    'FALSE', // acknowledged
+    '', // acknowledgedBy
+    '', // acknowledgedAt
+    now // createdAt
   ];
   
   // Append row and force date column to be stored as text
@@ -66,28 +69,16 @@ function assignSubstitution(data) {
 function getSubstitutionsForDate(date) {
   const normalizedDate = _isoDateString(date);
   
-  console.log(`[getSubstitutionsForDate] Querying for date: ${normalizedDate}`);
-  
   const sh = _getSheet('Substitutions');
   const headers = _headers(sh);
-  console.log(`[getSubstitutionsForDate] Headers: ${JSON.stringify(headers)}`);
-  
   const allRows = _rows(sh).map(r => _indexByHeader(r, headers));
-  console.log(`[getSubstitutionsForDate] Total rows: ${allRows.length}`);
-  
-  if (allRows.length > 0) {
-    console.log(`[getSubstitutionsForDate] Sample row: ${JSON.stringify(allRows[0])}`);
-    console.log(`[getSubstitutionsForDate] Sample date value: "${allRows[0].date}", normalized: "${_isoDateString(allRows[0].date)}"`);
-  }
   
   const substitutions = allRows.filter(r => {
     const rowDate = _isoDateString(r.date);
-    const matches = rowDate === normalizedDate;
-    console.log(`[getSubstitutionsForDate] Checking row: date="${r.date}", normalized="${rowDate}", matches="${matches}"`);
-    return matches;
+    return rowDate === normalizedDate;
   });
   
-  console.log(`[getSubstitutionsForDate] Found ${substitutions.length} substitutions for ${normalizedDate}`);
+  Logger.log(`[getSubstitutionsForDate] Found ${substitutions.length} substitutions for ${normalizedDate}`);
   
   // Sort by period and class
   substitutions.sort((a, b) => {
@@ -110,12 +101,15 @@ function getTeacherSubstitutions(teacherEmail, date) {
   
   const sh = _getSheet('Substitutions');
   const headers = _headers(sh);
-  const substitutions = _rows(sh)
-    .map(r => _indexByHeader(r, headers))
-    .filter(r => 
-      _isoDateString(r.date) === normalizedDate &&
-      String(r.substituteTeacher || '').toLowerCase() === teacherEmail.toLowerCase()
-    );
+  const allRows = _rows(sh).map(r => _indexByHeader(r, headers));
+  
+  const substitutions = allRows.filter(r => {
+    const rowDate = _isoDateString(r.date);
+    const rowTeacher = String(r.substituteTeacher || '').toLowerCase();
+    return rowDate === normalizedDate && rowTeacher === teacherEmail.toLowerCase();
+  });
+  
+  Logger.log(`[getTeacherSubstitutions] Found ${substitutions.length} substitutions for ${teacherEmail}`);
   
   // Sort by period
   substitutions.sort((a, b) => (parseInt(a.period) || 0) - (parseInt(b.period) || 0));
@@ -124,6 +118,41 @@ function getTeacherSubstitutions(teacherEmail, date) {
     date: normalizedDate,
     teacherEmail,
     assignedSubstitutions: substitutions
+  };
+}
+
+/**
+ * Get all substitutions assigned to a specific teacher within a date range
+ * More efficient than calling getTeacherSubstitutions multiple times
+ */
+function getTeacherSubstitutionsRange(teacherEmail, startDate, endDate) {
+  const normalizedStart = _isoDateString(startDate);
+  const normalizedEnd = _isoDateString(endDate);
+  
+  const sh = _getSheet('Substitutions');
+  const headers = _headers(sh);
+  const allRows = _rows(sh).map(r => _indexByHeader(r, headers));
+  
+  const substitutions = allRows.filter(r => {
+    const rowDate = _isoDateString(r.date);
+    const rowTeacher = String(r.substituteTeacher || '').toLowerCase();
+    return rowTeacher === teacherEmail.toLowerCase() && rowDate >= normalizedStart && rowDate <= normalizedEnd;
+  });
+  
+  Logger.log(`[getTeacherSubstitutionsRange] Found ${substitutions.length} substitutions for ${teacherEmail}`);
+  
+  // Sort by date descending, then by period
+  substitutions.sort((a, b) => {
+    const dateCompare = _isoDateString(b.date).localeCompare(_isoDateString(a.date));
+    if (dateCompare !== 0) return dateCompare;
+    return (parseInt(a.period) || 0) - (parseInt(b.period) || 0);
+  });
+  
+  return {
+    startDate: normalizedStart,
+    endDate: normalizedEnd,
+    teacherEmail,
+    substitutions
   };
 }
 
@@ -284,14 +313,81 @@ function getSubstitutionNotifications(teacherEmail) {
  * Get all substitution notifications for a teacher (acknowledged and unacknowledged)
  */
 function getTeacherSubstitutionNotifications(teacherEmail) {
-  const sh = _getSheet('SubstitutionNotifications');
-  const headers = _headers(sh);
-  const notifications = _rows(sh)
-    .map(r => _indexByHeader(r, headers))
-    .filter(r => String(r.recipient || '').toLowerCase() === teacherEmail.toLowerCase());
-  
-  // Sort by creation date (newest first)
-  notifications.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-  
-  return notifications;
+  try {
+    const sh = _getSheet('SubstitutionNotifications');
+    const headers = _headers(sh);
+    const notifications = _rows(sh)
+      .map(r => _indexByHeader(r, headers))
+      .filter(r => String(r.recipient || '').toLowerCase() === teacherEmail.toLowerCase());
+    
+    // Sort by creation date (newest first)
+    notifications.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    
+    Logger.log(`[getTeacherSubstitutionNotifications] Found ${notifications.length} notifications for ${teacherEmail}`);
+    
+    // Return in expected format with notifications array
+    return {
+      success: true,
+      notifications: notifications,
+      count: notifications.length
+    };
+  } catch (error) {
+    Logger.log(`[getTeacherSubstitutionNotifications] Error: ${error.message}`);
+    return {
+      success: false,
+      error: error.message,
+      notifications: []
+    };
+  }
+}
+
+/**
+ * Acknowledge a substitution assignment (in Substitutions sheet)
+ */
+function acknowledgeSubstitutionAssignment(data) {
+  try {
+    const sh = _getSheet('Substitutions');
+    const headers = _headers(sh);
+    const rows = sh.getDataRange().getValues();
+    
+    const normalizedDate = _isoDateString(data.date);
+    const teacherEmail = String(data.teacherEmail || '').toLowerCase();
+    
+    Logger.log(`[acknowledgeSubstitutionAssignment] Looking for: date=${normalizedDate}, period=${data.period}, class=${data.class}, teacher=${teacherEmail}`);
+    
+    // Find the substitution row
+    for (let i = 1; i < rows.length; i++) {
+      const row = _indexByHeader(rows[i], headers);
+      const rowDate = _isoDateString(row.date);
+      const rowSubstitute = String(row.substituteTeacher || '').toLowerCase();
+      
+      if (rowDate === normalizedDate &&
+          String(row.period) === String(data.period) &&
+          String(row.class || '').toLowerCase() === String(data.class || '').toLowerCase() &&
+          rowSubstitute === teacherEmail) {
+        
+        Logger.log(`[acknowledgeSubstitutionAssignment] Found matching row at index ${i}`);
+        
+        // Update acknowledgment fields
+        const acknowledgedColIndex = headers.indexOf('acknowledged') + 1;
+        const acknowledgedByColIndex = headers.indexOf('acknowledgedBy') + 1;
+        const acknowledgedAtColIndex = headers.indexOf('acknowledgedAt') + 1;
+        
+        sh.getRange(i + 1, acknowledgedColIndex).setValue('TRUE');
+        sh.getRange(i + 1, acknowledgedByColIndex).setValue(data.teacherEmail);
+        sh.getRange(i + 1, acknowledgedAtColIndex).setValue(new Date().toISOString());
+        
+        Logger.log(`[acknowledgeSubstitutionAssignment] Successfully acknowledged`);
+        
+        return { success: true, message: 'Substitution acknowledged successfully' };
+      }
+    }
+    
+    Logger.log(`[acknowledgeSubstitutionAssignment] No matching substitution found`);
+    return { error: 'Substitution not found' };
+    
+  } catch (error) {
+    Logger.log(`[acknowledgeSubstitutionAssignment] Error: ${error}`);
+    return { error: 'Failed to acknowledge substitution: ' + error.toString() };
+  }
 }

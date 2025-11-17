@@ -1,11 +1,11 @@
-// DailyReportTimetable.jsx - Enhanced Daily Reporting with Timetable Integration
 import React, { useEffect, useState } from "react";
 import {
   getTeacherDailyTimetable,
   getTeacherDailyReportsForDate,
   submitDailyReport,
   getApprovedLessonPlansForReport,
-  getPlannedLessonForPeriod,
+  getPlannedLessonsForDate, // NEW: Batch endpoint
+  getAppSettings, // Get period times from settings
 } from "./api";
 import { todayIST, formatLocalDate, periodToTimeString } from "./utils/dateUtils";
 
@@ -67,14 +67,16 @@ export default function DailyReportTimetable({ user }) {
     try {
       console.log('🔍 Loading timetable for:', { email, date, user });
       
-      // Start all initial API calls in parallel
-      const [tt, rep] = await Promise.all([
+      // ===== PERFORMANCE: Fetch ALL data in parallel (3 main calls at once) =====
+      const [tt, rep, batchPlannedLessons] = await Promise.all([
         getTeacherDailyTimetable(email, date),            // [{period, class, subject, teacherName, chapter}]
         getTeacherDailyReportsForDate(email, date),       // [{class, subject, period, planType, lessonPlanId, status}]
+        getPlannedLessonsForDate(email, date)            // Batch fetch all planned lessons
       ]);
 
       console.log('📅 Timetable response:', tt);
       console.log('📝 Reports response:', rep);
+      console.log('📦 Planned lessons batch:', batchPlannedLessons);
       console.log('🐛 Debug info from API:', tt?.debug);
       
       // DEBUG: Check reports structure
@@ -127,43 +129,21 @@ export default function DailyReportTimetable({ user }) {
       console.log(`📊 Status map created with ${Object.keys(sm).length} submitted reports`);
       setStatusMap(sm);
 
-      // Fetch lesson plans for each unique class/subject combination (OPTIMIZED - parallel calls)
+      // ===== PERFORMANCE: Skip loading lesson plans upfront - lazy load when dropdown opens =====
+      // Lesson plans are only needed when user selects from dropdown, not for initial render
       const lessonPlansMap = {};
-      const uniqueClassSubjects = new Set();
-      ttList.forEach(r => {
-        const key = `${r.class}|${r.subject}`;
-        if (!uniqueClassSubjects.has(key)) {
-          uniqueClassSubjects.add(key);
-        }
-      });
-
-      // Fetch all lesson plans in parallel instead of sequentially
-      console.log('📋 Fetching lesson plans for', uniqueClassSubjects.size, 'class/subject combinations...');
-      const lessonPlanPromises = Array.from(uniqueClassSubjects).map(async (key) => {
-        const [cls, subject] = key.split('|');
-        try {
-          const plans = await fetchLessonPlans(cls, subject);
-          return [key, plans];
-        } catch (err) {
-          console.warn(`Failed to fetch lesson plans for ${cls}/${subject}:`, err);
-          return [key, []];
-        }
-      });
-
-      const lessonPlanResults = await Promise.all(lessonPlanPromises);
-      lessonPlanResults.forEach(([key, plans]) => {
-        lessonPlansMap[key] = plans;
-      });
       setLessonPlansMap(lessonPlansMap);
-      console.log('✅ Lesson plans loaded for', Object.keys(lessonPlansMap).length, 'combinations');
+      console.log('⚡ Skipping lesson plan preload for faster initial load');
+
+      // ===== Use planned lessons from batch call (already fetched in parallel above) =====
+      const lessonsByPeriod = batchPlannedLessons?.lessonsByPeriod || {};
+      console.log(`📦 Using ${Object.keys(lessonsByPeriod).length} planned lessons from batch endpoint`);
 
       // Initialize drafts for not-submitted rows WITH AUTO-FILL from planned lessons
       // AND populate with existing report data for submitted reports (for display)
       const nextDrafts = {};
       
-      // Fetch planned lessons for each period in parallel
-      console.log('🔍 Fetching planned lessons for', ttList.length, 'periods...');
-      const plannedLessonPromises = ttList.map(async (r) => {
+      ttList.forEach((r) => {
         const k = keyOf(r);
         
         // If already submitted, populate with existing report data
@@ -171,63 +151,43 @@ export default function DailyReportTimetable({ user }) {
           const existingReport = reportMap[k];
           if (existingReport) {
             console.log(`📄 Populating period ${r.period} with submitted report data`);
-            return [k, { type: 'submitted', data: existingReport }];
+            nextDrafts[k] = {
+              planType: existingReport.planType || "not planned",
+              lessonPlanId: existingReport.lessonPlanId || "",
+              chapter: existingReport.chapter || "",
+              sessionNo: Number(existingReport.sessionNo || 0),
+              objectives: existingReport.objectives || "",
+              activities: existingReport.activities || "",
+              completed: existingReport.completed || "Not Started",
+              notes: existingReport.notes || "",
+              _isSubstitution: r.isSubstitution || false,
+              _originalTeacher: r.originalTeacher || '',
+              _session: existingReport.sessionNo || existingReport.session || '',
+              _submitted: true
+            };
+            return; // Skip to next period
           }
         }
         
-        try {
-          // Fetch planned lesson for this specific period
-          console.log(`🔎 Fetching planned lesson: date=${date}, period=${r.period}, class=${r.class}, subject=${r.subject}`);
-          const plannedLesson = await getPlannedLessonForPeriod(email, date, r.period, r.class, r.subject);
-          console.log(`📦 Response for period ${r.period}:`, plannedLesson);
-          return [k, { type: 'planned', data: plannedLesson }];
-        } catch (err) {
-          console.warn(`Failed to fetch planned lesson for ${r.class}/${r.subject} period ${r.period}:`, err);
-          return [k, { type: 'none', data: null }];
-        }
-      });
-      
-      const plannedLessonResults = await Promise.all(plannedLessonPromises);
-      
-      // Build drafts with auto-filled data OR submitted report data
-      plannedLessonResults.forEach(([k, result], index) => {
-        const r = ttList[index];
+        // Check if there's a planned lesson for this period
+        const periodKey = `${r.period}|${r.class}|${r.subject}`;
+        const plannedLesson = lessonsByPeriod[periodKey];
         
-        if (result.type === 'submitted') {
-          // Populate with existing submitted report data
-          const report = result.data;
-          nextDrafts[k] = {
-            planType: report.planType || "not planned",
-            lessonPlanId: report.lessonPlanId || "",
-            chapter: report.chapter || "",
-            sessionNo: Number(report.sessionNo || 0),
-            objectives: report.objectives || "",
-            activities: report.activities || "",
-            completed: report.completed || "Not Started",
-            notes: report.notes || "",
-            _isSubstitution: r.isSubstitution || false,
-            _originalTeacher: r.originalTeacher || '',
-            _session: report.sessionNo || report.session || '',  // Add session for display
-            _submitted: true  // Mark as submitted for UI
-          };
-          console.log(`✅ Populated period ${r.period} with submitted report (planType: ${report.planType}, lessonPlanId: ${report.lessonPlanId}, sessionNo: ${report.sessionNo})`);
-        } else if (result.type === 'planned' && result.data?.success && result.data?.hasPlannedLesson && result.data?.lessonPlan) {
+        if (plannedLesson) {
           // Auto-fill with planned lesson
-          const lp = result.data.lessonPlan;
-          console.log(`✨ Auto-filling period ${r.period} with lesson plan: ${lp.lpId}`);
-          
+          console.log(`✨ Auto-filling period ${r.period} with lesson plan: ${plannedLesson.lpId}`);
           nextDrafts[k] = {
             planType: "in plan",
-            lessonPlanId: lp.lpId,
-            chapter: lp.chapter || "",
-            sessionNo: Number(lp.sessionNo || lp.session || 0),
-            objectives: lp.learningObjectives || "",
-            activities: lp.teachingMethods || "",
+            lessonPlanId: plannedLesson.lpId,
+            chapter: plannedLesson.chapter || "",
+            sessionNo: Number(plannedLesson.sessionNo || plannedLesson.session || 0),
+            objectives: plannedLesson.learningObjectives || "",
+            activities: plannedLesson.teachingMethods || "",
             completed: "Not Started",
             notes: "",
             _isSubstitution: r.isSubstitution || false,
             _originalTeacher: r.originalTeacher || '',
-            _session: lp.session || ''
+            _session: plannedLesson.session || ''
           };
         } else {
           // No planned lesson - unplanned period
@@ -267,15 +227,17 @@ export default function DailyReportTimetable({ user }) {
     async function fetchSettings() {
       try {
         console.log('📊 Fetching app settings...');
-        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'https://script.google.com/macros/d/AKfycbxHRU5UKqr-eVLHsRzXmqQzqjqBN4qqNSqHbZqNPlHCB8s8wjVqQHrF-Mz-N_3dHJ3n/usercache'}?action=getAppSettings`);
-        const data = await response.json();
-        console.log('✅ App settings received:', data?.data);
+        const settings = await getAppSettings();
+        console.log('✅ App settings received:', settings);
         
-        // Extract the data from the wrapped response
-        const settings = data?.data || data;
         if (settings && (settings.periodTimesWeekday || settings.periodTimesFriday)) {
           setAppSettings(settings);
-          console.log('✅ App settings loaded with period times');
+          console.log('✅ App settings loaded with period times:', {
+            weekday: settings.periodTimesWeekday?.length || 0,
+            friday: settings.periodTimesFriday?.length || 0
+          });
+        } else {
+          console.warn('⚠️ No period times in settings, using defaults');
         }
       } catch (err) {
         console.warn('⚠️ Failed to fetch app settings, using defaults:', err);
@@ -296,6 +258,36 @@ export default function DailyReportTimetable({ user }) {
     if (!r) return;
 
     const plansKey = `${r.class}|${r.subject}`;
+    
+    // Lazy load lesson plans if not already loaded
+    if (!lessonPlansMap[plansKey]) {
+      console.log(`⏳ Lazy-loading lesson plans for ${r.class}/${r.subject}...`);
+      fetchLessonPlans(r.class, r.subject).then(plans => {
+        setLessonPlansMap(prev => ({
+          ...prev,
+          [plansKey]: plans
+        }));
+        
+        // Apply the selection after plans are loaded
+        const selectedPlan = plans.find(plan => plan.lpId === lessonPlanId);
+        if (selectedPlan) {
+          setDrafts(prev => ({
+            ...prev,
+            [k]: {
+              ...(prev[k] || {}),
+              lessonPlanId: lessonPlanId,
+              chapter: selectedPlan.chapter || "",
+              objectives: selectedPlan.objectives || "",
+              activities: selectedPlan.activities || "",
+            }
+          }));
+        }
+      }).catch(err => {
+        console.error(`Failed to lazy-load lesson plans:`, err);
+      });
+      return; // Exit early, will update after async load
+    }
+
     const selectedPlan = lessonPlansMap[plansKey]?.find(plan => plan.lpId === lessonPlanId);
 
     if (selectedPlan) {

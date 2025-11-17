@@ -3,8 +3,12 @@ import { Calendar, Download, Filter, RefreshCw, UserPlus, FileText, FileSpreadsh
 import { toISTDateString, formatDateForInput, parseApiDate, formatLocalDate, periodToTimeString } from '../utils/dateUtils';
 import * as api from '../api';
 import { debounce } from '../utils/performanceUtils';
+import { useNotifications } from '../contexts/NotificationContext';
 
 const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
+  // Notification system
+  const { success: notifySuccess, error: notifyError, info: notifyInfo } = useNotifications();
+  
   // State Management
   const [selectedDate, setSelectedDate] = useState(formatDateForInput(new Date()));
   const [timetableData, setTimetableData] = useState([]);
@@ -24,6 +28,7 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState(null);
   const [availableTeachers, setAvailableTeachers] = useState([]);
+  const [loadingTeachers, setLoadingTeachers] = useState(false);
   
   // Assignment Form States
   const [assignmentForm, setAssignmentForm] = useState({
@@ -332,7 +337,10 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
       note: ''
     });
     
+    setShowAssignModal(true);
+    
     // Fetch available teachers for this period
+    setLoadingTeachers(true);
     try {
       console.log('Fetching available teachers for period:', period.period);
       const response = await api.getAvailableTeachers(selectedDate, period.period);
@@ -350,15 +358,16 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
     } catch (err) {
       console.error('Error fetching available teachers:', err);
       setAvailableTeachers([]);
+    } finally {
+      setLoadingTeachers(false);
     }
-    
-    setShowAssignModal(true);
   };
 
   // Assign substitute teacher
   const assignSubstitute = async () => {
     if (!selectedPeriod || !assignmentForm.substituteTeacher) {
       setError('Please select a substitute teacher');
+      setTimeout(() => setError(''), 3000);
       return;
     }
 
@@ -378,9 +387,7 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
         note: assignmentForm.note || '',
       };
 
-      console.log('Assigning substitution:', substitutionData);
       const response = await api.addSubstitution(substitutionData);
-      console.log('Assignment response:', response);
       
       logApiCall('addSubstitution', substitutionData, response);
 
@@ -392,16 +399,41 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
         response?.message?.toLowerCase().includes('success')
       );
 
-      console.log('Success check result:', isSuccess);
-
       if (isSuccess) {
         // Close modal first
         setShowAssignModal(false);
         
-        // Show success message
-        const successMsg = `Successfully assigned ${assignmentForm.substituteTeacher} to Period ${selectedPeriod.period} - ${selectedPeriod.class}`;
+        // Show success message with notification info
+        const teacherName = availableTeachers.find(t => t.email === assignmentForm.substituteTeacher)?.name || assignmentForm.substituteTeacher;
+        const successMsg = `✅ Successfully assigned ${teacherName} to Period ${selectedPeriod.period} - ${selectedPeriod.class}. 
+📧 Notification sent to teacher's email.`;
         setSuccessMessage(successMsg);
         console.log('Setting success message:', successMsg);
+        
+        // Add toast notification for HM (auto-closes)
+        notifySuccess(
+          'Substitution Assigned',
+          `${teacherName} assigned to Period ${selectedPeriod.period} - ${selectedPeriod.class}. Email notification sent.`,
+          { autoClose: true, duration: 5000 }
+        );
+        
+        // Also add to bell icon notification center (persistent)
+        const absentTeacherName = selectedPeriod.teacherName || selectedPeriod.teacherEmail || 'Unknown Teacher';
+        notifyInfo(
+          'Substitution Assigned',
+          `${teacherName} has been assigned to cover Period ${selectedPeriod.period} for ${selectedPeriod.class} (${absentTeacherName}). Subject: ${assignmentForm.substituteSubject || selectedPeriod.subject}`,
+          { 
+            autoClose: false, // Keep in bell icon
+            metadata: {
+              type: 'substitution-confirmation',
+              date: selectedDate,
+              period: selectedPeriod.period,
+              class: selectedPeriod.class,
+              substituteTeacher: teacherName,
+              absentTeacher: absentTeacherName
+            }
+          }
+        );
         
         // Clear form
         setAssignmentForm({
@@ -755,8 +787,19 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
 
       {/* Success Display */}
       {successMessage && (
-        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
-          <p className="text-green-600 dark:text-green-400">{successMessage}</p>
+        <div className="bg-green-50 dark:bg-green-900/20 border-2 border-green-400 dark:border-green-600 rounded-lg p-4 shadow-md">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="ml-3 flex-1">
+              <p className="text-sm font-medium text-green-800 dark:text-green-300 whitespace-pre-line">
+                {successMessage}
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1037,19 +1080,39 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Substitute Teacher *
                 </label>
-                <select
-                  value={assignmentForm.substituteTeacher}
-                  onChange={(e) => setAssignmentForm(prev => ({ ...prev, substituteTeacher: e.target.value }))}
-                  className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  required
-                >
-                  <option value="">Select a teacher...</option>
-                  {availableTeachers.map(teacher => (
-                    <option key={teacher.email || teacher.name} value={teacher.email}>
-                      {teacher.name} ({teacher.email})
-                    </option>
-                  ))}
-                </select>
+                {loadingTeachers ? (
+                  <div className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 flex items-center text-gray-600 dark:text-gray-400">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                    Loading available teachers...
+                  </div>
+                ) : (
+                  <>
+                    <select
+                      value={assignmentForm.substituteTeacher}
+                      onChange={(e) => setAssignmentForm(prev => ({ ...prev, substituteTeacher: e.target.value }))}
+                      className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      required
+                      disabled={loadingTeachers}
+                    >
+                      <option value="">Select a teacher...</option>
+                      {availableTeachers.map(teacher => (
+                        <option key={teacher.email || teacher.name} value={teacher.email}>
+                          {teacher.name} ({teacher.email})
+                        </option>
+                      ))}
+                    </select>
+                    {availableTeachers.length > 0 && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
+                        💡 Note: Absent teachers may also appear in the list if needed
+                      </p>
+                    )}
+                    {!loadingTeachers && availableTeachers.length === 0 && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-1.5">
+                        ⚠️ No available teachers found for this period
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
 
               <div>
@@ -1092,9 +1155,9 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
               </button>
               <button
                 onClick={assignSubstitute}
-                disabled={loading || !assignmentForm.substituteTeacher}
+                disabled={loading || !assignmentForm.substituteTeacher || loadingTeachers}
                 className={`flex-1 px-4 py-2 rounded-lg transition-colors flex items-center justify-center ${
-                  loading || !assignmentForm.substituteTeacher
+                  loading || !assignmentForm.substituteTeacher || loadingTeachers
                     ? 'bg-gray-400 cursor-not-allowed' 
                     : 'bg-blue-600 hover:bg-blue-700'
                 } text-white`}

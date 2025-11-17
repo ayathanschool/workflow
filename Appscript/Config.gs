@@ -6,7 +6,7 @@
 /**
  * Your Google Spreadsheet ID - DON'T CHANGE THIS!
  */
-const SPREADSHEET_ID = '1sRD4gpE6CLtSOYF6OWNpLEoZfqGY9Oa8IOPj6c_rbXU';
+const SPREADSHEET_ID = '1PWD9XxQlnYcIgZqgY4LcnM4YgG0ciAtAYRVhv6lWKRg';
 
 /**
  * All the sheets (tabs) in your spreadsheet and what columns they have
@@ -21,18 +21,22 @@ const SHEETS = {
   // === ACADEMIC WORKFLOW (4 sheets) ===
   Timetable: ['class','dayOfWeek','period','subject','teacherEmail','teacherName'],
   Schemes: ['schemeId','teacherEmail','teacherName','class','subject','term','unit','chapter','month','noOfSessions','status','createdAt'],
-  LessonPlans: ['lpId','teacherEmail','teacherName','class','subject','chapter','session','objectives','activities','status','reviewerRemarks','date','createdAt'],
-  DailyReports: ['date','teacherEmail','teacherName','class','subject','period','planType','lessonPlanId','chapter','objectives','activities','completed','notes','createdAt'],
+  LessonPlans: ['lpId','schemeId','teacherEmail','teacherName','class','subject','chapter','session','selectedDate','selectedPeriod','learningObjectives','teachingMethods','resourcesRequired','assessmentMethods','status','createdAt','submittedAt','isDuplicate','lessonType','reviewerRemarks'],
+  DailyReports: ['date','teacherEmail','teacherName','class','subject','period','planType','lessonPlanId','chapter','sessionNo','totalSessions','completionPercentage','difficulties','nextSessionPlan','objectives','activities','completed','notes','createdAt'],
   
   // === SUBSTITUTION SYSTEM (2 sheets) ===  
-  Substitutions: ['date','period','class','absentTeacher','regularSubject','substituteTeacher','substituteSubject','note','createdAt'],
+  Substitutions: ['date','period','class','absentTeacher','regularSubject','substituteTeacher','substituteSubject','note','acknowledged','acknowledgedBy','acknowledgedAt','createdAt'],
   SubstitutionNotifications: ['id','recipient','title','message','type','data','acknowledged','acknowledgedAt','createdAt'],
   
   // === EXAM MANAGEMENT (4 sheets) ===
   Exams: ['examId','creatorEmail','creatorName','class','subject','examType','hasInternalMarks','internalMax','externalMax','totalMax','date','createdAt','examName'],
   ExamMarks: ['examId','class','subject','teacherEmail','teacherName','admNo','studentName','examType','ce','te','total','grade','createdAt'],
   GradeTypes: ['examType','internalMax','externalMax','totalMax'],
-  GradeBoundaries: ['standardGroup','grade','minPercentage','maxPercentage']
+  GradeBoundaries: ['standardGroup','grade','minPercentage','maxPercentage'],
+  
+  // === SESSION TRACKING SYSTEM (2 sheets) ===
+  TeacherPerformance: ['teacherEmail','teacherName','totalSessions','completedSessions','partialSessions','averageCompletion','onTimeCompletion','cascadingIssues','performanceGrade','lastUpdated','recommendations'],
+  SessionDependencies: ['prerequisiteSession','dependentSession','completionPercentage','impactLevel','recommendedAction','createdAt']
 };
 
 /**

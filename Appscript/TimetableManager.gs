@@ -344,32 +344,85 @@ function getAvailableTeachers(date, period) {
   const normalizedDate = _isoDateString(date);
   const dayName = _dayName(normalizedDate);
   
+  Logger.log(`[getAvailableTeachers] ========== START ==========`);
   Logger.log(`[getAvailableTeachers] Date: ${normalizedDate}, Day: ${dayName}, Period: ${period}`);
   
   // Get all teachers from Users sheet
   const usersSh = _getSheet('Users');
   const usersHeaders = _headers(usersSh);
-  const allTeachers = _rows(usersSh)
-    .map(r => _indexByHeader(r, usersHeaders))
-    .filter(u => {
-      const roles = String(u.roles || '').toLowerCase();
-      return roles.includes('teacher') || roles.includes('class teacher');
-    });
+  Logger.log(`[getAvailableTeachers] Users sheet headers: ${JSON.stringify(usersHeaders)}`);
   
-  Logger.log(`[getAvailableTeachers] Total teachers: ${allTeachers.length}`);
+  const allUsers = _rows(usersSh).map(r => _indexByHeader(r, usersHeaders));
+  Logger.log(`[getAvailableTeachers] Total users in Users sheet: ${allUsers.length}`);
+  
+  if (allUsers.length > 0) {
+    Logger.log(`[getAvailableTeachers] Sample user row: ${JSON.stringify(allUsers[0])}`);
+  }
+  
+  let allTeachers = allUsers.filter(u => {
+    const roles = String(u.roles || '').toLowerCase();
+    const hasTeacherRole = roles.includes('teacher') || roles.includes('class teacher');
+    if (!hasTeacherRole && u.email) {
+      Logger.log(`[getAvailableTeachers] User ${u.email} has roles: "${u.roles}" - excluded`);
+    }
+    return hasTeacherRole;
+  });
+  
+  Logger.log(`[getAvailableTeachers] Total teachers in Users sheet: ${allTeachers.length}`);
+  
+  // FALLBACK: If no teachers found in Users sheet, extract from Timetable
+  if (allTeachers.length === 0) {
+    Logger.log(`[getAvailableTeachers] WARNING: No teachers found in Users sheet. Falling back to Timetable sheet.`);
+    const timetableSh = _getSheet('Timetable');
+    const timetableHeaders = _headers(timetableSh);
+    const timetableRows = _rows(timetableSh).map(r => _indexByHeader(r, timetableHeaders));
+    
+    // Extract unique teachers from timetable
+    const teacherMap = {};
+    timetableRows.forEach(row => {
+      const email = String(row.teacherEmail || '').trim().toLowerCase();
+      const name = String(row.teacherName || '').trim();
+      if (email && !teacherMap[email]) {
+        teacherMap[email] = {
+          email: email,
+          name: name,
+          roles: 'Teacher'
+        };
+      }
+    });
+    
+    allTeachers = Object.values(teacherMap);
+    Logger.log(`[getAvailableTeachers] Extracted ${allTeachers.length} unique teachers from Timetable`);
+  }
+  
+  if (allTeachers.length > 0) {
+    Logger.log(`[getAvailableTeachers] Sample teacher: ${JSON.stringify(allTeachers[0])}`);
+  }
   
   // Get timetable entries for this day and period
   const timetableSh = _getSheet('Timetable');
   const timetableHeaders = _headers(timetableSh);
-  const busyTeachers = _rows(timetableSh)
-    .map(r => _indexByHeader(r, timetableHeaders))
-    .filter(r => 
-      _normalizeDayName(r.dayOfWeek) === _normalizeDayName(dayName) &&
-      String(r.period) === String(period)
-    )
-    .map(r => String(r.teacherEmail || '').toLowerCase());
+  Logger.log(`[getAvailableTeachers] Timetable sheet headers: ${JSON.stringify(timetableHeaders)}`);
   
-  Logger.log(`[getAvailableTeachers] Busy teachers in period ${period}: ${busyTeachers.length}`);
+  const allTimetableRows = _rows(timetableSh).map(r => _indexByHeader(r, timetableHeaders));
+  Logger.log(`[getAvailableTeachers] Total timetable rows: ${allTimetableRows.length}`);
+  
+  if (allTimetableRows.length > 0) {
+    Logger.log(`[getAvailableTeachers] Sample timetable row: ${JSON.stringify(allTimetableRows[0])}`);
+  }
+  
+  const busyTeacherRows = allTimetableRows.filter(r => 
+    _normalizeDayName(r.dayOfWeek) === _normalizeDayName(dayName) &&
+    String(r.period) === String(period)
+  );
+  
+  Logger.log(`[getAvailableTeachers] Matching timetable rows for ${dayName} Period ${period}: ${busyTeacherRows.length}`);
+  if (busyTeacherRows.length > 0) {
+    Logger.log(`[getAvailableTeachers] Sample busy row: ${JSON.stringify(busyTeacherRows[0])}`);
+  }
+  
+  const busyTeachers = busyTeacherRows.map(r => String(r.teacherEmail || '').toLowerCase());
+  Logger.log(`[getAvailableTeachers] Busy teacher emails: ${JSON.stringify(busyTeachers)}`);
   
   // Get teachers already assigned as substitutes for this date/period
   const substitutionsSh = _getSheet('Substitutions');
@@ -387,10 +440,21 @@ function getAvailableTeachers(date, period) {
   // Filter available teachers (not busy and not already assigned)
   const availableTeachers = allTeachers.filter(teacher => {
     const teacherEmail = String(teacher.email || '').toLowerCase();
-    return !busyTeachers.includes(teacherEmail) && !assignedSubstitutes.includes(teacherEmail);
+    const isBusy = busyTeachers.includes(teacherEmail);
+    const isAssigned = assignedSubstitutes.includes(teacherEmail);
+    
+    if (isBusy || isAssigned) {
+      Logger.log(`[getAvailableTeachers] Excluding ${teacher.name} (${teacherEmail}): busy=${isBusy}, assigned=${isAssigned}`);
+    }
+    
+    return !isBusy && !isAssigned;
   });
   
   Logger.log(`[getAvailableTeachers] Available teachers: ${availableTeachers.length}`);
+  if (availableTeachers.length > 0) {
+    Logger.log(`[getAvailableTeachers] Available: ${availableTeachers.map(t => t.name).join(', ')}`);
+  }
+  Logger.log(`[getAvailableTeachers] ========== END ==========`);
   
   return availableTeachers.map(t => ({
     name: t.name || '',

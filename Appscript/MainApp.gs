@@ -57,6 +57,7 @@ function _normalizeQueryDate(dateStr) {
 function doGet(e) {
   const action = (e.parameter.action || '').trim();
   try {
+    _clearRequestCache(); // PERFORMANCE: Clear cache at start of each request
     _bootstrapSheets();
     
     // Basic system check
@@ -141,6 +142,34 @@ function doGet(e) {
       return _respond(getTeacherSubstitutions(email, date));
     }
     
+    if (action === 'getTeacherSubstitutionsRange') {
+      const email = (e.parameter.email || '').toLowerCase().trim();
+      const startDate = e.parameter.startDate || '';
+      const endDate = e.parameter.endDate || '';
+      return _respond(getTeacherSubstitutionsRange(email, startDate, endDate));
+    }
+    
+    // Debug endpoint to check all substitutions
+    if (action === 'getAllSubstitutions') {
+      const sh = _getSheet('Substitutions');
+      const headers = _headers(sh);
+      const allRows = _rows(sh).map(r => _indexByHeader(r, headers));
+      
+      Logger.log(`[getAllSubstitutions] Total rows: ${allRows.length}`);
+      Logger.log(`[getAllSubstitutions] Headers: ${JSON.stringify(headers)}`);
+      
+      if (allRows.length > 0) {
+        Logger.log(`[getAllSubstitutions] Sample row: ${JSON.stringify(allRows[0])}`);
+      }
+      
+      return _respond({
+        total: allRows.length,
+        headers: headers,
+        data: allRows,
+        sampleDateNormalized: allRows.length > 0 ? _isoDateString(allRows[0].date) : null
+      });
+    }
+    
     if (action === 'getUnacknowledgedSubstitutions') {
       const email = (e.parameter.email || '').toLowerCase().trim();
       return _respond(getUnacknowledgedSubstitutions(email));
@@ -151,7 +180,7 @@ function doGet(e) {
       return _respond(getTeacherSubstitutionNotifications(email));
     }
     
-    if (action === 'getAvailableTeachers') {
+    if (action === 'getAvailableTeachers' || action === 'getFreeTeachers') {
       const date = (e.parameter.date || _todayISO()).trim();
       const period = e.parameter.period || '';
       return _respond(getAvailableTeachers(date, period));
@@ -269,9 +298,36 @@ function doGet(e) {
       return _handleGetPlannedLessonForPeriod(e.parameter);
     }
     
+    // NEW: Batch endpoint for daily report performance
+    if (action === 'getPlannedLessonsForDate') {
+      return _handleGetPlannedLessonsForDate(e.parameter);
+    }
+    
+    // NEW: Batch endpoint for teacher timetable with reports (reduces 2 calls to 1)
+    if (action === 'getTeacherDailyData') {
+      return _handleGetTeacherDailyData(e.parameter);
+    }
+    
+    // === SESSION COMPLETION TRACKING GET ROUTES ===
+    if (action === 'getTeacherPerformanceDashboard') {
+      return _handleGetTeacherPerformanceDashboard(e.parameter);
+    }
+    
+    if (action === 'getSchemeCompletionAnalytics') {
+      return _handleGetSchemeCompletionAnalytics(e.parameter);
+    }
+    
+    if (action === 'getSessionCompletionHistory') {
+      return _handleGetSessionCompletionHistory(e.parameter);
+    }
+    
     // === DAILY REPORT ROUTES ===
     if (action === 'getTeacherDailyReportsForDate') {
       return _handleGetTeacherDailyReportsForDate(e.parameter);
+    }
+    
+    if (action === 'checkCascadingIssues') {
+      return _handleCheckCascadingIssues(e.parameter);
     }
     
     // === HM DAILY OVERSIGHT ROUTES ===
@@ -281,6 +337,23 @@ function doGet(e) {
     
     if (action === 'getLessonPlansForDate') {
       return _handleGetLessonPlansForDate(e.parameter);
+    }
+    
+    // === HM MONITORING ROUTES (GET) ===
+    if (action === 'getAllTeachersPerformance') {
+      return _handleGetAllTeachersPerformance(e.parameter);
+    }
+    
+    if (action === 'getSchoolSessionAnalytics') {
+      return _handleGetSchoolSessionAnalytics(e.parameter);
+    }
+    
+    if (action === 'getCascadingIssuesReport') {
+      return _handleGetCascadingIssuesReport(e.parameter);
+    }
+    
+    if (action === 'syncSessionDependencies') {
+      return _handleSyncSessionDependencies(e.parameter);
     }
     
     // === APP SETTINGS ROUTES ===
@@ -393,6 +466,7 @@ function doPost(e) {
   const action = (data.action || e.parameter.action || '').trim();
   
   try {
+    _clearRequestCache(); // PERFORMANCE: Clear cache at start of each request
     _bootstrapSheets();
     
     // === AUTHENTICATION ROUTES ===
@@ -435,6 +509,10 @@ function doPost(e) {
       return _respond(acknowledgeSubstitution(notificationId, teacherEmail));
     }
     
+    if (action === 'acknowledgeSubstitutionAssignment') {
+      return _respond(acknowledgeSubstitutionAssignment(data));
+    }
+    
     // === SCHEME MANAGEMENT ROUTES ===
     if (action === 'submitPlan') {
       return _handleSubmitScheme(data);
@@ -457,7 +535,7 @@ function doPost(e) {
         const sh = _getSheet('DailyReports');
         Logger.log('DailyReports sheet obtained');
         
-        const headers = ['date', 'teacherEmail', 'teacherName', 'class', 'subject', 'period', 'planType', 'lessonPlanId', 'chapter', 'sessionNo', 'objectives', 'activities', 'completed', 'notes', 'createdAt'];
+        const headers = ['date', 'teacherEmail', 'teacherName', 'class', 'subject', 'period', 'planType', 'lessonPlanId', 'chapter', 'sessionNo', 'totalSessions', 'completionPercentage', 'difficulties', 'nextSessionPlan', 'objectives', 'activities', 'completed', 'notes', 'createdAt'];
         _ensureHeaders(sh, headers);
         Logger.log('Headers ensured');
         
@@ -535,9 +613,13 @@ function doPost(e) {
           data.lessonPlanId || '',
           data.chapter || '',
           Number(data.sessionNo || 0),
+          Number(data.totalSessions || 1),
+          Number(data.completionPercentage || 0),
+          data.difficulties || '',
+          data.nextSessionPlan || '',
           data.objectives || '',
           data.activities || '',
-          data.completed || '',
+          data.chapterCompleted ? 'Chapter Complete' : (data.completed || ''), // NEW: Handle chapter completion
           data.notes || '',
           now
         ];
@@ -549,6 +631,35 @@ function doPost(e) {
         SpreadsheetApp.flush();
         
         Logger.log('Row appended successfully and flushed to sheet');
+        
+        // === CASCADING TRACKING: Update session completion if lesson plan exists ===
+        if (data.lessonPlanId && data.completionPercentage !== undefined) {
+          Logger.log('Triggering session completion update for cascading tracking...');
+          try {
+            const sessionData = {
+              lpId: data.lessonPlanId,
+              completionPercentage: Number(data.completionPercentage || 0),
+              teacherEmail: data.teacherEmail,
+              completionDate: data.date || now,
+              teachingNotes: data.notes || '',
+              difficultiesEncountered: data.difficulties || '',
+              nextSessionAdjustments: data.nextSessionPlan || ''
+            };
+            
+            const sessionResult = updateSessionCompletion(sessionData);
+            Logger.log('Session completion updated: ' + JSON.stringify(sessionResult));
+            
+            if (sessionResult.success && sessionResult.cascadingEffects) {
+              Logger.log('Cascading effects detected: ' + sessionResult.cascadingEffects);
+            }
+          } catch (sessionError) {
+            // Don't fail the daily report submission if session tracking fails
+            Logger.log('Warning: Session completion tracking failed: ' + sessionError.message);
+            Logger.log('Daily report was still saved successfully');
+          }
+        } else {
+          Logger.log('No lessonPlanId or completionPercentage - skipping cascading tracking');
+        }
         
         return _respond({ ok: true, submitted: true });
       } catch (err) {
@@ -564,6 +675,37 @@ function doPost(e) {
     // === SCHEME-BASED LESSON PLANNING ROUTES ===
     if (action === 'createSchemeLessonPlan') {
       return _handleCreateSchemeLessonPlan(data);
+    }
+    
+    // === SESSION COMPLETION TRACKING ROUTES ===
+    if (action === 'updateSessionCompletion') {
+      return _handleUpdateSessionCompletion(data);
+    }
+    
+    if (action === 'getTeacherPerformanceDashboard') {
+      return _handleGetTeacherPerformanceDashboard(data);
+    }
+    
+    if (action === 'getSchemeCompletionAnalytics') {
+      return _handleGetSchemeCompletionAnalytics(data);
+    }
+    
+    // === HM MONITORING ROUTES ===
+    if (action === 'getAllTeachersPerformance') {
+      return _handleGetAllTeachersPerformance(data);
+    }
+    
+    if (action === 'getSchoolSessionAnalytics') {
+      return _handleGetSchoolSessionAnalytics(data);
+    }
+    
+    if (action === 'getCascadingIssuesReport') {
+      return _handleGetCascadingIssuesReport(data);
+    }
+    
+    // === BATCH SYNC ROUTE (Admin/HM only) ===
+    if (action === 'syncSessionDependencies') {
+      return _handleSyncSessionDependencies(data);
     }
     
     if (action === 'updateLessonPlanStatus') {
@@ -664,6 +806,10 @@ School Administration
 /**
  * Handle GET approved schemes for lesson planning
  */
+/**
+ * Handle GET approved schemes for lesson planning
+ * WITH ENHANCED BACKUP IMPLEMENTATION
+ */
 function _handleGetApprovedSchemesForLessonPlanning(params) {
   try {
     const teacherEmail = params.teacherEmail;
@@ -672,10 +818,185 @@ function _handleGetApprovedSchemesForLessonPlanning(params) {
       return _respond({ success: false, error: 'Teacher email is required' });
     }
     
-    const result = getApprovedSchemesForLessonPlanning(teacherEmail);
+    // Try the original function first
+    try {
+      if (typeof getApprovedSchemesForLessonPlanning === 'function') {
+        Logger.log('Using original getApprovedSchemesForLessonPlanning function');
+        const result = getApprovedSchemesForLessonPlanning(teacherEmail);
+        return _respond(result);
+      }
+    } catch (originalError) {
+      Logger.log('Original function failed, using backup implementation:', originalError.message);
+    }
+    
+    // ENHANCED BACKUP IMPLEMENTATION WITH CACHING
+    Logger.log(`Getting approved schemes for lesson planning (BACKUP): ${teacherEmail}`);
+    
+    // PERFORMANCE: Use cached sheet data instead of multiple _rows() calls
+    const schemesData = _getCachedSheetData('Schemes').data;
+    const approvedSchemes = schemesData.filter(scheme => 
+      (scheme.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase() &&
+      (scheme.status || '').toLowerCase() === 'approved'
+    );
+    
+    // PERFORMANCE: Cache lesson plans data
+    const lessonPlansData = _getCachedSheetData('LessonPlans').data;
+    const teacherPlans = lessonPlansData.filter(plan =>
+      (plan.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase()
+    );
+    
+    // PERFORMANCE: Cache daily reports once for all schemes
+    const dailyReportsData = _getCachedSheetData('DailyReports').data;
+    
+    // Process each scheme with basic chapter/session breakdown
+    const schemesWithProgress = approvedSchemes.map(scheme => {
+      // Enhanced chapter parsing with extended session support
+      let chapters = [];
+      if (scheme.chapter && String(scheme.chapter).trim() !== '') {
+        const chapterName = String(scheme.chapter).trim();
+        let originalSessionCount = parseInt(scheme.noOfSessions || 2);
+        
+        // Check daily reports to see if extended sessions are needed
+        let extendedSessionCount = originalSessionCount;
+        try {
+          // PERFORMANCE: Use cached daily reports instead of reading sheet again
+          // Find daily reports for this chapter by this teacher
+          const chapterReports = dailyReportsData.filter(report => {
+            const matchesTeacher = String(report.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
+            const matchesChapter = String(report.chapter || '') === String(chapterName || '');
+            const matchesClass = String(report.class || '') === String(scheme.class || '');
+            const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
+            
+            return matchesTeacher && matchesChapter && matchesClass && matchesSubject;
+          });
+          
+          if (chapterReports.length > 0) {
+            Logger.log(`Found ${chapterReports.length} daily reports for chapter ${chapterName}`);
+            
+            // Check if any sessions are below 75% completion threshold
+            let hasIncompleteSessions = false;
+            let maxExistingSession = 0;
+            
+            for (let i = 1; i <= originalSessionCount; i++) {
+              const sessionReport = chapterReports.find(report => 
+                Number(report.sessionNo) === i
+              );
+              
+              if (sessionReport) {
+                maxExistingSession = Math.max(maxExistingSession, i);
+                const completion = Number(sessionReport.completionPercentage || 0);
+                Logger.log(`Session ${i}: ${completion}% complete`);
+                
+                if (completion < 75) {
+                  hasIncompleteSessions = true;
+                  Logger.log(`Session ${i} incomplete (${completion}% < 75%)`);
+                }
+              }
+            }
+            
+            // If there are incomplete sessions, allow extended sessions
+            // NEW: More permissive logic - show extended if ANY session is incomplete  
+            if (hasIncompleteSessions) {
+              extendedSessionCount = originalSessionCount + 1;
+              Logger.log(`Extending sessions to ${extendedSessionCount} due to incomplete sessions (any session <75%)`);
+            }
+          } else {
+            Logger.log(`No daily reports found for chapter ${chapterName} - using original session count`);
+          }
+          
+        } catch (drError) {
+          Logger.log(`Error checking daily reports for extended sessions: ${drError.message}`);
+          // Continue with original session count if error
+        }
+        
+        // Create sessions for this chapter (including extended sessions)
+        const sessions = [];
+        for (let i = 1; i <= extendedSessionCount; i++) {
+          const isExtended = i > originalSessionCount;
+          const existingPlan = teacherPlans.find(plan =>
+            plan.schemeId === scheme.schemeId &&
+            String(plan.chapter || '').toLowerCase() === chapterName.toLowerCase() &&
+            parseInt(plan.session || '1') === i
+          );
+          
+          sessions.push({
+            sessionNumber: i,
+            sessionName: `Session ${i}${isExtended ? ' (Extended)' : ''}`,
+            estimatedDuration: '45 minutes',
+            status: existingPlan ? 'planned' : 'not-planned',
+            plannedDate: existingPlan ? existingPlan.selectedDate : null,
+            plannedPeriod: existingPlan ? existingPlan.selectedPeriod : null,
+            lessonPlanId: existingPlan ? existingPlan.lpId : null,
+            isExtended: isExtended
+          });
+        }
+        
+        const plannedSessions = sessions.filter(s => s.status === 'planned').length;
+        
+        chapters.push({
+          chapterNumber: 1,
+          chapterName: chapterName,
+          chapterDescription: chapterName,
+          totalSessions: extendedSessionCount, // Use extended count, not original
+          plannedSessions: plannedSessions,
+          completionPercentage: extendedSessionCount > 0 ? Math.round((plannedSessions / extendedSessionCount) * 100) : 0,
+          sessions: sessions
+        });
+      }
+      
+      const totalSessions = chapters.reduce((sum, ch) => sum + ch.totalSessions, 0);
+      const totalPlanned = chapters.reduce((sum, ch) => sum + ch.plannedSessions, 0);
+      
+      return {
+        schemeId: scheme.schemeId,
+        class: scheme.class,
+        subject: scheme.subject,
+        academicYear: scheme.academicYear,
+        term: scheme.term,
+        totalChapters: chapters.length,
+        totalSessions: totalSessions,
+        plannedSessions: totalPlanned,
+        overallProgress: totalSessions > 0 ? Math.round((totalPlanned / totalSessions) * 100) : 0,
+        chapters: chapters,
+        createdAt: scheme.createdAt,
+        approvedAt: scheme.approvedAt
+      };
+    });
+    
+    // Calculate basic planning date range - show till end of current month
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const startDate = new Date(today);
+    const endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0); // Last day of month
+    endDate.setHours(0, 0, 0, 0);
+    
+    const result = {
+      success: true,
+      schemes: schemesWithProgress,
+      planningDateRange: {
+        startDate: _isoDateString(startDate),
+        endDate: _isoDateString(endDate),
+        deferredDays: 0,
+        daysAhead: Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1,
+        preparationDay: 'Any',
+        isPreparationDay: true,
+        canSubmit: true
+      },
+      summary: {
+        totalSchemes: schemesWithProgress.length,
+        totalSessions: schemesWithProgress.reduce((sum, s) => sum + s.totalSessions, 0),
+        plannedSessions: schemesWithProgress.reduce((sum, s) => sum + s.plannedSessions, 0),
+        overallProgress: schemesWithProgress.length > 0 ? 
+          Math.round(schemesWithProgress.reduce((sum, s) => sum + s.overallProgress, 0) / schemesWithProgress.length) : 0
+      }
+    };
+    
+    Logger.log('Backup implementation completed successfully');
     return _respond(result);
+    
   } catch (error) {
-    console.error('Error handling approved schemes for lesson planning:', error);
+    Logger.log('Error in _handleGetApprovedSchemesForLessonPlanning:', error.message);
+    Logger.log('Error stack:', error.stack);
     return _respond({ success: false, error: error.message });
   }
 }
@@ -1083,6 +1404,141 @@ function _handleCreateSchemeLessonPlan(data) {
  * Handle GET planned lesson for a specific period
  * Returns the approved lesson plan for a given period/class/subject combination
  */
+/**
+ * BATCH ENDPOINT: Get teacher's full daily data in ONE call
+ * Combines: getTeacherDailyTimetable + getTeacherDailyReportsForDate
+ * Performance: Reduces 2 API calls to 1
+ */
+function _handleGetTeacherDailyData(params) {
+  try {
+    const { email, date } = params;
+    
+    Logger.log(`[BATCH] Getting teacher daily data for: ${email} on ${date}`);
+    
+    if (!email || !date) {
+      return _respond({ 
+        success: false, 
+        error: 'Missing required parameters: email, date' 
+      });
+    }
+    
+    // Get timetable data
+    const timetableResult = getTeacherDailyTimetable(email, date);
+    
+    // Get submitted reports
+    const reportsResult = _handleGetTeacherDailyReportsForDate({ email, date });
+    const reports = reportsResult?.data || [];
+    
+    return _respond({
+      success: true,
+      date: date,
+      timetable: timetableResult,
+      reports: reports,
+      combined: true
+    });
+    
+  } catch (error) {
+    Logger.log(`[BATCH] Error getting teacher daily data: ${error.message}`);
+    return _respond({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+}
+
+/**
+ * BATCH ENDPOINT: Get all planned lessons for a date (teacher's full day)
+ * This replaces multiple getPlannedLessonForPeriod calls with ONE batch call
+ * Performance: Reduces 6-8 API calls to 1 call
+ */
+function _handleGetPlannedLessonsForDate(params) {
+  try {
+    const { email, date } = params;
+    
+    Logger.log(`[BATCH] Getting all planned lessons for: ${email} on ${date}`);
+    
+    if (!email || !date) {
+      return _respond({ 
+        success: false, 
+        error: 'Missing required parameters: email, date' 
+      });
+    }
+    
+    const queryDate = _normalizeQueryDate(date);
+    
+    // Get all lesson plans for this date
+    const sh = _getSheet('LessonPlans');
+    const headers = _headers(sh);
+    const allLessonPlans = _rows(sh).map(row => _indexByHeader(row, headers));
+    
+    Logger.log(`[BATCH] Total lesson plans in sheet: ${allLessonPlans.length}`);
+    
+    // Filter for Ready status and matching date
+    const matchingPlans = allLessonPlans.filter(plan => {
+      const selectedDateVal = plan.selectedDate || plan.date;
+      const planDate = _isoDateIST(selectedDateVal);
+      
+      return String(plan.status || '') === 'Ready' && planDate === queryDate;
+    });
+    
+    Logger.log(`[BATCH] Found ${matchingPlans.length} lesson plans for ${queryDate}`);
+    
+    // Get scheme details for total sessions (batch lookup)
+    const schemeSheet = _getSheet('Schemes');
+    const schemeHeaders = _headers(schemeSheet);
+    const allSchemes = _rows(schemeSheet).map(row => _indexByHeader(row, schemeHeaders));
+    const schemeMap = {};
+    allSchemes.forEach(scheme => {
+      if (scheme.schemeId) {
+        schemeMap[scheme.schemeId] = scheme;
+      }
+    });
+    
+    // Build response with period-indexed lessons
+    const lessonsByPeriod = {};
+    matchingPlans.forEach(plan => {
+      const periodKey = `${plan.selectedPeriod || plan.period}|${plan.class}|${plan.subject}`;
+      
+      let totalSessions = 1;
+      if (plan.schemeId && schemeMap[plan.schemeId]) {
+        totalSessions = Number(schemeMap[plan.schemeId].noOfSessions || 1);
+      }
+      
+      lessonsByPeriod[periodKey] = {
+        lpId: plan.lpId,
+        schemeId: plan.schemeId,
+        chapter: plan.chapter || '',
+        session: plan.session || '',
+        sessionNo: Number(plan.sessionNo || plan.session || 0),
+        totalSessions: totalSessions,
+        learningObjectives: plan.learningObjectives || '',
+        teachingMethods: plan.teachingMethods || '',
+        selectedDate: plan.selectedDate,
+        selectedPeriod: plan.selectedPeriod || plan.period,
+        class: plan.class,
+        subject: plan.subject,
+        preparationDay: plan.preparationDay || ''
+      };
+      
+      Logger.log(`[BATCH] Mapped lesson ${plan.lpId} to ${periodKey}`);
+    });
+    
+    return _respond({
+      success: true,
+      date: queryDate,
+      lessonsByPeriod: lessonsByPeriod,
+      totalPlans: matchingPlans.length
+    });
+    
+  } catch (error) {
+    Logger.log(`[BATCH] Error getting planned lessons: ${error.message}`);
+    return _respond({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+}
+
 function _handleGetPlannedLessonForPeriod(params) {
   try {
     const { email, date, period, class: className, subject } = params;
@@ -1137,6 +1593,25 @@ function _handleGetPlannedLessonForPeriod(params) {
     
     if (matchingPlan) {
       Logger.log(`Returning lesson plan: ${matchingPlan.lpId}`);
+      
+      // Get scheme details to include total sessions
+      let totalSessions = 1;
+      if (matchingPlan.schemeId) {
+        try {
+          const schemeSheet = _getSheet('Schemes');
+          const schemeHeaders = _headers(schemeSheet);
+          const schemes = _rows(schemeSheet).map(row => _indexByHeader(row, schemeHeaders));
+          const matchingScheme = schemes.find(scheme => scheme.schemeId === matchingPlan.schemeId);
+          
+          if (matchingScheme && matchingScheme.noOfSessions) {
+            totalSessions = Number(matchingScheme.noOfSessions);
+            Logger.log(`Found scheme with ${totalSessions} total sessions`);
+          }
+        } catch (schemeError) {
+          Logger.log(`Error fetching scheme details: ${schemeError.message}`);
+        }
+      }
+      
       return _respond({
         success: true,
         hasPlannedLesson: true,
@@ -1146,6 +1621,7 @@ function _handleGetPlannedLessonForPeriod(params) {
           chapter: matchingPlan.chapter || '',
           session: matchingPlan.session || '',
           sessionNo: Number(matchingPlan.session || 0),
+          totalSessions: totalSessions,
           learningObjectives: matchingPlan.learningObjectives || matchingPlan.objectives || '',
           teachingMethods: matchingPlan.teachingMethods || matchingPlan.activities || '',
           resourcesRequired: matchingPlan.resourcesRequired || matchingPlan.resources || '',
@@ -1529,14 +2005,119 @@ School Administration
 }
 
 /**
- * Handle GET app settings
- * Returns periodTimes from Settings sheet for frontend to use
+ * Handle CHECK cascading issues for a session
+ * Returns warnings about incomplete previous sessions
  */
+function _handleCheckCascadingIssues(params) {
+  try {
+    const { teacherEmail, chapter, sessionNo, class: className, subject } = params;
+    
+    Logger.log(`=== CHECKING CASCADING ISSUES ===`);
+    Logger.log(`Teacher: ${teacherEmail}, Chapter: ${chapter}, Session: ${sessionNo}, Class: ${className}, Subject: ${subject}`);
+    
+    if (!teacherEmail || !chapter || !sessionNo || !className || !subject) {
+      return _respond({ 
+        success: false, 
+        error: 'Missing required parameters: teacherEmail, chapter, sessionNo, class, subject' 
+      });
+    }
+    
+    const currentSessionNo = Number(sessionNo);
+    if (currentSessionNo <= 1) {
+      return _respond({
+        success: true,
+        hasWarnings: false,
+        warnings: []
+      });
+    }
+    
+    // Get all daily reports for this teacher, class, and subject
+    const drSh = _getSheet('DailyReports');
+    const drHeaders = _headers(drSh);
+    const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
+    
+    Logger.log(`Total reports in sheet: ${allReports.length}`);
+    
+    // Filter reports for this chapter by this teacher
+    const chapterReports = allReports.filter(report => {
+      const matchesTeacher = String(report.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
+      const matchesChapter = String(report.chapter || '') === String(chapter || '');
+      const matchesClass = String(report.class || '') === String(className || '');
+      const matchesSubject = String(report.subject || '') === String(subject || '');
+      
+      return matchesTeacher && matchesChapter && matchesClass && matchesSubject;
+    });
+    
+    Logger.log(`Found ${chapterReports.length} reports for chapter "${chapter}"`);
+    
+    // Check previous sessions
+    const warnings = [];
+    const incompleteSessions = [];
+    
+    for (let checkSessionNo = 1; checkSessionNo < currentSessionNo; checkSessionNo++) {
+      const sessionReport = chapterReports.find(report => 
+        Number(report.sessionNo) === checkSessionNo
+      );
+      
+      if (sessionReport) {
+        const completion = Number(sessionReport.completionPercentage || 0);
+        Logger.log(`Session ${checkSessionNo}: ${completion}% complete`);
+        
+        if (completion < 75) {
+          incompleteSessions.push({
+            session: checkSessionNo,
+            completion: completion,
+            date: sessionReport.date,
+            difficulties: sessionReport.difficulties || '',
+            incomplete: true
+          });
+        }
+      } else {
+        Logger.log(`Session ${checkSessionNo}: Not found (0% complete)`);
+        
+        incompleteSessions.push({
+          session: checkSessionNo,
+          completion: 0,
+          date: 'Not completed',
+          difficulties: 'Session not reported',
+          incomplete: true
+        });
+      }
+    }
+    
+    if (incompleteSessions.length > 0) {
+      const severity = incompleteSessions.some(s => s.completion < 50) ? 'high' : 'medium';
+      const message = `⚠️ ${incompleteSessions.length} previous session${incompleteSessions.length > 1 ? 's' : ''} incomplete`;
+      const details = `Session${incompleteSessions.length > 1 ? 's' : ''} ${incompleteSessions.map(s => s.session).join(', ')} need${incompleteSessions.length === 1 ? 's' : ''} attention`;
+      
+      warnings.push({
+        type: 'cascading',
+        severity: severity,
+        message: message,
+        details: details,
+        incompleteSessions: incompleteSessions
+      });
+    }
+    
+    Logger.log(`=== CASCADING CHECK RESULT: ${warnings.length} warnings ===`);
+    
+    return _respond({
+      success: true,
+      hasWarnings: warnings.length > 0,
+      warnings: warnings,
+      checkedSessions: currentSessionNo - 1,
+      incompleteSessions: incompleteSessions
+    });
+    
+  } catch (error) {
+    Logger.log('Error checking cascading issues: ' + error.message);
+    return _respond({ success: false, error: error.message });
+  }
+}
 function _handleGetAppSettings() {
   try {
-    const settingsSheet = _getSheet('Settings');
-    const settingsHeaders = _headers(settingsSheet);
-    const settingsData = _rows(settingsSheet).map(row => _indexByHeader(row, settingsHeaders));
+    // PERFORMANCE: Use cached Settings data
+    const settingsData = _getCachedSheetData('Settings').data;
     
     Logger.log(`Total settings rows: ${settingsData.length}`);
     
@@ -1580,6 +2161,150 @@ function _handleGetAppSettings() {
     
   } catch (error) {
     Logger.log('Error getting app settings: ' + error.message);
+    return _respond({ success: false, error: error.message });
+  }
+}
+
+// === SESSION COMPLETION TRACKING HANDLERS ===
+
+/**
+ * Handle session completion update requests
+ */
+function _handleUpdateSessionCompletion(data) {
+  try {
+    Logger.log(`_handleUpdateSessionCompletion called with data: ${JSON.stringify(data)}`);
+    
+    const result = updateSessionCompletion(data);
+    return _respond(result);
+  } catch (error) {
+    Logger.log(`ERROR in _handleUpdateSessionCompletion: ${error.message}`);
+    return _respond({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Handle teacher performance dashboard requests  
+ */
+function _handleGetTeacherPerformanceDashboard(data) {
+  try {
+    const teacherEmail = data.teacherEmail || '';
+    Logger.log(`_handleGetTeacherPerformanceDashboard called for: ${teacherEmail}`);
+    
+    if (!teacherEmail) {
+      return _respond({ success: false, error: 'Teacher email is required' });
+    }
+    
+    const result = getTeacherPerformanceDashboard(teacherEmail);
+    return _respond(result);
+  } catch (error) {
+    Logger.log(`ERROR in _handleGetTeacherPerformanceDashboard: ${error.message}`);
+    return _respond({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Handle scheme completion analytics requests
+ */
+function _handleGetSchemeCompletionAnalytics(data) {
+  try {
+    const schemeId = data.schemeId || '';
+    Logger.log(`_handleGetSchemeCompletionAnalytics called for: ${schemeId}`);
+    
+    if (!schemeId) {
+      return _respond({ success: false, error: 'Scheme ID is required' });
+    }
+    
+    const result = getSchemeCompletionAnalytics(schemeId);
+    return _respond(result);
+  } catch (error) {
+    Logger.log(`ERROR in _handleGetSchemeCompletionAnalytics: ${error.message}`);
+    return _respond({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Handle session completion history requests
+ */
+function _handleGetSessionCompletionHistory(data) {
+  try {
+    const teacherEmail = data.teacherEmail || '';
+    Logger.log(`_handleGetSessionCompletionHistory called for: ${teacherEmail}`);
+    
+    if (!teacherEmail) {
+      return _respond({ success: false, error: 'Teacher email is required' });
+    }
+    
+    // Implementation would fetch session history from sheets
+    // For now, return basic structure
+    const result = {
+      success: true,
+      history: []
+    };
+    
+    return _respond(result);
+  } catch (error) {
+    Logger.log(`ERROR in _handleGetSessionCompletionHistory: ${error.message}`);
+    return _respond({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Handle getting all teachers performance (HM only)
+ */
+function _handleGetAllTeachersPerformance(data) {
+  try {
+    Logger.log('_handleGetAllTeachersPerformance called');
+    
+    const result = getAllTeachersPerformance();
+    return _respond(result);
+  } catch (error) {
+    Logger.log(`ERROR in _handleGetAllTeachersPerformance: ${error.message}`);
+    return _respond({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Handle school session analytics (HM only)
+ */
+function _handleGetSchoolSessionAnalytics(data) {
+  try {
+    const filters = data.filters || {};
+    Logger.log(`_handleGetSchoolSessionAnalytics called with filters: ${JSON.stringify(filters)}`);
+    
+    const result = getSchoolSessionAnalytics(filters);
+    return _respond(result);
+  } catch (error) {
+    Logger.log(`ERROR in _handleGetSchoolSessionAnalytics: ${error.message}`);
+    return _respond({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Handle cascading issues report (HM only)
+ */
+function _handleGetCascadingIssuesReport(data) {
+  try {
+    Logger.log('_handleGetCascadingIssuesReport called');
+    
+    const result = getCascadingIssuesReport();
+    return _respond(result);
+  } catch (error) {
+    Logger.log(`ERROR in _handleGetCascadingIssuesReport: ${error.message}`);
+    return _respond({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Handle batch sync of session dependencies (Admin/HM only)
+ */
+function _handleSyncSessionDependencies(data) {
+  try {
+    Logger.log('_handleSyncSessionDependencies called');
+    
+    const result = syncSessionDependenciesFromReports();
+    return _respond(result);
+  } catch (error) {
+    Logger.log(`ERROR in _handleSyncSessionDependencies: ${error.message}`);
     return _respond({ success: false, error: error.message });
   }
 }

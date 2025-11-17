@@ -17,12 +17,15 @@ import PWAInstallBanner from './components/PWAInstallBanner';
 const SmartReminders = lazy(() => import('./components/SmartReminders'));
 const SubstitutionModule = lazy(() => import('./components/SubstitutionModule'));
 const EnhancedSubstitutionView = lazy(() => import('./components/EnhancedSubstitutionView'));
-const DailyReportTimetable = lazy(() => import('./DailyReportTimetable'));
+const DailyReportTimetable = lazy(() => import('./DailyReportEnhanced'));
 const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodSubstitutionView'));
 const ExamManagement = lazy(() => import('./components/ExamManagement'));
 const ReportCard = lazy(() => import('./components/ReportCard'));
 const SchemeLessonPlanning = lazy(() => import('./components/SchemeLessonPlanning'));
-const HMDailyOversight = lazy(() => import('./components/HMDailyOversight'));
+const SessionCompletionTracker = lazy(() => import('./components/SessionCompletionTracker'));
+const HMTeacherPerformanceView = lazy(() => import('./components/HMTeacherPerformanceView'));
+const HMSessionAnalyticsView = lazy(() => import('./components/HMSessionAnalyticsView'));
+const HMDailyOversight = lazy(() => import('./components/HMDailyOversightEnhanced'));
 
 // Keep lightweight components as regular imports
 import AppLayout from './components/AppLayout';
@@ -58,6 +61,7 @@ import {
   Settings,
   UserCheck,
   Award,
+  Activity,
   School,
   UserCircle,
   CalendarDays,
@@ -67,7 +71,8 @@ import {
   FileClock,
   RefreshCw,
   LayoutGrid,
-  ClipboardCheck
+  ClipboardCheck,
+  Check
 } from 'lucide-react';
 
 // Common utility functions to avoid duplication
@@ -420,7 +425,8 @@ const App = () => {
         { id: 'lesson-plans', label: 'Lesson Plans', icon: BookOpen },
         { id: 'scheme-lesson-planning', label: 'Scheme-Based Planning', icon: BookCheck },
         { id: 'timetable', label: 'Timetable', icon: Calendar },
-        { id: 'reports', label: 'Daily Reports', icon: FileText },
+        { id: 'my-substitutions', label: 'My Substitutions', icon: UserPlus },
+        { id: 'reports', label: 'Daily Reports (Enhanced)', icon: FileText },
         { id: 'smart-reminders', label: 'Smart Reminders', icon: Bell }
       );
       // Teachers and class teachers can also manage exams: view available exams,
@@ -433,7 +439,7 @@ const App = () => {
     if (hasAnyRole(['daily reporting teachers'])) {
       items.push(
         { id: 'timetable', label: 'Timetable', icon: Calendar },
-        { id: 'reports', label: 'Daily Reports', icon: FileText }
+        { id: 'reports', label: 'Daily Reports (Enhanced)', icon: FileText }
       );
     }
 
@@ -448,7 +454,9 @@ const App = () => {
       items.push(
         { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
         { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
-        { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
+        { id: 'teacher-performance', label: 'Teacher Performance', icon: TrendingUp },
+        { id: 'session-analytics', label: 'Session Analytics', icon: BarChart2 },
+        { id: 'daily-oversight', label: 'Daily Oversight (Enhanced)', icon: ClipboardCheck },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
@@ -470,6 +478,103 @@ const App = () => {
     return items;
   };
 
+  // Substitution notifications state (moved to App level to avoid hook issues)
+  const [substitutionNotifications, setSubstitutionNotifications] = useState([]);
+  const [shownNotificationIds, setShownNotificationIds] = useState(new Set()); // Track shown notifications
+  
+  // Load substitution notifications for current user and add to NotificationCenter
+  const loadSubstitutionNotifications = useCallback(async () => {
+    if (!user?.email) return;
+    
+    try {
+      const response = await api.getSubstitutionNotifications(user.email);
+      
+      let notificationsList = [];
+      
+      // Handle different response formats
+      if (Array.isArray(response)) {
+        notificationsList = response;
+      } else if (response && response.notifications) {
+        notificationsList = response.notifications;
+      } else if (response && Array.isArray(response.data)) {
+        notificationsList = response.data;
+      }
+      
+      // Store for teacher dashboard display
+      setSubstitutionNotifications(notificationsList);
+      
+      // Add unacknowledged notifications to NotificationCenter (only if not already shown)
+      notificationsList.forEach(notification => {
+        const isUnacknowledged = String(notification.acknowledged || '').toLowerCase() !== 'true';
+        const notAlreadyShown = !shownNotificationIds.has(notification.id);
+        
+        if (isUnacknowledged && notAlreadyShown) {
+          // Parse the notification data
+          let notifData = {};
+          try {
+            notifData = JSON.parse(notification.data || '{}');
+          } catch (e) {
+            console.warn('Failed to parse notification data:', e);
+          }
+          
+          // Add to notification center
+          info(
+            notification.title || 'Substitution Assignment',
+            notification.message || `Period ${notifData.period} - Class ${notifData.class}`,
+            {
+              autoClose: false, // Don't auto-close substitution notifications
+              actions: [
+                {
+                  label: 'Acknowledge',
+                  handler: () => acknowledgeNotification(notification.id)
+                }
+              ],
+              metadata: {
+                type: 'substitution',
+                notificationId: notification.id,
+                ...notifData
+              }
+            }
+          );
+          
+          // Mark as shown
+          setShownNotificationIds(prev => new Set([...prev, notification.id]));
+        }
+      });
+      
+    } catch (error) {
+      console.error('Error loading substitution notifications:', error);
+    }
+  }, [user?.email, info, shownNotificationIds]);
+  
+  const acknowledgeNotification = useCallback(async (notificationId) => {
+    try {
+      await api.acknowledgeSubstitutionNotification(user.email, notificationId);
+      success('Acknowledged', 'Substitution assignment acknowledged successfully');
+      
+      // Remove from state
+      setSubstitutionNotifications(prev => 
+        prev.filter(n => n.id !== notificationId)
+      );
+      
+      // Reload to refresh data
+      loadSubstitutionNotifications();
+    } catch (error) {
+      console.error('Error acknowledging notification:', error);
+      error('Error', 'Failed to acknowledge notification');
+    }
+  }, [user?.email, success, error, loadSubstitutionNotifications]);
+  
+  // Poll for substitution notifications
+  useEffect(() => {
+    if (user?.email) {
+      loadSubstitutionNotifications();
+      // Poll for new notifications every 2 minutes
+      const interval = setInterval(loadSubstitutionNotifications, 2 * 60 * 1000);
+      return () => clearInterval(interval);
+    }
+  }, [user?.email, loadSubstitutionNotifications]);
+  
   // Dashboard component
   const Dashboard = ({ 
     showSendNotification, 
@@ -477,40 +582,6 @@ const App = () => {
     notificationData, 
     setNotificationData 
   }) => {
-    // Get notification functions
-    const { success, error, warning, info } = useNotifications();
-    
-    // Substitution notifications state
-    const [substitutionNotifications, setSubstitutionNotifications] = useState([]);
-    
-    // Load substitution notifications for current user
-    useEffect(() => {
-      if (user?.email) {
-        loadSubstitutionNotifications();
-      }
-    }, [user]);
-    
-    const loadSubstitutionNotifications = async () => {
-      try {
-        const response = await api.getSubstitutionNotifications(user.email);
-        if (response && response.notifications) {
-          setSubstitutionNotifications(response.notifications);
-        }
-      } catch (error) {
-        console.error('Error loading substitution notifications:', error);
-      }
-    };
-    
-    const acknowledgeNotification = async (notificationId) => {
-      try {
-        await api.acknowledgeSubstitutionNotification(user.email, notificationId);
-        success('Acknowledged', 'Substitution assignment acknowledged successfully');
-        loadSubstitutionNotifications(); // Reload to remove acknowledged notification
-      } catch (error) {
-        console.error('Error acknowledging notification:', error);
-        error('Error', 'Failed to acknowledge notification');
-      }
-    };
 
     // Insights state holds counts used to populate the summary cards.  When the
     // logged‑in user is the headmaster ("H M" role) we fetch global counts
@@ -572,12 +643,9 @@ const App = () => {
           
           // Headmaster view: use HM insights and classes count
           if (hasRole('h m')) {
-            console.log('Fetching HM dashboard data...');
             const hmData = await api.getHmInsights();
-            console.log('HM insights received:', hmData);
             
             const classes = await api.getAllClasses();
-            console.log('Classes received:', classes);
             
             const newInsights = {
               planCount: hmData?.planCount || 0,
@@ -588,7 +656,6 @@ const App = () => {
               pendingReports: 0
             };
             
-            console.log('Setting insights to:', newInsights);
             setInsights(newInsights);
           } else if (hasAnyRole(['teacher','class teacher','daily reporting teachers'])) {
             // Teacher view: compute classes and subjects from user object
@@ -770,12 +837,10 @@ const App = () => {
   // Keep root user state in sync when googleAuth.user changes (first login or restore)
   useEffect(() => {
     if (googleAuth?.user) {
-      console.log('Google auth user detected, syncing to app state:', googleAuth.user);
       const gu = googleAuth.user;
       const roles = Array.isArray(gu.roles) ? gu.roles : (gu.roles ? String(gu.roles).split(',').map(s=>s.trim()).filter(Boolean) : []);
       setUser(prev => {
         if (!prev || prev.email !== gu.email) {
-          console.log('Setting user state from Google auth');
           return { ...gu, roles };
         }
         return prev;
@@ -944,8 +1009,16 @@ const App = () => {
           return <LessonPlansView />;
         case 'scheme-lesson-planning':
           return <SchemeLessonPlanning userEmail={user?.email} userName={user?.name} />;
+        case 'session-tracking':
+          return <SessionCompletionTracker user={user} />;
+        case 'teacher-performance':
+          return <HMTeacherPerformanceView user={user} />;
+        case 'session-analytics':
+          return <HMSessionAnalyticsView user={user} />;
         case 'timetable':
           return <TimetableView />;
+        case 'my-substitutions':
+          return <MySubstitutionsView user={user} periodTimes={memoizedSettings.periodTimes} />;
       case 'reports':
         return <ReportsView />;
       case 'hm-dashboard':
@@ -1019,9 +1092,7 @@ const App = () => {
           noOfSessions: formData.noOfSessions
         };
         
-        console.log('Submitting scheme data:', schemeData);
         const response = await api.submitPlan(user.email, schemeData);
-        console.log('Scheme submission response:', response);
         
         // Unwrap the response (backend wraps in {status, data, timestamp})
         const result = response.data || response;
@@ -1394,11 +1465,7 @@ const App = () => {
           const timetableData = await api.getTeacherWeeklyTimetable(user.email);
           setTimetableSlots(Array.isArray(timetableData) ? timetableData : []);
           // Teacher lesson plans
-          console.log('Fetching teacher lesson plans for:', user.email);
           const plans = await api.getTeacherLessonPlans(user.email);
-          console.log('Teacher lesson plans response:', plans);
-          console.log('Plans is array?', Array.isArray(plans));
-          console.log('Plans length:', plans?.length);
           setLessonPlans(Array.isArray(plans) ? plans : []);
           
           // Load data silently
@@ -1752,7 +1819,7 @@ const App = () => {
                 </p>
               </div>
 
-              {/* Session dropdown based on selected scheme's number of sessions */}
+              {/* Session dropdown based on selected scheme's number of sessions + extensions */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Session
@@ -1765,18 +1832,37 @@ const App = () => {
                 >
                   {(() => {
                     const scheme = approvedSchemes.find(s => s.schemeId === preparationData.schemeId);
-                    const max = scheme ? Number(scheme.noOfSessions || 1) : 1;
+                    const originalMax = scheme ? Number(scheme.noOfSessions || 1) : 1;
+                    
+                    // Calculate extended max: include existing sessions + 1 for continuation
+                    let extendedMax = originalMax;
+                    if (scheme && lessonPlans.length > 0) {
+                      const existingSessionsForScheme = lessonPlans
+                        .filter(lp => lp.schemeId === scheme.schemeId)
+                        .map(lp => Number(lp.session || 0))
+                        .filter(session => session > 0);
+                      
+                      if (existingSessionsForScheme.length > 0) {
+                        const maxExisting = Math.max(...existingSessionsForScheme);
+                        extendedMax = Math.max(originalMax, maxExisting + 1);
+                      }
+                    }
+                    
                     const options = [];
-                    for (let i = 1; i <= max; i++) {
+                    for (let i = 1; i <= extendedMax; i++) {
+                      const isExtended = i > originalMax;
                       options.push(
                         <option key={i} value={String(i)}>
-                          Session {i} - {scheme ? scheme.chapter : ''}
+                          Session {i} - {scheme ? scheme.chapter : ''}{isExtended ? ' (Extended)' : ''}
                         </option>
                       );
                     }
                     return options;
                   })()}
                 </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Sessions beyond the original plan are marked as extended
+                </p>
               </div>
 
               <div>
@@ -2192,6 +2278,342 @@ const App = () => {
     );
   };
 
+  // My Substitutions View - For teachers to see their assigned substitutions
+  const MySubstitutionsView = ({ user, periodTimes }) => {
+    const [substitutions, setSubstitutions] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+    const [acknowledgingId, setAcknowledgingId] = useState(null);
+    const [debugInfo, setDebugInfo] = useState(null);
+
+    useEffect(() => {
+      // Set default date range: last 30 days to today
+      const today = new Date();
+      const thirtyDaysAgo = new Date(today);
+      thirtyDaysAgo.setDate(today.getDate() - 30);
+      
+      setStartDate(thirtyDaysAgo.toISOString().split('T')[0]);
+      setEndDate(today.toISOString().split('T')[0]);
+    }, []);
+
+    useEffect(() => {
+      if (user?.email && startDate && endDate) {
+        loadSubstitutions();
+      }
+    }, [user, startDate, endDate]);
+
+    const loadSubstitutions = async () => {
+      setLoading(true);
+      setDebugInfo(null);
+      try {
+        // Use single range query instead of multiple date queries
+        const result = await api.getTeacherSubstitutionsRange(user.email, startDate, endDate);
+        
+        const allSubs = result?.substitutions || [];
+        
+        if (allSubs.length === 0) {
+          // Load debug info to help troubleshoot
+          const debugData = await api.getAllSubstitutions();
+          setDebugInfo({
+            totalInSheet: debugData.total,
+            allData: debugData.data,
+            searchedEmail: user.email,
+            searchedRange: `${startDate} to ${endDate}`
+          });
+        }
+        
+        setSubstitutions(allSubs);
+      } catch (error) {
+        console.error('Error loading substitutions:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const handleAcknowledge = async (sub) => {
+      const uniqueId = `${sub.date}-${sub.period}-${sub.class}`;
+      setAcknowledgingId(uniqueId);
+      
+      try {
+        const response = await api.acknowledgeSubstitutionAssignment({
+          date: sub.date,
+          period: sub.period,
+          class: sub.class,
+          teacherEmail: user.email
+        });
+
+        if (response?.success || response?.data?.success) {
+          // Update local state
+          setSubstitutions(prev => prev.map(s => {
+            const sId = `${s.date}-${s.period}-${s.class}`;
+            if (sId === uniqueId) {
+              return { ...s, acknowledged: 'TRUE', acknowledgedBy: user.email, acknowledgedAt: new Date().toISOString() };
+            }
+            return s;
+          }));
+        } else {
+          console.error('Failed to acknowledge:', response);
+          alert('Failed to acknowledge substitution. Please try again.');
+        }
+      } catch (error) {
+        console.error('Error acknowledging substitution:', error);
+        alert('Error acknowledging substitution. Please try again.');
+      } finally {
+        setAcknowledgingId(null);
+      }
+    };
+
+    const getPeriodTime = (period) => {
+      if (!periodTimes || !Array.isArray(periodTimes)) return '';
+      const periodInfo = periodTimes.find(p => parseInt(p.period) === parseInt(period));
+      return periodInfo ? `${periodInfo.start} - ${periodInfo.end}` : '';
+    };
+
+    const isAcknowledged = (sub) => {
+      return String(sub.acknowledged).toLowerCase() === 'true';
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-gray-900">My Substitutions</h1>
+          <div className="text-sm text-gray-600">
+            View and acknowledge substitution assignments
+          </div>
+        </div>
+
+        {/* Date Range Filter */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+          <div className="flex items-center gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">From Date</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">To Date</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+            <button
+              onClick={loadSubstitutions}
+              className="mt-6 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {/* Substitutions List */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+          <div className="p-6">
+            <h2 className="text-lg font-semibold mb-4">Assigned Substitutions ({substitutions.length})</h2>
+            
+            {loading ? (
+              <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                <p className="text-gray-600 mt-4">Loading substitutions...</p>
+              </div>
+            ) : substitutions.length === 0 ? (
+              <div>
+                <div className="text-center py-12">
+                  <UserPlus className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-600 mb-2">No substitutions found for the selected period</p>
+                  <p className="text-sm text-gray-500">Showing results for: {startDate} to {endDate}</p>
+                </div>
+                
+                {/* Debug Info */}
+                {debugInfo && (
+                  <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <h3 className="font-semibold text-sm text-gray-700 mb-2">Debug Information:</h3>
+                    <div className="text-xs text-gray-600 space-y-1">
+                      <p>• Total substitutions in sheet: <strong>{debugInfo.totalInSheet}</strong></p>
+                      <p>• Searching for teacher: <strong>{debugInfo.searchedEmail}</strong></p>
+                      <p>• Date range: <strong>{debugInfo.searchedRange}</strong></p>
+                      {debugInfo.allData && debugInfo.allData.length > 0 && (
+                        <div className="mt-3">
+                          <p className="font-medium mb-1">All substitutions in sheet:</p>
+                          <div className="max-h-60 overflow-y-auto">
+                            {debugInfo.allData.map((sub, idx) => (
+                              <div key={idx} className="pl-4 py-1 border-l-2 border-gray-300 mb-2">
+                                <p>Date: {sub.date} | Period: {sub.period} | Class: {sub.class}</p>
+                                <p>Substitute: <strong>{sub.substituteTeacher}</strong></p>
+                                <p className="text-gray-500">Absent: {sub.absentTeacher}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Period</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Absent Teacher</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Note</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {substitutions.map((sub, index) => {
+                      const uniqueId = `${sub.date}-${sub.period}-${sub.class}`;
+                      const acknowledged = isAcknowledged(sub);
+                      const acknowledging = acknowledgingId === uniqueId;
+                      
+                      return (
+                        <tr key={index} className={acknowledged ? 'bg-green-50 hover:bg-green-100' : 'hover:bg-gray-50'}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {new Date(sub.date).toLocaleDateString('en-GB', { 
+                              day: '2-digit', 
+                              month: 'short', 
+                              year: 'numeric' 
+                            })}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            Period {sub.period}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                            {getPeriodTime(sub.period)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {sub.class}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            <div className="flex flex-col">
+                              <span className="font-medium">{sub.substituteSubject || sub.regularSubject}</span>
+                              {sub.substituteSubject !== sub.regularSubject && (
+                                <span className="text-xs text-gray-500">(Original: {sub.regularSubject})</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                            {sub.absentTeacher}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-600">
+                            {sub.note || '-'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            {acknowledged ? (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                <Check className="w-3 h-3 mr-1" />
+                                Acknowledged
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                Pending
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            {!acknowledged && (
+                              <button
+                                onClick={() => handleAcknowledge(sub)}
+                                disabled={acknowledging}
+                                className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-xs"
+                              >
+                                {acknowledging ? 'Acknowledging...' : 'Acknowledge'}
+                              </button>
+                            )}
+                            {acknowledged && sub.acknowledgedAt && (
+                              <span className="text-xs text-gray-500">
+                                {new Date(sub.acknowledgedAt).toLocaleDateString('en-GB', {
+                                  day: '2-digit',
+                                  month: 'short'
+                                })}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Summary Statistics */}
+        {!loading && substitutions.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center">
+                <div className="p-3 bg-blue-100 rounded-lg">
+                  <UserPlus className="w-6 h-6 text-blue-600" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Total Substitutions</p>
+                  <p className="text-2xl font-bold text-gray-900">{substitutions.length}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center">
+                <div className="p-3 bg-green-100 rounded-lg">
+                  <Check className="w-6 h-6 text-green-600" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Acknowledged</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {substitutions.filter(s => isAcknowledged(s)).length}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center">
+                <div className="p-3 bg-purple-100 rounded-lg">
+                  <Calendar className="w-6 h-6 text-purple-600" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Unique Classes</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {[...new Set(substitutions.map(s => s.class))].length}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center">
+                <div className="p-3 bg-orange-100 rounded-lg">
+                  <BookOpen className="w-6 h-6 text-orange-600" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Unique Subjects</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {[...new Set(substitutions.map(s => s.substituteSubject || s.regularSubject))].length}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Reports View - Enhanced Daily Report with Timetable Integration
   const ReportsView = () => {
     return (
@@ -2402,21 +2824,13 @@ const App = () => {
       return [...new Set(allSchemes.map(s => s.subject).filter(Boolean))].sort();
     }, [allSchemes]);
 
-    // Debug logging for filter options (reduced frequency)
-    useEffect(() => {
-      console.log('Scheme Filter options - Teachers:', uniqueTeachers, 'Classes:', uniqueClasses, 'Subjects:', uniqueSubjects);
-    }, [uniqueTeachers, uniqueClasses, uniqueSubjects]);
-
     // Load all schemes once for filter options
     useEffect(() => {
       async function fetchAllSchemes() {
         try {
-          console.log('Fetching all schemes for filter options...');
           const data = await api.getAllSchemes(1, 1000, '', '', '', '', ''); // Get all schemes regardless of status
-          console.log('Raw API response for all schemes:', data);
           // Backend returns array directly, not wrapped in .plans
           const schemes = Array.isArray(data) ? data : (Array.isArray(data?.plans) ? data.plans : []);
-          console.log('Processed schemes for filters:', schemes.length, 'schemes loaded', schemes.slice(0, 3));
           setAllSchemes(schemes);
         } catch (err) {
           console.error('Error fetching schemes for filters:', err);
@@ -2437,14 +2851,11 @@ const App = () => {
           const subjectFilter = filters.subject === '' ? '' : filters.subject;
           const statusFilter = filters.status === '' || filters.status === 'All' ? '' : filters.status;
           
-          console.log('Fetching schemes with filters:', { teacherFilter, classFilter, subjectFilter, statusFilter });
-          
           // Use getAllSchemes API with status filter directly - backend handles exact matching
           const data = await api.getAllSchemes(1, 200, teacherFilter, classFilter, subjectFilter, statusFilter, '');
           
           // Backend returns array directly, not wrapped in .plans  
           const schemes = Array.isArray(data) ? data : (Array.isArray(data?.plans) ? data.plans : []);
-          console.log(`Filtered schemes: ${schemes.length} results for status "${filters.status || 'All'}"`, schemes);
           setPendingSchemes(schemes);
         } catch (err) {
           console.error('Error fetching filtered schemes:', err);
@@ -2689,19 +3100,12 @@ const App = () => {
       return [...new Set(allLessons.map(l => l.subject).filter(Boolean))].sort();
     }, [allLessons]);
 
-    // Debug logging for lesson filter options (reduced frequency)
-    useEffect(() => {
-      console.log('Lesson Filter options - Teachers:', uniqueTeachers, 'Classes:', uniqueClasses, 'Subjects:', uniqueSubjects);
-    }, [uniqueTeachers, uniqueClasses, uniqueSubjects]);
-
     // Load all lessons once for reference
     useEffect(() => {
       async function fetchAllLessons() {
         try {
-          console.log('Fetching all lessons for filter options...');
           const data = await api.getPendingLessonReviews('', '', '', ''); // Get all for reference
           const lessons = Array.isArray(data) ? data : [];
-          console.log('Processed lessons for filters:', lessons.length, 'lessons loaded');
           setAllLessons(lessons);
         } catch (err) {
           console.error('Error fetching lessons for filters:', err);
@@ -2724,7 +3128,6 @@ const App = () => {
           
           const data = await api.getPendingLessonReviews(teacherFilter, classFilter, subjectFilter, statusFilter);
           const lessons = Array.isArray(data) ? data : [];
-          console.log(`Filtered lessons: ${lessons.length} results for status "${filters.status || 'All'}"`);
           setPendingLessons(lessons);
         } catch (err) {
           console.error('Error fetching filtered lessons:', err);
@@ -3249,39 +3652,6 @@ const App = () => {
           <h1 className="text-2xl font-bold text-gray-900">Substitutions Management</h1>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => {
-                console.log('=== DEBUG INFO ===');
-                console.log('Current substitutions:', substitutions);
-                console.log('Current date filter:', formData.date);
-                console.log('Daily timetable:', dailyTimetable);
-                console.log('=================');
-                
-                // Debug the raw API response
-                Promise.all([
-                  api.getAssignedSubstitutions(formData.date, { noCache: true }),
-                  api.debugSubstitutions(formData.date, { noCache: true })
-                ]).then(([response, debugResponse]) => {
-                  console.log('🔍 NORMAL API RESPONSE:', response);
-                  console.log('🔧 DEBUG API RESPONSE:', debugResponse);
-                  
-                  if (debugResponse) {
-                    console.log('📊 Headers in sheet:', debugResponse.headers);
-                    console.log('📊 Total substitutions in sheet:', debugResponse.totalCount);
-                    console.log('📊 All substitutions:', debugResponse.allSubstitutions);
-                    console.log('📊 Target date:', debugResponse.targetDate);
-                    console.log('📊 Target date ISO:', debugResponse.targetDateISO);
-                    console.log('📊 Date conversion debug:', debugResponse.dateDebug);
-                    console.log('📊 Filtered for date:', debugResponse.filteredForDate);
-                  }
-                }).catch(err => console.error('❌ API Error:', err));
-                
-                alert(`Debug info logged to console. Found ${substitutions.length} substitutions. Check console for detailed API response.`);
-              }}
-              className="bg-yellow-100 text-yellow-800 rounded-lg px-3 py-2 flex items-center hover:bg-yellow-200 transition-colors duration-300"
-            >
-              🐛 Debug
-            </button>
-            <button
               onClick={() => refreshSubstitutions()}
               className="bg-gray-100 text-gray-900 rounded-lg px-3 py-2 flex items-center hover:bg-gray-200 transition-colors duration-300"
               disabled={refreshing}
@@ -3698,16 +4068,13 @@ const App = () => {
         try {
           let data;
           const needServerFilter = !!(filterClass || filterTeacher || searchDate);
-          console.log('[FullTimetableView] Fetching timetable, needServerFilter:', needServerFilter);
           if (needServerFilter) {
             data = await api.getFullTimetableFiltered(filterClass || '', '', filterTeacher || '', searchDate || '');
           } else {
             data = await api.getFullTimetable();
           }
-          console.log('[FullTimetableView] Received data:', data);
           if (cancelled) return;
           const ft = Array.isArray(data) ? data : [];
-          console.log('[FullTimetableView] Setting fullTimetable:', ft.length, 'days');
           setFullTimetable(ft);
           // Derive filter lists from current data
           const classes = new Set();
@@ -5300,13 +5667,6 @@ const App = () => {
     }
 
     if (!effectiveUser) {
-      console.log('No effectiveUser, checking auth state:', {
-        googleLoading: googleAuth?.loading,
-        googleUser: googleAuth?.user?.email,
-        localUser: localUser?.email,
-        user: user?.email
-      });
-      
       return (
         <>
           {apiError && (
@@ -5322,8 +5682,6 @@ const App = () => {
         </>
       );
     }
-    
-    console.log('Rendering dashboard for user:', effectiveUser?.email);
 
     return (
       <div className={`min-h-screen ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'} transition-colors duration-300`}>
@@ -5349,7 +5707,6 @@ const App = () => {
                 <form onSubmit={async (e) => {
                   e.preventDefault();
                   try {
-                    console.log('Sending notification:', notificationData);
                     const response = await api.sendCustomNotification(
                       user.email,
                       notificationData.title,
@@ -5357,7 +5714,6 @@ const App = () => {
                       notificationData.priority.toUpperCase(),
                       notificationData.recipients
                     );
-                    console.log('Notification sent successfully:', response);
                     
                     // Show success message
                     alert(`Notice "${notificationData.title}" sent successfully to ${notificationData.recipients}!`);

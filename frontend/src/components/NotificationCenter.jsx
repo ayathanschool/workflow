@@ -38,7 +38,9 @@ const NotificationCenter = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const persistentNotifications = notifications.filter(n => !n.autoClose || !n.read);
+  // Show notifications that are persistent (autoClose: false) OR unread
+  // Once marked as read, only persistent notifications remain visible
+  const persistentNotifications = notifications.filter(n => !n.autoClose);
 
   const getIcon = (type) => {
     switch (type) {

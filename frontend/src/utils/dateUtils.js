@@ -288,16 +288,16 @@ export function periodToTimeString(period, customPeriodTimes = null) {
     }
   }
   
-  // Default period map
+  // Default period map (updated to match school settings)
   const periodMap = {
-    1: "09:00 - 09:45",
-    2: "09:45 - 10:30",
-    3: "10:45 - 11:30",
-    4: "11:30 - 12:15",
-    5: "13:00 - 13:45",
-    6: "13:45 - 14:30",
-    7: "14:45 - 15:30",
-    8: "15:30 - 16:15"
+    1: "08:50 - 09:35",
+    2: "09:35 - 10:20",
+    3: "10:30 - 11:15",
+    4: "11:15 - 12:00",
+    5: "12:00 - 12:45",
+    6: "13:15 - 14:00",
+    7: "14:00 - 14:40",
+    8: "14:45 - 15:25"
   };
   
   return periodMap[period] || `Period ${period}`;
