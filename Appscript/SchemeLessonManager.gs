@@ -1375,6 +1375,80 @@ function _getDefaultPeriodTiming(periodNumber) {
 }
 
 /**
+ * Skip remaining sessions when a chapter is completed early
+ * Called when teacher checks "Chapter Fully Completed" before the final session
+ */
+function _skipRemainingSessionsForCompletedChapter(reportData) {
+  try {
+    Logger.log('=== SKIPPING REMAINING SESSIONS FOR COMPLETED CHAPTER ===');
+    Logger.log('Report data: ' + JSON.stringify(reportData));
+    
+    const lessonPlanId = reportData.lessonPlanId;
+    const currentSession = Number(reportData.sessionNo || 0);
+    const totalSessions = Number(reportData.totalSessions || 1);
+    
+    // If this is already the last session, nothing to skip
+    if (currentSession >= totalSessions) {
+      Logger.log('Already at or past final session - nothing to skip');
+      return { success: true, sessionsSkipped: 0 };
+    }
+    
+    // Find the lesson plan
+    const lpSh = _getSheet('LessonPlans');
+    const lpHeaders = _headers(lpSh);
+    const lessonPlans = _rows(lpSh).map(row => _indexByHeader(row, lpHeaders));
+    
+    const baseLessonPlan = lessonPlans.find(lp => 
+      String(lp.lpId || '').toLowerCase() === String(lessonPlanId || '').toLowerCase() &&
+      Number(lp.session || 0) === currentSession
+    );
+    
+    if (!baseLessonPlan) {
+      Logger.log('Base lesson plan not found');
+      return { success: false, error: 'Lesson plan not found' };
+    }
+    
+    Logger.log('Found base lesson plan: ' + JSON.stringify(baseLessonPlan));
+    
+    // Find and mark all remaining sessions as "Skipped"
+    let skippedCount = 0;
+    const rowsData = _rows(lpSh);
+    
+    for (let i = 0; i < rowsData.length; i++) {
+      const lp = _indexByHeader(rowsData[i], lpHeaders);
+      const lpSession = Number(lp.session || 0);
+      
+      // Check if this is a remaining session of the same lesson plan
+      if (String(lp.lpId || '').toLowerCase() === String(lessonPlanId || '').toLowerCase() &&
+          lp.teacherEmail === baseLessonPlan.teacherEmail &&
+          lp.class === baseLessonPlan.class &&
+          lp.subject === baseLessonPlan.subject &&
+          lp.chapter === baseLessonPlan.chapter &&
+          lpSession > currentSession &&
+          lpSession <= totalSessions) {
+        
+        // Mark as Skipped
+        const rowIndex = i + 2; // +1 for header, +1 for 0-based index
+        const statusColIndex = lpHeaders.indexOf('status') + 1;
+        
+        if (statusColIndex > 0) {
+          lpSh.getRange(rowIndex, statusColIndex).setValue('Skipped');
+          Logger.log(`Marked session ${lpSession} as Skipped (row ${rowIndex})`);
+          skippedCount++;
+        }
+      }
+    }
+    
+    Logger.log(`Successfully skipped ${skippedCount} remaining sessions`);
+    return { success: true, sessionsSkipped: skippedCount };
+    
+  } catch (error) {
+    Logger.log('Error skipping remaining sessions: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Normalize day name for comparison
  */
 function _normalizeDayName(dayName) {

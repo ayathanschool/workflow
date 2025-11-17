@@ -613,8 +613,8 @@ export default function DailyReportEnhanced({ user }) {
                             </div>
                           </div>
                           
-                          {/* Chapter Completed checkbox - show for last session OR extended sessions */}
-                          {((d.sessionNo || 1) >= (d.totalSessions || 1)) && (
+                          {/* Chapter Completed checkbox - show for ANY session with a chapter */}
+                          {d.chapter && (
                             <div>
                               <label className="flex items-center space-x-2 text-xs">
                                 <input
@@ -626,11 +626,12 @@ export default function DailyReportEnhanced({ user }) {
                                 />
                                 <span className="font-medium text-green-700">
                                   ✅ Chapter Fully Completed
-                                  {(d.sessionNo || 1) > (d.totalSessions || 1) && <span className="text-orange-600 ml-1">(Extended Session)</span>}
+                                  {(d.sessionNo || 1) > (d.totalSessions || 1) && <span className="text-orange-600 ml-1">(Extended)</span>}
+                                  {(d.sessionNo || 1) < (d.totalSessions || 1) && <span className="text-blue-600 ml-1">(Early Completion)</span>}
                                 </span>
                               </label>
                               <p className="text-xs text-gray-500 mt-1 ml-5">
-                                Check this if the entire chapter is finished. This allows preparation of the next chapter's lesson plans.
+                                Check this if the entire chapter is finished{(d.sessionNo || 1) < (d.totalSessions || 1) ? '. This will skip remaining planned sessions.' : '. This allows preparation of the next chapter\'s lesson plans.'}
                               </p>
                             </div>
                           )}

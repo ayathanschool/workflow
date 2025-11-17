@@ -661,6 +661,17 @@ function doPost(e) {
           Logger.log('No lessonPlanId or completionPercentage - skipping cascading tracking');
         }
         
+        // === AUTO-SKIP REMAINING SESSIONS if chapter completed early ===
+        if (data.chapterCompleted && data.lessonPlanId) {
+          Logger.log('Chapter marked as complete - skipping remaining sessions...');
+          try {
+            const skipResult = _skipRemainingSessionsForCompletedChapter(data);
+            Logger.log('Skip remaining sessions result: ' + JSON.stringify(skipResult));
+          } catch (skipError) {
+            Logger.log('Warning: Failed to skip remaining sessions: ' + skipError.message);
+          }
+        }
+        
         return _respond({ ok: true, submitted: true });
       } catch (err) {
         Logger.log('ERROR in submitDailyReport: ' + err.message);
