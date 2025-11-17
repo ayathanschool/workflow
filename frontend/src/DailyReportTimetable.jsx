@@ -544,7 +544,7 @@ export default function DailyReportTimetable({ user }) {
                   } else if (isPlanned && !isSubstitution) {
                     rowBgClass = "bg-blue-50"; // Planned lesson
                   } else if (isSubstitution) {
-                    rowBgClass = "bg-purple-50"; // Substitution
+                    rowBgClass = "bg-orange-50"; // Substitution
                   } else {
                     rowBgClass = "bg-yellow-50"; // Unplanned
                   }
@@ -561,7 +561,7 @@ export default function DailyReportTimetable({ user }) {
                             </span>
                           )}
                           {isSubstitution && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800" title={`Substitution for ${d._originalTeacher || 'another teacher'}`}>
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800" title={`Substitution for ${d._originalTeacher || 'another teacher'}`}>
                               🔄
                             </span>
                           )}
@@ -580,7 +580,7 @@ export default function DailyReportTimetable({ user }) {
                           )}
                         </div>
                         {isSubstitution && d._originalTeacher && (
-                          <div className="text-xs text-purple-600 mt-1">For: {d._originalTeacher}</div>
+                          <div className="text-xs text-orange-600 mt-1">For: {d._originalTeacher}</div>
                         )}
                       </td>
                       
