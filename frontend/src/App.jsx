@@ -428,14 +428,18 @@ const App = () => {
       return [];
     }
     
-    console.log('[getNavigationItems] Current user:', {
-      email: currentUser.email,
-      name: currentUser.name,
-      roles: currentUser.roles,
-      rolesType: typeof currentUser.roles,
-      isArray: Array.isArray(currentUser.roles),
-      rolesStringified: JSON.stringify(currentUser.roles)
-    });
+    // SUPER VISIBLE DEBUG
+    console.log('='.repeat(80));
+    console.log('🔍 NAVIGATION DEBUG - CHECK YOUR ROLES!');
+    console.log('='.repeat(80));
+    console.log('📧 Email:', currentUser.email);
+    console.log('👤 Name:', currentUser.name);
+    console.log('🎭 Roles:', currentUser.roles);
+    console.log('📊 Roles Type:', typeof currentUser.roles);
+    console.log('✅ Is Array?', Array.isArray(currentUser.roles));
+    console.log('🔢 Length:', currentUser.roles?.length);
+    console.log('📦 Full User Object:', currentUser);
+    console.log('='.repeat(80));
     
     const items = [
       { id: 'dashboard', label: 'Dashboard', icon: Home }
@@ -443,7 +447,8 @@ const App = () => {
     
     // If no roles, show message but keep dashboard
     if (!currentUser.roles || !Array.isArray(currentUser.roles) || currentUser.roles.length === 0) {
-      console.error('[getNavigationItems] No roles found for user! User object:', currentUser);
+      console.error('❌❌❌ NO ROLES FOUND! Check your Google Sheet Users tab!');
+      console.error('User should have roles column filled in!');
       // Still return dashboard so user can at least see something
       return items;
     }

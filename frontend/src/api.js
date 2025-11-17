@@ -183,17 +183,29 @@ export async function login(email, password = '') {
 
 // Google OAuth exchange: send auth info to backend; backend validates and returns user profile & roles
 export async function googleLogin(googleAuthInfo) {
+  console.log('🔐 googleLogin called with:', googleAuthInfo);
   try {
     devLog('Sending Google auth info to backend (POST)');
-    return await postJSON(`${BASE_URL}?action=googleLogin`, googleAuthInfo);
+    const postResult = await postJSON(`${BASE_URL}?action=googleLogin`, googleAuthInfo);
+    console.log('✅ POST googleLogin success:', postResult);
+    return postResult;
   } catch (err) {
     // If POST fails for any reason (CORS/preflight/network), attempt GET fallback
+    console.warn('⚠️ POST googleLogin failed, trying GET fallback:', err?.message);
     devLog('googleLogin POST failed, attempting GET fallback');
     try {
-      // For GET, just send the email as the main identifier
+      // For GET, send all user info as query parameters
       if (!googleAuthInfo?.email) throw err; // can't fallback without email
       devLog('Sending Google auth info via GET fallback');
-      return await getJSON(`${BASE_URL}?action=googleLogin&email=${encodeURIComponent(googleAuthInfo.email)}`);
+      const params = new URLSearchParams({
+        email: googleAuthInfo.email,
+        name: googleAuthInfo.name || '',
+        google_id: googleAuthInfo.google_id || '',
+        picture: googleAuthInfo.picture || ''
+      });
+      const getResult = await getJSON(`${BASE_URL}?action=googleLogin&${params.toString()}`);
+      console.log('✅ GET googleLogin success:', getResult);
+      return getResult;
     } catch (err2) {
       console.error('Both POST and GET Google login attempts failed:', 
                     { postError: err?.message, getError: err2?.message });
