@@ -423,13 +423,24 @@ const App = () => {
   const getNavigationItems = () => {
     // Use effectiveUser instead of user to ensure we have the authenticated user
     const currentUser = effectiveUser || user;
-    if (!currentUser) return [];
+    if (!currentUser) {
+      console.warn('[getNavigationItems] No current user found');
+      return [];
+    }
+    
+    console.log('[getNavigationItems] Current user:', {
+      email: currentUser.email,
+      name: currentUser.name,
+      roles: currentUser.roles,
+      rolesType: typeof currentUser.roles,
+      isArray: Array.isArray(currentUser.roles)
+    });
     
     const items = [
       { id: 'dashboard', label: 'Dashboard', icon: Home }
     ];
 
-  if (hasAnyRole(['teacher','class teacher'])) {
+    if (hasAnyRole(['teacher','class teacher'])) {
       items.push(
         { id: 'schemes', label: 'Schemes of Work', icon: Book },
         { id: 'lesson-plans', label: 'Lesson Plans', icon: BookOpen },
@@ -453,14 +464,14 @@ const App = () => {
       );
     }
 
-  if (hasRole('class teacher')) {
+    if (hasRole('class teacher')) {
       items.push(
         { id: 'class-data', label: 'Class Data', icon: UserCheck },
         { id: 'class-students', label: 'Students', icon: Users }
       );
     }
 
-  if (hasRole('h m')) {
+    if (hasRole('h m')) {
       items.push(
         { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
         { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
@@ -858,6 +869,18 @@ const App = () => {
   const Sidebar = () => {
     const navigationItems = getNavigationItems();
     const { theme } = useTheme();
+    
+    // Debug: Log navigation items
+    if (navigationItems.length === 0) {
+      console.error('[Sidebar Debug] No navigation items:', {
+        user: user?.email,
+        userRoles: user?.roles,
+        effectiveUser: effectiveUser?.email,
+        effectiveUserRoles: effectiveUser?.roles,
+        googleAuthUser: googleAuth?.user?.email,
+        localUser: localUser?.email
+      });
+    }
 
     return (
       <>
