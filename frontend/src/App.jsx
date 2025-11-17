@@ -433,12 +433,20 @@ const App = () => {
       name: currentUser.name,
       roles: currentUser.roles,
       rolesType: typeof currentUser.roles,
-      isArray: Array.isArray(currentUser.roles)
+      isArray: Array.isArray(currentUser.roles),
+      rolesStringified: JSON.stringify(currentUser.roles)
     });
     
     const items = [
       { id: 'dashboard', label: 'Dashboard', icon: Home }
     ];
+    
+    // If no roles, show message but keep dashboard
+    if (!currentUser.roles || !Array.isArray(currentUser.roles) || currentUser.roles.length === 0) {
+      console.error('[getNavigationItems] No roles found for user! User object:', currentUser);
+      // Still return dashboard so user can at least see something
+      return items;
+    }
 
     if (hasAnyRole(['teacher','class teacher'])) {
       items.push(
