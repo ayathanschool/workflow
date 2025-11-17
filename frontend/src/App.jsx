@@ -333,6 +333,13 @@ const App = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
 
+  // Google Auth integration
+  const googleAuth = useGoogleAuth();
+  // Local user (manual login) fallback
+  const [localUser, setLocalUser] = useState(null);
+  // effectiveUser is the currently authenticated user (from Google Auth, local login, or state)
+  const effectiveUser = googleAuth?.user || localUser || user;
+
   // Send notification modal state - moved to app level for testing
   const [showSendNotification, setShowSendNotification] = useState(false);
   const [notificationData, setNotificationData] = useState({
@@ -351,9 +358,10 @@ const App = () => {
   // Role helpers — use normalized comparisons to handle different spellings/casing
   const _normRole = (r) => (r || '').toString().toLowerCase().trim();
   const hasRole = (token) => {
-    if (!user || !Array.isArray(user.roles)) return false;
+    const currentUser = effectiveUser || user;
+    if (!currentUser || !Array.isArray(currentUser.roles)) return false;
     const t = (token || '').toString().toLowerCase();
-    return user.roles.some(r => {
+    return currentUser.roles.some(r => {
       const rr = _normRole(r);
       // exact match or substring match (covers 'class teacher' and 'teacher')
       if (rr === t) return true;
@@ -413,7 +421,9 @@ const App = () => {
 
   // Navigation items based on user role
   const getNavigationItems = () => {
-    if (!user) return [];
+    // Use effectiveUser instead of user to ensure we have the authenticated user
+    const currentUser = effectiveUser || user;
+    if (!currentUser) return [];
     
     const items = [
       { id: 'dashboard', label: 'Dashboard', icon: Home }
@@ -813,12 +823,6 @@ const App = () => {
       </div>
     );
   };
-
-  // Google Auth integration
-  const googleAuth = useGoogleAuth();
-  // Local user (manual login) fallback
-  const [localUser, setLocalUser] = useState(null);
-  const effectiveUser = googleAuth?.user || localUser || user;
 
   const handleManualLoginSuccess = (data) => {
     // Normalize roles to array
