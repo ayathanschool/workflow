@@ -52,7 +52,6 @@ function InnerAuthProvider({ children }) {
 
 	const backendGoogleLogin = async (authPayload) => {
 		// Call backend to exchange Google auth info for application user & roles
-		console.log("Sending Google auth info to backend...");
 		try {
 			const result = await api.googleLogin(authPayload);
 			if (result && result.error) {
