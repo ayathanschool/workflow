@@ -76,17 +76,13 @@ function InnerAuthProvider({ children }) {
 		onSuccess: async credentialResponse => {
 			try {
 				setLoading(true); setError(null);
-				console.log("Google login response:", credentialResponse);
 				
 				// Google OAuth is returning access_token instead of id_token
 				// We'll use the access token to get user info directly
 				const accessToken = credentialResponse.access_token;
 				if (!accessToken) {
-					console.error("No access token received from Google OAuth:", credentialResponse);
 					throw new Error('Failed to authenticate with Google. Please try again.');
 				}
-				
-				console.log("Received Google access token, fetching user info...");
 				
 				// Use the access token to get user info from Google
 				const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -98,7 +94,6 @@ function InnerAuthProvider({ children }) {
 				}
 				
 				const userInfo = await userInfoResponse.json();
-				console.log("Google user info:", userInfo);
 				
 				// Use sub claim as the token for backend verification
 				const googleId = userInfo.sub;
@@ -115,11 +110,9 @@ function InnerAuthProvider({ children }) {
 				
 				// Exchange Google auth info with backend
 				const response = await backendGoogleLogin(googleAuthPayload);
-				console.log("Backend login response:", response);
 				
 				// Extract user data from wrapped response {status, data, timestamp}
 				const appUser = response?.data || response;
-				console.log("Extracted user data:", appUser);
 				
 				const r = Array.isArray(appUser.roles) ? appUser.roles : (appUser.role ? [appUser.role] : []);
 				setUser(appUser);

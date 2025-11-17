@@ -117,7 +117,7 @@ function handleGoogleLogin(payload) {
       .filter(c => c.length > 0);
     
     const userData = {
-      name: name || found.name || '',
+      name: found.name || name || '',  // Use sheet name first, then Google name as fallback
       email: found.email || '',
       picture: picture || '',
       google_id: google_id || '',
