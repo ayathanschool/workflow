@@ -1,5 +1,5 @@
 // DailyReportEnhanced.jsx - Integrated Daily Reports with Session Progress Tracking
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   getTeacherDailyTimetable,
   getTeacherDailyReportsForDate,
@@ -35,8 +35,9 @@ export default function DailyReportEnhanced({ user }) {
   const [lessonPlansMap, setLessonPlansMap] = useState({});
   const [appSettings, setAppSettings] = useState(null);
 
-  const email = user?.email || "";
-  const teacherName = user?.name || "";
+  // Memoize email to prevent unnecessary re-renders
+  const email = useMemo(() => user?.email || "", [user?.email]);
+  const teacherName = useMemo(() => user?.name || "", [user?.name]);
 
   function keyOf(r) {
     return `${r.period}|${r.class}|${r.subject}`;
@@ -290,7 +291,12 @@ export default function DailyReportEnhanced({ user }) {
     fetchSettings();
   }, []);
 
-  useEffect(() => { load(); }, [date, email]);
+  // Prevent unnecessary reloads - only reload when date or email actually changes
+  useEffect(() => { 
+    if (email) {
+      load(); 
+    }
+  }, [date, email]);
 
   function setDraft(k, field, value) {
     setDrafts(prev => ({ ...prev, [k]: { ...(prev[k] || {}), [field]: value } }));
