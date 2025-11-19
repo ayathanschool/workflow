@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   getTeacherDailyTimetable,
   getTeacherDailyReportsForDate,
@@ -37,9 +37,16 @@ export default function DailyReportTimetable({ user }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lessonDelays, setLessonDelays] = useState([]);
   const [appSettings, setAppSettings] = useState(null);  // Store app settings with period times
+  const [loadedDate, setLoadedDate] = useState(null);  // Track last loaded date to prevent infinite refreshes
 
-  const email = user?.email || "";
-  const teacherName = user?.name || "";
+  // Memoize user object to prevent unnecessary re-renders from parent component
+  const memoizedUser = useMemo(() => ({
+    email: user?.email || "",
+    name: user?.name || ""
+  }), [user?.email, user?.name]);
+  
+  const stableEmail = memoizedUser.email;
+  const teacherName = memoizedUser.name;
 
   function keyOf(r) {
     // stable per-period key
@@ -47,9 +54,9 @@ export default function DailyReportTimetable({ user }) {
   }
 
   async function fetchLessonPlans(cls, subject) {
-    if (!cls || !subject || !email) return [];
+    if (!cls || !subject || !stableEmail) return [];
     try {
-      const plans = await getApprovedLessonPlansForReport(email, cls, subject);
+      const plans = await getApprovedLessonPlansForReport(stableEmail, cls, subject);
       return Array.isArray(plans) ? plans : [];
     } catch (e) {
       console.error('Failed to fetch lesson plans:', e);
@@ -58,20 +65,20 @@ export default function DailyReportTimetable({ user }) {
   }
 
   async function load() {
-    if (!email) {
+    if (!stableEmail) {
       console.log('❌ No email provided for timetable load');
       return;
     }
     setLoading(true);
     setMessage("");
     try {
-      console.log('🔍 Loading timetable for:', { email, date, user });
+      console.log('🔍 Loading timetable for:', { email: stableEmail, date, user });
       
       // ===== PERFORMANCE: Fetch ALL data in parallel (3 main calls at once) =====
       const [tt, rep, batchPlannedLessons] = await Promise.all([
-        getTeacherDailyTimetable(email, date),            // [{period, class, subject, teacherName, chapter}]
-        getTeacherDailyReportsForDate(email, date),       // [{class, subject, period, planType, lessonPlanId, status}]
-        getPlannedLessonsForDate(email, date)            // Batch fetch all planned lessons
+        getTeacherDailyTimetable(stableEmail, date),            // [{period, class, subject, teacherName, chapter}]
+        getTeacherDailyReportsForDate(stableEmail, date),       // [{class, subject, period, planType, lessonPlanId, status}]
+        getPlannedLessonsForDate(stableEmail, date)            // Batch fetch all planned lessons
       ]);
 
       console.log('📅 Timetable response:', tt);
@@ -247,7 +254,13 @@ export default function DailyReportTimetable({ user }) {
     fetchSettings();
   }, []);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [date, email]);
+  useEffect(() => { 
+    // Prevent unnecessary reloads - only load if date has changed
+    if (date !== loadedDate && stableEmail) {
+      setLoadedDate(date);
+      load();
+    }
+  }, [date, loadedDate, stableEmail]);
 
   function setDraft(k, field, value) {
     setDrafts(prev => ({ ...prev, [k]: { ...(prev[k] || {}), [field]: value } }));
@@ -542,7 +555,7 @@ export default function DailyReportTimetable({ user }) {
                   if (submitted) {
                     rowBgClass = "bg-green-100 border-l-4 border-green-500"; // Green for submitted
                   } else if (isSubstitution) {
-                    rowBgClass = "bg-orange-100 border-l-4 border-orange-500"; // Orange for substitution
+                    rowBgClass = "bg-pink-100 border-l-4 border-pink-600"; // Pink/Red for substitution - more distinctive
                   } else if (isPlanned) {
                     rowBgClass = "bg-blue-100 border-l-4 border-blue-500"; // Blue for in-plan
                   } else {

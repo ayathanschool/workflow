@@ -2832,6 +2832,11 @@ const App = () => {
       status: 'Pending' // Default to pending for approvals
     });
 
+    // Auto-hide sidebar when viewing approvals
+    useEffect(() => {
+      setSidebarOpen(false);
+    }, []);
+
     // Get unique values for dropdowns - optimized with useMemo
     const uniqueTeachers = useMemo(() => {
       return [...new Set(allSchemes.map(s => s.teacherName).filter(Boolean))].sort();
@@ -2876,7 +2881,13 @@ const App = () => {
           const data = await api.getAllSchemes(1, 200, teacherFilter, classFilter, subjectFilter, statusFilter, '');
           
           // Backend returns array directly, not wrapped in .plans  
-          const schemes = Array.isArray(data) ? data : (Array.isArray(data?.plans) ? data.plans : []);
+          let schemes = Array.isArray(data) ? data : (Array.isArray(data?.plans) ? data.plans : []);
+          // Sort by createdAt in descending order (latest first)
+          schemes.sort((a, b) => {
+            const dateA = new Date(a.createdAt || 0);
+            const dateB = new Date(b.createdAt || 0);
+            return dateB - dateA; // Latest first
+          });
           setPendingSchemes(schemes);
         } catch (err) {
           console.error('Error fetching filtered schemes:', err);
@@ -2905,7 +2916,7 @@ const App = () => {
     };
 
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 max-w-full">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">Scheme Approvals</h1>
           <div className="flex space-x-3">
@@ -2923,167 +2934,201 @@ const App = () => {
         {showFilters && (
           <div className="bg-white rounded-xl shadow-sm p-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Filter Schemes</h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Teacher</label>
-                <select
-                  value={filters.teacher}
-                  onChange={(e) => setFilters({ ...filters, teacher: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            <div className="space-y-4">
+              {/* Quick Filter Buttons */}
+              <div className="flex flex-wrap gap-2 mb-4">
+                <button
+                  onClick={() => setFilters({ teacher: '', class: '', subject: '', status: 'Pending' })}
+                  className={`px-3 py-1 text-sm rounded-full transition-all ${
+                    filters.status === 'Pending' && !filters.teacher && !filters.class && !filters.subject
+                      ? 'bg-yellow-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  <option value="">All Teachers</option>
-                  {uniqueTeachers.map(teacher => (
-                    <option key={teacher} value={teacher}>{teacher}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Class</label>
-                <select
-                  value={filters.class}
-                  onChange={(e) => setFilters({ ...filters, class: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  ⏳ Pending Only
+                </button>
+                <button
+                  onClick={() => setFilters({ teacher: '', class: '', subject: '', status: 'Approved' })}
+                  className={`px-3 py-1 text-sm rounded-full transition-all ${
+                    filters.status === 'Approved' && !filters.teacher && !filters.class && !filters.subject
+                      ? 'bg-green-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  <option value="">All Classes</option>
-                  {uniqueClasses.map(cls => (
-                    <option key={cls} value={cls}>{cls}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Subject</label>
-                <select
-                  value={filters.subject}
-                  onChange={(e) => setFilters({ ...filters, subject: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  ✓ Approved Only
+                </button>
+                <button
+                  onClick={() => setFilters({ teacher: '', class: '', subject: '', status: '' })}
+                  className={`px-3 py-1 text-sm rounded-full transition-all ${
+                    !filters.status && !filters.teacher && !filters.class && !filters.subject
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  <option value="">All Subjects</option>
-                  {uniqueSubjects.map(subject => (
-                    <option key={subject} value={subject}>{subject}</option>
-                  ))}
-                </select>
+                  All Schemes
+                </button>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
-                <select
-                  value={filters.status}
-                  onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="Pending">Pending</option>
-                  <option value="Pending - Validation Override">Pending - Override</option>
-                  <option value="Pending - No Timetable">Pending - No Timetable</option>
-                  <option value="Approved">Approved</option>
-                  <option value="Rejected">Rejected</option>
-                  <option value="">All</option>
-                </select>
+              {/* Advanced Filters */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Teacher</label>
+                  <select
+                    value={filters.teacher}
+                    onChange={(e) => setFilters({ ...filters, teacher: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">All</option>
+                    {uniqueTeachers.map(teacher => (
+                      <option key={teacher} value={teacher}>{teacher}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Class</label>
+                  <select
+                    value={filters.class}
+                    onChange={(e) => setFilters({ ...filters, class: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">All</option>
+                    {uniqueClasses.map(cls => (
+                      <option key={cls} value={cls}>{cls}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Subject</label>
+                  <select
+                    value={filters.subject}
+                    onChange={(e) => setFilters({ ...filters, subject: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">All</option>
+                    {uniqueSubjects.map(subject => (
+                      <option key={subject} value={subject}>{subject}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Status</label>
+                  <select
+                    value={filters.status}
+                    onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="Pending - Validation Override">Pending - Override</option>
+                    <option value="Pending - No Timetable">Pending - No TT</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Rejected">Rejected</option>
+                    <option value="">All Statuses</option>
+                  </select>
+                </div>
               </div>
-            </div>
-            <div className="mt-4 flex justify-end">
-              <button
-                onClick={() => setFilters({ teacher: '', class: '', subject: '', status: 'Pending' })}
-                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-              >
-                Clear Filters
-              </button>
             </div>
           </div>
         )}
 
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <div className="flex justify-between items-center">
+          <div className="px-4 py-3 border-b border-gray-200">
+            <div className="flex flex-col gap-2">
               <h2 className="text-lg font-medium text-gray-900">
                 {filters.status === 'Approved' ? 'Approved Schemes' : 
                  filters.status === 'Pending' ? 'Pending Schemes' : 'All Schemes'} 
                 ({pendingSchemes.length})
               </h2>
               {/* Active Filter Status Display */}
-              <div className="flex gap-2 text-sm">
-                {filters.teacher && (
-                  <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded">Teacher: {filters.teacher}</span>
-                )}
-                {filters.class && (
-                  <span className="px-2 py-1 bg-green-100 text-green-800 rounded">Class: {filters.class}</span>
-                )}
-                {filters.subject && (
-                  <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded">Subject: {filters.subject}</span>
-                )}
-                {filters.status && filters.status !== 'Pending' && (
-                  <span className="px-2 py-1 bg-orange-100 text-orange-800 rounded">Status: {filters.status}</span>
-                )}
-              </div>
+              {(filters.teacher || filters.class || filters.subject || (filters.status && filters.status !== 'Pending')) && (
+                <div className="flex flex-wrap gap-1 text-xs">
+                  {filters.teacher && (
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded">Teacher: {filters.teacher}</span>
+                  )}
+                  {filters.class && (
+                    <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded">Class: {filters.class}</span>
+                  )}
+                  {filters.subject && (
+                    <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded">Subject: {filters.subject}</span>
+                  )}
+                  {filters.status && filters.status !== 'Pending' && (
+                    <span className="px-2 py-0.5 bg-orange-100 text-orange-800 rounded">Status: {filters.status}</span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
-          <div className="overflow-x-auto responsive-table">
-            <table className="min-w-full divide-y divide-gray-200">
+          <div className="overflow-x-auto">
+            <table className="w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teacher</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter</th>
-                  <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">Sessions</th>
-                  <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Status</th>
-                  <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Actions</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Teacher</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Class</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Subject</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Chapter</th>
+                  <th className="px-2 py-2 text-center text-xs font-medium text-gray-600 uppercase w-12">Sess</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Submitted</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase w-20">Status</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {pendingSchemes.map((scheme) => (
-                  <tr key={scheme.schemeId}>
-                    <td className="px-3 py-4 text-sm text-gray-900">{scheme.teacherName}</td>
-                    <td className="px-3 py-4 text-sm text-gray-900">{scheme.class}</td>
-                    <td className="px-3 py-4 text-sm text-gray-900">{scheme.subject}</td>
-                    <td className="px-3 py-4 text-sm text-gray-900">{scheme.chapter}</td>
-                    <td className="px-2 py-4 text-sm text-gray-900 text-center">{scheme.noOfSessions}</td>
-                    <td className="px-2 py-4">
+                  <tr key={scheme.schemeId} className="hover:bg-gray-50">
+                    <td className="px-2 py-2 text-xs text-gray-900 truncate">{scheme.teacherName}</td>
+                    <td className="px-2 py-2 text-xs text-gray-900">{scheme.class}</td>
+                    <td className="px-2 py-2 text-xs text-gray-900 truncate">{scheme.subject}</td>
+                    <td className="px-2 py-2 text-xs text-gray-900 truncate">{scheme.chapter}</td>
+                    <td className="px-2 py-2 text-xs text-gray-900 text-center font-medium">{scheme.noOfSessions}</td>
+                    <td className="px-2 py-2 text-xs text-gray-600">{scheme.createdAt ? new Date(scheme.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '-'}</td>
+                    <td className="px-2 py-2">
                       {scheme.status === 'Approved' ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                           ✓ Approved
                         </span>
                       ) : scheme.status === 'Rejected' ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
                           ✗ Rejected
                         </span>
                       ) : scheme.status === 'Pending - Validation Override' ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
-                          ⚠️ Override
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                          Override
                         </span>
                       ) : scheme.status === 'Pending - No Timetable' ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                          📋 No TT
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                          No TT
                         </span>
                       ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                          ⏳ Pending
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                          Pending
                         </span>
                       )}
                     </td>
-                    <td className="px-2 py-4 text-sm text-gray-500">
-                      <div className="flex items-center gap-2">
+                    <td className="px-2 py-2 text-xs text-gray-500">
+                      <div className="flex items-center gap-2 whitespace-nowrap">
+                        <button type="button"
+                          onClick={() => openLessonView(scheme)}
+                          className="text-blue-600 hover:text-blue-900 p-1"
+                          title="View scheme details"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
                         {(scheme.status === 'Pending' || scheme.status === 'Pending - Validation Override' || scheme.status === 'Pending - No Timetable') && (
                           <>
                             <button 
                               onClick={() => handleApproveScheme(scheme.schemeId)}
                               className="text-green-600 hover:text-green-900 px-2 py-1 bg-green-100 rounded text-xs"
+                              title="Approve scheme"
                             >
-                              Approve
+                              ✓
                             </button>
                             <button 
                               onClick={() => handleRejectScheme(scheme.schemeId)}
                               className="text-red-600 hover:text-red-900 px-2 py-1 bg-red-100 rounded text-xs"
+                              title="Reject scheme"
                             >
-                              Reject
+                              ✗
                             </button>
                           </>
                         )}
-                        <button type="button"
-                          onClick={() => openLessonView(scheme)}
-                          className="text-blue-600 hover:text-blue-900"
-                          title="View scheme details"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -3107,6 +3152,11 @@ const App = () => {
       subject: '',
       status: 'Pending Review' // Default to pending for approvals
     });
+
+    // Auto-hide sidebar when viewing approvals
+    useEffect(() => {
+      setSidebarOpen(false);
+    }, []);
 
     // Get unique values for dropdowns - optimized with useMemo
     const uniqueTeachers = useMemo(() => {
@@ -3148,7 +3198,13 @@ const App = () => {
           const statusFilter = filters.status === '' || filters.status === 'All' ? '' : filters.status;
           
           const data = await api.getPendingLessonReviews(teacherFilter, classFilter, subjectFilter, statusFilter);
-          const lessons = Array.isArray(data) ? data : [];
+          let lessons = Array.isArray(data) ? data : [];
+          // Sort by selectedDate in descending order (latest planned date first)
+          lessons.sort((a, b) => {
+            const dateA = new Date(a.selectedDate || 0);
+            const dateB = new Date(b.selectedDate || 0);
+            return dateB - dateA; // Latest first
+          });
           setPendingLessons(lessons);
         } catch (err) {
           console.error('Error fetching filtered lessons:', err);
@@ -3167,7 +3223,7 @@ const App = () => {
     };
 
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 max-w-full">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">Lesson Plan Approvals</h1>
           <div className="flex space-x-3">
@@ -3185,183 +3241,234 @@ const App = () => {
         {showFilters && (
           <div className="bg-white rounded-xl shadow-sm p-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Filter Lesson Plans</h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Teacher</label>
-                <select
-                  value={filters.teacher}
-                  onChange={(e) => setFilters({ ...filters, teacher: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            <div className="space-y-4">
+              {/* Quick Filter Buttons */}
+              <div className="flex flex-wrap gap-2 mb-4">
+                <button
+                  onClick={() => setFilters({ teacher: '', class: '', subject: '', status: 'Pending Review' })}
+                  className={`px-3 py-1 text-sm rounded-full transition-all ${
+                    filters.status === 'Pending Review' && !filters.teacher && !filters.class && !filters.subject
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  <option value="">All Teachers</option>
-                  {uniqueTeachers.map(teacher => (
-                    <option key={teacher} value={teacher}>{teacher}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Class</label>
-                <select
-                  value={filters.class}
-                  onChange={(e) => setFilters({ ...filters, class: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  ⏳ Pending Review
+                </button>
+                <button
+                  onClick={() => setFilters({ teacher: '', class: '', subject: '', status: 'Ready' })}
+                  className={`px-3 py-1 text-sm rounded-full transition-all ${
+                    filters.status === 'Ready' && !filters.teacher && !filters.class && !filters.subject
+                      ? 'bg-green-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  <option value="">All Classes</option>
-                  {uniqueClasses.map(cls => (
-                    <option key={cls} value={cls}>{cls}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Subject</label>
-                <select
-                  value={filters.subject}
-                  onChange={(e) => setFilters({ ...filters, subject: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  ✓ Approved
+                </button>
+                <button
+                  onClick={() => setFilters({ teacher: '', class: '', subject: '', status: 'Needs Rework' })}
+                  className={`px-3 py-1 text-sm rounded-full transition-all ${
+                    filters.status === 'Needs Rework' && !filters.teacher && !filters.class && !filters.subject
+                      ? 'bg-yellow-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  <option value="">All Subjects</option>
-                  {uniqueSubjects.map(subject => (
-                    <option key={subject} value={subject}>{subject}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
-                <select
-                  value={filters.status}
-                  onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  ⚠ Needs Rework
+                </button>
+                <button
+                  onClick={() => setFilters({ teacher: '', class: '', subject: '', status: '' })}
+                  className={`px-3 py-1 text-sm rounded-full transition-all ${
+                    !filters.status && !filters.teacher && !filters.class && !filters.subject
+                      ? 'bg-purple-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  <option value="Pending Review">Pending Review</option>
-                  <option value="Ready">Ready</option>
-                  <option value="Needs Rework">Needs Rework</option>
-                  <option value="Rejected">Rejected</option>
-                  <option value="">All</option>
-                </select>
+                  All Plans
+                </button>
               </div>
-            </div>
-            <div className="mt-4 flex justify-end">
-              <button
-                onClick={() => setFilters({ teacher: '', class: '', subject: '', status: 'Pending Review' })}
-                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
-              >
-                Clear Filters
-              </button>
+              {/* Advanced Filters */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Teacher</label>
+                  <select
+                    value={filters.teacher}
+                    onChange={(e) => setFilters({ ...filters, teacher: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">All</option>
+                    {uniqueTeachers.map(teacher => (
+                      <option key={teacher} value={teacher}>{teacher}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Class</label>
+                  <select
+                    value={filters.class}
+                    onChange={(e) => setFilters({ ...filters, class: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">All</option>
+                    {uniqueClasses.map(cls => (
+                      <option key={cls} value={cls}>{cls}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Subject</label>
+                  <select
+                    value={filters.subject}
+                    onChange={(e) => setFilters({ ...filters, subject: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">All</option>
+                    {uniqueSubjects.map(subject => (
+                      <option key={subject} value={subject}>{subject}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Status</label>
+                  <select
+                    value={filters.status}
+                    onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="Pending Review">Pending Review</option>
+                    <option value="Ready">Ready</option>
+                    <option value="Needs Rework">Needs Rework</option>
+                    <option value="Rejected">Rejected</option>
+                    <option value="">All Statuses</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
         )}
 
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <div className="flex justify-between items-center">
+          <div className="px-4 py-3 border-b border-gray-200">
+            <div className="flex flex-col gap-2">
               <h2 className="text-lg font-medium text-gray-900">
                 {filters.status === 'Ready' ? 'Approved Lesson Plans' : 
                  filters.status === 'Pending Review' ? 'Pending Lesson Plans' : 'All Lesson Plans'} 
                 ({pendingLessons.length})
               </h2>
               {/* Active Filter Status Display */}
-              <div className="flex gap-2 text-sm">
-                {filters.teacher && (
-                  <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded">Teacher: {filters.teacher}</span>
-                )}
-                {filters.class && (
-                  <span className="px-2 py-1 bg-green-100 text-green-800 rounded">Class: {filters.class}</span>
-                )}
-                {filters.subject && (
-                  <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded">Subject: {filters.subject}</span>
-                )}
-                {filters.status && filters.status !== 'Pending Review' && (
-                  <span className="px-2 py-1 bg-orange-100 text-orange-800 rounded">Status: {filters.status}</span>
-                )}
-              </div>
+              {(filters.teacher || filters.class || filters.subject || (filters.status && filters.status !== 'Pending Review')) && (
+                <div className="flex flex-wrap gap-1 text-xs">
+                  {filters.teacher && (
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded">Teacher: {filters.teacher}</span>
+                  )}
+                  {filters.class && (
+                    <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded">Class: {filters.class}</span>
+                  )}
+                  {filters.subject && (
+                    <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded">Subject: {filters.subject}</span>
+                  )}
+                  {filters.status && filters.status !== 'Pending Review' && (
+                    <span className="px-2 py-0.5 bg-orange-100 text-orange-800 rounded">Status: {filters.status}</span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+            <table className="w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teacher</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Session</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Teacher</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Class</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Subject</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Chapter</th>
+                  <th className="px-2 py-2 text-center text-xs font-medium text-gray-600 uppercase w-10">Sess</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Submitted</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Planned</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase w-20">Status</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {pendingLessons.map((lesson) => (
-                  <tr key={lesson.lpId}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{lesson.teacherName}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{lesson.class}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{lesson.subject}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{lesson.chapter}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{lesson.session}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                  <tr key={lesson.lpId} className="hover:bg-gray-50">
+                    <td className="px-2 py-2 text-xs text-gray-900 truncate">{lesson.teacherName}</td>
+                    <td className="px-2 py-2 text-xs text-gray-900">{lesson.class}</td>
+                    <td className="px-2 py-2 text-xs text-gray-900 truncate">{lesson.subject}</td>
+                    <td className="px-2 py-2 text-xs text-gray-900 truncate">{lesson.chapter}</td>
+                    <td className="px-2 py-2 text-xs text-gray-900 text-center font-medium">{lesson.session}</td>
+                    <td className="px-2 py-2 text-xs text-gray-600">{lesson.submittedAt ? new Date(lesson.submittedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '-'}</td>
+                    <td className="px-2 py-2 text-xs text-gray-600"><div className="flex flex-col"><span>{lesson.selectedDate ? new Date(lesson.selectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '-'}</span><span className="text-xs text-gray-500">P{lesson.selectedPeriod || '-'}</span></div></td>
+                    <td className="px-2 py-2">
                       {lesson.status === 'Ready' ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                           ✓ Ready
                         </span>
                       ) : lesson.status === 'Needs Rework' ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                          ⚠ Needs Rework
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                          Rework
                         </span>
                       ) : lesson.status === 'Rejected' ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
                           ✗ Rejected
                         </span>
                       ) : (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                          ⏳ Pending Review
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                          Pending
                         </span>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {lesson.status === 'Pending Review' && (
-                        <>
-                          <button 
-                            onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
-                            className="text-green-600 hover:text-green-900 mr-3 px-3 py-1 bg-green-100 rounded"
-                          >
-                            Approve
-                          </button>
-                          <button 
-                            onClick={() => handleApproveLesson(lesson.lpId, 'Needs Rework')}
-                            className="text-yellow-600 hover:text-yellow-900 mr-3 px-3 py-1 bg-yellow-100 rounded"
-                          >
-                            Rework
-                          </button>
-                          <button 
-                            onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
-                            className="text-red-600 hover:text-red-900 mr-3 px-3 py-1 bg-red-100 rounded"
-                          >
-                            Reject
-                          </button>
-                        </>
-                      )}
-                      {lesson.status === 'Needs Rework' && (
-                        <>
-                          <button 
-                            onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
-                            className="text-green-600 hover:text-green-900 mr-3 px-3 py-1 bg-green-100 rounded"
-                          >
-                            Approve
-                          </button>
-                          <button 
-                            onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
-                            className="text-red-600 hover:text-red-900 mr-3 px-3 py-1 bg-red-100 rounded"
-                          >
-                            Reject
-                          </button>
-                        </>
-                      )}
-                      <button type="button" 
-                        className="text-blue-600 hover:text-blue-900" 
-                        onClick={() => openLessonView(lesson)} 
-                        title="View lesson details"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
+                    <td className="px-2 py-2 text-xs text-gray-500">
+                      <div className="flex items-center gap-1 whitespace-nowrap">
+                        <button type="button" 
+                          className="text-blue-600 hover:text-blue-900 p-1" 
+                          onClick={() => openLessonView(lesson)} 
+                          title="View lesson details"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        {lesson.status === 'Pending Review' && (
+                          <>
+                            <button 
+                              onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
+                              className="text-green-600 hover:text-green-900 px-1.5 py-0.5 bg-green-100 rounded text-xs"
+                              title="Approve"
+                            >
+                              ✓
+                            </button>
+                            <button 
+                              onClick={() => handleApproveLesson(lesson.lpId, 'Needs Rework')}
+                              className="text-yellow-600 hover:text-yellow-900 px-1.5 py-0.5 bg-yellow-100 rounded text-xs"
+                              title="Send for rework"
+                            >
+                              ⚠
+                            </button>
+                            <button 
+                              onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
+                              className="text-red-600 hover:text-red-900 px-1.5 py-0.5 bg-red-100 rounded text-xs"
+                              title="Reject"
+                            >
+                              ✗
+                            </button>
+                          </>
+                        )}
+                        {lesson.status === 'Needs Rework' && (
+                          <>
+                            <button 
+                              onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
+                              className="text-green-600 hover:text-green-900 px-1.5 py-0.5 bg-green-100 rounded text-xs"
+                              title="Approve"
+                            >
+                              ✓
+                            </button>
+                            <button 
+                              onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
+                              className="text-red-600 hover:text-red-900 px-1.5 py-0.5 bg-red-100 rounded text-xs"
+                              title="Reject"
+                            >
+                              ✗
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
