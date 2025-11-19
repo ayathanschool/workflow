@@ -537,16 +537,16 @@ export default function DailyReportTimetable({ user }) {
                   const isPlanned = d.planType === "in plan" && d.lessonPlanId;
                   const isSubstitution = d._isSubstitution || r.isSubstitution || false;
                   
-                  // Row background color based on status
+                  // Row background color based on status - ENHANCED COLORS for better visibility
                   let rowBgClass = "";
                   if (submitted) {
-                    rowBgClass = "bg-green-50";
-                  } else if (isPlanned && !isSubstitution) {
-                    rowBgClass = "bg-blue-50"; // Planned lesson
+                    rowBgClass = "bg-green-100 border-l-4 border-green-500"; // Green for submitted
                   } else if (isSubstitution) {
-                    rowBgClass = "bg-orange-50"; // Substitution
+                    rowBgClass = "bg-orange-100 border-l-4 border-orange-500"; // Orange for substitution
+                  } else if (isPlanned) {
+                    rowBgClass = "bg-blue-100 border-l-4 border-blue-500"; // Blue for in-plan
                   } else {
-                    rowBgClass = "bg-yellow-50"; // Unplanned
+                    rowBgClass = "bg-yellow-100 border-l-4 border-yellow-500"; // Yellow for not-planned
                   }
                   
                   return (
@@ -593,74 +593,70 @@ export default function DailyReportTimetable({ user }) {
                       {/* Lesson Details - Read-only info card */}
                       <td className="px-4 py-3">
                         <div className="space-y-2">
-                          {/* Header badge */}
-                          {isPlanned && d.lessonPlanId ? (
-                            <div className="flex items-center gap-2">
-                              <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-green-50 border border-green-200 text-green-800">
-                                ✓ Pre-planned {(d._session || d.sessionNo) ? `(Session ${d._session || d.sessionNo})` : ''}
-                              </span>
-                              {!submitted && (
-                                <button
-                                  type="button"
-                                  onClick={() => setDraft(k, "planType", "not planned")}
-                                  className="text-xs text-gray-600 hover:text-gray-900 underline"
-                                >
-                                  Change
-                                </button>
-                              )}
+                          {/* Plan Type Toggle */}
+                          <div className="flex gap-2 pb-2 border-b">
+                            {PLAN_TYPES.map(type => (
+                              <button
+                                key={type}
+                                type="button"
+                                disabled={submitted}
+                                onClick={() => setDraft(k, "planType", type)}
+                                className={`px-2 py-1 text-xs font-medium rounded border ${
+                                  d.planType === type
+                                    ? 'bg-blue-100 border-blue-300 text-blue-800'
+                                    : 'bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200'
+                                } disabled:opacity-50`}
+                              >
+                                {type}
+                              </button>
+                            ))}
+                          </div>
+                          
+                          {/* Chapter/Topic */}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Chapter/Topic</label>
+                            <input
+                              type="text"
+                              placeholder="Chapter taught"
+                              value={d.chapter || ""}
+                              disabled={submitted}
+                              onChange={e => setDraft(k, "chapter", e.target.value)}
+                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                            />
+                          </div>
+                          
+                          {/* Status badge for planned lessons */}
+                          {isPlanned && d.lessonPlanId && (
+                            <div className="text-xs bg-green-50 border border-green-200 rounded p-2">
+                              ✓ Pre-planned {(d._session || d.sessionNo) ? `(Session ${d._session || d.sessionNo})` : ''}
                             </div>
-                          ) : (
-                            <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-gray-100 border border-gray-300 text-gray-700">
-                              ⚠️ Unplanned Period
-                            </span>
                           )}
                           
-                          {/* Lesson info */}
-                          {d.chapter && (
-                            <div className="text-xs bg-white border border-gray-200 rounded p-2">
-                              <div className="font-semibold text-gray-700 mb-1">📖 {d.chapter}</div>
-                              {d.objectives && (
-                                <div className="text-gray-600 mb-1">
-                                  <span className="font-medium">Objectives:</span> {d.objectives}
-                                </div>
-                              )}
-                              {d.activities && (
-                                <div className="text-gray-600">
-                                  <span className="font-medium">Activities:</span> {d.activities}
-                                </div>
-                              )}
-                            </div>
-                          )}
+                          {/* Objectives - EDITABLE */}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Learning Objectives</label>
+                            <textarea
+                              placeholder="Objectives for this session"
+                              value={d.objectives || ""}
+                              disabled={submitted}
+                              onChange={e => setDraft(k, "objectives", e.target.value)}
+                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                              rows="2"
+                            />
+                          </div>
                           
-                          {/* Manual entry for unplanned */}
-                          {!isPlanned && !submitted && (
-                            <div className="space-y-2">
-                              <input
-                                id={`chapter-${k}`}
-                                type="text"
-                                placeholder="Chapter/Topic taught"
-                                value={d.chapter || ""}
-                                onChange={e => setDraft(k, "chapter", e.target.value)}
-                                className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              />
-                              <textarea
-                                id={`objectives-${k}`}
-                                placeholder="Brief objectives"
-                                value={d.objectives || ""}
-                                onChange={e => setDraft(k, "objectives", e.target.value)}
-                                className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                rows="2"
-                              />
-                              <textarea
-                                id={`activities-${k}`}
-                                placeholder="Activities done"
-                                value={d.activities || ""}
-                                onChange={e => setDraft(k, "activities", e.target.value)}
-                                className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                rows="2"
-                              />
-                            </div>
-                          )}
+                          {/* Activities - EDITABLE */}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Activities Done</label>
+                            <textarea
+                              placeholder="Teaching activities/methods"
+                              value={d.activities || ""}
+                              disabled={submitted}
+                              onChange={e => setDraft(k, "activities", e.target.value)}
+                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                              rows="2"
+                            />
+                          </div>
                         </div>
                       </td>
                       

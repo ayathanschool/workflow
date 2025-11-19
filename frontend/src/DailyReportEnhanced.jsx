@@ -499,7 +499,7 @@ export default function DailyReportEnhanced({ user }) {
                   const isPlanned = d.planType === "in plan" && d.lessonPlanId;
                   
                   return (
-                    <tr key={k} className={submitted ? "bg-green-50" : isPlanned ? "bg-blue-50" : "bg-yellow-50"}>
+                    <tr key={k} className={submitted ? "bg-green-100 border-l-4 border-green-600" : isPlanned ? "bg-blue-100 border-l-4 border-blue-600" : "bg-yellow-100 border-l-4 border-yellow-600"}>
                       {/* Period */}
                       <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
                         #{r.period}
@@ -521,58 +521,80 @@ export default function DailyReportEnhanced({ user }) {
                       {/* Chapter & Session Progress */}
                       <td className="px-4 py-3">
                         <div className="space-y-3">
+                          {/* Plan Type Toggle */}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Plan Type</label>
+                            <div className="flex gap-2">
+                              {PLAN_TYPES.map(type => (
+                                <button
+                                  key={type}
+                                  type="button"
+                                  disabled={submitted}
+                                  onClick={() => setDraft(k, "planType", type)}
+                                  className={`px-2 py-1 text-xs font-medium rounded border ${
+                                    d.planType === type
+                                      ? 'bg-blue-100 border-blue-300 text-blue-800'
+                                      : 'bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200'
+                                  } disabled:opacity-50`}
+                                >
+                                  {type}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          
                           {/* Chapter */}
                           <div>
                             <label className="block text-xs font-medium text-gray-700 mb-1">Chapter/Topic</label>
-                            {isPlanned && d.chapter ? (
-                              <div className="text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded px-2 py-1">
-                                📖 {d.chapter}
-                              </div>
-                            ) : (
-                              <input
-                                type="text"
-                                placeholder="Enter chapter/topic taught"
-                                value={d.chapter || ""}
-                                disabled={submitted}
-                                onChange={e => setDraft(k, "chapter", e.target.value)}
-                                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                              />
-                            )}
+                            <input
+                              type="text"
+                              placeholder="Enter chapter/topic taught"
+                              value={d.chapter || ""}
+                              disabled={submitted}
+                              onChange={e => setDraft(k, "chapter", e.target.value)}
+                              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                            />
                           </div>
                           
                           {/* Session Number */}
-                          <div className="flex items-center gap-2 text-xs">
-                            <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full font-medium">
-                              📚 Session {d.sessionNo || 1} of {d.totalSessions || 1}
-                            </span>
-                            {isPlanned && (
+                          {isPlanned && (
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full font-medium">
+                                📚 Session {d.sessionNo || 1} of {d.totalSessions || 1}
+                              </span>
                               <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full font-medium">
                                 ✓ Pre-planned
                               </span>
-                            )}
-                            {/* Last session indicator */}
-                            {(d.sessionNo || 1) === (d.totalSessions || 1) && (
-                              <span className="px-2 py-1 bg-orange-100 text-orange-800 rounded-full font-medium">
-                                🏁 Final Session
-                              </span>
-                            )}
-                          </div>
-                          
-                          {/* Objectives & Activities (condensed) */}
-                          {(d.objectives || d.activities) && (
-                            <div className="text-xs bg-gray-50 border border-gray-200 rounded p-2">
-                              {d.objectives && (
-                                <div className="mb-1">
-                                  <span className="font-medium">Objectives:</span> {d.objectives}
-                                </div>
-                              )}
-                              {d.activities && (
-                                <div>
-                                  <span className="font-medium">Activities:</span> {d.activities}
-                                </div>
+                              {(d.sessionNo || 1) === (d.totalSessions || 1) && (
+                                <span className="px-2 py-1 bg-orange-100 text-orange-800 rounded-full font-medium">
+                                  🏁 Final Session
+                                </span>
                               )}
                             </div>
                           )}
+                          
+                          {/* Objectives & Activities - EDITABLE */}
+                          <div className="space-y-2 border-t pt-2">
+                            <label className="block text-xs font-medium text-gray-700">Learning Objectives</label>
+                            <textarea
+                              placeholder="Learning objectives for this session"
+                              value={d.objectives || ""}
+                              disabled={submitted}
+                              onChange={e => setDraft(k, "objectives", e.target.value)}
+                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                              rows="2"
+                            />
+                            
+                            <label className="block text-xs font-medium text-gray-700">Activities Done</label>
+                            <textarea
+                              placeholder="Teaching activities/methods used"
+                              value={d.activities || ""}
+                              disabled={submitted}
+                              onChange={e => setDraft(k, "activities", e.target.value)}
+                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                              rows="2"
+                            />
+                          </div>
                         </div>
                       </td>
                       

@@ -295,6 +295,8 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
   const getStatusIcon = (status) => {
     switch (status) {
+      case 'ready':
+        return <CheckCircle className="w-4 h-4 text-blue-500" />;
       case 'planned':
         return <CheckCircle className="w-4 h-4 text-green-500" />;
       case 'not-planned':
@@ -443,10 +445,12 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                           <div
                             key={`${scheme.schemeId}-${chapter.chapterNumber}-${session.sessionNumber}`}
                             onClick={() => handleSessionClick(scheme, chapter, session)}
-                            className={`p-3 rounded border cursor-pointer transition-colors ${
-                              session.status === 'planned'
-                                ? 'bg-green-50 border-green-200 hover:bg-green-100'
-                                : 'bg-red-50 border-red-200 hover:bg-red-100'
+                            className={`p-3 rounded cursor-pointer transition-colors ${
+                              session.status === 'ready'
+                                ? 'bg-blue-50 border-2 border-blue-300 hover:bg-blue-100'
+                                : session.status === 'planned'
+                                ? 'bg-green-50 border-2 border-green-300 hover:bg-green-100'
+                                : 'bg-red-50 border-2 border-red-300 hover:bg-red-100'
                             }`}
                           >
                             <div className="flex items-center justify-between mb-1">
@@ -458,9 +462,24 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                             <div className="text-xs text-gray-600 mb-1">
                               {session.sessionName}
                             </div>
+                            {session.status === 'ready' && (
+                              <div className="space-y-1">
+                                <div className="text-xs text-blue-700 font-semibold bg-blue-100 rounded px-2 py-1 inline-block">
+                                  ✓ Approved
+                                </div>
+                                <div className="text-xs text-blue-700">
+                                  {formatDate(session.plannedDate)} P{session.plannedPeriod}
+                                </div>
+                              </div>
+                            )}
                             {session.status === 'planned' && (
-                              <div className="text-xs text-green-600">
-                                {formatDate(session.plannedDate)} P{session.plannedPeriod}
+                              <div className="space-y-1">
+                                <div className="text-xs text-green-700 font-semibold bg-green-100 rounded px-2 py-1 inline-block">
+                                  ⏳ Pending Review
+                                </div>
+                                <div className="text-xs text-green-700">
+                                  {formatDate(session.plannedDate)} P{session.plannedPeriod}
+                                </div>
                               </div>
                             )}
                             {session.status === 'not-planned' && (

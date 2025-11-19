@@ -469,11 +469,22 @@ function getApprovedSchemesForLessonPlanning(teacherEmail) {
             parseInt(plan.session || '1') === session.sessionNumber
           );
           
+          // Determine status: 'ready' (approved), 'planned', or 'not-planned'
+          let status = 'not-planned';
+          if (existingPlan) {
+            // Check if the lesson plan has been approved (status = "Ready")
+            if (String(existingPlan.status || '').toLowerCase() === 'ready') {
+              status = 'ready';
+            } else {
+              status = 'planned';
+            }
+          }
+          
           return {
             sessionNumber: session.sessionNumber,
             sessionName: session.sessionName,
             estimatedDuration: session.estimatedDuration,
-            status: existingPlan ? 'planned' : 'not-planned',
+            status: status,
             plannedDate: existingPlan ? existingPlan.selectedDate : null,
             plannedPeriod: existingPlan ? existingPlan.selectedPeriod : null,
             lessonPlanId: existingPlan ? existingPlan.lpId : null
