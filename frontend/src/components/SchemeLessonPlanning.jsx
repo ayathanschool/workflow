@@ -48,6 +48,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   const [submitting, setSubmitting] = useState(false);
   const [showLessonPlanForm, setShowLessonPlanForm] = useState(false);
   const [planningDateRange, setPlanningDateRange] = useState(null);
+  const [classFilter, setClassFilter] = useState('all'); // NEW: Class filter state
   const [lessonPlanData, setLessonPlanData] = useState({
     learningObjectives: '',
     teachingMethods: '',
@@ -352,10 +353,28 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
             <BookOpen className="w-5 h-5 mr-2 text-blue-600" />
             Lesson Plan Preparation
           </h2>
-          <div className="text-sm text-gray-500">
-            Schemes: {schemes.length} | 
-            Total Sessions: {schemes.reduce((sum, s) => sum + s.totalSessions, 0)} |
-            Planned: {schemes.reduce((sum, s) => sum + s.plannedSessions, 0)}
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <label htmlFor="class-filter" className="text-sm font-medium text-gray-700">
+                Filter by Class:
+              </label>
+              <select
+                id="class-filter"
+                value={classFilter}
+                onChange={(e) => setClassFilter(e.target.value)}
+                className="border border-gray-300 rounded-md px-3 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="all">All Classes</option>
+                {[...new Set(schemes.map(s => s.class))].sort().map(cls => (
+                  <option key={cls} value={cls}>{cls}</option>
+                ))}
+              </select>
+            </div>
+            <div className="text-sm text-gray-500">
+              Schemes: {schemes.filter(s => classFilter === 'all' || s.class === classFilter).length} | 
+              Total Sessions: {schemes.filter(s => classFilter === 'all' || s.class === classFilter).reduce((sum, s) => sum + s.totalSessions, 0)} |
+              Planned: {schemes.filter(s => classFilter === 'all' || s.class === classFilter).reduce((sum, s) => sum + s.plannedSessions, 0)}
+            </div>
           </div>
         </div>
 
@@ -366,7 +385,21 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
           </div>
         ) : (
           <div className="space-y-6">
-            {schemes.map((scheme) => (
+            {schemes.filter(scheme => classFilter === 'all' || scheme.class === classFilter).length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                <p>No schemes found for class "{classFilter}"</p>
+                <button
+                  onClick={() => setClassFilter('all')}
+                  className="mt-2 px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Show All Classes
+                </button>
+              </div>
+            ) : (
+              schemes
+                .filter(scheme => classFilter === 'all' || scheme.class === classFilter)
+                .map((scheme) => (
               <div key={scheme.schemeId} className="border border-gray-200 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-4">
                   <div>
@@ -443,7 +476,8 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   ))}
                 </div>
               </div>
-            ))}
+            ))
+            )}
           </div>
         )}
       </div>
