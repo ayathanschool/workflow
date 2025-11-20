@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Clock, 
-  Users, BookOpen, Target, Activity, Filter, Search, Eye,
+  Users, BookOpen, Target, Activity, Filter, Search, Eye, X,
   BarChart3, PieChart, Calendar, Award, Download, RefreshCw
 } from 'lucide-react';
 import * as api from '../api';
@@ -64,21 +64,38 @@ const HMTeacherPerformanceView = ({ user }) => {
       
       console.log('HM Performance API Response:', response);
       
-      if (response.success && response.performances) {
+      // Unwrap response structure: {status, data: {success, performances}}
+      const result = response.data || response;
+      
+      if (result.success && result.performances && Array.isArray(result.performances)) {
         // Map the performances to expected format
-        const performances = response.performances.map(teacher => ({
-          teacherEmail: teacher.teacherEmail,
-          teacherName: teacher.teacherName || teacher.teacherEmail,
-          totalSessions: parseInt(teacher.totalSessions || 0),
-          completedSessions: parseInt(teacher.completedSessions || 0),
-          partialSessions: parseInt(teacher.partialSessions || 0),
-          averageCompletion: parseInt(teacher.averageCompletion || 0),
-          onTimeCompletion: parseInt(teacher.onTimeCompletion || 100),
-          cascadingIssues: parseInt(teacher.cascadingIssues || 0),
-          performanceGrade: teacher.performanceGrade || 'No Data',
-          recommendations: teacher.recommendations || []
-        }));
+        const performances = result.performances.map((teacher, idx) => {
+          const mapped = {
+            teacherEmail: teacher.teacherEmail,
+            teacherName: teacher.teacherName || teacher.teacherEmail,
+            totalSessions: parseInt(teacher.totalSessions || 0),
+            completedSessions: parseInt(teacher.completedSessions || 0),
+            partialSessions: parseInt(teacher.partialSessions || 0),
+            averageCompletion: parseInt(teacher.averageCompletion || 0),
+            onTimeCompletion: parseInt(teacher.onTimeCompletion || 100),
+            cascadingIssues: parseInt(teacher.cascadingIssues || 0),
+            performanceGrade: String(teacher.performanceGrade || 'No Data').trim(),
+            recommendations: teacher.recommendations || [],
+            qualityScore: parseInt(teacher.qualityScore || 0),
+            submissionRate: parseInt(teacher.submissionRate || 0),
+            lastSubmitDate: teacher.lastSubmitDate || 'Never'
+          };
+          
+          // Log first teacher to debug
+          if (idx === 0) {
+            console.log('First teacher mapped data:', mapped);
+            console.log('Raw teacher from backend:', teacher);
+          }
+          
+          return mapped;
+        });
         
+        console.log(`Loaded ${performances.length} teacher performances`);
         setTeacherPerformances(performances);
         setLastUpdated(new Date());
         
@@ -87,7 +104,8 @@ const HMTeacherPerformanceView = ({ user }) => {
           .filter(t => 
             t.cascadingIssues >= 3 || 
             t.averageCompletion < 60 || 
-            t.performanceGrade === 'Needs Improvement'
+            t.performanceGrade === 'Needs Improvement' ||
+            t.performanceGrade === 'At Risk'
           )
           .map(t => ({
             type: 'critical',
@@ -95,25 +113,39 @@ const HMTeacherPerformanceView = ({ user }) => {
             email: t.teacherEmail,
             message: t.cascadingIssues >= 3 
               ? `${t.cascadingIssues} cascading issues detected`
+              : t.performanceGrade === 'At Risk'
+              ? `At risk: ${t.averageCompletion}% completion`
               : `Low completion rate: ${t.averageCompletion}%`,
             timestamp: new Date()
           }));
         
         setCriticalAlerts(alerts);
         
-        // Set overall stats from response summary or calculate
-        if (response.summary) {
+        // Calculate overall stats
+        if (performances.length > 0) {
+          const avgCompletion = Math.round(performances.reduce((sum, p) => sum + p.averageCompletion, 0) / performances.length);
+          const avgOnTime = Math.round(performances.reduce((sum, p) => sum + p.onTimeCompletion, 0) / performances.length);
+          const teachersNeedingSupport = performances.filter(t => 
+            t.performanceGrade === 'At Risk' || 
+            t.performanceGrade === 'Needs Improvement'
+          ).length;
+          
           setOverallStats({
-            totalTeachers: response.summary.totalTeachers || performances.length,
-            averageCompletion: response.summary.averageCompletion || 0,
-            onTimeRate: Math.round(performances.reduce((sum, p) => sum + p.onTimeCompletion, 0) / performances.length) || 0,
-            teachersNeedingSupport: response.summary.teachersNeedingSupport || 0
+            totalTeachers: performances.length,
+            averageCompletion: avgCompletion,
+            onTimeRate: avgOnTime,
+            teachersNeedingSupport: teachersNeedingSupport
           });
         } else {
-          calculateOverallStats(performances);
+          setOverallStats({
+            totalTeachers: 0,
+            averageCompletion: 0,
+            onTimeRate: 0,
+            teachersNeedingSupport: 0
+          });
         }
       } else {
-        console.warn('No teacher performance data available');
+        console.warn('No teacher performance data available or invalid response structure:', result);
         setTeacherPerformances([]);
         setOverallStats({
           totalTeachers: 0,

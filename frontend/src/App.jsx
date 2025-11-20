@@ -340,6 +340,17 @@ const App = () => {
   // effectiveUser is the currently authenticated user (from Google Auth, local login, or state)
   const effectiveUser = googleAuth?.user || localUser || user;
 
+  // Memoize the user object passed to child components to prevent unnecessary re-renders
+  // when parent re-renders due to theme changes or other state updates
+  const memoizedUser = useMemo(() => {
+    if (!effectiveUser) return null;
+    return {
+      email: effectiveUser.email || '',
+      name: effectiveUser.name || '',
+      roles: effectiveUser.roles || []
+    };
+  }, [effectiveUser?.email, effectiveUser?.name, effectiveUser?.roles?.join(',')]);
+
   // Send notification modal state - moved to app level for testing
   const [showSendNotification, setShowSendNotification] = useState(false);
   const [notificationData, setNotificationData] = useState({
@@ -2648,7 +2659,7 @@ const App = () => {
         
         {/* Enhanced daily reporting with timetable integration */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-          <DailyReportTimetable user={user} />
+          <DailyReportTimetable user={memoizedUser} />
         </div>
       </div>
     );
@@ -5836,7 +5847,7 @@ const App = () => {
                   e.preventDefault();
                   try {
                     const response = await api.sendCustomNotification(
-                      user.email,
+                      effectiveUser.email,
                       notificationData.title,
                       notificationData.message,
                       notificationData.priority.toUpperCase(),

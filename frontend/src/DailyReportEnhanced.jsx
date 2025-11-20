@@ -1,5 +1,5 @@
 // DailyReportEnhanced.jsx - Integrated Daily Reports with Session Progress Tracking
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import {
   getTeacherDailyTimetable,
   getTeacherDailyReportsForDate,
@@ -34,9 +34,17 @@ export default function DailyReportEnhanced({ user }) {
   const [message, setMessage] = useState("");        
   const [lessonPlansMap, setLessonPlansMap] = useState({});
   const [appSettings, setAppSettings] = useState(null);
+  const [loadedDate, setLoadedDate] = useState(null);
+  const loadedEmailRef = useRef(null);
 
-  const email = user?.email || "";
-  const teacherName = user?.name || "";
+  // Memoize user data to prevent unnecessary re-renders
+  const memoizedUser = useMemo(() => ({
+    email: user?.email || "",
+    name: user?.name || ""
+  }), [user?.email, user?.name]);
+
+  const email = memoizedUser.email;
+  const teacherName = memoizedUser.name;
 
   function keyOf(r) {
     return `${r.period}|${r.class}|${r.subject}`;
@@ -290,7 +298,23 @@ export default function DailyReportEnhanced({ user }) {
     fetchSettings();
   }, []);
 
-  useEffect(() => { load(); }, [date, email]);
+  useEffect(() => {
+    // Only reload if date OR email has actually changed from last load
+    const hasDateChanged = date !== loadedDate;
+    const hasEmailChanged = email && email !== loadedEmailRef.current;
+    
+    if (email && (hasDateChanged || hasEmailChanged)) {
+      console.log('🔄 Loading data:', { 
+        reason: hasDateChanged ? 'date changed' : 'email changed',
+        date, 
+        email 
+      });
+      setLoadedDate(date);
+      loadedEmailRef.current = email;
+      load();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date, email]);
 
   function setDraft(k, field, value) {
     setDrafts(prev => ({ ...prev, [k]: { ...(prev[k] || {}), [field]: value } }));
@@ -307,14 +331,32 @@ export default function DailyReportEnhanced({ user }) {
     const d = drafts[k] || {};
     if (statusMap[k] === "Submitted") return;
 
-    // Validation
-    const hasBasicContent = d.completionPercentage > 0 || 
-                           (d.objectives && d.objectives.trim()) ||
-                           (d.activities && d.activities.trim()) ||
-                           (d.notes && d.notes.trim());
+    // STRICT VALIDATION: Chapter, Objectives AND Completion Percentage are ALL REQUIRED
+    const chapter = (d.chapter || r.chapter || "").trim();
+    const objectives = (d.objectives || "").trim();
+    const completionPercentage = Number(d.completionPercentage || 0);
     
-    if (!hasBasicContent) {
-      setMessage("Please select completion percentage or fill in some lesson details before submitting.");
+    // Validate chapter
+    if (!chapter || chapter.length === 0) {
+      const errorMsg = "❌ Chapter/Topic is required! Please fill the Chapter field before submitting.";
+      setMessage(errorMsg);
+      alert(errorMsg);
+      return;
+    }
+    
+    // Validate objectives
+    if (!objectives || objectives.length === 0) {
+      const errorMsg = "❌ Learning Objectives are required! Please fill the Objectives field before submitting.";
+      setMessage(errorMsg);
+      alert(errorMsg);
+      return;
+    }
+    
+    // Validate completion percentage
+    if (completionPercentage <= 0) {
+      const errorMsg = "❌ Completion Percentage is required! Please select how much of the lesson was completed before submitting.";
+      setMessage(errorMsg);
+      alert(errorMsg);
       return;
     }
 
@@ -543,16 +585,21 @@ export default function DailyReportEnhanced({ user }) {
                             </div>
                           </div>
                           
-                          {/* Chapter */}
+                          {/* Chapter - REQUIRED */}
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">Chapter/Topic</label>
+                            <label className="block text-xs font-medium text-red-700 mb-1">
+                              Chapter/Topic <span className="text-red-600">*</span>
+                            </label>
                             <input
                               type="text"
-                              placeholder="Enter chapter/topic taught"
+                              placeholder="Enter chapter/topic taught (REQUIRED)"
                               value={d.chapter || ""}
                               disabled={submitted}
                               onChange={e => setDraft(k, "chapter", e.target.value)}
-                              className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                              className={`w-full text-sm border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 ${
+                                !d.chapter?.trim() && !submitted ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                              }`}
+                              required
                             />
                           </div>
                           
@@ -575,14 +622,19 @@ export default function DailyReportEnhanced({ user }) {
                           
                           {/* Objectives & Activities - EDITABLE */}
                           <div className="space-y-2 border-t pt-2">
-                            <label className="block text-xs font-medium text-gray-700">Learning Objectives</label>
+                            <label className="block text-xs font-medium text-red-700">
+                              Learning Objectives <span className="text-red-600">*</span>
+                            </label>
                             <textarea
-                              placeholder="Learning objectives for this session"
+                              placeholder="Learning objectives for this session (REQUIRED)"
                               value={d.objectives || ""}
                               disabled={submitted}
                               onChange={e => setDraft(k, "objectives", e.target.value)}
-                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                              className={`w-full text-xs border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 ${
+                                !d.objectives?.trim() && !submitted ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                              }`}
                               rows="2"
+                              required
                             />
                             
                             <label className="block text-xs font-medium text-gray-700">Activities Done</label>
@@ -598,11 +650,13 @@ export default function DailyReportEnhanced({ user }) {
                         </div>
                       </td>
                       
-                      {/* Session Progress Slider */}
+                      {/* Session Progress Slider - REQUIRED */}
                       <td className="px-4 py-3">
                         <div className="space-y-3">
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-2">Session Completion</label>
+                            <label className="block text-xs font-medium text-red-700 mb-2">
+                              Session Completion <span className="text-red-600">*</span>
+                            </label>
                             <div className="space-y-2">
                               <input
                                 type="range"
@@ -612,7 +666,10 @@ export default function DailyReportEnhanced({ user }) {
                                 value={d.completionPercentage || 0}
                                 disabled={submitted}
                                 onChange={e => setDraft(k, "completionPercentage", Number(e.target.value))}
-                                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer disabled:opacity-50"
+                                className={`w-full h-2 rounded-lg appearance-none cursor-pointer disabled:opacity-50 ${
+                                  (d.completionPercentage || 0) <= 0 && !submitted ? 'bg-red-200' : 'bg-gray-200'
+                                }`}
+                                required
                               />
                               <div className="flex justify-between items-center">
                                 <span className={`text-xs px-2 py-1 rounded-full font-medium ${getCompletionColor(d.completionPercentage || 0)}`}>

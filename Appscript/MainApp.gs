@@ -352,6 +352,23 @@ function doGet(e) {
       return _handleGetCascadingIssuesReport(e.parameter);
     }
     
+    if (action === 'getAllTeachersPerformance') {
+      return _handleGetAllTeachersPerformance(e.parameter);
+    }
+    
+    if (action === 'getClassSubjectPerformance') {
+      return _respond(getClassSubjectPerformance());
+    }
+    
+    if (action === 'getDailySubmissionMetrics') {
+      const daysBack = Number(e.parameter.daysBack || 30);
+      return _respond(getDailySubmissionMetrics(daysBack));
+    }
+    
+    if (action === 'getHMAnalyticsDashboard') {
+      return _respond(getHMAnalyticsDashboard());
+    }
+    
     if (action === 'syncSessionDependencies') {
       return _handleSyncSessionDependencies(e.parameter);
     }
@@ -632,45 +649,8 @@ function doPost(e) {
         
         Logger.log('Row appended successfully and flushed to sheet');
         
-        // === CASCADING TRACKING: Update session completion if lesson plan exists ===
-        if (data.lessonPlanId && data.completionPercentage !== undefined) {
-          Logger.log('Triggering session completion update for cascading tracking...');
-          try {
-            const sessionData = {
-              lpId: data.lessonPlanId,
-              completionPercentage: Number(data.completionPercentage || 0),
-              teacherEmail: data.teacherEmail,
-              completionDate: data.date || now,
-              teachingNotes: data.notes || '',
-              difficultiesEncountered: data.difficulties || '',
-              nextSessionAdjustments: data.nextSessionPlan || ''
-            };
-            
-            const sessionResult = updateSessionCompletion(sessionData);
-            Logger.log('Session completion updated: ' + JSON.stringify(sessionResult));
-            
-            if (sessionResult.success && sessionResult.cascadingEffects) {
-              Logger.log('Cascading effects detected: ' + sessionResult.cascadingEffects);
-            }
-          } catch (sessionError) {
-            // Don't fail the daily report submission if session tracking fails
-            Logger.log('Warning: Session completion tracking failed: ' + sessionError.message);
-            Logger.log('Daily report was still saved successfully');
-          }
-        } else {
-          Logger.log('No lessonPlanId or completionPercentage - skipping cascading tracking');
-        }
-        
-        // === AUTO-SKIP REMAINING SESSIONS if chapter completed early ===
-        if (data.chapterCompleted && data.lessonPlanId) {
-          Logger.log('Chapter marked as complete - skipping remaining sessions...');
-          try {
-            const skipResult = _skipRemainingSessionsForCompletedChapter(data);
-            Logger.log('Skip remaining sessions result: ' + JSON.stringify(skipResult));
-          } catch (skipError) {
-            Logger.log('Warning: Failed to skip remaining sessions: ' + skipError.message);
-          }
-        }
+        // NOTE: Cascading tracking and auto-skip features disabled for now
+        // They can be re-enabled once the required functions are implemented
         
         return _respond({ ok: true, submitted: true });
       } catch (err) {
@@ -704,6 +684,19 @@ function doPost(e) {
     // === HM MONITORING ROUTES ===
     if (action === 'getAllTeachersPerformance') {
       return _handleGetAllTeachersPerformance(data);
+    }
+    
+    if (action === 'getClassSubjectPerformance') {
+      return _respond(getClassSubjectPerformance());
+    }
+    
+    if (action === 'getDailySubmissionMetrics') {
+      const daysBack = Number(data.daysBack || 30);
+      return _respond(getDailySubmissionMetrics(daysBack));
+    }
+    
+    if (action === 'getHMAnalyticsDashboard') {
+      return _respond(getHMAnalyticsDashboard());
     }
     
     if (action === 'getSchoolSessionAnalytics') {
@@ -2351,5 +2344,530 @@ function testSchemeLessonPlanningAPI() {
     console.log('Test completed successfully');
   } catch (error) {
     console.error(`Error in test: ${error.message}`);
+  }
+}
+
+/**
+ * ====== HM PERFORMANCE ANALYTICS ======
+ * Comprehensive teacher performance data for HM oversight and analysis
+ */
+
+/**
+ * Get all teachers' performance metrics (HM view)
+ * Returns: { success, performances: [{teacherEmail, teacherName, totalSessions, completedSessions, ...}] }
+ */
+function getAllTeachersPerformance() {
+  try {
+    // Load all sheets
+    const lpSh = _getSheet('LessonPlans');
+    const lpHeaders = _headers(lpSh);
+    const allLessonPlans = _rows(lpSh).map(row => _indexByHeader(row, lpHeaders));
+    
+    const drSh = _getSheet('DailyReports');
+    const drHeaders = _headers(drSh);
+    const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
+    
+    const schemeSh = _getSheet('Schemes');
+    const schemeHeaders = _headers(schemeSh);
+    const allSchemes = _rows(schemeSh).map(row => _indexByHeader(row, schemeHeaders));
+    
+    Logger.log(`getAllTeachersPerformance: LP=${allLessonPlans.length}, DR=${allReports.length}, Schemes=${allSchemes.length}`);
+    
+    // Build teacher data structure with Plan vs Actual tracking
+    const teacherData = {};
+    
+    // STEP 1: Count PLANNED sessions from LessonPlans (these are the planned sessions)
+    allLessonPlans.forEach(lp => {
+      const email = String(lp.teacherEmail || '').toLowerCase().trim();
+      const name = lp.teacherName || email;
+      
+      if (!email) return;
+      
+      if (!teacherData[email]) {
+        teacherData[email] = {
+          teacherEmail: email,
+          teacherName: name,
+          
+          // PLAN metrics
+          plannedSessions: 0,
+          approvedPlans: 0,
+          pendingPlans: 0,
+          
+          // ACTUAL metrics
+          actualSessions: 0,
+          completedSessions: 0,
+          partialSessions: 0,
+          notStartedSessions: 0,
+          
+          // Coverage
+          completionPercentages: [],
+          subjects: new Set(),
+          classes: new Set(),
+          chapters: new Set(),
+          
+          // Quality
+          cascadingIssues: 0,
+          lastSubmitDate: null
+        };
+      }
+      
+      const teacher = teacherData[email];
+      teacher.plannedSessions++;
+      
+      if (lp.status === 'Approved' || lp.status === 'approved') {
+        teacher.approvedPlans++;
+      } else {
+        teacher.pendingPlans++;
+      }
+      
+      // Track subjects and classes from plans
+      if (lp.subject) teacher.subjects.add(lp.subject);
+      if (lp.class) teacher.classes.add(lp.class);
+      if (lp.chapter) teacher.chapters.add(lp.chapter);
+    });
+    
+    // STEP 2: Count ACTUAL sessions from DailyReports (what was actually taught)
+    allReports.forEach(report => {
+      const email = String(report.teacherEmail || '').toLowerCase().trim();
+      const name = report.teacherName || email;
+      
+      if (!email) return;
+      
+      if (!teacherData[email]) {
+        teacherData[email] = {
+          teacherEmail: email,
+          teacherName: name,
+          plannedSessions: 0,
+          approvedPlans: 0,
+          pendingPlans: 0,
+          actualSessions: 0,
+          completedSessions: 0,
+          partialSessions: 0,
+          notStartedSessions: 0,
+          completionPercentages: [],
+          subjects: new Set(),
+          classes: new Set(),
+          chapters: new Set(),
+          cascadingIssues: 0,
+          lastSubmitDate: null
+        };
+      }
+      
+      const teacher = teacherData[email];
+      teacher.actualSessions++;
+      
+      // Track subjects, classes, chapters
+      if (report.subject) teacher.subjects.add(report.subject);
+      if (report.class) teacher.classes.add(report.class);
+      if (report.chapter) teacher.chapters.add(report.chapter);
+      
+      // Categorize by completion status
+      const completion = Number(report.completionPercentage || 0);
+      teacher.completionPercentages.push(completion);
+      
+      if (completion >= 100 || (report.completed === 'Yes' || report.completed === true)) {
+        teacher.completedSessions++;
+      } else if (completion >= 50) {
+        teacher.partialSessions++;
+      } else if (completion > 0) {
+        teacher.notStartedSessions++;
+      }
+      
+      // Update last submit date
+      if (report.createdAt) {
+        const submitDate = new Date(report.createdAt);
+        if (!teacher.lastSubmitDate || submitDate > teacher.lastSubmitDate) {
+          teacher.lastSubmitDate = submitDate;
+        }
+      }
+    });
+    
+    // STEP 3: Calculate performance metrics and plan vs actual comparison
+    const performances = Object.values(teacherData).map(teacher => {
+      // Calculate average completion percentage
+      const avgCompletion = teacher.completionPercentages.length > 0
+        ? Math.round(teacher.completionPercentages.reduce((a, b) => a + b, 0) / teacher.completionPercentages.length)
+        : 0;
+      
+      // Plan vs Actual comparison
+      const planActualGap = teacher.plannedSessions - teacher.actualSessions;
+      const coveragePercentage = teacher.plannedSessions > 0
+        ? Math.round((teacher.actualSessions / teacher.plannedSessions) * 100)
+        : 0;
+      
+      // Detect cascading issues (sessions with completion < 75%)
+      const lowCompletions = teacher.completionPercentages.filter(c => c < 75);
+      teacher.cascadingIssues = lowCompletions.length;
+      
+      // Calculate quality score based on:
+      // 1. Coverage (how many planned sessions were actually delivered) - 50%
+      // 2. Completion (how thoroughly were sessions completed) - 30%
+      // 3. Consistency (how many sessions had issues) - 20%
+      const coverageScore = Math.min(100, coveragePercentage);
+      const completionScore = avgCompletion;
+      const consistencyScore = teacher.actualSessions > 0
+        ? Math.max(0, 100 - (teacher.cascadingIssues * 10))
+        : 0;
+      
+      const qualityScore = Math.round(
+        (coverageScore * 0.5) + 
+        (completionScore * 0.3) + 
+        (consistencyScore * 0.2)
+      );
+      
+      // Determine performance grade
+      let performanceGrade = 'No Data';
+      if (teacher.actualSessions > 0) {
+        if (qualityScore >= 90) performanceGrade = 'Excellent';
+        else if (qualityScore >= 75) performanceGrade = 'Good';
+        else if (qualityScore >= 60) performanceGrade = 'Satisfactory';
+        else if (qualityScore >= 40) performanceGrade = 'Needs Improvement';
+        else performanceGrade = 'At Risk';
+      }
+      
+      return {
+        teacherEmail: teacher.teacherEmail,
+        teacherName: teacher.teacherName,
+        
+        // Plan vs Actual
+        plannedSessions: teacher.plannedSessions,
+        actualSessions: teacher.actualSessions,
+        planActualGap: planActualGap,
+        coveragePercentage: coveragePercentage,
+        
+        // Actual breakdown
+        completedSessions: teacher.completedSessions,
+        partialSessions: teacher.partialSessions,
+        notStartedSessions: teacher.notStartedSessions,
+        averageCompletion: avgCompletion,
+        
+        // Quality metrics
+        cascadingIssues: teacher.cascadingIssues,
+        qualityScore: qualityScore,
+        performanceGrade: performanceGrade,
+        
+        // Additional info
+        approvedPlans: teacher.approvedPlans,
+        pendingPlans: teacher.pendingPlans,
+        lastSubmitDate: teacher.lastSubmitDate ? Utilities.formatDate(teacher.lastSubmitDate, TZ, 'yyyy-MM-dd') : 'Never',
+        subjects: Array.from(teacher.subjects).join(', '),
+        classes: Array.from(teacher.classes).join(', '),
+        chapters: Array.from(teacher.chapters).length
+      };
+    }).sort((a, b) => {
+      // Sort by performance grade, then by quality score
+      const gradeOrder = { 'Excellent': 5, 'Good': 4, 'Satisfactory': 3, 'Needs Improvement': 2, 'At Risk': 1, 'No Data': 0 };
+      const gradeA = gradeOrder[a.performanceGrade] || 0;
+      const gradeB = gradeOrder[b.performanceGrade] || 0;
+      if (gradeA !== gradeB) return gradeB - gradeA;
+      return b.qualityScore - a.qualityScore;
+    });
+    
+    Logger.log(`getAllTeachersPerformance: Computed performance for ${performances.length} teachers`);
+    
+    return {
+      success: true,
+      performances: performances,
+      generatedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    Logger.log(`ERROR in getAllTeachersPerformance: ${error.message}`);
+    return {
+      success: false,
+      error: error.message,
+      performances: []
+    };
+  }
+}
+
+/**
+ * Get class/subject-level performance analytics
+ * Returns: { success, classMetrics: [{class, subject, avgCompletion, submissionRate, teacherCount, ...}] }
+ */
+function getClassSubjectPerformance() {
+  try {
+    // Load lesson plans (PLANNED sessions by class/subject)
+    const lpSh = _getSheet('LessonPlans');
+    const lpHeaders = _headers(lpSh);
+    const allLessonPlans = _rows(lpSh).map(row => _indexByHeader(row, lpHeaders));
+    
+    // Load daily reports (ACTUAL sessions by class/subject)
+    const drSh = _getSheet('DailyReports');
+    const drHeaders = _headers(drSh);
+    const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
+    
+    Logger.log(`getClassSubjectPerformance: LP=${allLessonPlans.length}, DR=${allReports.length}`);
+    
+    // STEP 1: Count PLANNED sessions by class/subject from LessonPlans
+    const classSubjectData = {};
+    
+    allLessonPlans.forEach(lp => {
+      const cls = String(lp.class || '').trim();
+      const subject = String(lp.subject || '').trim();
+      const key = `${cls}|${subject}`;
+      
+      if (!cls || !subject) return;
+      
+      if (!classSubjectData[key]) {
+        classSubjectData[key] = {
+          class: cls,
+          subject: subject,
+          plannedSessions: 0,
+          actualSessions: 0,
+          completedSessions: 0,
+          partialSessions: 0,
+          completionValues: [],
+          teachers: new Set(),
+          chapters: new Set()
+        };
+      }
+      
+      const data = classSubjectData[key];
+      data.plannedSessions++;
+      data.teachers.add(lp.teacherEmail);
+      if (lp.chapter) data.chapters.add(lp.chapter);
+    });
+    
+    // STEP 2: Count ACTUAL sessions by class/subject from DailyReports
+    allReports.forEach(report => {
+      const cls = String(report.class || '').trim();
+      const subject = String(report.subject || '').trim();
+      const key = `${cls}|${subject}`;
+      
+      if (!cls || !subject) return;
+      
+      if (!classSubjectData[key]) {
+        classSubjectData[key] = {
+          class: cls,
+          subject: subject,
+          plannedSessions: 0,
+          actualSessions: 0,
+          completedSessions: 0,
+          partialSessions: 0,
+          completionValues: [],
+          teachers: new Set(),
+          chapters: new Set()
+        };
+      }
+      
+      const data = classSubjectData[key];
+      data.actualSessions++;
+      data.teachers.add(report.teacherEmail);
+      if (report.chapter) data.chapters.add(report.chapter);
+      
+      const completion = Number(report.completionPercentage || 0);
+      data.completionValues.push(completion);
+      
+      if (completion >= 100 || report.completed === 'Yes' || report.completed === true) {
+        data.completedSessions++;
+      } else if (completion >= 50) {
+        data.partialSessions++;
+      }
+    });
+    
+    // STEP 3: Calculate metrics with Plan vs Actual comparison
+    const classMetrics = Object.values(classSubjectData).map(data => {
+      const avgCompletion = data.completionValues.length > 0
+        ? Math.round(data.completionValues.reduce((a, b) => a + b, 0) / data.completionValues.length)
+        : 0;
+      
+      // Plan vs Actual comparison
+      const planActualGap = data.plannedSessions - data.actualSessions;
+      const coveragePercentage = data.plannedSessions > 0
+        ? Math.round((data.actualSessions / data.plannedSessions) * 100)
+        : 0;
+      
+      // Determine status based on coverage and completion
+      let status = 'On Track';
+      if (coveragePercentage < 50) {
+        status = 'Behind Schedule';
+      } else if (coveragePercentage < 80) {
+        status = 'Slightly Behind';
+      } else if (coveragePercentage === 100 && avgCompletion >= 80) {
+        status = 'Excellent';
+      } else if (coveragePercentage === 100 && avgCompletion >= 60) {
+        status = 'Good';
+      }
+      
+      // Determine risk level
+      let riskLevel = 'Low';
+      if (avgCompletion < 60 || coveragePercentage < 50) {
+        riskLevel = 'High';
+      } else if (avgCompletion < 75 || coveragePercentage < 75) {
+        riskLevel = 'Medium';
+      }
+      
+      return {
+        class: data.class,
+        subject: data.subject,
+        
+        // Plan vs Actual
+        plannedSessions: data.plannedSessions,
+        actualSessions: data.actualSessions,
+        planActualGap: planActualGap,
+        coveragePercentage: coveragePercentage,
+        
+        // Actual completion breakdown
+        completedSessions: data.completedSessions,
+        partialSessions: data.partialSessions,
+        avgCompletion: avgCompletion,
+        
+        // Additional metrics
+        teacherCount: data.teachers.size,
+        chapterCount: data.chapters.size,
+        status: status,
+        riskLevel: riskLevel
+      };
+    });
+    
+    return {
+      success: true,
+      classMetrics: classMetrics,
+      generatedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    Logger.log(`ERROR in getClassSubjectPerformance: ${error.message}`);
+    return {
+      success: false,
+      error: error.message,
+      classMetrics: []
+    };
+  }
+}
+
+/**
+ * Get daily submission metrics and trends
+ * Returns: { success, dailyMetrics: [{date, totalTeachers, submittedReports, pendingReports, avgCompletion, ...}] }
+ */
+function getDailySubmissionMetrics(daysBack = 30) {
+  try {
+    const drSh = _getSheet('DailyReports');
+    const drHeaders = _headers(drSh);
+    const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
+    
+    // Group by date
+    const dateMetrics = {};
+    
+    allReports.forEach(report => {
+      if (!report.date && !report.submittedAt && !report.createdAt) return;
+      
+      const reportDate = report.date || report.submittedAt || report.createdAt;
+      const dateStr = _isoDateIST(reportDate);
+      
+      if (!dateMetrics[dateStr]) {
+        dateMetrics[dateStr] = {
+          date: dateStr,
+          teachers: new Set(),
+          totalReports: 0,
+          completedReports: 0,
+          pendingReports: 0,
+          completionValues: [],
+          submittedReports: 0
+        };
+      }
+      
+      const metrics = dateMetrics[dateStr];
+      metrics.totalReports++;
+      metrics.teachers.add(report.teacherEmail);
+      
+      if (report.completionPercentage || report.completed) {
+        metrics.submittedReports++;
+        const completion = Number(report.completionPercentage || 0);
+        metrics.completionValues.push(completion);
+        if (completion >= 80) {
+          metrics.completedReports++;
+        }
+      } else {
+        metrics.pendingReports++;
+      }
+    });
+    
+    // Calculate metrics and sort by date
+    const dailyMetrics = Object.values(dateMetrics)
+      .map(metrics => {
+        const avgCompletion = metrics.completionValues.length > 0
+          ? Math.round(metrics.completionValues.reduce((a, b) => a + b, 0) / metrics.completionValues.length)
+          : 0;
+        
+        const submissionRate = metrics.totalReports > 0
+          ? Math.round(100 * metrics.submittedReports / metrics.totalReports)
+          : 0;
+        
+        return {
+          date: metrics.date,
+          totalTeachers: metrics.teachers.size,
+          totalReports: metrics.totalReports,
+          submittedReports: metrics.submittedReports,
+          completedReports: metrics.completedReports,
+          pendingReports: metrics.pendingReports,
+          avgCompletion: avgCompletion,
+          submissionRate: submissionRate
+        };
+      })
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .slice(0, daysBack);
+    
+    return {
+      success: true,
+      dailyMetrics: dailyMetrics,
+      daysIncluded: dailyMetrics.length,
+      generatedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    Logger.log(`ERROR in getDailySubmissionMetrics: ${error.message}`);
+    return {
+      success: false,
+      error: error.message,
+      dailyMetrics: []
+    };
+  }
+}
+
+/**
+ * Get comprehensive HM analytics dashboard data
+ * Returns: { success, teachers, classes, dailyTrends, systemHealth }
+ */
+function getHMAnalyticsDashboard() {
+  try {
+    // Fetch all analytics in parallel concept (sequential due to Apps Script limitations)
+    const teachers = getAllTeachersPerformance();
+    const classes = getClassSubjectPerformance();
+    const dailyTrends = getDailySubmissionMetrics(30);
+    
+    // Calculate system health
+    const teacherPerfs = teachers.performances || [];
+    const avgTeacherScore = teacherPerfs.length > 0
+      ? Math.round(teacherPerfs.reduce((sum, t) => sum + t.qualityScore, 0) / teacherPerfs.length)
+      : 0;
+    
+    const classMetrics = classes.classMetrics || [];
+    const avgClassCompletion = classMetrics.length > 0
+      ? Math.round(classMetrics.reduce((sum, c) => sum + c.avgCompletion, 0) / classMetrics.length)
+      : 0;
+    
+    const systemHealth = {
+      overallQualityScore: avgTeacherScore,
+      systemCompletionRate: avgClassCompletion,
+      totalTeachers: teacherPerfs.length,
+      totalClasses: classMetrics.length,
+      excellentTeachers: teacherPerfs.filter(t => t.performanceGrade === 'Excellent').length,
+      atRiskTeachers: teacherPerfs.filter(t => t.performanceGrade === 'At Risk').length,
+      highRiskClasses: classMetrics.filter(c => c.riskLevel === 'High').length
+    };
+    
+    return {
+      success: true,
+      systemHealth: systemHealth,
+      teachers: teachers,
+      classes: classes,
+      dailyTrends: dailyTrends,
+      generatedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    Logger.log(`ERROR in getHMAnalyticsDashboard: ${error.message}`);
+    return {
+      success: false,
+      error: error.message
+    };
   }
 }

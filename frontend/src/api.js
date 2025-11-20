@@ -946,6 +946,31 @@ export async function getAllTeachersPerformance() {
   return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
 }
 
+// Get class/subject-level performance metrics (HM only)
+export async function getClassSubjectPerformance() {
+  const q = new URLSearchParams({
+    action: 'getClassSubjectPerformance'
+  });
+  return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+}
+
+// Get daily submission metrics and trends (HM only)
+export async function getDailySubmissionMetrics(daysBack = 30) {
+  const q = new URLSearchParams({
+    action: 'getDailySubmissionMetrics',
+    daysBack: String(daysBack)
+  });
+  return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+}
+
+// Get comprehensive HM analytics dashboard (HM only)
+export async function getHMAnalyticsDashboard() {
+  const q = new URLSearchParams({
+    action: 'getHMAnalyticsDashboard'
+  });
+  return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+}
+
 // Get school session analytics (HM only)
 export async function getSchoolSessionAnalytics(filters = {}) {
   const q = new URLSearchParams({

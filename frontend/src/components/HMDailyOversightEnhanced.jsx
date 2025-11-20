@@ -1,6 +1,6 @@
 // HMDailyOversightEnhanced.jsx - Enhanced HM Dashboard with Session Progress Analytics
 import React, { useState, useEffect } from 'react';
-import { getDailyReportsForDate, getLessonPlansForDate } from '../api';
+import { getDailyReportsForDate, getLessonPlansForDate, getClassSubjectPerformance } from '../api';
 import { todayIST, formatLocalDate } from '../utils/dateUtils';
 import { Clock, RefreshCw, AlertTriangle } from 'lucide-react';
 
@@ -31,6 +31,9 @@ const HMDailyOversightEnhanced = ({ user }) => {
   const [classes, setClasses] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [sessionAnalytics, setSessionAnalytics] = useState([]);
+  // Class/Subject Performance Analytics
+  const [classSubjectPerformance, setClassSubjectPerformance] = useState([]);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   // Real-time features
   const [lastUpdated, setLastUpdated] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -41,7 +44,31 @@ const HMDailyOversightEnhanced = ({ user }) => {
   useEffect(() => {
     loadDailyReports();
     loadLessonPlans();
+    loadClassSubjectPerformance(); // Load analytics data on mount
   }, [date]);
+
+  // Load class/subject performance analytics
+  async function loadClassSubjectPerformance() {
+    setAnalyticsLoading(true);
+    try {
+      const response = await getClassSubjectPerformance();
+      console.log('Class/Subject performance response:', response);
+      
+      const result = response.data || response;
+      if (result.success && result.classMetrics && Array.isArray(result.classMetrics)) {
+        console.log('Setting classSubjectPerformance with', result.classMetrics.length, 'items');
+        setClassSubjectPerformance(result.classMetrics);
+      } else {
+        console.warn('Invalid class/subject performance response:', result);
+        setClassSubjectPerformance([]);
+      }
+    } catch (err) {
+      console.error('Failed to load class/subject performance:', err);
+      setClassSubjectPerformance([]);
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }
 
   // Auto-refresh mechanism
   useEffect(() => {
@@ -499,6 +526,152 @@ const HMDailyOversightEnhanced = ({ user }) => {
             </div>
           </div>
           <p className="text-xs text-gray-500 mt-1">High cascading risk</p>
+        </div>
+      </div>
+
+      {/* Subject-wise Performance */}
+      <div className="bg-white p-6 border border-gray-200 rounded-lg mb-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Subject-wise Performance</h3>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Subject</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Class</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Planned</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actual</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gap</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Coverage</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Avg Completion</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {classSubjectPerformance.length > 0 ? (
+                classSubjectPerformance.map((performance, idx) => (
+                  <tr key={idx} className={`hover:bg-gray-50 ${performance.riskLevel === 'High' ? 'bg-red-50' : performance.riskLevel === 'Medium' ? 'bg-yellow-50' : ''}`}>
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{performance.subject}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{performance.class}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{performance.plannedSessions}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{performance.actualSessions}</td>
+                    <td className="px-4 py-3 text-sm">
+                      <span className={performance.planActualGap > 0 ? 'text-red-600 font-medium' : 'text-green-600 font-medium'}>
+                        {performance.planActualGap > 0 ? '+' : ''}{performance.planActualGap}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 bg-gray-200 rounded-full h-2">
+                          <div 
+                            className={performance.coveragePercentage >= 80 ? 'bg-green-600' : performance.coveragePercentage >= 50 ? 'bg-yellow-600' : 'bg-red-600'} 
+                            style={{ width: `${performance.coveragePercentage || 0}%`, height: '100%', borderRadius: '4px' }}
+                          ></div>
+                        </div>
+                        <span className="text-sm font-medium text-gray-900">{performance.coveragePercentage || 0}%</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 bg-gray-200 rounded-full h-2">
+                          <div 
+                            className="bg-blue-600 h-2 rounded-full" 
+                            style={{ width: `${performance.avgCompletion || 0}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-sm font-medium text-gray-900">{performance.avgCompletion || 0}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                    {analyticsLoading ? 'Loading performance data...' : 'No subject performance data available.'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Class-wise Performance */}
+      <div className="bg-white p-6 border border-gray-200 rounded-lg mb-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Class-wise Performance (Plan vs Actual)</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {classSubjectPerformance.length > 0 ? (
+            // Group by class from the performance data
+            Object.entries(
+              classSubjectPerformance.reduce((acc, perf) => {
+                if (!acc[perf.class]) {
+                  acc[perf.class] = {
+                    class: perf.class,
+                    plannedSessions: 0,
+                    actualSessions: 0,
+                    completedSessions: 0,
+                    avgCompletions: [],
+                    subjects: new Set(),
+                    riskLevel: 'Low'
+                  };
+                }
+                acc[perf.class].plannedSessions += perf.plannedSessions || 0;
+                acc[perf.class].actualSessions += perf.actualSessions || 0;
+                acc[perf.class].completedSessions += perf.completedSessions || 0;
+                acc[perf.class].avgCompletions.push(perf.avgCompletion || 0);
+                acc[perf.class].riskLevel = perf.riskLevel === 'High' ? 'High' : acc[perf.class].riskLevel;
+                if (perf.subject) acc[perf.class].subjects.add(perf.subject);
+                return acc;
+              }, {})
+            ).map(([classKey, classData]) => {
+              const avgCompletion = classData.avgCompletions.length > 0
+                ? Math.round(classData.avgCompletions.reduce((a, b) => a + b) / classData.avgCompletions.length)
+                : 0;
+              
+              const coverage = classData.plannedSessions > 0
+                ? Math.round((classData.actualSessions / classData.plannedSessions) * 100)
+                : 0;
+              
+              const gap = classData.plannedSessions - classData.actualSessions;
+              
+              return (
+                <div key={classKey} className={`p-4 rounded-lg border-2 ${classData.riskLevel === 'High' ? 'bg-red-50 border-red-200' : classData.riskLevel === 'Medium' ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-200'}`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-semibold text-gray-900">{classData.class}</h4>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${classData.riskLevel === 'High' ? 'bg-red-100 text-red-800' : classData.riskLevel === 'Medium' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
+                      {classData.riskLevel}
+                    </span>
+                  </div>
+                  <div className="space-y-2 text-sm">
+                    <p className="text-gray-600">
+                      <span className="font-medium">Plan: {classData.plannedSessions}</span>
+                      <span className="text-gray-500"> | </span>
+                      <span className="font-medium">Actual: {classData.actualSessions}</span>
+                      <span className={`ml-1 font-medium ${gap > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                        ({gap > 0 ? '+' : ''}{gap})
+                      </span>
+                    </p>
+                    <p className="text-gray-600">
+                      <span className="font-medium">{classData.completedSessions}</span>
+                      <span className="text-gray-500"> sessions completed (Avg: {avgCompletion}%)</span>
+                    </p>
+                    <p className="text-gray-600">
+                      <span className="font-medium">{classData.subjects.size}</span>
+                      <span className="text-gray-500"> subject(s) | Coverage: {coverage}%</span>
+                    </p>
+                  </div>
+                  <div className="mt-3 w-full bg-gray-200 rounded-full h-2">
+                    <div 
+                      className={coverage >= 80 ? 'bg-green-600' : coverage >= 50 ? 'bg-yellow-600' : 'bg-red-600'} 
+                      style={{ width: `${coverage}%`, height: '100%', borderRadius: '4px' }}
+                    ></div>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="col-span-full text-center py-8 text-gray-500">
+              {analyticsLoading ? 'Loading performance data...' : 'No class performance data available.'}
+            </div>
+          )}
         </div>
       </div>
 

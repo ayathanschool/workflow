@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import {
   getTeacherDailyTimetable,
   getTeacherDailyReportsForDate,
@@ -38,6 +38,7 @@ export default function DailyReportTimetable({ user }) {
   const [lessonDelays, setLessonDelays] = useState([]);
   const [appSettings, setAppSettings] = useState(null);  // Store app settings with period times
   const [loadedDate, setLoadedDate] = useState(null);  // Track last loaded date to prevent infinite refreshes
+  const loadedEmailRef = useRef(null);  // Track last loaded email to prevent unnecessary reloads
 
   // Memoize user object to prevent unnecessary re-renders from parent component
   const memoizedUser = useMemo(() => ({
@@ -255,12 +256,23 @@ export default function DailyReportTimetable({ user }) {
   }, []);
 
   useEffect(() => { 
-    // Prevent unnecessary reloads - only load if date has changed
-    if (date !== loadedDate && stableEmail) {
+    // Only reload if date OR email has actually changed from last load
+    // This prevents reloads when user is typing or when parent re-renders for other reasons
+    const hasDateChanged = date !== loadedDate;
+    const hasEmailChanged = stableEmail && stableEmail !== loadedEmailRef.current;
+    
+    if (stableEmail && (hasDateChanged || hasEmailChanged)) {
+      console.log('🔄 Loading data:', { 
+        reason: hasDateChanged ? 'date changed' : 'email changed',
+        date, 
+        email: stableEmail 
+      });
       setLoadedDate(date);
+      loadedEmailRef.current = stableEmail;
       load();
     }
-  }, [date, loadedDate, stableEmail]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date, stableEmail]); // Removed loadedDate from dependencies to prevent loops
 
   function setDraft(k, field, value) {
     setDrafts(prev => ({ ...prev, [k]: { ...(prev[k] || {}), [field]: value } }));
@@ -334,14 +346,32 @@ export default function DailyReportTimetable({ user }) {
     const d = drafts[k] || {};
     if (statusMap[k] === "Submitted") return;
 
-    // simple validation: at least one of objectives/activities/completed should be non-empty / not default
-    const hasContent =
-      (d.objectives && d.objectives.trim()) ||
-      (d.activities && d.activities.trim()) ||
-      d.completed !== "Not Started" ||
-      (d.notes && d.notes.trim());
-    if (!hasContent) {
-      setMessage("Please fill something (objectives/activities/completion/notes) before submitting.");
+    // STRICT VALIDATION: Chapter, Objectives AND Completion Status are REQUIRED
+    const chapter = (d.chapter || r.chapter || "").trim();
+    const objectives = (d.objectives || "").trim();
+    const completed = d.completed || "Not Started";
+    
+    // Validate chapter
+    if (!chapter || chapter.length === 0) {
+      const errorMsg = "❌ Chapter/Topic is required! Please fill the Chapter field before submitting.";
+      setMessage(errorMsg);
+      alert(errorMsg);
+      return;
+    }
+    
+    // Validate objectives
+    if (!objectives || objectives.length === 0) {
+      const errorMsg = "❌ Learning Objectives are required! Please fill the Objectives field before submitting.";
+      setMessage(errorMsg);
+      alert(errorMsg);
+      return;
+    }
+    
+    // Validate completion status
+    if (completed === "Not Started") {
+      const errorMsg = "❌ Completion Status is required! Please select how much of the lesson was completed before submitting.";
+      setMessage(errorMsg);
+      alert(errorMsg);
       return;
     }
 
@@ -351,16 +381,16 @@ export default function DailyReportTimetable({ user }) {
     try {
       const payload = {
         date,
-        teacherEmail: email,
+        teacherEmail: stableEmail,
         teacherName,
         class: r.class,
         subject: r.subject,
         period: Number(r.period),
         planType: d.planType || "not planned",
         lessonPlanId: d.lessonPlanId || "",
-        chapter: d.chapter || r.chapter || "",
+        chapter: chapter,
         sessionNo: Number(d.sessionNo || 0),
-        objectives: d.objectives || "",
+        objectives: objectives,
         activities: d.activities || "",
         completed: d.completed || "Not Started",
         notes: d.notes || "",
@@ -436,7 +466,7 @@ export default function DailyReportTimetable({ user }) {
             className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 text-sm font-medium transition-colors" 
             onClick={async () => {
               try {
-                const result = await getTeacherDailyTimetable(email, date);
+                const result = await getTeacherDailyTimetable(stableEmail, date);
                 alert(`API Response: ${JSON.stringify(result, null, 2)}`);
               } catch (err) {
                 alert(`API Error: ${err.message}`);
@@ -625,16 +655,21 @@ export default function DailyReportTimetable({ user }) {
                             ))}
                           </div>
                           
-                          {/* Chapter/Topic */}
+                          {/* Chapter/Topic - REQUIRED */}
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">Chapter/Topic</label>
+                            <label className="block text-xs font-medium text-red-700 mb-1">
+                              Chapter/Topic <span className="text-red-600">*</span>
+                            </label>
                             <input
                               type="text"
-                              placeholder="Chapter taught"
+                              placeholder="Chapter taught (REQUIRED)"
                               value={d.chapter || ""}
                               disabled={submitted}
                               onChange={e => setDraft(k, "chapter", e.target.value)}
-                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                              className={`w-full text-xs border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 ${
+                                !d.chapter?.trim() && !submitted ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                              }`}
+                              required
                             />
                           </div>
                           
@@ -645,16 +680,21 @@ export default function DailyReportTimetable({ user }) {
                             </div>
                           )}
                           
-                          {/* Objectives - EDITABLE */}
+                          {/* Objectives - REQUIRED */}
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">Learning Objectives</label>
+                            <label className="block text-xs font-medium text-red-700 mb-1">
+                              Learning Objectives <span className="text-red-600">*</span>
+                            </label>
                             <textarea
-                              placeholder="Objectives for this session"
+                              placeholder="Objectives for this session (REQUIRED)"
                               value={d.objectives || ""}
                               disabled={submitted}
                               onChange={e => setDraft(k, "objectives", e.target.value)}
-                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                              className={`w-full text-xs border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 ${
+                                !d.objectives?.trim() && !submitted ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                              }`}
                               rows="2"
+                              required
                             />
                           </div>
                           
@@ -675,13 +715,21 @@ export default function DailyReportTimetable({ user }) {
                       
                       {/* Completion Status - REQUIRED FIELD */}
                       <td className="px-4 py-3">
+                        <label className="block text-xs font-medium text-red-700 mb-1">
+                          Completion <span className="text-red-600">*</span>
+                        </label>
                         <select
                           id={`completed-${k}`}
                           name={`completed-${k}`}
                           value={d.completed || "Not Started"}
                           disabled={submitted}
                           onChange={e => setDraft(k, "completed", e.target.value)}
-                          className="w-full text-sm border border-gray-300 rounded px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 font-medium"
+                          className={`w-full text-sm border rounded px-3 py-2 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 font-medium ${
+                            (d.completed === "Not Started" || !d.completed) && !submitted 
+                              ? 'border-red-500 bg-red-50' 
+                              : 'border-gray-300'
+                          }`}
+                          required
                         >
                           {COMPLETION.map(opt => (
                             <option key={opt} value={opt}>{opt}</option>
