@@ -373,30 +373,34 @@ function getStudentReportCard(examType, admNo = '', cls = '') {
           const exam = exams.find(e => e.examId === mark.examId);
           if (exam) {
             // ExamMarks sheet uses 'ce' and 'te' columns
-            // ce = Continuous Evaluation (Internal)
-            // te = Term Exam (External)
+            // ce = Continuous Evaluation (Internal marks)
+            // te = Term Exam (External marks)
             const ce = Number(mark.ce || 0);
             const te = Number(mark.te || 0);
             const totalFromSheet = Number(mark.total || 0);
             
-            // FIXED: Direct assignment - ce is internal, te is external
-            // If both ce and te are 0 but total exists, use total as external (for backward compatibility)
+            // Direct assignment: ce is internal, te is external
             let internal = ce;
             let external = te;
             
+            // If total exists but ce and te are both 0, use the stored total
+            // This handles legacy data where only total was stored
             if (totalFromSheet > 0 && ce === 0 && te === 0) {
-              // Only if both are 0, use total as external
-              internal = 0;
+              // For backward compatibility, treat legacy total as external marks
               external = totalFromSheet;
+              internal = 0;
             }
             
             const total = internal + external;
             const examMax = Number(exam.totalMax || exam.internalMax + exam.externalMax || 100);
             
-            Logger.log(`  Subject ${exam.subject}: ce=${ce}, te=${te}, internal=${internal}, external=${external}, total=${total}, max=${examMax}`);
+            Logger.log(`  Subject ${exam.subject}: ce=${ce}, te=${te}, internal=${internal}, external=${external}, total=${total}, max=${examMax}, percentage=${examMax > 0 ? ((total / examMax) * 100).toFixed(2) : 0}%`);
             
             // Determine if this class has internal marks
             const hasInternalMarks = _classHasInternalMarks(student.class);
+            
+            // Calculate percentage for grade determination
+            const percentage = examMax > 0 ? (total / examMax) * 100 : 0;
             
             // IMPORTANT: Use 'ce' and 'te' property names to match frontend expectations
             subjects[exam.subject] = {
@@ -406,8 +410,8 @@ function getStudentReportCard(examType, admNo = '', cls = '') {
               external: external,  // Backward compatibility
               total: total,
               maxMarks: examMax,
-              percentage: examMax > 0 ? Math.round((total / examMax) * 100) : 0,
-              grade: _calculateGradeFromBoundaries(examMax > 0 ? (total / examMax) * 100 : 0, student.class),
+              percentage: Math.round(percentage),
+              grade: _calculateGradeFromBoundaries(percentage, student.class),
               hasInternalMarks: hasInternalMarks
             };
             

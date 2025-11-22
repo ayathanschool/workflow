@@ -1,5 +1,5 @@
 ﻿import * as api from './api'
-import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
 import LoginForm from './auth/LoginForm';
 import LoadingSplash from './auth/LoadingSplash';
 import TopBar from './layout/TopBar';
@@ -509,6 +509,13 @@ const App = () => {
   const [substitutionNotifications, setSubstitutionNotifications] = useState([]);
   const [shownNotificationIds, setShownNotificationIds] = useState(new Set()); // Track shown notifications
   
+  // Keep a ref in sync with shownNotificationIds so our callbacks always see the latest set
+  const shownNotificationIdsRef = useRef(shownNotificationIds);
+  
+  useEffect(() => {
+    shownNotificationIdsRef.current = shownNotificationIds;
+  }, [shownNotificationIds]);
+  
   // Load substitution notifications for current user and add to NotificationCenter
   const loadSubstitutionNotifications = useCallback(async () => {
     if (!user?.email) return;
@@ -530,51 +537,54 @@ const App = () => {
       // Store for teacher dashboard display
       setSubstitutionNotifications(notificationsList);
       
-      // Add unacknowledged notifications to NotificationCenter (only if not already shown)
-      notificationsList.forEach(notification => {
-        const isUnacknowledged = String(notification.acknowledged || '').toLowerCase() !== 'true';
-        const notAlreadyShown = !shownNotificationIds.has(notification.id);
-        
-        if (isUnacknowledged && notAlreadyShown) {
-          // Parse the notification data
-          let notifData = {};
-          try {
-            notifData = JSON.parse(notification.data || '{}');
-          } catch (e) {
-            console.warn('Failed to parse notification data:', e);
-          }
-          
-          // Add to notification center
-          info(
-            notification.title || 'Substitution Assignment',
-            notification.message || `Period ${notifData.period} - Class ${notifData.class}`,
-            {
-              autoClose: false, // Don't auto-close substitution notifications
-              actions: [
-                {
-                  label: 'Acknowledge',
-                  handler: () => acknowledgeNotification(notification.id)
-                }
-              ],
-              metadata: {
-                type: 'substitution',
-                notificationId: notification.id,
-                ...notifData
-              }
-            }
-          );
-          
-          // Mark as shown
-          setShownNotificationIds(prev => new Set([...prev, notification.id]));
-        }
-      });
+    // Add unacknowledged notifications to NotificationCenter (only if not already shown)
+    notificationsList.forEach(notification => {
+      const isUnacknowledged = String(notification.acknowledged || '').toLowerCase() !== 'true';
+      const notAlreadyShown = !shownNotificationIdsRef.current.has(notification.id);
       
-    } catch (error) {
-      console.error('Error loading substitution notifications:', error);
-    }
-  }, [user?.email, info, shownNotificationIds]);
-  
-  const acknowledgeNotification = useCallback(async (notificationId) => {
+      if (isUnacknowledged && notAlreadyShown) {
+        // Parse the notification data
+        let notifData = {};
+        try {
+          notifData = JSON.parse(notification.data || '{}');
+        } catch (e) {
+          console.warn('Failed to parse notification data:', e);
+        }
+        
+        // Add to notification center
+        info(
+          notification.title || 'Substitution Assignment',
+          notification.message || `Period ${notifData.period} - Class ${notifData.class}`,
+          {
+            autoClose: false, // Don't auto-close substitution notifications
+            actions: [
+              {
+                label: 'Acknowledge',
+                handler: () => acknowledgeNotification(notification.id)
+              }
+            ],
+            metadata: {
+              type: 'substitution',
+              notificationId: notification.id,
+              ...notifData
+            }
+          }
+        );
+        
+        // Mark as shown (guarded so we don't trigger extra renders for same id)
+        setShownNotificationIds(prev => {
+          if (prev.has(notification.id)) return prev;
+          const next = new Set(prev);
+          next.add(notification.id);
+          return next;
+        });
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error loading substitution notifications:', error);
+  }
+}, [user?.email, info]);  const acknowledgeNotification = useCallback(async (notificationId) => {
     try {
       await api.acknowledgeSubstitutionNotification(user.email, notificationId);
       success('Acknowledged', 'Substitution assignment acknowledged successfully');
@@ -622,7 +632,13 @@ const App = () => {
       teacherCount: 0,
       classCount: 0,
       subjectCount: 0,
-      pendingReports: 0
+      pendingReports: 0,
+      classStudentCounts: {},
+      teachingClasses: [],
+      teachingSubjects: [],
+      studentsAboveAverage: 0,
+      studentsNeedFocus: 0,
+      classPerformance: {} // { className: { aboveAverage, needFocus, avgPercentage } }
     });
     const [dashboardLoading, setDashboardLoading] = useState(false);
     const [dashboardLoaded, setDashboardLoaded] = useState(false);
@@ -693,8 +709,114 @@ const App = () => {
             setInsights(newInsights);
           } else if (hasAnyRole(['teacher','class teacher','daily reporting teachers'])) {
             // Teacher view: compute classes and subjects from user object
-            const classCount = Array.isArray(user.classes) ? user.classes.length : 0;
-            const subjectCount = Array.isArray(user.subjects) ? user.subjects.length : 0;
+            const teachingClasses = Array.isArray(user.classes) ? user.classes : [];
+            const teachingSubjects = Array.isArray(user.subjects) ? user.subjects : [];
+            const classCount = teachingClasses.length;
+            const subjectCount = teachingSubjects.length;
+            
+            // Fetch student counts per class for class teacher
+            let classStudentCounts = {};
+            let studentsAboveAverage = 0;
+            let studentsNeedFocus = 0;
+            let classPerformance = {};
+            
+            if (hasRole('class teacher') && teachingClasses.length > 0) {
+              try {
+                // Fetch students for each class and store count per class
+                const studentPromises = teachingClasses.map(cls => api.getStudents(cls));
+                const studentsPerClass = await Promise.all(studentPromises);
+                teachingClasses.forEach((cls, idx) => {
+                  const students = studentsPerClass[idx];
+                  classStudentCounts[cls] = Array.isArray(students) ? students.length : 0;
+                });
+                
+                // Calculate academic performance for class teacher's classes
+                try {
+                  // Get all exams to find latest exam for class teacher's classes
+                  const allExams = await api.getExams();
+                  const relevantExams = Array.isArray(allExams) 
+                    ? allExams.filter(exam => teachingClasses.includes(exam.class))
+                    : [];
+                  
+                  if (relevantExams.length > 0) {
+                    // Get marks for the most recent exam of each class
+                    const examsByClass = {};
+                    relevantExams.forEach(exam => {
+                      if (!examsByClass[exam.class] || new Date(exam.date) > new Date(examsByClass[exam.class].date)) {
+                        examsByClass[exam.class] = exam;
+                      }
+                    });
+                    
+                    // Fetch marks for each class's latest exam
+                    const examsArray = Object.values(examsByClass);
+                    const marksPromises = examsArray.map(exam => 
+                      api.getExamMarks(exam.examId).catch(() => [])
+                    );
+                    const allMarksArrays = await Promise.all(marksPromises);
+                    
+                    // Build performance data per class
+                    // Use the outer classPerformance variable instead of declaring new one
+                    let totalAboveAverage = 0;
+                    let totalNeedFocus = 0;
+                    
+                    examsArray.forEach((exam, idx) => {
+                      const marks = allMarksArrays[idx];
+                      const className = exam.class;
+                      
+                      if (Array.isArray(marks) && marks.length > 0) {
+                        const studentMarks = [];
+                        
+                        marks.forEach(mark => {
+                          if (mark && (mark.total != null || mark.ce != null || mark.te != null)) {
+                            // Calculate total from ce + te if total not present
+                            const total = parseFloat(mark.total) || 
+                                        (parseFloat(mark.ce || 0) + parseFloat(mark.te || 0));
+                            const max = parseFloat(exam.totalMax || exam.internalMax + exam.externalMax || 100);
+                            
+                            if (total >= 0 && max > 0) {
+                              studentMarks.push({
+                                total: total,
+                                max: max,
+                                percentage: (total / max) * 100
+                              });
+                            }
+                          }
+                        });
+                        
+                        if (studentMarks.length > 0) {
+                          // Calculate class average
+                          const percentages = studentMarks.map(m => m.percentage);
+                          const avgPercentage = percentages.reduce((sum, p) => sum + p, 0) / percentages.length;
+                          
+                          // Categorize students for this class
+                          const aboveAverage = percentages.filter(p => p >= avgPercentage).length;
+                          const needFocus = percentages.filter(p => p < 50).length;
+                          
+                          classPerformance[className] = {
+                            aboveAverage,
+                            needFocus,
+                            avgPercentage: Math.round(avgPercentage),
+                            totalStudents: studentMarks.length
+                          };
+                          
+                          totalAboveAverage += aboveAverage;
+                          totalNeedFocus += needFocus;
+                        }
+                      }
+                    });
+                    
+                    studentsAboveAverage = totalAboveAverage;
+                    studentsNeedFocus = totalNeedFocus;
+                    
+                    console.log('📊 Class-wise Performance:', classPerformance);
+                  }
+                } catch (err) {
+                  console.warn('Unable to fetch performance data:', err);
+                }
+              } catch (err) {
+                console.warn('Unable to fetch student counts:', err);
+              }
+            }
             
             // Attempt to fetch daily reports for today to count pending submissions
             let pendingReports = 0;
@@ -715,7 +837,13 @@ const App = () => {
               teacherCount: 0,
               classCount,
               subjectCount,
-              pendingReports
+              pendingReports,
+              classStudentCounts,
+              teachingClasses,
+              teachingSubjects,
+              studentsAboveAverage,
+              studentsNeedFocus,
+              classPerformance
             });
           }
           setDashboardLoaded(true);
@@ -803,44 +931,157 @@ const App = () => {
             </div>
           </div>
   ) : user && hasAnyRole(['teacher','class teacher','daily reporting teachers']) ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Classes Teaching */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-              <div className="flex items-center">
-                <div className="p-3 bg-blue-100 rounded-lg">
-                  <School className="w-6 h-6 text-blue-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Classes Teaching</p>
-                  <p className="text-2xl font-bold text-gray-900">{insights.classCount}</p>
-                </div>
-              </div>
-            </div>
-            {/* Subjects */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-              <div className="flex items-center">
-                <div className="p-3 bg-green-100 rounded-lg">
-                  <Book className="w-6 h-6 text-green-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Subjects</p>
-                  <p className="text-2xl font-bold text-gray-900">{insights.subjectCount}</p>
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              {/* Classes Teaching */}
+              <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <div className="flex items-center">
+                  <div className="p-3 bg-blue-100 rounded-lg">
+                    <School className="w-6 h-6 text-blue-600" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600">Classes</p>
+                    <p className="text-2xl font-bold text-gray-900">{insights.classCount}</p>
+                  </div>
                 </div>
               </div>
-            </div>
-            {/* Pending Reports */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-              <div className="flex items-center">
-                <div className="p-3 bg-purple-100 rounded-lg">
-                  <FileText className="w-6 h-6 text-purple-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Pending Reports</p>
-                  <p className="text-2xl font-bold text-gray-900">{insights.pendingReports}</p>
+              
+              {/* Subjects */}
+              <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <div className="flex items-center">
+                  <div className="p-3 bg-green-100 rounded-lg">
+                    <Book className="w-6 h-6 text-green-600" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600">Subjects</p>
+                    <p className="text-2xl font-bold text-gray-900">{insights.subjectCount}</p>
+                  </div>
                 </div>
               </div>
+              
+              {/* Pending Reports */}
+              <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <div className="flex items-center">
+                  <div className="p-3 bg-purple-100 rounded-lg">
+                    <FileText className="w-6 h-6 text-purple-600" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600">Pending Reports</p>
+                    <p className="text-2xl font-bold text-gray-900">{insights.pendingReports}</p>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Students Above Average - Only for class teachers with performance data */}
+              {hasRole('class teacher') && (
+                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                  <div className="flex items-center">
+                    <div className="p-3 bg-emerald-100 rounded-lg">
+                      <Award className="w-6 h-6 text-emerald-600" />
+                    </div>
+                    <div className="ml-4">
+                      <p className="text-sm font-medium text-gray-600">Above Average</p>
+                      <p className="text-2xl font-bold text-gray-900">{insights.studentsAboveAverage}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Students Need Focus - Only for class teachers with performance data */}
+              {hasRole('class teacher') && (
+                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                  <div className="flex items-center">
+                    <div className="p-3 bg-amber-100 rounded-lg">
+                      <AlertCircle className="w-6 h-6 text-amber-600" />
+                    </div>
+                    <div className="ml-4">
+                      <p className="text-sm font-medium text-gray-600">Need Focus</p>
+                      <p className="text-2xl font-bold text-gray-900">{insights.studentsNeedFocus}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
+            
+            {/* Detailed Teaching Assignment - Shows specific classes and subjects */}
+            {(insights.teachingClasses.length > 0 || insights.teachingSubjects.length > 0) && (
+              <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Teaching Assignment</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {insights.teachingClasses.length > 0 && (
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 mb-2">Classes</p>
+                      <div className="flex flex-wrap gap-2">
+                        {insights.teachingClasses.map((cls, idx) => {
+                          const studentCount = insights.classStudentCounts[cls];
+                          return (
+                            <span key={idx} className="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium flex items-center gap-2">
+                              <span>{cls}</span>
+                              {studentCount !== undefined && (
+                                <span className="px-2 py-0.5 bg-blue-100 rounded-full text-xs">
+                                  {studentCount} {studentCount === 1 ? 'student' : 'students'}
+                                </span>
+                              )}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {insights.teachingSubjects.length > 0 && (
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 mb-2">Subjects</p>
+                      <div className="flex flex-wrap gap-2">
+                        {insights.teachingSubjects.map((subject, idx) => (
+                          <span key={idx} className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-sm font-medium">
+                            {subject}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            {/* Class-wise Performance Breakdown - Only for class teachers */}
+            {hasRole('class teacher') && insights.classPerformance && Object.keys(insights.classPerformance).length > 0 && (
+              <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Class-wise Performance</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {Object.entries(insights.classPerformance).map(([className, perf]) => (
+                    <div key={className} className="border border-gray-200 rounded-lg p-4">
+                      <h4 className="font-semibold text-gray-900 mb-3">{className}</h4>
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-gray-600">Class Average:</span>
+                          <span className="text-sm font-semibold text-blue-600">{perf.avgPercentage}%</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-gray-600">Total Students:</span>
+                          <span className="text-sm font-semibold">{perf.totalStudents}</span>
+                        </div>
+                        <div className="border-t pt-2 mt-2">
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="text-xs text-emerald-600 flex items-center gap-1">
+                              <Award className="w-3 h-3" /> Above Average
+                            </span>
+                            <span className="text-sm font-bold text-emerald-600">{perf.aboveAverage}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs text-amber-600 flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3" /> Need Focus
+                            </span>
+                            <span className="text-sm font-bold text-amber-600">{perf.needFocus}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           <div className="bg-white rounded-xl shadow-sm p-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Welcome, {user?.name}</h2>
@@ -1011,9 +1252,19 @@ const App = () => {
             <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
               <User className="h-5 w-5 text-blue-600" />
             </div>
-            <span className={`ml-2 text-sm font-medium hidden md:block ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
-              {user?.name}
-            </span>
+            <div className={`ml-2 hidden md:block ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+              <div className="text-sm font-medium">{user?.name}</div>
+              {user?.roles && user.roles.length > 0 && (
+                <div className="text-xs text-gray-500 dark:text-gray-400">
+                  {user.roles.join(', ')}
+                </div>
+              )}
+              {googleAuth?.user ? (
+                <div className="text-xs text-blue-600 dark:text-blue-400">Google Login</div>
+              ) : (
+                <div className="text-xs text-green-600 dark:text-green-400">Password Login</div>
+              )}
+            </div>
             <button
               onClick={logout}
               className={`ml-4 text-sm flex items-center transition-colors duration-200 ${theme === 'dark' ? 'text-gray-400 hover:text-gray-300' : 'text-gray-500 hover:text-gray-700'}`}
