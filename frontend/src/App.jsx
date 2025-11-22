@@ -880,56 +880,7 @@ const App = () => {
         </div>
 
   {user && hasRole('h m') ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
-            {/* Pending Schemes */}
-            <div className="bg-white rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 mobile-p-2">
-              <div className="flex items-center">
-                <div className="p-3 bg-blue-100 rounded-lg">
-                  <Book className="w-6 h-6 text-blue-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Pending Schemes</p>
-                  <p className="text-2xl font-bold text-gray-900">{insights.planCount}</p>
-                </div>
-              </div>
-            </div>
-            {/* Pending Lessons */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-              <div className="flex items-center">
-                <div className="p-3 bg-green-100 rounded-lg">
-                  <BookOpen className="w-6 h-6 text-green-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Pending Lessons</p>
-                  <p className="text-2xl font-bold text-gray-900">{insights.lessonCount}</p>
-                </div>
-              </div>
-            </div>
-            {/* Teachers */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-              <div className="flex items-center">
-                <div className="p-3 bg-purple-100 rounded-lg">
-                  <Users className="w-6 h-6 text-purple-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Teachers</p>
-                  <p className="text-2xl font-bold text-gray-900">{insights.teacherCount}</p>
-                </div>
-              </div>
-            </div>
-            {/* Classes */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-              <div className="flex items-center">
-                <div className="p-3 bg-orange-100 rounded-lg">
-                  <Calendar className="w-6 h-6 text-orange-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Classes</p>
-                  <p className="text-2xl font-bold text-gray-900">{insights.classCount}</p>
-                </div>
-              </div>
-            </div>
-          </div>
+          <HMDashboardView insights={insights} />
   ) : user && hasAnyRole(['teacher','class teacher','daily reporting teachers']) ? (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -2927,36 +2878,233 @@ const App = () => {
     );
   };
 
-  const HMDashboardView = () => {
-    const [insights, setInsights] = useState({ planCount: 0, lessonCount: 0, teacherCount: 0, classCount: 0 });
+  const HMDashboardView = ({ insights }) => {
+    console.log('🚀 HMDashboardView rendering with insights:', insights);
+    const [currentTime, setCurrentTime] = useState(new Date());
+    const [dailyReportsData, setDailyReportsData] = useState({ reports: [], stats: {} });
+    const [autoRefresh, setAutoRefresh] = useState(true);
+    const [lastRefresh, setLastRefresh] = useState(new Date());
 
+  // Update current time every minute
   useEffect(() => {
-    async function fetchInsights() {
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Auto-refresh daily reports every 5 minutes
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const refreshTimer = setInterval(async () => {
       try {
-        const hmData = await api.getHmInsights().catch(() => ({}));
-        const classes = await api.getAllClasses().catch(() => []);
-        setInsights({
-          planCount: hmData?.planCount || 0,
-          lessonCount: hmData?.lessonCount || 0,
-          teacherCount: hmData?.teacherCount || 0,
-          classCount: Array.isArray(classes) ? classes.length : 0
+        const today = new Date().toISOString().split('T')[0];
+        const response = await api.getDailyReportsForDate(today);
+        const data = response?.data || response;
+        setDailyReportsData({
+          reports: data.reports || [],
+          stats: data.stats || {}
         });
+        setLastRefresh(new Date());
       } catch (err) {
-        console.warn('Failed to load HM insights', err);
+        console.error('Auto-refresh failed:', err);
+      }
+    }, 5 * 60 * 1000);
+    return () => clearInterval(refreshTimer);
+  }, [autoRefresh]);
+
+  // Load daily reports on mount
+  useEffect(() => {
+    async function loadTodayReports() {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const response = await api.getDailyReportsForDate(today);
+        const data = response?.data || response;
+        setDailyReportsData({
+          reports: data.reports || [],
+          stats: data.stats || {}
+        });
+        setLastRefresh(new Date());
+      } catch (err) {
+        console.error('Failed to load daily reports:', err);
       }
     }
-    fetchInsights();
+    loadTodayReports();
   }, []);
+
+  // Determine current period based on time
+  const getCurrentPeriod = () => {
+    const hour = currentTime.getHours();
+    const minute = currentTime.getMinutes();
+    const time = hour * 60 + minute;
+    
+    // School periods (approximate)
+    if (time >= 9*60 && time < 9*60+40) return 1;
+    if (time >= 9*60+40 && time < 10*60+20) return 2;
+    if (time >= 10*60+20 && time < 11*60) return 3;
+    if (time >= 11*60 && time < 11*60+40) return 4;
+    if (time >= 11*60+40 && time < 12*60+20) return 5;
+    if (time >= 13*60+30 && time < 14*60+10) return 6;
+    if (time >= 14*60+10 && time < 14*60+50) return 7;
+    if (time >= 14*60+50 && time < 15*60+30) return 8;
+    return null;
+  };
+
+  const currentPeriod = getCurrentPeriod();
+
+  // Calculate critical alerts
+  const criticalAlerts = [];
+  const pendingCount = dailyReportsData.stats.pending || 0;
+  const lateSubmissions = dailyReportsData.reports.filter(r => {
+    if (r.submitted) return false;
+    const reportPeriod = parseInt(r.period);
+    return currentPeriod && reportPeriod < currentPeriod;
+  }).length;
+
+  if (lateSubmissions > 0) {
+    criticalAlerts.push({
+      type: 'critical',
+      icon: '🚨',
+      message: `${lateSubmissions} late report${lateSubmissions > 1 ? 's' : ''} (period${lateSubmissions > 1 ? 's' : ''} already completed)`,
+      color: 'red'
+    });
+  }
+
+  if (pendingCount > 10) {
+    criticalAlerts.push({
+      type: 'warning',
+      icon: '⚠️',
+      message: `${pendingCount} reports still pending`,
+      color: 'orange'
+    });
+  }
+
+  if (substitutionNotifications.length > 0) {
+    criticalAlerts.push({
+      type: 'info',
+      icon: '🔄',
+      message: `${substitutionNotifications.length} unacknowledged substitution${substitutionNotifications.length > 1 ? 's' : ''}`,
+      color: 'amber'
+    });
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Headmaster Dashboard</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Headmaster Dashboard - Daily Oversight</h1>
+          <p className="text-sm text-gray-600 mt-1">
+            Live monitoring • {currentTime.toLocaleDateString()} • {currentTime.toLocaleTimeString()} 
+            {currentPeriod && ` • Current Period: ${currentPeriod}`}
+          </p>
+        </div>
         <div className="flex space-x-3">
-          <button className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700">
+          <button 
+            onClick={() => setAutoRefresh(!autoRefresh)}
+            className={`px-4 py-2 rounded-lg flex items-center ${autoRefresh ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
+            {autoRefresh ? 'Auto-Refresh ON' : 'Auto-Refresh OFF'}
+          </button>
+          <button 
+            onClick={() => setActiveView('daily-oversight')}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700"
+          >
+            <ClipboardCheck className="h-4 w-4 mr-2" />
+            Detailed View
+          </button>
+          <button className="bg-gray-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-gray-700">
             <Download className="h-4 w-4 mr-2" />
             Export Report
           </button>
+        </div>
+      </div>
+
+      {/* Critical Alerts Banner */}
+      {criticalAlerts.length > 0 && (
+        <div className="bg-gradient-to-r from-red-50 to-orange-50 border-l-4 border-red-500 p-4 rounded-lg shadow-sm">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <AlertCircle className="h-6 w-6 text-red-500" />
+            </div>
+            <div className="ml-3 flex-1">
+              <h3 className="text-sm font-bold text-red-800 mb-2">
+                🔴 CRITICAL ALERTS - IMMEDIATE ATTENTION REQUIRED
+              </h3>
+              <div className="space-y-1">
+                {criticalAlerts.map((alert, idx) => (
+                  <div key={idx} className="flex items-center text-sm">
+                    <span className="mr-2 text-lg">{alert.icon}</span>
+                    <span className={`font-medium text-${alert.color}-800`}>{alert.message}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Real-Time Activity Monitor */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">📊 Live Activity Monitor</h2>
+          <span className="text-xs text-gray-500">
+            Last updated: {lastRefresh.toLocaleTimeString()}
+          </span>
+        </div>
+        
+        {/* Period Heatmap */}
+        <div className="grid grid-cols-8 gap-2 mb-6">
+          {[1,2,3,4,5,6,7,8].map(period => {
+            const periodReports = dailyReportsData.reports.filter(r => parseInt(r.period) === period);
+            const submitted = periodReports.filter(r => r.submitted).length;
+            const total = periodReports.length;
+            const percentage = total > 0 ? Math.round((submitted / total) * 100) : 0;
+            const isCurrent = currentPeriod === period;
+            const isPast = currentPeriod && period < currentPeriod;
+            
+            let bgColor = 'bg-gray-100';
+            if (total === 0) bgColor = 'bg-gray-50';
+            else if (percentage >= 90) bgColor = 'bg-green-500';
+            else if (percentage >= 70) bgColor = 'bg-green-400';
+            else if (percentage >= 50) bgColor = 'bg-yellow-400';
+            else if (percentage >= 30) bgColor = 'bg-orange-400';
+            else bgColor = 'bg-red-400';
+            
+            return (
+              <div key={period} className={`relative p-3 rounded-lg ${bgColor} ${isCurrent ? 'ring-4 ring-blue-500' : ''}`}>
+                <div className="text-center">
+                  <div className="text-xs font-medium text-gray-700">P{period}</div>
+                  <div className="text-lg font-bold text-gray-900">{percentage}%</div>
+                  <div className="text-xs text-gray-600">{submitted}/{total}</div>
+                  {isCurrent && <div className="text-xs font-bold text-blue-600 mt-1">NOW</div>}
+                  {isPast && submitted < total && (
+                    <div className="text-xs font-bold text-red-600 mt-1">LATE</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Quick Stats */}
+        <div className="grid grid-cols-4 gap-4">
+          <div className="text-center p-3 bg-blue-50 rounded-lg">
+            <div className="text-2xl font-bold text-blue-600">{dailyReportsData.stats.submitted || 0}</div>
+            <div className="text-xs text-gray-600">Submitted</div>
+          </div>
+          <div className="text-center p-3 bg-orange-50 rounded-lg">
+            <div className="text-2xl font-bold text-orange-600">{dailyReportsData.stats.pending || 0}</div>
+            <div className="text-xs text-gray-600">Pending</div>
+          </div>
+          <div className="text-center p-3 bg-red-50 rounded-lg">
+            <div className="text-2xl font-bold text-red-600">{lateSubmissions}</div>
+            <div className="text-xs text-gray-600">Late</div>
+          </div>
+          <div className="text-center p-3 bg-green-50 rounded-lg">
+            <div className="text-2xl font-bold text-green-600">
+              {dailyReportsData.stats.totalPeriods > 0 ? Math.round((dailyReportsData.stats.submitted / dailyReportsData.stats.totalPeriods) * 100) : 0}%
+            </div>
+            <div className="text-xs text-gray-600">Completion</div>
+          </div>
         </div>
       </div>
 
@@ -3047,30 +3195,279 @@ const App = () => {
         </div>
       </div>
 
+      {/* Quick Actions Command Center */}
+      <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">⚡ Quick Actions</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <button 
+            onClick={() => setActiveView('scheme-approvals')}
+            className="flex flex-col items-center p-4 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+          >
+            <BookCheck className="h-6 w-6 text-blue-600 mb-2" />
+            <span className="text-sm font-medium text-blue-900">Approve Schemes</span>
+            {insights.planCount > 0 && (
+              <span className="mt-1 px-2 py-0.5 text-xs bg-blue-600 text-white rounded-full">{insights.planCount}</span>
+            )}
+          </button>
+          
+          <button 
+            onClick={() => setActiveView('lesson-approvals')}
+            className="flex flex-col items-center p-4 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
+          >
+            <FileCheck className="h-6 w-6 text-green-600 mb-2" />
+            <span className="text-sm font-medium text-green-900">Approve Lessons</span>
+            {insights.lessonCount > 0 && (
+              <span className="mt-1 px-2 py-0.5 text-xs bg-green-600 text-white rounded-full">{insights.lessonCount}</span>
+            )}
+          </button>
+          
+          <button 
+            onClick={() => setActiveView('substitution')}
+            className="flex flex-col items-center p-4 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors"
+          >
+            <RefreshCw className="h-6 w-6 text-amber-600 mb-2" />
+            <span className="text-sm font-medium text-amber-900">Substitutions</span>
+            {substitutionNotifications.length > 0 && (
+              <span className="mt-1 px-2 py-0.5 text-xs bg-amber-600 text-white rounded-full">{substitutionNotifications.length}</span>
+            )}
+          </button>
+          
+          <button 
+            onClick={() => setActiveView('daily-oversight')}
+            className="flex flex-col items-center p-4 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
+          >
+            <BarChart2 className="h-6 w-6 text-purple-600 mb-2" />
+            <span className="text-sm font-medium text-purple-900">Analytics</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Teacher Status Overview */}
+      <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">👥 Teacher Status Overview</h2>
+        <div className="space-y-3">
+          {/* Group reports by teacher */}
+          {Object.entries(
+            dailyReportsData.reports.reduce((acc, report) => {
+              const teacherKey = report.teacherEmail || report.teacherName;
+              if (!acc[teacherKey]) {
+                acc[teacherKey] = {
+                  name: report.teacherName || teacherKey,
+                  submitted: 0,
+                  total: 0,
+                  periods: []
+                };
+              }
+              acc[teacherKey].total++;
+              if (report.submitted) acc[teacherKey].submitted++;
+              acc[teacherKey].periods.push(report.period);
+              return acc;
+            }, {})
+          )
+          .sort((a, b) => {
+            const aPercent = a[1].total > 0 ? a[1].submitted / a[1].total : 0;
+            const bPercent = b[1].total > 0 ? b[1].submitted / b[1].total : 0;
+            return aPercent - bPercent; // Sort by completion rate (lowest first)
+          })
+          .slice(0, 10) // Show top 10 teachers needing attention
+          .map(([teacherKey, data]) => {
+            const percentage = data.total > 0 ? Math.round((data.submitted / data.total) * 100) : 0;
+            let statusColor = 'bg-green-500';
+            let statusText = 'All Done';
+            if (percentage < 50) {
+              statusColor = 'bg-red-500';
+              statusText = 'Needs Attention';
+            } else if (percentage < 100) {
+              statusColor = 'bg-yellow-500';
+              statusText = 'In Progress';
+            }
+            
+            return (
+              <div key={teacherKey} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3 flex-1">
+                  <div className={`w-3 h-3 rounded-full ${statusColor}`}></div>
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-900">{data.name}</div>
+                    <div className="text-xs text-gray-500">Periods: {data.periods.sort((a,b) => a-b).join(', ')}</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <div className="text-sm font-semibold text-gray-900">{data.submitted}/{data.total}</div>
+                    <div className="text-xs text-gray-500">{statusText}</div>
+                  </div>
+                  <div className="w-16">
+                    <div className="bg-gray-200 rounded-full h-2">
+                      <div 
+                        className={`h-2 rounded-full ${percentage >= 80 ? 'bg-green-500' : percentage >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                        style={{ width: `${percentage}%` }}
+                      ></div>
+                    </div>
+                    <div className="text-xs text-center text-gray-600 mt-1">{percentage}%</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          
+          {dailyReportsData.reports.length === 0 && (
+            <div className="text-center py-8 text-gray-500">
+              <Users className="h-12 w-12 mx-auto mb-2 text-gray-400" />
+              <p>No data available for today</p>
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Submission Timeline Chart */}
         <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">Submission Trends</h2>
-          <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg">
-            <p className="text-gray-500">Submission trends chart would appear here</p>
+          <h2 className="text-lg font-medium text-gray-900 mb-4">📈 Submission Timeline</h2>
+          <div className="space-y-2">
+            {[1,2,3,4,5,6,7,8].map(period => {
+              const periodReports = dailyReportsData.reports.filter(r => parseInt(r.period) === period);
+              const submitted = periodReports.filter(r => r.submitted).length;
+              const total = periodReports.length;
+              const percentage = total > 0 ? Math.round((submitted / total) * 100) : 0;
+              
+              return (
+                <div key={period} className="flex items-center gap-3">
+                  <div className="w-16 text-sm font-medium text-gray-700">Period {period}</div>
+                  <div className="flex-1">
+                    <div className="relative bg-gray-200 rounded-full h-8 overflow-hidden">
+                      <div 
+                        className={`h-full flex items-center justify-end pr-2 text-xs font-bold text-white transition-all duration-500 ${
+                          percentage >= 80 ? 'bg-green-500' : 
+                          percentage >= 60 ? 'bg-blue-500' : 
+                          percentage >= 40 ? 'bg-yellow-500' : 
+                          percentage > 0 ? 'bg-orange-500' : 'bg-gray-300'
+                        }`}
+                        style={{ width: `${percentage}%` }}
+                      >
+                        {percentage > 15 && `${percentage}%`}
+                      </div>
+                      {percentage <= 15 && percentage > 0 && (
+                        <div className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-700">
+                          {percentage}%
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="w-16 text-sm text-gray-600 text-right">
+                    {submitted}/{total}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
         
+        {/* Completion Distribution */}
         <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">Approval Rates</h2>
-          <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg">
-            <p className="text-gray-500">Approval rates chart would appear here</p>
+          <h2 className="text-lg font-medium text-gray-900 mb-4">🎯 Completion Distribution</h2>
+          <div className="space-y-4">
+            {(() => {
+              const submittedReports = dailyReportsData.reports.filter(r => r.submitted && r.completionPercentage != null);
+              const excellent = submittedReports.filter(r => r.completionPercentage >= 80).length;
+              const good = submittedReports.filter(r => r.completionPercentage >= 60 && r.completionPercentage < 80).length;
+              const moderate = submittedReports.filter(r => r.completionPercentage >= 40 && r.completionPercentage < 60).length;
+              const poor = submittedReports.filter(r => r.completionPercentage < 40).length;
+              const total = submittedReports.length || 1;
+              
+              const ranges = [
+                { label: 'Excellent (80-100%)', count: excellent, color: 'bg-green-500', textColor: 'text-green-700' },
+                { label: 'Good (60-79%)', count: good, color: 'bg-blue-500', textColor: 'text-blue-700' },
+                { label: 'Moderate (40-59%)', count: moderate, color: 'bg-yellow-500', textColor: 'text-yellow-700' },
+                { label: 'Poor (<40%)', count: poor, color: 'bg-red-500', textColor: 'text-red-700' }
+              ];
+              
+              return (
+                <>
+                  <div className="flex h-4 rounded-full overflow-hidden">
+                    {ranges.map((range, idx) => {
+                      const percent = Math.round((range.count / total) * 100);
+                      return percent > 0 ? (
+                        <div
+                          key={idx}
+                          className={range.color}
+                          style={{ width: `${percent}%` }}
+                          title={`${range.label}: ${range.count}`}
+                        />
+                      ) : null;
+                    })}
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    {ranges.map((range, idx) => {
+                      const percent = Math.round((range.count / total) * 100);
+                      return (
+                        <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-3 h-3 rounded-full ${range.color}`}></div>
+                            <span className="text-sm text-gray-700">{range.label.split(' ')[0]}</span>
+                          </div>
+                          <div className={`text-sm font-bold ${range.textColor}`}>
+                            {range.count} ({percent}%)
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       </div>
 
+      {/* Recent Activities - Show latest submissions */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-medium text-gray-900">Recent Activities</h2>
+          <h2 className="text-lg font-medium text-gray-900">📋 Recent Activity</h2>
         </div>
         <div className="p-6">
-          <p className="text-sm text-gray-500">
-            Recent activity data will be displayed here when available.
-          </p>
+          {dailyReportsData.reports.length > 0 ? (
+            <div className="space-y-2">
+              {dailyReportsData.reports
+                .filter(r => r.submitted)
+                .sort((a, b) => new Date(b.submittedAt || b.createdAt) - new Date(a.submittedAt || a.createdAt))
+                .slice(0, 10)
+                .map((report, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                    <div className="flex items-center gap-3 flex-1">
+                      <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
+                        <Check className="w-4 h-4 text-green-600" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-900">{report.teacherName}</div>
+                        <div className="text-sm text-gray-500">
+                          {report.class} • {report.subject} • Period {report.period}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      {report.completionPercentage != null && (
+                        <div className={`text-sm font-semibold ${
+                          report.completionPercentage >= 80 ? 'text-green-600' :
+                          report.completionPercentage >= 60 ? 'text-blue-600' :
+                          report.completionPercentage >= 40 ? 'text-yellow-600' : 'text-red-600'
+                        }`}>
+                          {report.completionPercentage}% complete
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-500">
+                        {new Date(report.submittedAt || report.createdAt).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              <Clock className="h-12 w-12 mx-auto mb-2 text-gray-400" />
+              <p>No reports submitted yet today</p>
+            </div>
+          )}
         </div>
       </div>
 
