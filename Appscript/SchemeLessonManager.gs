@@ -457,6 +457,15 @@ function getApprovedSchemesForLessonPlanning(teacherEmail) {
       (plan.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase()
     );
     
+    // Get daily reports to check which sessions have been reported
+    const drSheet = _getSheet('DailyReports');
+    const drHeaders = _headers(drSheet);
+    const allReports = _rows(drSheet).map(row => _indexByHeader(row, drHeaders));
+    
+    const teacherReports = allReports.filter(report =>
+      (report.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase()
+    );
+    
     // Process each scheme to show chapter/session breakdown
     const schemesWithProgress = approvedSchemes.map(scheme => {
       const schemeChapters = _parseSchemeChapters(scheme);
@@ -469,14 +478,25 @@ function getApprovedSchemesForLessonPlanning(teacherEmail) {
             parseInt(plan.session || '1') === session.sessionNumber
           );
           
-          // Determine status: 'ready' (approved), 'planned', or 'not-planned'
+          // Determine status: pass through actual status or 'not-planned' if no plan exists
           let status = 'not-planned';
           if (existingPlan) {
-            // Check if the lesson plan has been approved (status = "Ready")
-            if (String(existingPlan.status || '').toLowerCase() === 'ready') {
-              status = 'ready';
-            } else {
-              status = 'planned';
+            // Pass through the actual status from LessonPlans sheet
+            status = String(existingPlan.status || 'planned').trim();
+            
+            // Check if this session has a daily report submitted
+            const hasReport = teacherReports.some(report => {
+              const matchesClass = String(report.class || '') === String(scheme.class || '');
+              const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
+              const matchesChapter = String(report.chapter || '').toLowerCase() === String(chapter.name || '').toLowerCase();
+              const matchesSession = Number(report.sessionNo) === session.sessionNumber;
+              
+              return matchesClass && matchesSubject && matchesChapter && matchesSession;
+            });
+            
+            // If report exists, override status to 'Reported'
+            if (hasReport && !['Cancelled', 'Rejected'].includes(status)) {
+              status = 'Reported';
             }
           }
           
@@ -492,7 +512,11 @@ function getApprovedSchemesForLessonPlanning(teacherEmail) {
         });
         
         const totalSessions = sessions.length;
-        const plannedSessions = sessionsWithStatus.filter(s => s.status === 'planned').length;
+        // Count all sessions that have been planned (excluding 'not-planned' and 'Cancelled')
+        const plannedSessions = sessionsWithStatus.filter(s => {
+          const status = String(s.status || '').toLowerCase();
+          return status !== 'not-planned' && status !== 'cancelled' && status !== 'rejected';
+        }).length;
         
         return {
           chapterNumber: chapter.number,
@@ -603,7 +627,7 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
           const emailMatch = String(p.teacherEmail || '').trim().toLowerCase() === teacherEmail.toLowerCase();
           const hasDate    = p.selectedDate !== undefined && p.selectedDate !== '';
           const hasPeriod  = p.selectedPeriod !== undefined && p.selectedPeriod !== '';
-          const active     = !['cancelled','rejected'].includes(String(p.status || '').trim().toLowerCase());
+          const active     = !['cancelled','rejected','completed early'].includes(String(p.status || '').trim().toLowerCase());
           
           return emailMatch && hasDate && hasPeriod && active;
         })
@@ -994,6 +1018,11 @@ function _generateSessionsForChapter(chapter, scheme) {
         Logger.log(`Teacher: ${scheme.teacherEmail}, Class: ${scheme.class}, Subject: ${scheme.subject}`);
         Logger.log(`Original session count: ${originalSessionCount}`);
         
+        // Log all reports for debugging
+        chapterReports.forEach(r => {
+          Logger.log(`Report: Session ${r.sessionNo}, Date: ${r.date}, Completed: "${r.completed}"`);
+        });
+        
         // Check if ALL original sessions (1 to originalSessionCount) have daily reports
         let allOriginalSessionsHaveReports = true;
         let missingSessions = [];
@@ -1004,7 +1033,7 @@ function _generateSessionsForChapter(chapter, scheme) {
           );
           
           if (sessionReport) {
-            Logger.log(`✓ Session ${i}: Daily report exists`);
+            Logger.log(`✓ Session ${i}: Daily report exists (completed: "${sessionReport.completed}")`);
           } else {
             Logger.log(`✗ Session ${i}: No daily report found`);
             allOriginalSessionsHaveReports = false;
@@ -1020,11 +1049,17 @@ function _generateSessionsForChapter(chapter, scheme) {
             Number(report.sessionNo) === originalSessionCount
           );
           
+          Logger.log(`Last session report found: ${!!lastSessionReport}`);
+          if (lastSessionReport) {
+            Logger.log(`Last session completed field raw: "${lastSessionReport.completed}"`);
+            Logger.log(`Last session completed field type: ${typeof lastSessionReport.completed}`);
+            Logger.log(`Last session completed field lowercase: "${String(lastSessionReport.completed || '').toLowerCase()}"`);
+          }
+          
           const isMarkedComplete = lastSessionReport && 
             String(lastSessionReport.completed || '').toLowerCase().includes('chapter complete');
           
           Logger.log(`Last session (${originalSessionCount}) marked "Chapter Complete": ${isMarkedComplete}`);
-          Logger.log(`Last session completed field: "${lastSessionReport?.completed}"`);
           
           if (!isMarkedComplete) {
             // All sessions have reports BUT last not marked complete - show extended session
@@ -1386,6 +1421,211 @@ function _getDefaultPeriodTiming(periodNumber) {
 }
 
 /**
+ * Find remaining lesson plans for a chapter after completion
+ * Returns lesson plans that haven't been used yet
+ */
+function _findRemainingLessonPlans(teacherEmail, classValue, subject, chapter, afterDate) {
+  try {
+    Logger.log('=== FINDING REMAINING LESSON PLANS ===');
+    Logger.log(`Teacher: ${teacherEmail}, Class: ${classValue}, Subject: ${subject}, Chapter: ${chapter}`);
+    Logger.log(`After date: ${afterDate}`);
+    
+    const lpSheet = _getSheet('LessonPlans');
+    const lpHeaders = _headers(lpSheet);
+    const allPlans = _rows(lpSheet).map(row => _indexByHeader(row, lpHeaders));
+    
+    const afterDateNorm = _normalizeQueryDate(afterDate);
+    Logger.log(`After date normalized: ${afterDateNorm}`);
+    
+    // First, find all plans for this teacher/class/subject/chapter
+    const chapterPlans = allPlans.filter(plan => {
+      const emailMatch = String(plan.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
+      const classMatch = String(plan.class || '') === String(classValue || '');
+      const subjectMatch = String(plan.subject || '') === String(subject || '');
+      const chapterMatch = String(plan.chapter || '').toLowerCase() === String(chapter || '').toLowerCase();
+      
+      return emailMatch && classMatch && subjectMatch && chapterMatch;
+    });
+    
+    Logger.log(`Found ${chapterPlans.length} total plans for this chapter`);
+    
+    // Log details of each plan
+    chapterPlans.forEach(plan => {
+      const planDateNorm = _normalizeQueryDate(plan.selectedDate);
+      const isActive = !['Cancelled', 'Rejected', 'Completed Early'].includes(String(plan.status || ''));
+      const isAfterDate = planDateNorm > afterDateNorm;
+      
+      Logger.log(`Plan: ${plan.lpId}`);
+      Logger.log(`  Date: ${plan.selectedDate} -> ${planDateNorm}`);
+      Logger.log(`  Status: ${plan.status} (Active: ${isActive})`);
+      Logger.log(`  Is After ${afterDateNorm}: ${isAfterDate}`);
+      Logger.log(`  Session: ${plan.session}`);
+    });
+    
+    const remainingPlans = chapterPlans.filter(plan => {
+      const isActive = !['Cancelled', 'Rejected', 'Completed Early'].includes(String(plan.status || ''));
+      const planDateNorm = _normalizeQueryDate(plan.selectedDate);
+      const isAfterDate = planDateNorm > afterDateNorm;
+      
+      return isActive && isAfterDate;
+    });
+    
+    Logger.log(`Found ${remainingPlans.length} remaining lesson plans (after ${afterDateNorm}, active only)`);
+    
+    return remainingPlans.map(plan => ({
+      lpId: plan.lpId,
+      selectedDate: _normalizeQueryDate(plan.selectedDate), // Ensure YYYY-MM-DD format
+      selectedPeriod: plan.selectedPeriod,
+      session: plan.session,
+      status: plan.status,
+      learningObjectives: plan.learningObjectives
+    }));
+    
+  } catch (error) {
+    Logger.log(`Error finding remaining lesson plans: ${error.message}`);
+    return [];
+  }
+}
+
+/**
+ * Handle chapter completion check - called after daily report submission
+ */
+function _handleCheckChapterCompletion(data) {
+  try {
+    Logger.log('=== CHECKING CHAPTER COMPLETION ===');
+    Logger.log(`Data: ${JSON.stringify(data)}`);
+    
+    const remainingPlans = _findRemainingLessonPlans(
+      data.teacherEmail,
+      data.class,
+      data.subject,
+      data.chapter,
+      data.date
+    );
+    
+    return _respond({
+      success: true,
+      hasRemainingPlans: remainingPlans.length > 0,
+      remainingPlans: remainingPlans,
+      suggestion: remainingPlans.length > 0 ? 'mark_completed_early' : 'none'
+    });
+    
+  } catch (error) {
+    Logger.log(`Error checking chapter completion: ${error.message}`);
+    return _respond({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Apply action to remaining lesson plans after chapter completion
+ */
+function _handleApplyChapterCompletionAction(data) {
+  try {
+    Logger.log('==============================================');
+    Logger.log('FUNCTION CALLED: _handleApplyChapterCompletionAction');
+    Logger.log('==============================================');
+    Logger.log('Raw data received: ' + JSON.stringify(data));
+    
+    // Parse the data (use 'userAction' to avoid conflict with API routing 'action')
+    const userAction = data.userAction || data.action; // Support both for backwards compatibility
+    const lessonPlanIds = data.lessonPlanIds || [];
+    
+    Logger.log('Parsed userAction: ' + userAction);
+    Logger.log('Parsed lessonPlanIds: ' + JSON.stringify(lessonPlanIds));
+    Logger.log('Number of IDs: ' + lessonPlanIds.length);
+    
+    if (lessonPlanIds.length === 0) {
+      Logger.log('ERROR: No lesson plan IDs provided!');
+      return _respond({ success: false, error: 'No lesson plan IDs provided' });
+    }
+    
+    // Get the sheet
+    Logger.log('Getting LessonPlans sheet...');
+    const lpSheet = _getSheet('LessonPlans');
+    const lpHeaders = _headers(lpSheet);
+    const rows = _rows(lpSheet);
+    
+    Logger.log('Sheet loaded. Total rows: ' + rows.length);
+    Logger.log('Headers: ' + JSON.stringify(lpHeaders));
+    
+    const statusColIndex = lpHeaders.indexOf('status');
+    const lpIdColIndex = lpHeaders.indexOf('lpId');
+    
+    Logger.log('Status column index: ' + statusColIndex);
+    Logger.log('LpId column index: ' + lpIdColIndex);
+    
+    if (statusColIndex === -1) {
+      Logger.log('ERROR: Status column not found!');
+      return _respond({ success: false, error: 'Status column not found' });
+    }
+    
+    let updatedCount = 0;
+    
+    // Log all lesson plan IDs in sheet for debugging
+    Logger.log('=== ALL LESSON PLAN IDs IN SHEET ===');
+    for (let i = 0; i < Math.min(rows.length, 50); i++) { // Show first 50
+      const plan = _indexByHeader(rows[i], lpHeaders);
+      Logger.log(`Row ${i + 2}: "${plan.lpId}" (status: ${plan.status})`);
+    }
+    Logger.log('=== END OF LESSON PLAN IDs ===');
+    
+    // Search through all rows
+    for (let i = 0; i < rows.length; i++) {
+      const plan = _indexByHeader(rows[i], lpHeaders);
+      const planLpId = String(plan.lpId || '').trim();
+      
+      // Check if this lpId matches any in our list
+      for (let j = 0; j < lessonPlanIds.length; j++) {
+        const searchId = String(lessonPlanIds[j] || '').trim();
+        
+        if (planLpId === searchId) {
+          Logger.log('MATCH FOUND!');
+          Logger.log('  Row: ' + (i + 2));
+          Logger.log('  lpId: ' + planLpId);
+          Logger.log('  Current status: ' + plan.status);
+          Logger.log('  User Action: ' + userAction);
+          
+          const rowIndex = i + 2;
+          
+          if (userAction === 'cancel') {
+            lpSheet.getRange(rowIndex, statusColIndex + 1).setValue('Cancelled');
+            Logger.log('  ✓ Updated to: Cancelled');
+            updatedCount++;
+          } else if (userAction === 'keep') {
+            Logger.log('  ✓ Kept unchanged');
+          }
+        }
+      }
+    }
+    
+    if (updatedCount === 0) {
+      Logger.log('❌ NO MATCHES FOUND!');
+      Logger.log('Searched for IDs: ' + JSON.stringify(lessonPlanIds));
+      Logger.log('Total rows checked: ' + rows.length);
+      Logger.log('Please verify:');
+      Logger.log('1. Lesson plan ID exists in LessonPlans sheet');
+      Logger.log('2. Exact match (no extra spaces, correct case)');
+      Logger.log('3. Check the lpId column in your sheet');
+    }
+    
+    Logger.log('==============================================');
+    Logger.log('SUMMARY: Updated ' + updatedCount + ' out of ' + lessonPlanIds.length + ' lesson plans');
+    Logger.log('==============================================');
+    
+    return _respond({
+      success: true,
+      updatedCount: updatedCount,
+      message: updatedCount + ' lesson plan(s) updated successfully'
+    });
+    
+  } catch (error) {
+    Logger.log('CRITICAL ERROR: ' + error.message);
+    Logger.log('Stack trace: ' + error.stack);
+    return _respond({ success: false, error: 'Critical error: ' + error.message });
+  }
+}
+
+/**
  * Skip remaining sessions when a chapter is completed early
  * Called when teacher checks "Chapter Fully Completed" before the final session
  */
@@ -1460,19 +1700,26 @@ function _skipRemainingSessionsForCompletedChapter(reportData) {
 }
 
 /**
- * Normalize day name for comparison
+ * TEST FUNCTION - Run this directly in Apps Script to test the update logic
+ * DELETE AFTER TESTING
  */
-function _normalizeDayName(dayName) {
-  const normalized = String(dayName || '').toLowerCase().trim();
-  // Handle abbreviated forms
-  const dayMap = {
-    'mon': 'monday',
-    'tue': 'tuesday',
-    'wed': 'wednesday',
-    'thu': 'thursday',
-    'fri': 'friday',
-    'sat': 'saturday',
-    'sun': 'sunday'
+function testChapterCompletionAction() {
+  const testData = {
+    action: 'cancel',
+    lessonPlanIds: ['LP_1763628148305_723'] // Replace with actual ID from your sheet
   };
-  return dayMap[normalized] || normalized;
+  
+  Logger.log('=== RUNNING TEST ===');
+  const result = _handleApplyChapterCompletionAction(testData);
+  Logger.log('Result: ' + JSON.stringify(result));
+  
+  return result;
 }
+
+/**
+ * Normalize day name for comparison
+ * NOTE: This function is defined in TimetableManager.gs
+ * All .gs files are compiled together in Apps Script, so it's available globally.
+ * Using the TimetableManager.gs version to avoid duplicate definitions.
+ */
+// function _normalizeDayName() - REMOVED DUPLICATE - See TimetableManager.gs

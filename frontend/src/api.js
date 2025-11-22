@@ -1,7 +1,7 @@
 // src/api.js
 // Configure this to your deployed Google Apps Script Web App URL (ends with /exec)
 // PRODUCTION: Uses this URL for both development and Vercel deployment
-const BASE_URL = 'https://script.google.com/macros/s/AKfycbw1bZdFJ-RuED-6feux3F24qapAXHimMVwcPcR3AoTB5rPprHLNWxflWyEND6YJ6TN-Pw/exec';
+const BASE_URL = 'https://script.google.com/macros/s/AKfycbyfKlfWqiDRkNF_Cjft73qHpGQm8tQ-nHjPSPHOKfuC1l8H5JH5gfippuhNqjvtx5dsDg/exec';
 
 // Export BASE_URL for components that need to build direct URLs
 export function getBaseUrl() {
@@ -354,6 +354,21 @@ export async function debugExamMarks() {
 
 export async function submitDailyReport(data) {
   return postJSON(`${BASE_URL}?action=submitDailyReport`, data)
+}
+
+export async function checkChapterCompletion(data) {
+  return postJSON(`${BASE_URL}?action=checkChapterCompletion`, data)
+}
+
+export async function applyChapterCompletionAction(data) {
+  console.log('🔧 API: applyChapterCompletionAction called');
+  console.log('   URL:', `${BASE_URL}?action=applyChapterCompletionAction`);
+  console.log('   Data:', JSON.stringify(data));
+  console.log('   User Action:', data.userAction);
+  console.log('   IDs:', data.lessonPlanIds);
+  const result = await postJSON(`${BASE_URL}?action=applyChapterCompletionAction`, data);
+  console.log('   Result:', result);
+  return result;
 }
 
 export async function getTeacherDailyReportsForDate(email, date) {

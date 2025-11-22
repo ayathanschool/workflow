@@ -415,7 +415,12 @@ function getSchemeCompletionAnalytics(schemeId) {
 /**
  * Get all teachers' performance data (HM only)
  */
-function getAllTeachersPerformance() {
+/**
+ * Get all teachers performance from cached TeacherPerformance sheet
+ * This is the LIGHTWEIGHT version - reads pre-computed data
+ * NOTE: TeacherPerformance sheet must be populated first by updateTeacherPerformanceMetrics
+ */
+function getAllTeachersPerformanceFromSheet() {
   try {
     const performanceSheet = _getSheet('TeacherPerformance');
     if (!performanceSheet) {

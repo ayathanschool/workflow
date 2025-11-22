@@ -95,7 +95,10 @@ function doGet(e) {
     if (action === 'getTeacherDailyTimetable') {
       const identifier = (e.parameter.email || '').toLowerCase().trim();
       const date = (e.parameter.date || _todayISO()).trim();
-      return _respond(getTeacherDailyTimetable(identifier, date));
+      Logger.log(`[MainApp] getTeacherDailyTimetable called: identifier=${identifier}, date=${date}`);
+      const result = getTeacherDailyTimetable(identifier, date);
+      Logger.log(`[MainApp] getTeacherDailyTimetable returned ${result.length} periods`);
+      return _respond(result);
     }
     
     if (action === 'getDailyTimetableWithSubstitutions') {
@@ -552,7 +555,7 @@ function doPost(e) {
         const sh = _getSheet('DailyReports');
         Logger.log('DailyReports sheet obtained');
         
-        const headers = ['date', 'teacherEmail', 'teacherName', 'class', 'subject', 'period', 'planType', 'lessonPlanId', 'chapter', 'sessionNo', 'totalSessions', 'completionPercentage', 'difficulties', 'nextSessionPlan', 'objectives', 'activities', 'completed', 'notes', 'createdAt'];
+        const headers = ['date', 'teacherEmail', 'teacherName', 'class', 'subject', 'period', 'planType', 'lessonPlanId', 'chapter', 'sessionNo', 'totalSessions', 'completionPercentage', 'chapterStatus', 'deviationReason', 'difficulties', 'nextSessionPlan', 'objectives', 'activities', 'completed', 'notes', 'createdAt'];
         _ensureHeaders(sh, headers);
         Logger.log('Headers ensured');
         
@@ -632,11 +635,13 @@ function doPost(e) {
           Number(data.sessionNo || 0),
           Number(data.totalSessions || 1),
           Number(data.completionPercentage || 0),
+          data.chapterStatus || '', // NEW: Chapter status field
+          data.deviationReason || '', // NEW: Deviation reason field
           data.difficulties || '',
           data.nextSessionPlan || '',
           data.objectives || '',
           data.activities || '',
-          data.chapterCompleted ? 'Chapter Complete' : (data.completed || ''), // NEW: Handle chapter completion
+          data.chapterCompleted ? 'Chapter Complete' : (data.completed || ''), // Handle chapter completion
           data.notes || '',
           now
         ];
@@ -666,6 +671,24 @@ function doPost(e) {
     // === SCHEME-BASED LESSON PLANNING ROUTES ===
     if (action === 'createSchemeLessonPlan') {
       return _handleCreateSchemeLessonPlan(data);
+    }
+    
+    // === CHAPTER COMPLETION ROUTES ===
+    if (action === 'checkChapterCompletion') {
+      return _handleCheckChapterCompletion(data);
+    }
+    
+    if (action === 'applyChapterCompletionAction') {
+      Logger.log('==============================================');
+      Logger.log('ROUTING: applyChapterCompletionAction called in doPost');
+      Logger.log('Raw e object: ' + JSON.stringify(e));
+      Logger.log('e.postData: ' + JSON.stringify(e.postData));
+      Logger.log('e.postData.contents: ' + (e.postData ? e.postData.contents : 'NO POSTDATA'));
+      Logger.log('Parsed data: ' + JSON.stringify(data));
+      Logger.log('data.action: ' + data.action);
+      Logger.log('data.lessonPlanIds: ' + JSON.stringify(data.lessonPlanIds));
+      Logger.log('==============================================');
+      return _handleApplyChapterCompletionAction(data);
     }
     
     // === SESSION COMPLETION TRACKING ROUTES ===
@@ -2263,7 +2286,8 @@ function _handleGetAllTeachersPerformance(data) {
   try {
     Logger.log('_handleGetAllTeachersPerformance called');
     
-    const result = getAllTeachersPerformance();
+    // Use the heavy computation version from raw data
+    const result = computeAllTeachersPerformanceFromRaw();
     return _respond(result);
   } catch (error) {
     Logger.log(`ERROR in _handleGetAllTeachersPerformance: ${error.message}`);
@@ -2356,7 +2380,12 @@ function testSchemeLessonPlanningAPI() {
  * Get all teachers' performance metrics (HM view)
  * Returns: { success, performances: [{teacherEmail, teacherName, totalSessions, completedSessions, ...}] }
  */
-function getAllTeachersPerformance() {
+/**
+ * Compute all teachers performance from raw data (LessonPlans, DailyReports, Schemes)
+ * This is the HEAVY version - aggregates from multiple sheets
+ * Used by: _handleGetAllTeachersPerformance (API endpoint)
+ */
+function computeAllTeachersPerformanceFromRaw() {
   try {
     // Load all sheets
     const lpSh = _getSheet('LessonPlans');
@@ -2830,7 +2859,7 @@ function getDailySubmissionMetrics(daysBack = 30) {
 function getHMAnalyticsDashboard() {
   try {
     // Fetch all analytics in parallel concept (sequential due to Apps Script limitations)
-    const teachers = getAllTeachersPerformance();
+    const teachers = computeAllTeachersPerformanceFromRaw();
     const classes = getClassSubjectPerformance();
     const dailyTrends = getDailySubmissionMetrics(30);
     

@@ -6,9 +6,17 @@
  */
 export function todayIST() {
   const now = new Date();
-  // Convert to IST (UTC+5:30)
-  const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
-  return istTime.toISOString().slice(0, 10);
+  
+  // Get the date in IST (Asia/Kolkata timezone)
+  // Use toLocaleString to properly handle timezone conversion
+  const istDateString = now.toLocaleString('en-CA', { 
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).split(',')[0]; // Format: YYYY-MM-DD
+  
+  return istDateString;
 }
 
 /**

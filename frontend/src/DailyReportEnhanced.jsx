@@ -4,6 +4,8 @@ import {
   getTeacherDailyTimetable,
   getTeacherDailyReportsForDate,
   submitDailyReport,
+  checkChapterCompletion,
+  applyChapterCompletionAction,
   getApprovedLessonPlansForReport,
   getPlannedLessonsForDate, // BATCH: Optimized for performance
   getAppSettings, // Get period times from settings
@@ -20,8 +22,15 @@ const COMPLETION_LEVELS = [
 ];
 
 const PLAN_TYPES = [
-  "in plan",
-  "not planned",
+  { value: "in plan", label: "In Plan" },
+  { value: "not planned", label: "Not Planned" }
+];
+
+const DEVIATION_REASONS = [
+  { value: "", label: "Select reason" },
+  { value: "Exam", label: "Exam" },
+  { value: "Event", label: "School Event" },
+  { value: "Holiday", label: "Holiday" }
 ];
 
 export default function DailyReportEnhanced({ user }) {
@@ -36,6 +45,10 @@ export default function DailyReportEnhanced({ user }) {
   const [appSettings, setAppSettings] = useState(null);
   const [loadedDate, setLoadedDate] = useState(null);
   const loadedEmailRef = useRef(null);
+  
+  // Chapter completion modal state
+  const [showCompletionModal, setShowCompletionModal] = useState(false);
+  const [completionModalData, setCompletionModalData] = useState(null);
 
   // Memoize user data to prevent unnecessary re-renders
   const memoizedUser = useMemo(() => ({
@@ -104,7 +117,7 @@ export default function DailyReportEnhanced({ user }) {
     if (!cls || !subject || !email) return [];
     try {
       // Use the existing getTeacherSchemes API endpoint
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'https://script.google.com/macros/s/AKfycbw1bZdFJ-RuED-6feux3F24qapAXHimMVwcPcR3AoTB5rPprHLNWxflWyEND6YJ6TN-Pw/exec'}?action=getTeacherSchemes&teacherEmail=${encodeURIComponent(email)}`);
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'https://script.google.com/macros/s/AKfycbyfKlfWqiDRkNF_Cjft73qHpGQm8tQ-nHjPSPHOKfuC1l8H5JH5gfippuhNqjvtx5dsDg/exec'}?action=getTeacherSchemes&teacherEmail=${encodeURIComponent(email)}`);
       const data = await response.json();
       const schemes = data?.data?.schemes || data?.schemes || [];
       
@@ -242,6 +255,7 @@ export default function DailyReportEnhanced({ user }) {
           // NOTE: Removed cascading checks - they were causing major slowdown
           // Validation is now handled on the backend during submission
           
+          // In Plan: Auto-populate objectives and activities from lesson plan
           nextDrafts[k] = {
             planType: "in plan",
             lessonPlanId: lp.lpId,
@@ -257,6 +271,7 @@ export default function DailyReportEnhanced({ user }) {
             notes: ""
           };
         } else {
+          // Not Planned: Leave objectives and activities blank for teacher to fill
           nextDrafts[k] = {
             planType: "not planned",
             lessonPlanId: "",
@@ -331,12 +346,13 @@ export default function DailyReportEnhanced({ user }) {
     const d = drafts[k] || {};
     if (statusMap[k] === "Submitted") return;
 
-    // STRICT VALIDATION: Chapter, Objectives AND Completion Percentage are ALL REQUIRED
+    // SMART VALIDATION: Different rules for 0% vs teaching sessions
     const chapter = (d.chapter || r.chapter || "").trim();
     const objectives = (d.objectives || "").trim();
     const completionPercentage = Number(d.completionPercentage || 0);
+    const deviationReason = (d.deviationReason || "").trim();
     
-    // Validate chapter
+    // Validate chapter (always required)
     if (!chapter || chapter.length === 0) {
       const errorMsg = "❌ Chapter/Topic is required! Please fill the Chapter field before submitting.";
       setMessage(errorMsg);
@@ -344,20 +360,27 @@ export default function DailyReportEnhanced({ user }) {
       return;
     }
     
-    // Validate objectives
-    if (!objectives || objectives.length === 0) {
-      const errorMsg = "❌ Learning Objectives are required! Please fill the Objectives field before submitting.";
-      setMessage(errorMsg);
-      alert(errorMsg);
-      return;
-    }
-    
-    // Validate completion percentage
-    if (completionPercentage <= 0) {
-      const errorMsg = "❌ Completion Percentage is required! Please select how much of the lesson was completed before submitting.";
-      setMessage(errorMsg);
-      alert(errorMsg);
-      return;
+    // SMART VALIDATION FOR 0% COMPLETION:
+    // If 0% completion: Check if deviation reason is provided
+    if (completionPercentage === 0) {
+      // If deviation reason is selected (Exam/Event/Holiday), allow submission
+      // This handles valid cases like: exam duty, school event, holiday
+      if (!deviationReason || deviationReason === '') {
+        const errorMsg = "❌ For 0% completion, please select a reason (Exam/Event/Holiday)!\n\nIf you taught something, please increase the completion percentage.";
+        setMessage(errorMsg);
+        alert(errorMsg);
+        return;
+      }
+      // Valid: 0% with reason - teacher couldn't conduct class due to valid reason
+      // Objectives not required in this case since no teaching happened
+    } else {
+      // If teaching happened (completion > 0%): Require objectives
+      if (!objectives || objectives.length === 0) {
+        const errorMsg = "❌ Learning Objectives are required when teaching was done! Please fill what was taught.";
+        setMessage(errorMsg);
+        alert(errorMsg);
+        return;
+      }
     }
 
     setSaving(s => ({ ...s, [k]: true }));
@@ -377,6 +400,8 @@ export default function DailyReportEnhanced({ user }) {
         sessionNo: Number(d.sessionNo || 1),
         totalSessions: Number(d.totalSessions || 1),
         completionPercentage: Number(d.completionPercentage || 0),
+        chapterStatus: d.chapterCompleted ? 'Chapter Complete' : 'Session Complete',
+        deviationReason: d.deviationReason || '',
         difficulties: d.difficulties || "",
         nextSessionPlan: d.nextSessionPlan || "",
         objectives: d.objectives || "",
@@ -398,10 +423,39 @@ export default function DailyReportEnhanced({ user }) {
         
         // Enhanced success message
         let successMsg = `Report submitted successfully! Session ${d.sessionNo} of ${d.totalSessions} recorded at ${d.completionPercentage}% completion.`;
-        if (d.chapterCompleted && (d.sessionNo || 1) === (d.totalSessions || 1)) {
-          successMsg += ` 🎉 Chapter marked as completed - you can now prepare lesson plans for the next chapter!`;
+        if (d.chapterCompleted) {
+          successMsg += ` 🎉 Chapter marked as completed!`;
         }
         setMessage(successMsg);
+        
+        // Check for remaining lesson plans if chapter is complete
+        if (d.chapterCompleted) {
+          try {
+            const completionCheck = await checkChapterCompletion({
+              teacherEmail: email,
+              class: r.class,
+              subject: r.subject,
+              chapter: d.chapter || r.chapter || "",
+              date: date
+            });
+            
+            const checkResult = completionCheck.data || completionCheck;
+            
+            if (checkResult.success && checkResult.hasRemainingPlans) {
+              // Show modal with remaining plans
+              setCompletionModalData({
+                chapter: d.chapter || r.chapter || "",
+                class: r.class,
+                subject: r.subject,
+                remainingPlans: checkResult.remainingPlans
+              });
+              setShowCompletionModal(true);
+            }
+          } catch (checkError) {
+            console.error('Error checking chapter completion:', checkError);
+            // Don't block the success - just log the error
+          }
+        }
       } else if (result && result.error === 'duplicate') {
         setStatusMap(m => ({ ...m, [k]: "Submitted" }));
         setMessage(result.message || "Report already submitted for this period");
@@ -524,12 +578,12 @@ export default function DailyReportEnhanced({ user }) {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Period</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[300px]">Chapter & Session</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[180px]">Session Progress</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">Difficulties & Planning</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">Class</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">Subject</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[300px]">Lesson Details</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">Completion</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[200px]">Notes</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Action</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
@@ -540,11 +594,28 @@ export default function DailyReportEnhanced({ user }) {
                   const isLoading = saving[k];
                   const isPlanned = d.planType === "in plan" && d.lessonPlanId;
                   
+                  // Row background color based on status
+                  let rowBgClass = "";
+                  if (submitted) {
+                    rowBgClass = "bg-green-100 border-l-4 border-green-500";
+                  } else if (isPlanned) {
+                    rowBgClass = "bg-blue-100 border-l-4 border-blue-500";
+                  } else {
+                    rowBgClass = "bg-yellow-100 border-l-4 border-yellow-500";
+                  }
+                  
                   return (
-                    <tr key={k} className={submitted ? "bg-green-100 border-l-4 border-green-600" : isPlanned ? "bg-blue-100 border-l-4 border-blue-600" : "bg-yellow-100 border-l-4 border-yellow-600"}>
+                    <tr key={k} className={rowBgClass}>
                       {/* Period */}
                       <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                        #{r.period}
+                        <div className="flex items-center gap-2">
+                          #{r.period}
+                          {isPlanned && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800" title="Pre-planned lesson">
+                              📚
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-gray-500 mt-1">
                           {periodToTimeString(r.period, 
                             new Date(date + 'T00:00:00').getDay() === 5 
@@ -560,30 +631,43 @@ export default function DailyReportEnhanced({ user }) {
                       {/* Subject */}
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{r.subject}</td>
                       
-                      {/* Chapter & Session Progress */}
+                      {/* Lesson Details */}
                       <td className="px-4 py-3">
-                        <div className="space-y-3">
-                          {/* Plan Type Toggle */}
-                          <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">Plan Type</label>
-                            <div className="flex gap-2">
+                        <div className="space-y-2">
+                          {/* Plan Type Dropdown */}
+                          <div className="pb-2 border-b">
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              Plan Type
+                            </label>
+                            <select
+                              value={d.planType || "not planned"}
+                              disabled={submitted}
+                              onChange={e => {
+                                const newPlanType = e.target.value;
+                                setDraft(k, "planType", newPlanType);
+                                // Clear objectives and activities if switching to "Not Planned"
+                                if (newPlanType === "not planned") {
+                                  setDraft(k, "objectives", "");
+                                  setDraft(k, "activities", "");
+                                }
+                              }}
+                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                            >
                               {PLAN_TYPES.map(type => (
-                                <button
-                                  key={type}
-                                  type="button"
-                                  disabled={submitted}
-                                  onClick={() => setDraft(k, "planType", type)}
-                                  className={`px-2 py-1 text-xs font-medium rounded border ${
-                                    d.planType === type
-                                      ? 'bg-blue-100 border-blue-300 text-blue-800'
-                                      : 'bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200'
-                                  } disabled:opacity-50`}
-                                >
-                                  {type}
-                                </button>
+                                <option key={type.value} value={type.value}>
+                                  {type.label}
+                                </option>
                               ))}
-                            </div>
+                            </select>
                           </div>
+                          
+                          {/* Session Info */}
+                          {isPlanned && (
+                            <div className="text-xs bg-green-50 border border-green-200 rounded p-2">
+                              ✓ Pre-planned (Session {d.sessionNo || 1} of {d.totalSessions || 1})
+                              {(d.sessionNo || 1) === (d.totalSessions || 1) && <span className="ml-1">🏁</span>}
+                            </div>
+                          )}
                           
                           {/* Chapter - REQUIRED */}
                           <div>
@@ -592,110 +676,94 @@ export default function DailyReportEnhanced({ user }) {
                             </label>
                             <input
                               type="text"
-                              placeholder="Enter chapter/topic taught (REQUIRED)"
+                              placeholder="Chapter taught (REQUIRED)"
                               value={d.chapter || ""}
                               disabled={submitted}
                               onChange={e => setDraft(k, "chapter", e.target.value)}
-                              className={`w-full text-sm border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 ${
+                              className={`w-full text-xs border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 ${
                                 !d.chapter?.trim() && !submitted ? 'border-red-500 bg-red-50' : 'border-gray-300'
                               }`}
                               required
                             />
                           </div>
                           
-                          {/* Session Number */}
-                          {isPlanned && (
-                            <div className="flex items-center gap-2 text-xs">
-                              <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full font-medium">
-                                📚 Session {d.sessionNo || 1} of {d.totalSessions || 1}
-                              </span>
-                              <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full font-medium">
-                                ✓ Pre-planned
-                              </span>
-                              {(d.sessionNo || 1) === (d.totalSessions || 1) && (
-                                <span className="px-2 py-1 bg-orange-100 text-orange-800 rounded-full font-medium">
-                                  🏁 Final Session
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          
-                          {/* Objectives & Activities - EDITABLE */}
-                          <div className="space-y-2 border-t pt-2">
-                            <label className="block text-xs font-medium text-red-700">
-                              Learning Objectives <span className="text-red-600">*</span>
+                          {/* Objectives - REQUIRED if completion > 0% */}
+                          <div>
+                            <label className={`block text-xs font-medium mb-1 ${(d.completionPercentage || 0) > 0 ? 'text-red-700' : 'text-gray-700'}`}>
+                              Learning Objectives {(d.completionPercentage || 0) > 0 && <span className="text-red-600">*</span>}
+                              {(d.completionPercentage || 0) === 0 && <span className="text-gray-500 text-xs ml-1">(Not required for 0%)</span>}
                             </label>
                             <textarea
-                              placeholder="Learning objectives for this session (REQUIRED)"
+                              placeholder={(d.completionPercentage || 0) > 0 ? "Objectives (REQUIRED)" : "Objectives (optional)"}
                               value={d.objectives || ""}
                               disabled={submitted}
                               onChange={e => setDraft(k, "objectives", e.target.value)}
                               className={`w-full text-xs border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 ${
-                                !d.objectives?.trim() && !submitted ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                                !d.objectives?.trim() && (d.completionPercentage || 0) > 0 && !submitted ? 'border-red-500 bg-red-50' : 'border-gray-300'
                               }`}
                               rows="2"
-                              required
                             />
-                            
-                            <label className="block text-xs font-medium text-gray-700">Activities Done</label>
+                          </div>
+                          
+                          {/* Activities */}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Activities Done</label>
                             <textarea
-                              placeholder="Teaching activities/methods used"
+                              placeholder="Teaching activities/methods"
                               value={d.activities || ""}
                               disabled={submitted}
                               onChange={e => setDraft(k, "activities", e.target.value)}
-                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                               rows="2"
                             />
                           </div>
                         </div>
                       </td>
                       
-                      {/* Session Progress Slider - REQUIRED */}
+                      {/* Completion */}
                       <td className="px-4 py-3">
-                        <div className="space-y-3">
+                        <div className="space-y-2">
+                          {/* Percentage Slider */}
                           <div>
-                            <label className="block text-xs font-medium text-red-700 mb-2">
-                              Session Completion <span className="text-red-600">*</span>
+                            <label className="block text-xs font-medium text-red-700 mb-1">
+                              Completion % <span className="text-red-600">*</span>
                             </label>
-                            <div className="space-y-2">
-                              <input
-                                type="range"
-                                min="0"
-                                max="100"
-                                step="5"
-                                value={d.completionPercentage || 0}
-                                disabled={submitted}
-                                onChange={e => setDraft(k, "completionPercentage", Number(e.target.value))}
-                                className={`w-full h-2 rounded-lg appearance-none cursor-pointer disabled:opacity-50 ${
-                                  (d.completionPercentage || 0) <= 0 && !submitted ? 'bg-red-200' : 'bg-gray-200'
-                                }`}
-                                required
-                              />
-                              <div className="flex justify-between items-center">
-                                <span className={`text-xs px-2 py-1 rounded-full font-medium ${getCompletionColor(d.completionPercentage || 0)}`}>
-                                  {d.completionPercentage || 0}%
-                                </span>
-                                <div className="flex space-x-1">
-                                  {[25, 50, 75, 100].map(val => (
-                                    <button
-                                      key={val}
-                                      type="button"
-                                      disabled={submitted}
-                                      onClick={() => setDraft(k, "completionPercentage", val)}
-                                      className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded disabled:opacity-50"
-                                    >
-                                      {val}%
-                                    </button>
-                                  ))}
-                                </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              step="5"
+                              value={d.completionPercentage || 0}
+                              disabled={submitted}
+                              onChange={e => setDraft(k, "completionPercentage", Number(e.target.value))}
+                              className={`w-full h-2 rounded-lg appearance-none cursor-pointer disabled:opacity-50 ${
+                                (d.completionPercentage || 0) <= 0 && !submitted ? 'bg-red-200' : 'bg-gray-200'
+                              }`}
+                            />
+                            <div className="flex justify-between items-center mt-1">
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${getCompletionColor(d.completionPercentage || 0)}`}>
+                                {d.completionPercentage || 0}%
+                              </span>
+                              <div className="flex space-x-1">
+                                {[25, 50, 75, 100].map(val => (
+                                  <button
+                                    key={val}
+                                    type="button"
+                                    disabled={submitted}
+                                    onClick={() => setDraft(k, "completionPercentage", val)}
+                                    className="text-xs px-1.5 py-0.5 bg-gray-100 hover:bg-gray-200 rounded disabled:opacity-50"
+                                  >
+                                    {val}
+                                  </button>
+                                ))}
                               </div>
                             </div>
                           </div>
                           
-                          {/* Chapter Completed checkbox - show for ANY session with a chapter */}
+                          {/* Chapter Completed Checkbox */}
                           {d.chapter && (
                             <div>
-                              <label className="flex items-center space-x-2 text-xs">
+                              <label className="flex items-center space-x-1 text-xs">
                                 <input
                                   type="checkbox"
                                   checked={d.chapterCompleted || false}
@@ -704,42 +772,58 @@ export default function DailyReportEnhanced({ user }) {
                                   className="h-3 w-3 text-green-600 focus:ring-green-500 border-gray-300 rounded disabled:opacity-50"
                                 />
                                 <span className="font-medium text-green-700">
-                                  ✅ Chapter Fully Completed
-                                  {(d.sessionNo || 1) > (d.totalSessions || 1) && <span className="text-orange-600 ml-1">(Extended)</span>}
-                                  {(d.sessionNo || 1) < (d.totalSessions || 1) && <span className="text-blue-600 ml-1">(Early Completion)</span>}
+                                  ✅ Chapter Complete
                                 </span>
                               </label>
-                              <p className="text-xs text-gray-500 mt-1 ml-5">
-                                Check this if the entire chapter is finished{(d.sessionNo || 1) < (d.totalSessions || 1) ? '. This will skip remaining planned sessions.' : '. This allows preparation of the next chapter\'s lesson plans.'}
-                              </p>
                             </div>
                           )}
+                          
+                          {/* Deviation Reason - Required for 0% */}
+                          <div>
+                            <label className={`block text-xs font-medium mb-1 ${(d.completionPercentage || 0) === 0 ? 'text-red-700' : 'text-gray-700'}`}>
+                              Reason {(d.completionPercentage || 0) === 0 && <span className="text-red-600">*</span>}
+                            </label>
+                            <select
+                              value={d.deviationReason || ''}
+                              disabled={submitted}
+                              onChange={e => setDraft(k, "deviationReason", e.target.value)}
+                              className={`w-full text-xs border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 ${
+                                (d.completionPercentage || 0) === 0 && !d.deviationReason && !submitted ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                              }`}
+                            >
+                              {DEVIATION_REASONS.map(reason => (
+                                <option key={reason.value} value={reason.value}>
+                                  {reason.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
                       </td>
                       
-                      {/* Difficulties & Next Session Planning */}
+                      {/* Notes */}
                       <td className="px-4 py-3">
                         <div className="space-y-2">
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">Difficulties Encountered</label>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Difficulties</label>
                             <textarea
                               placeholder="Any challenges? (optional)"
                               value={d.difficulties || ""}
                               disabled={submitted}
                               onChange={e => setDraft(k, "difficulties", e.target.value)}
-                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                               rows="2"
                             />
                           </div>
                           
                           <div>
-                            <label className="block text-xs font-medium text-gray-700 mb-1">Next Session Adjustments</label>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">Next Session Plan</label>
                             <textarea
                               placeholder="Plans for next session? (optional)"
                               value={d.nextSessionPlan || ""}
                               disabled={submitted}
                               onChange={e => setDraft(k, "nextSessionPlan", e.target.value)}
-                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                               rows="2"
                             />
                           </div>
@@ -751,7 +835,7 @@ export default function DailyReportEnhanced({ user }) {
                               value={d.notes || ""}
                               disabled={submitted}
                               onChange={e => setDraft(k, "notes", e.target.value)}
-                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                              className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                               rows="2"
                             />
                           </div>
@@ -789,6 +873,150 @@ export default function DailyReportEnhanced({ user }) {
           </div>
         </div>
       )}
+      
+      {/* Chapter Completion Modal */}
+      {showCompletionModal && completionModalData && (
+        <ChapterCompletionModal
+          data={completionModalData}
+          onClose={() => setShowCompletionModal(false)}
+          onAction={async (action) => {
+            try {
+              const lessonPlanIds = completionModalData.remainingPlans.map(p => p.lpId);
+              await applyChapterCompletionAction({ action, lessonPlanIds });
+              setShowCompletionModal(false);
+              setMessage(`Chapter completion confirmed. ${action === 'cancel' ? 'Remaining periods freed up for next chapter.' : 'Lesson plans kept for revision.'}`);
+            } catch (error) {
+              console.error('Error applying action:', error);
+              setMessage('Error updating lesson plans: ' + (error.message || error));
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Chapter Completion Modal Component
+function ChapterCompletionModal({ data, onClose, onAction }) {
+  const [selectedAction, setSelectedAction] = useState('cancel');
+  
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="p-6">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">
+                ✅ Chapter "{data.chapter}" Completed!
+              </h3>
+              <p className="text-sm text-gray-600 mt-1">
+                {data.class} - {data.subject}
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          
+          {/* Remaining Plans */}
+          <div className="mb-6">
+            <h4 className="text-sm font-medium text-gray-900 mb-3">
+              You have {data.remainingPlans.length} remaining lesson plan(s):
+            </h4>
+            <div className="space-y-2 max-h-40 overflow-y-auto">
+              {data.remainingPlans.map((plan, idx) => (
+                <div key={idx} className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">
+                        Session {plan.session} - {new Date(plan.selectedDate).toLocaleDateString()}
+                      </p>
+                      <p className="text-xs text-gray-600 mt-1">
+                        Period {plan.selectedPeriod} • {plan.status}
+                      </p>
+                      {plan.learningObjectives && (
+                        <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                          {plan.learningObjectives}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          
+          {/* Action Selection */}
+          <div className="mb-6">
+            <h4 className="text-sm font-medium text-gray-900 mb-3">
+              What would you like to do with these lesson plans?
+            </h4>
+            <div className="space-y-3">
+              <label className="flex items-start space-x-3 p-3 border-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
+                style={{ borderColor: selectedAction === 'cancel' ? '#3b82f6' : '#e5e7eb' }}>
+                <input
+                  type="radio"
+                  name="action"
+                  value="cancel"
+                  checked={selectedAction === 'cancel'}
+                  onChange={(e) => setSelectedAction(e.target.value)}
+                  className="mt-1"
+                />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-gray-900">
+                    ✅ Chapter Fully Completed
+                  </p>
+                  <p className="text-xs text-gray-600 mt-1">
+                    <strong>Frees up {data.remainingPlans.length} period(s)</strong> - Chapter is complete, no need for remaining sessions. Periods become available for planning the next chapter immediately.
+                  </p>
+                </div>
+              </label>
+              
+              <label className="flex items-start space-x-3 p-3 border-2 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
+                style={{ borderColor: selectedAction === 'keep' ? '#3b82f6' : '#e5e7eb' }}>
+                <input
+                  type="radio"
+                  name="action"
+                  value="keep"
+                  checked={selectedAction === 'keep'}
+                  onChange={(e) => setSelectedAction(e.target.value)}
+                  className="mt-1"
+                />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-gray-900">
+                    📚 Keep for Revision
+                  </p>
+                  <p className="text-xs text-gray-600 mt-1">
+                    Keep these lesson plans active. Use the scheduled periods for chapter revision, practice, or assessment. Periods remain occupied.
+                  </p>
+                </div>
+              </label>
+            </div>
+          </div>
+          
+          {/* Actions */}
+          <div className="flex justify-end space-x-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => onAction(selectedAction)}
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Confirm
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

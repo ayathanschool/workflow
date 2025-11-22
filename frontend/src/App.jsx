@@ -18,6 +18,7 @@ const SmartReminders = lazy(() => import('./components/SmartReminders'));
 const SubstitutionModule = lazy(() => import('./components/SubstitutionModule'));
 const EnhancedSubstitutionView = lazy(() => import('./components/EnhancedSubstitutionView'));
 const DailyReportTimetable = lazy(() => import('./DailyReportEnhanced'));
+const DailyReportModern = lazy(() => import('./DailyReportModern'));
 const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodSubstitutionView'));
 const ExamManagement = lazy(() => import('./components/ExamManagement'));
 const ReportCard = lazy(() => import('./components/ReportCard'));
@@ -623,6 +624,8 @@ const App = () => {
       subjectCount: 0,
       pendingReports: 0
     });
+    const [dashboardLoading, setDashboardLoading] = useState(false);
+    const [dashboardLoaded, setDashboardLoaded] = useState(false);
 
     // Send notification modal state - now using app-level state
     // const [showSendNotification, setShowSendNotification] = useState(true); // Removed - moved to app level
@@ -664,8 +667,13 @@ const App = () => {
 
     useEffect(() => {
       async function fetchDashboardData() {
+        // Prevent multiple fetches
+        if (dashboardLoading || dashboardLoaded) return;
+        
         try {
-          if (!user?.email) return; // More specific check
+          if (!user?.email) return;
+          
+          setDashboardLoading(true);
           
           // Headmaster view: use HM insights and classes count
           if (hasRole('h m')) {
@@ -710,16 +718,19 @@ const App = () => {
               pendingReports
             });
           }
+          setDashboardLoaded(true);
         } catch (err) {
           console.error('Error loading dashboard data:', err);
+        } finally {
+          setDashboardLoading(false);
         }
       }
       
-      // Only run once when user changes, not on every render
-      if (user?.email) {
+      // Only run once when component mounts
+      if (user?.email && !dashboardLoaded) {
         fetchDashboardData();
       }
-    }, [user?.email]); // More specific dependency
+    }, [user?.email, dashboardLoaded, dashboardLoading]); // Only fetch once
 
     return (
       <div className="space-y-6">
@@ -2657,9 +2668,9 @@ const App = () => {
           </div>
         </div>
         
-        {/* Enhanced daily reporting with timetable integration */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-          <DailyReportTimetable user={memoizedUser} />
+        {/* Modern daily reporting with smooth UX - NO PAGE REFRESH */}
+        <div className="bg-transparent">
+          <DailyReportModern user={memoizedUser} />
         </div>
       </div>
     );

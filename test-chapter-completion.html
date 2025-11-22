@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Chapter Completion Action</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 900px;
+      margin: 50px auto;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+    .container {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 30px;
+      text-align: center;
+    }
+    .section {
+      margin-bottom: 25px;
+      padding: 20px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      border-left: 4px solid #667eea;
+    }
+    .section h3 {
+      margin-top: 0;
+      color: #667eea;
+    }
+    input, select {
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 15px;
+      border: 2px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: monospace;
+    }
+    button {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 15px 30px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: bold;
+      width: 100%;
+      transition: all 0.3s ease;
+    }
+    button:hover {
+      background: #5568d3;
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(102,126,234,0.3);
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+      transform: none;
+    }
+    #output {
+      margin-top: 25px;
+      padding: 20px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      border-radius: 8px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+      max-height: 500px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .success { color: #4ade80; }
+    .error { color: #f87171; }
+    .info { color: #60a5fa; }
+    .warning { color: #fbbf24; }
+    .label {
+      font-weight: bold;
+      color: #555;
+      display: block;
+      margin-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🧪 Test Chapter Completion Action</h1>
+    
+    <div class="section">
+      <h3>📡 Backend Configuration</h3>
+      <label class="label">Apps Script Deployment URL:</label>
+      <input 
+        type="text" 
+        id="backendUrl" 
+        value="https://script.google.com/macros/s/AKfycbyfKlfWqiDRkNF_Cjft73qHpGQm8tQ-nHjPSPHOKfuC1l8H5JH5gfippuhNqjvtx5dsDg/exec"
+        placeholder="Enter your Apps Script deployment URL"
+      />
+    </div>
+
+    <div class="section">
+      <h3>🎯 Test Data</h3>
+      <label class="label">Action (cancel or keep):</label>
+      <select id="action">
+        <option value="cancel">cancel - Cancel lesson plans</option>
+        <option value="keep">keep - Keep lesson plans</option>
+      </select>
+      
+      <label class="label">Lesson Plan IDs (comma-separated):</label>
+      <input 
+        type="text" 
+        id="lessonPlanIds" 
+        value="LP_1763714682696_933"
+        placeholder="LP_123456, LP_789012, LP_345678"
+      />
+      <p style="color: #666; font-size: 12px; margin-top: -10px;">
+        💡 To find lesson plan IDs, check your LessonPlans sheet or browser console logs
+      </p>
+    </div>
+
+    <button id="testBtn" onclick="testBackend()">🚀 Test Backend Call</button>
+
+    <div id="output"></div>
+  </div>
+
+  <script>
+    function log(message, type = 'info') {
+      const output = document.getElementById('output');
+      const timestamp = new Date().toLocaleTimeString();
+      const className = type;
+      output.innerHTML += `<span class="${className}">[${timestamp}] ${message}</span>\n`;
+      output.scrollTop = output.scrollHeight;
+    }
+
+    async function testBackend() {
+      const output = document.getElementById('output');
+      const btn = document.getElementById('testBtn');
+      output.innerHTML = '';
+      btn.disabled = true;
+
+      try {
+        const backendUrl = document.getElementById('backendUrl').value.trim();
+        const action = document.getElementById('action').value;
+        const idsInput = document.getElementById('lessonPlanIds').value.trim();
+        
+        // Parse lesson plan IDs
+        const lessonPlanIds = idsInput.split(',').map(id => id.trim()).filter(id => id);
+
+        log('🔧 Configuration:', 'info');
+        log(`   Backend URL: ${backendUrl}`, 'info');
+        log(`   Action: ${action}`, 'info');
+        log(`   Lesson Plan IDs: ${JSON.stringify(lessonPlanIds)}`, 'info');
+        log(`   Number of IDs: ${lessonPlanIds.length}`, 'info');
+        log('', 'info');
+
+        if (lessonPlanIds.length === 0) {
+          log('❌ ERROR: No lesson plan IDs provided!', 'error');
+          return;
+        }
+
+        log('📤 Sending POST request...', 'info');
+        
+        const payload = {
+          action: 'applyChapterCompletionAction',
+          lessonPlanIds: lessonPlanIds
+        };
+
+        log(`   Payload: ${JSON.stringify(payload, null, 2)}`, 'info');
+        log('', 'info');
+
+        const url = `${backendUrl}?action=applyChapterCompletionAction`;
+        
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        log(`📥 Response Status: ${response.status} ${response.statusText}`, 
+          response.ok ? 'success' : 'error');
+
+        if (!response.ok) {
+          const text = await response.text();
+          log(`   Response body: ${text}`, 'error');
+          throw new Error(`HTTP ${response.status}: ${text}`);
+        }
+
+        const result = await response.json();
+        
+        // Unwrap response if wrapped in {status, data, timestamp} structure
+        const actualData = result.data || result;
+        
+        log('', 'info');
+        log('✅ Response received:', 'success');
+        log(`   Success: ${actualData.success}`, actualData.success ? 'success' : 'error');
+        log(`   Updated Count: ${actualData.updatedCount}`, 'info');
+        log(`   Message: ${actualData.message}`, 'info');
+        log('', 'info');
+        log('📋 Full Response:', 'info');
+        log(JSON.stringify(result, null, 2), 'info');
+
+        if (actualData.success) {
+          log('', 'info');
+          if (actualData.updatedCount > 0) {
+            log('🎉 TEST PASSED! Backend is working correctly!', 'success');
+            log(`   ${actualData.updatedCount} lesson plan(s) were updated.`, 'success');
+          } else {
+            log('⚠️ WARNING: Backend succeeded but updated 0 lesson plans', 'warning');
+            log('', 'info');
+            log('Possible reasons:', 'warning');
+            log('1. Lesson Plan ID does not exist in LessonPlans sheet', 'warning');
+            log('2. Lesson Plan ID has wrong format or extra spaces', 'warning');
+            log('3. Lesson Plan status is already "Cancelled" or "Rejected"', 'warning');
+            log('', 'info');
+            log('💡 Check your LessonPlans sheet:', 'info');
+            log('   - Find the lpId column', 'info');
+            log('   - Look for: ' + lessonPlanIds[0], 'info');
+            log('   - Verify exact match (case-sensitive, no extra spaces)', 'info');
+          }
+        } else {
+          log('', 'info');
+          log('⚠️ Backend responded but operation failed:', 'warning');
+          log(`   Error: ${actualData.error}`, 'error');
+        }
+
+      } catch (error) {
+        log('', 'info');
+        log('💥 CRITICAL ERROR:', 'error');
+        log(`   ${error.message}`, 'error');
+        log('', 'info');
+        
+        if (error.message.includes('Failed to fetch')) {
+          log('🔍 Diagnosis: Network error - Backend not reachable', 'error');
+          log('', 'info');
+          log('Possible causes:', 'warning');
+          log('1. Deployment URL is incorrect', 'warning');
+          log('2. Deployment permissions set to "Only myself" instead of "Anyone"', 'warning');
+          log('3. Deployment not authorized properly', 'warning');
+          log('4. CORS issues (less likely with text/plain)', 'warning');
+          log('', 'info');
+          log('💡 Quick test: Open this URL in browser:', 'info');
+          log(`   ${document.getElementById('backendUrl').value}?action=ping`, 'info');
+          log('   Should see: {"success":true,"message":"pong"}', 'info');
+        } else if (error.message.includes('401') || error.message.includes('403')) {
+          log('🔍 Diagnosis: Authorization error', 'error');
+          log('   Backend deployment needs to be publicly accessible', 'warning');
+        }
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>

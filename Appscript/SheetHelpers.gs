@@ -164,15 +164,8 @@ function _uuid() {
 }
 
 /**
- * Get today's date in ISO format (YYYY-MM-DD)
- */
-function _todayISO() {
-  const now = new Date();
-  return Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-}
-
-/**
  * Convert a date to ISO string format
+ * Note: _todayISO() is defined in MainApp.gs
  */
 function _isoDateString(date) {
   if (!date) return '';

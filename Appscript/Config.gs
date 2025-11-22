@@ -22,7 +22,7 @@ const SHEETS = {
   Timetable: ['class','dayOfWeek','period','subject','teacherEmail','teacherName'],
   Schemes: ['schemeId','teacherEmail','teacherName','class','subject','term','unit','chapter','month','noOfSessions','status','createdAt'],
   LessonPlans: ['lpId','schemeId','teacherEmail','teacherName','class','subject','chapter','session','selectedDate','selectedPeriod','learningObjectives','teachingMethods','resourcesRequired','assessmentMethods','status','createdAt','submittedAt','isDuplicate','lessonType','reviewerRemarks'],
-  DailyReports: ['date','teacherEmail','teacherName','class','subject','period','planType','lessonPlanId','chapter','sessionNo','totalSessions','completionPercentage','difficulties','nextSessionPlan','objectives','activities','completed','notes','createdAt'],
+  DailyReports: ['date','teacherEmail','teacherName','class','subject','period','planType','lessonPlanId','chapter','sessionNo','totalSessions','completionPercentage','chapterStatus','deviationReason','difficulties','nextSessionPlan','objectives','activities','completed','notes','createdAt'],
   
   // === SUBSTITUTION SYSTEM (2 sheets) ===  
   Substitutions: ['date','period','class','absentTeacher','regularSubject','substituteTeacher','substituteSubject','note','acknowledged','acknowledgedBy','acknowledgedAt','createdAt'],

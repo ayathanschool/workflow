@@ -294,11 +294,17 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   };
 
   const getStatusIcon = (status) => {
-    switch (status) {
+    const normalizedStatus = String(status || '').toLowerCase();
+    switch (normalizedStatus) {
+      case 'reported':
+        return <CheckCircle className="w-4 h-4 text-purple-600" />;
       case 'ready':
         return <CheckCircle className="w-4 h-4 text-blue-500" />;
       case 'planned':
+      case 'pending review':
         return <CheckCircle className="w-4 h-4 text-green-500" />;
+      case 'cancelled':
+        return <AlertCircle className="w-4 h-4 text-gray-500" />;
       case 'not-planned':
         return <AlertCircle className="w-4 h-4 text-red-500" />;
       default:
@@ -356,6 +362,19 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
             Lesson Plan Preparation
           </h2>
           <div className="flex items-center space-x-4">
+            <button
+              onClick={() => {
+                setLoading(true);
+                loadSchemes();
+              }}
+              disabled={loading}
+              className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              <span>{loading ? 'Refreshing...' : 'Refresh'}</span>
+            </button>
             <div className="flex items-center space-x-2">
               <label htmlFor="class-filter" className="text-sm font-medium text-gray-700">
                 Filter by Class:
@@ -444,13 +463,22 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                         {chapter.sessions.map((session) => (
                           <div
                             key={`${scheme.schemeId}-${chapter.chapterNumber}-${session.sessionNumber}`}
-                            onClick={() => handleSessionClick(scheme, chapter, session)}
-                            className={`p-3 rounded cursor-pointer transition-colors ${
-                              session.status === 'ready'
-                                ? 'bg-blue-50 border-2 border-blue-300 hover:bg-blue-100'
-                                : session.status === 'planned'
-                                ? 'bg-green-50 border-2 border-green-300 hover:bg-green-100'
-                                : 'bg-red-50 border-2 border-red-300 hover:bg-red-100'
+                            onClick={() => {
+                              const normalizedStatus = String(session.status || '').toLowerCase();
+                              if (!['cancelled', 'reported'].includes(normalizedStatus)) {
+                                handleSessionClick(scheme, chapter, session);
+                              }
+                            }}
+                            className={`p-3 rounded transition-colors ${
+                              String(session.status || '').toLowerCase() === 'reported'
+                                ? 'bg-purple-50 border-2 border-purple-300 opacity-90 cursor-default'
+                                : String(session.status || '').toLowerCase() === 'ready'
+                                ? 'bg-blue-50 border-2 border-blue-300 hover:bg-blue-100 cursor-pointer'
+                                : ['planned', 'pending review'].includes(String(session.status || '').toLowerCase())
+                                ? 'bg-green-50 border-2 border-green-300 hover:bg-green-100 cursor-pointer'
+                                : String(session.status || '').toLowerCase() === 'cancelled'
+                                ? 'bg-gray-50 border-2 border-gray-300 opacity-60 cursor-not-allowed'
+                                : 'bg-red-50 border-2 border-red-300 hover:bg-red-100 cursor-pointer'
                             }`}
                           >
                             <div className="flex items-center justify-between mb-1">
@@ -462,7 +490,17 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                             <div className="text-xs text-gray-600 mb-1">
                               {session.sessionName}
                             </div>
-                            {session.status === 'ready' && (
+                            {String(session.status || '').toLowerCase() === 'reported' && (
+                              <div className="space-y-1">
+                                <div className="text-xs text-purple-700 font-semibold bg-purple-100 rounded px-2 py-1 inline-block">
+                                  ✓ Reported
+                                </div>
+                                <div className="text-xs text-purple-700">
+                                  {formatDate(session.plannedDate)} P{session.plannedPeriod}
+                                </div>
+                              </div>
+                            )}
+                            {String(session.status || '').toLowerCase() === 'ready' && (
                               <div className="space-y-1">
                                 <div className="text-xs text-blue-700 font-semibold bg-blue-100 rounded px-2 py-1 inline-block">
                                   ✓ Approved
@@ -472,13 +510,23 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                 </div>
                               </div>
                             )}
-                            {session.status === 'planned' && (
+                            {['planned', 'pending review'].includes(String(session.status || '').toLowerCase()) && (
                               <div className="space-y-1">
                                 <div className="text-xs text-green-700 font-semibold bg-green-100 rounded px-2 py-1 inline-block">
                                   ⏳ Pending Review
                                 </div>
                                 <div className="text-xs text-green-700">
                                   {formatDate(session.plannedDate)} P{session.plannedPeriod}
+                                </div>
+                              </div>
+                            )}
+                            {String(session.status || '').toLowerCase() === 'cancelled' && (
+                              <div className="space-y-1">
+                                <div className="text-xs text-gray-700 font-semibold bg-gray-200 rounded px-2 py-1 inline-block">
+                                  ❌ Cancelled
+                                </div>
+                                <div className="text-xs text-gray-600">
+                                  {session.plannedDate && session.plannedPeriod ? `${formatDate(session.plannedDate)} P${session.plannedPeriod}` : 'No longer needed'}
                                 </div>
                               </div>
                             )}
