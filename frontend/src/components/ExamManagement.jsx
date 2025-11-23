@@ -134,12 +134,9 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     }
     
     if (!gradeBoundariesLoaded || !gradeBoundaries.length) {
-      // Fallback calculation while loading or if no boundaries
-      if (percentage >= 90) return 'A+';
+      // Fallback - use simple grades without + for safety
       if (percentage >= 80) return 'A';
-      if (percentage >= 70) return 'B+';
       if (percentage >= 60) return 'B';
-      if (percentage >= 50) return 'C+';
       if (percentage >= 40) return 'C';
       if (percentage >= 30) return 'D';
       return 'E';
@@ -160,9 +157,13 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
 
     const stdGroup = getStandardGroup(className);
     
-    // Find appropriate grade boundary
+    // Find appropriate grade boundary - use case-insensitive comparison
     const boundaries = gradeBoundaries
-      .filter(b => b.standardGroup === stdGroup)
+      .filter(b => {
+        const boundaryGroup = String(b.standardGroup || '').trim().toLowerCase();
+        const targetGroup = String(stdGroup || '').trim().toLowerCase();
+        return boundaryGroup === targetGroup;
+      })
       .sort((a, b) => b.minPercentage - a.minPercentage); // Sort descending
 
     for (const boundary of boundaries) {

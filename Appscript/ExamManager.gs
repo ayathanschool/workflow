@@ -197,17 +197,24 @@ function _calculateGradeFromBoundaries(percentage, className) {
   try {
     const standardGroup = _standardGroup(className);
     
+    Logger.log(`[Grade Calculation] Class: ${className}, Standard Group: ${standardGroup}, Percentage: ${percentage}`);
+    
     const gbSh = _getSheet('GradeBoundaries');
     _ensureHeaders(gbSh, SHEETS.GradeBoundaries);
     const gbHeaders = _headers(gbSh);
     const boundaries = _rows(gbSh).map(r => _indexByHeader(r, gbHeaders));
     
-    // Find boundaries for this standard group
-    const applicableBoundaries = boundaries.filter(b => 
-      String(b.standardGroup || '').toLowerCase() === standardGroup.toLowerCase()
-    );
+    // Find boundaries for this standard group - normalize comparison
+    const applicableBoundaries = boundaries.filter(b => {
+      const boundaryGroup = String(b.standardGroup || '').trim().toLowerCase();
+      const targetGroup = standardGroup.trim().toLowerCase();
+      return boundaryGroup === targetGroup;
+    });
+    
+    Logger.log(`[Grade Calculation] Found ${applicableBoundaries.length} boundaries for ${standardGroup}`);
     
     if (applicableBoundaries.length === 0) {
+      Logger.log(`[Grade Calculation] No boundaries found, using fallback`);
       return _calculateGradeFallback(percentage);
     }
     
@@ -219,14 +226,16 @@ function _calculateGradeFromBoundaries(percentage, className) {
       const maxPercent = Number(boundary.maxPercentage) || 100;
       
       if (percentage >= minPercent && percentage <= maxPercent) {
+        Logger.log(`[Grade Calculation] Matched: ${boundary.grade} (${minPercent}%-${maxPercent}%)`);
         return boundary.grade || 'F';
       }
     }
     
+    Logger.log(`[Grade Calculation] No matching boundary, returning F`);
     return 'F';
     
   } catch (error) {
-    console.error('Error calculating grade from boundaries:', error);
+    Logger.log(`[Grade Calculation ERROR] ${error.toString()}`);
     return _calculateGradeFallback(percentage);
   }
 }

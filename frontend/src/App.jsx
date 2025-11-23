@@ -3045,7 +3045,7 @@ const App = () => {
       {/* Real-Time Activity Monitor */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">📊 Live Activity Monitor</h2>
+          <h2 className="text-lg font-semibold text-gray-900">📊 Live Activity Monitor <span className="text-sm font-normal text-blue-600">[{new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})}]</span></h2>
           <span className="text-xs text-gray-500">
             Last updated: {lastRefresh.toLocaleTimeString()}
           </span>
@@ -3089,21 +3089,21 @@ const App = () => {
         <div className="grid grid-cols-4 gap-4">
           <div className="text-center p-3 bg-blue-50 rounded-lg">
             <div className="text-2xl font-bold text-blue-600">{dailyReportsData.stats.submitted || 0}</div>
-            <div className="text-xs text-gray-600">Submitted</div>
+            <div className="text-xs text-gray-600">Submitted (Today)</div>
           </div>
           <div className="text-center p-3 bg-orange-50 rounded-lg">
             <div className="text-2xl font-bold text-orange-600">{dailyReportsData.stats.pending || 0}</div>
-            <div className="text-xs text-gray-600">Pending</div>
+            <div className="text-xs text-gray-600">Pending (Today)</div>
           </div>
           <div className="text-center p-3 bg-red-50 rounded-lg">
             <div className="text-2xl font-bold text-red-600">{lateSubmissions}</div>
-            <div className="text-xs text-gray-600">Late</div>
+            <div className="text-xs text-gray-600">Late (Today)</div>
           </div>
           <div className="text-center p-3 bg-green-50 rounded-lg">
             <div className="text-2xl font-bold text-green-600">
               {dailyReportsData.stats.totalPeriods > 0 ? Math.round((dailyReportsData.stats.submitted / dailyReportsData.stats.totalPeriods) * 100) : 0}%
             </div>
-            <div className="text-xs text-gray-600">Completion</div>
+            <div className="text-xs text-gray-600">Completion (Today)</div>
           </div>
         </div>
       </div>
@@ -3244,7 +3244,7 @@ const App = () => {
 
       {/* Teacher Status Overview */}
       <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">👥 Teacher Status Overview</h2>
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">👥 Teacher Status Overview <span className="text-sm font-normal text-blue-600">[{new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})}]</span></h2>
         <div className="space-y-3">
           {/* Group reports by teacher */}
           {Object.entries(
@@ -3322,7 +3322,7 @@ const App = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Submission Timeline Chart */}
         <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">📈 Submission Timeline</h2>
+          <h2 className="text-lg font-medium text-gray-900 mb-4">📈 Submission Timeline <span className="text-sm font-normal text-blue-600">[{new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})}]</span></h2>
           <div className="space-y-2">
             {[1,2,3,4,5,6,7,8].map(period => {
               const periodReports = dailyReportsData.reports.filter(r => parseInt(r.period) === period);
@@ -3364,7 +3364,7 @@ const App = () => {
         
         {/* Completion Distribution */}
         <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">🎯 Completion Distribution</h2>
+          <h2 className="text-lg font-medium text-gray-900 mb-4">🎯 Completion Distribution <span className="text-sm font-normal text-blue-600">[{new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})}]</span></h2>
           <div className="space-y-4">
             {(() => {
               const submittedReports = dailyReportsData.reports.filter(r => r.submitted && r.completionPercentage != null);
@@ -3423,7 +3423,7 @@ const App = () => {
       {/* Recent Activities - Show latest submissions */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-medium text-gray-900">📋 Recent Activity</h2>
+          <h2 className="text-lg font-medium text-gray-900">📋 Recent Activity <span className="text-sm font-normal text-blue-600">[{new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})}]</span></h2>
         </div>
         <div className="p-6">
           {dailyReportsData.reports.length > 0 ? (
