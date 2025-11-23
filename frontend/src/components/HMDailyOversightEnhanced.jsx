@@ -531,7 +531,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
 
       {/* Subject-wise Performance */}
       <div className="bg-white p-6 border border-gray-200 rounded-lg mb-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Subject-wise Performance</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Subject-wise Performance (Plan vs Actual)</h3>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
@@ -539,7 +539,8 @@ const HMDailyOversightEnhanced = ({ user }) => {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Subject</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Class</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Planned</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actual</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actual (Planned)</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unplanned ⚠️</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gap</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Coverage</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Avg Completion</th>
@@ -548,11 +549,20 @@ const HMDailyOversightEnhanced = ({ user }) => {
             <tbody className="divide-y divide-gray-200">
               {classSubjectPerformance.length > 0 ? (
                 classSubjectPerformance.map((performance, idx) => (
-                  <tr key={idx} className={`hover:bg-gray-50 ${performance.riskLevel === 'High' ? 'bg-red-50' : performance.riskLevel === 'Medium' ? 'bg-yellow-50' : ''}`}>
+                  <tr key={idx} className={`hover:bg-gray-50 ${performance.unplannedSessions > 0 ? 'bg-orange-50' : performance.riskLevel === 'High' ? 'bg-red-50' : performance.riskLevel === 'Medium' ? 'bg-yellow-50' : ''}`}>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">{performance.subject}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{performance.class}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{performance.plannedSessions}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{performance.actualSessions}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{performance.actualPlannedSessions || 0}</td>
+                    <td className="px-4 py-3 text-sm">
+                      {performance.unplannedSessions > 0 ? (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-orange-100 text-orange-800">
+                          {performance.unplannedSessions} ⚠️
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">0</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-sm">
                       <span className={performance.planActualGap > 0 ? 'text-red-600 font-medium' : 'text-green-600 font-medium'}>
                         {performance.planActualGap > 0 ? '+' : ''}{performance.planActualGap}
@@ -584,13 +594,25 @@ const HMDailyOversightEnhanced = ({ user }) => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                     {analyticsLoading ? 'Loading performance data...' : 'No subject performance data available.'}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+        </div>
+        
+        {/* Legend */}
+        <div className="mt-4 p-3 bg-gray-50 rounded border border-gray-200">
+          <p className="text-xs font-semibold text-gray-700 mb-2">📖 Legend:</p>
+          <ul className="text-xs text-gray-600 space-y-1">
+            <li><strong>Planned:</strong> Total lesson plans created</li>
+            <li><strong>Actual (Planned):</strong> Daily reports with matching lesson plans</li>
+            <li><strong className="text-orange-600">Unplanned ⚠️:</strong> Daily reports WITHOUT lesson plans (taught without preparation)</li>
+            <li><strong>Gap:</strong> Planned sessions not yet taught (+ means pending)</li>
+            <li><strong>Coverage:</strong> (Actual Planned / Planned) × 100%</li>
+          </ul>
         </div>
       </div>
 
@@ -606,7 +628,8 @@ const HMDailyOversightEnhanced = ({ user }) => {
                   acc[perf.class] = {
                     class: perf.class,
                     plannedSessions: 0,
-                    actualSessions: 0,
+                    actualPlannedSessions: 0,
+                    unplannedSessions: 0,
                     completedSessions: 0,
                     avgCompletions: [],
                     subjects: new Set(),
@@ -614,7 +637,8 @@ const HMDailyOversightEnhanced = ({ user }) => {
                   };
                 }
                 acc[perf.class].plannedSessions += perf.plannedSessions || 0;
-                acc[perf.class].actualSessions += perf.actualSessions || 0;
+                acc[perf.class].actualPlannedSessions += perf.actualPlannedSessions || 0;
+                acc[perf.class].unplannedSessions += perf.unplannedSessions || 0;
                 acc[perf.class].completedSessions += perf.completedSessions || 0;
                 acc[perf.class].avgCompletions.push(perf.avgCompletion || 0);
                 acc[perf.class].riskLevel = perf.riskLevel === 'High' ? 'High' : acc[perf.class].riskLevel;
@@ -627,28 +651,34 @@ const HMDailyOversightEnhanced = ({ user }) => {
                 : 0;
               
               const coverage = classData.plannedSessions > 0
-                ? Math.round((classData.actualSessions / classData.plannedSessions) * 100)
+                ? Math.round((classData.actualPlannedSessions / classData.plannedSessions) * 100)
                 : 0;
               
-              const gap = classData.plannedSessions - classData.actualSessions;
+              const gap = classData.plannedSessions - classData.actualPlannedSessions;
+              const hasUnplanned = classData.unplannedSessions > 0;
               
               return (
-                <div key={classKey} className={`p-4 rounded-lg border-2 ${classData.riskLevel === 'High' ? 'bg-red-50 border-red-200' : classData.riskLevel === 'Medium' ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-200'}`}>
+                <div key={classKey} className={`p-4 rounded-lg border-2 ${hasUnplanned ? 'bg-orange-50 border-orange-300' : classData.riskLevel === 'High' ? 'bg-red-50 border-red-200' : classData.riskLevel === 'Medium' ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-200'}`}>
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="font-semibold text-gray-900">{classData.class}</h4>
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${classData.riskLevel === 'High' ? 'bg-red-100 text-red-800' : classData.riskLevel === 'Medium' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
-                      {classData.riskLevel}
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${hasUnplanned ? 'bg-orange-100 text-orange-800' : classData.riskLevel === 'High' ? 'bg-red-100 text-red-800' : classData.riskLevel === 'Medium' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
+                      {hasUnplanned ? '⚠️ Unprepared' : classData.riskLevel}
                     </span>
                   </div>
                   <div className="space-y-2 text-sm">
                     <p className="text-gray-600">
                       <span className="font-medium">Plan: {classData.plannedSessions}</span>
                       <span className="text-gray-500"> | </span>
-                      <span className="font-medium">Actual: {classData.actualSessions}</span>
+                      <span className="font-medium">Actual: {classData.actualPlannedSessions}</span>
                       <span className={`ml-1 font-medium ${gap > 0 ? 'text-red-600' : 'text-green-600'}`}>
                         ({gap > 0 ? '+' : ''}{gap})
                       </span>
                     </p>
+                    {hasUnplanned && (
+                      <p className="text-orange-700 font-medium">
+                        ⚠️ {classData.unplannedSessions} session(s) taught without lesson plan
+                      </p>
+                    )}
                     <p className="text-gray-600">
                       <span className="font-medium">{classData.completedSessions}</span>
                       <span className="text-gray-500"> sessions completed (Avg: {avgCompletion}%)</span>

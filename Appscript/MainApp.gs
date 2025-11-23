@@ -2627,7 +2627,33 @@ function getClassSubjectPerformance() {
     
     Logger.log(`getClassSubjectPerformance: LP=${allLessonPlans.length}, DR=${allReports.length}`);
     
-    // STEP 1: Count PLANNED sessions by class/subject from LessonPlans
+    // STEP 1: Create lesson plan index for matching
+    const lessonPlanIndex = {};
+    
+    allLessonPlans.forEach(lp => {
+      const cls = String(lp.class || '').trim();
+      const subject = String(lp.subject || '').trim();
+      const chapter = String(lp.chapter || '').trim().toLowerCase();
+      const date = String(lp.date || '').split('T')[0]; // Get date part only
+      
+      if (!cls || !subject) return;
+      
+      // Create multiple keys for flexible matching
+      const keys = [
+        `${cls}|${subject}|${chapter}|${date}`, // Exact match
+        `${cls}|${subject}|${chapter}`, // Match without date
+        `${cls}|${subject}|${date}`, // Match without chapter
+      ];
+      
+      keys.forEach(key => {
+        if (!lessonPlanIndex[key]) {
+          lessonPlanIndex[key] = [];
+        }
+        lessonPlanIndex[key].push(lp);
+      });
+    });
+    
+    // STEP 2: Count PLANNED sessions by class/subject
     const classSubjectData = {};
     
     allLessonPlans.forEach(lp => {
@@ -2642,7 +2668,8 @@ function getClassSubjectPerformance() {
           class: cls,
           subject: subject,
           plannedSessions: 0,
-          actualSessions: 0,
+          actualPlannedSessions: 0,
+          unplannedSessions: 0,
           completedSessions: 0,
           partialSessions: 0,
           completionValues: [],
@@ -2657,10 +2684,12 @@ function getClassSubjectPerformance() {
       if (lp.chapter) data.chapters.add(lp.chapter);
     });
     
-    // STEP 2: Count ACTUAL sessions by class/subject from DailyReports
+    // STEP 3: Count ACTUAL sessions - match with lesson plans
     allReports.forEach(report => {
       const cls = String(report.class || '').trim();
       const subject = String(report.subject || '').trim();
+      const chapter = String(report.chapter || '').trim().toLowerCase();
+      const date = String(report.date || '').split('T')[0];
       const key = `${cls}|${subject}`;
       
       if (!cls || !subject) return;
@@ -2670,7 +2699,8 @@ function getClassSubjectPerformance() {
           class: cls,
           subject: subject,
           plannedSessions: 0,
-          actualSessions: 0,
+          actualPlannedSessions: 0,
+          unplannedSessions: 0,
           completedSessions: 0,
           partialSessions: 0,
           completionValues: [],
@@ -2680,9 +2710,31 @@ function getClassSubjectPerformance() {
       }
       
       const data = classSubjectData[key];
-      data.actualSessions++;
       data.teachers.add(report.teacherEmail);
       if (report.chapter) data.chapters.add(report.chapter);
+      
+      // Check if this report has a corresponding lesson plan
+      const matchKeys = [
+        `${cls}|${subject}|${chapter}|${date}`,
+        `${cls}|${subject}|${chapter}`,
+        `${cls}|${subject}|${date}`,
+      ];
+      
+      let hasMatchingPlan = false;
+      for (const matchKey of matchKeys) {
+        if (lessonPlanIndex[matchKey] && lessonPlanIndex[matchKey].length > 0) {
+          hasMatchingPlan = true;
+          break;
+        }
+      }
+      
+      if (hasMatchingPlan) {
+        // This report has a matching lesson plan
+        data.actualPlannedSessions++;
+      } else {
+        // This report has NO matching lesson plan (taught without preparation)
+        data.unplannedSessions++;
+      }
       
       const completion = Number(report.completionPercentage || 0);
       data.completionValues.push(completion);
@@ -2694,21 +2746,26 @@ function getClassSubjectPerformance() {
       }
     });
     
-    // STEP 3: Calculate metrics with Plan vs Actual comparison
+    // STEP 4: Calculate metrics with Plan vs Actual comparison
     const classMetrics = Object.values(classSubjectData).map(data => {
       const avgCompletion = data.completionValues.length > 0
         ? Math.round(data.completionValues.reduce((a, b) => a + b, 0) / data.completionValues.length)
         : 0;
       
-      // Plan vs Actual comparison
-      const planActualGap = data.plannedSessions - data.actualSessions;
+      // Plan vs Actual comparison (ONLY count sessions with matching lesson plans)
+      const planActualGap = data.plannedSessions - data.actualPlannedSessions;
       const coveragePercentage = data.plannedSessions > 0
-        ? Math.round((data.actualSessions / data.plannedSessions) * 100)
+        ? Math.round((data.actualPlannedSessions / data.plannedSessions) * 100)
         : 0;
+      
+      // Total actual includes both planned and unplanned
+      const totalActualSessions = data.actualPlannedSessions + data.unplannedSessions;
       
       // Determine status based on coverage and completion
       let status = 'On Track';
-      if (coveragePercentage < 50) {
+      if (data.unplannedSessions > 0) {
+        status = '⚠️ Unprepared Teaching';
+      } else if (coveragePercentage < 50) {
         status = 'Behind Schedule';
       } else if (coveragePercentage < 80) {
         status = 'Slightly Behind';
@@ -2720,9 +2777,9 @@ function getClassSubjectPerformance() {
       
       // Determine risk level
       let riskLevel = 'Low';
-      if (avgCompletion < 60 || coveragePercentage < 50) {
+      if (data.unplannedSessions > 2 || avgCompletion < 60 || coveragePercentage < 50) {
         riskLevel = 'High';
-      } else if (avgCompletion < 75 || coveragePercentage < 75) {
+      } else if (data.unplannedSessions > 0 || avgCompletion < 75 || coveragePercentage < 75) {
         riskLevel = 'Medium';
       }
       
@@ -2730,11 +2787,15 @@ function getClassSubjectPerformance() {
         class: data.class,
         subject: data.subject,
         
-        // Plan vs Actual
+        // Plan vs Actual (matching lesson plans only)
         plannedSessions: data.plannedSessions,
-        actualSessions: data.actualSessions,
+        actualPlannedSessions: data.actualPlannedSessions,
         planActualGap: planActualGap,
         coveragePercentage: coveragePercentage,
+        
+        // Unplanned sessions (RED FLAG)
+        unplannedSessions: data.unplannedSessions,
+        totalActualSessions: totalActualSessions,
         
         // Actual completion breakdown
         completedSessions: data.completedSessions,
