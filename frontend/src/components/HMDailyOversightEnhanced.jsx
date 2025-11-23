@@ -34,6 +34,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
   // Class/Subject Performance Analytics
   const [classSubjectPerformance, setClassSubjectPerformance] = useState([]);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [performanceClassFilter, setPerformanceClassFilter] = useState(''); // New filter state
   // Real-time features
   const [lastUpdated, setLastUpdated] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -531,7 +532,30 @@ const HMDailyOversightEnhanced = ({ user }) => {
 
       {/* Subject-wise Performance */}
       <div className="bg-white p-6 border border-gray-200 rounded-lg mb-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Subject-wise Performance (Plan vs Actual)</h3>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">Subject-wise Performance (Plan vs Actual)</h3>
+          <div className="flex items-center gap-3">
+            <label className="text-sm text-gray-600">Filter by Class:</label>
+            <select 
+              value={performanceClassFilter}
+              onChange={(e) => setPerformanceClassFilter(e.target.value)}
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">All Classes</option>
+              {[...new Set(classSubjectPerformance.map(p => p.class))].sort().map(cls => (
+                <option key={cls} value={cls}>{cls}</option>
+              ))}
+            </select>
+            {performanceClassFilter && (
+              <button 
+                onClick={() => setPerformanceClassFilter('')}
+                className="text-xs text-gray-500 hover:text-gray-700 underline"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
@@ -548,7 +572,9 @@ const HMDailyOversightEnhanced = ({ user }) => {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {classSubjectPerformance.length > 0 ? (
-                classSubjectPerformance.map((performance, idx) => (
+                classSubjectPerformance
+                  .filter(performance => !performanceClassFilter || performance.class === performanceClassFilter)
+                  .map((performance, idx) => (
                   <tr key={idx} className={`hover:bg-gray-50 ${performance.unplannedSessions > 0 ? 'bg-orange-50' : performance.riskLevel === 'High' ? 'bg-red-50' : performance.riskLevel === 'Medium' ? 'bg-yellow-50' : ''}`}>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">{performance.subject}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{performance.class}</td>
@@ -570,10 +596,10 @@ const HMDailyOversightEnhanced = ({ user }) => {
                     </td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <div className="w-16 bg-gray-200 rounded-full h-2">
+                        <div className="w-16 bg-gray-200 rounded-full h-2 overflow-hidden">
                           <div 
                             className={performance.coveragePercentage >= 80 ? 'bg-green-600' : performance.coveragePercentage >= 50 ? 'bg-yellow-600' : 'bg-red-600'} 
-                            style={{ width: `${performance.coveragePercentage || 0}%`, height: '100%', borderRadius: '4px' }}
+                            style={{ width: `${Math.min(performance.coveragePercentage || 0, 100)}%`, height: '100%', borderRadius: '4px' }}
                           ></div>
                         </div>
                         <span className="text-sm font-medium text-gray-900">{performance.coveragePercentage || 0}%</span>
@@ -581,10 +607,10 @@ const HMDailyOversightEnhanced = ({ user }) => {
                     </td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <div className="w-16 bg-gray-200 rounded-full h-2">
+                        <div className="w-16 bg-gray-200 rounded-full h-2 overflow-hidden">
                           <div 
                             className="bg-blue-600 h-2 rounded-full" 
-                            style={{ width: `${performance.avgCompletion || 0}%` }}
+                            style={{ width: `${Math.min(performance.avgCompletion || 0, 100)}%` }}
                           ></div>
                         </div>
                         <span className="text-sm font-medium text-gray-900">{performance.avgCompletion || 0}%</span>
@@ -674,6 +700,10 @@ const HMDailyOversightEnhanced = ({ user }) => {
                         ({gap > 0 ? '+' : ''}{gap})
                       </span>
                     </p>
+                    <p className="text-gray-600">
+                      <span className="font-medium">Total Reports: {classData.actualPlannedSessions + classData.unplannedSessions}</span>
+                      <span className="text-gray-500"> ({classData.actualPlannedSessions} planned + {classData.unplannedSessions} unplanned)</span>
+                    </p>
                     {hasUnplanned && (
                       <p className="text-orange-700 font-medium">
                         ⚠️ {classData.unplannedSessions} session(s) taught without lesson plan
@@ -688,10 +718,10 @@ const HMDailyOversightEnhanced = ({ user }) => {
                       <span className="text-gray-500"> subject(s) | Coverage: {coverage}%</span>
                     </p>
                   </div>
-                  <div className="mt-3 w-full bg-gray-200 rounded-full h-2">
+                  <div className="mt-3 w-full bg-gray-200 rounded-full h-2 overflow-hidden">
                     <div 
                       className={coverage >= 80 ? 'bg-green-600' : coverage >= 50 ? 'bg-yellow-600' : 'bg-red-600'} 
-                      style={{ width: `${coverage}%`, height: '100%', borderRadius: '4px' }}
+                      style={{ width: `${Math.min(coverage, 100)}%`, height: '100%', borderRadius: '4px' }}
                     ></div>
                   </div>
                 </div>
