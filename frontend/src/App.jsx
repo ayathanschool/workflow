@@ -24,8 +24,6 @@ const ExamManagement = lazy(() => import('./components/ExamManagement'));
 const ReportCard = lazy(() => import('./components/ReportCard'));
 const SchemeLessonPlanning = lazy(() => import('./components/SchemeLessonPlanning'));
 const SessionCompletionTracker = lazy(() => import('./components/SessionCompletionTracker'));
-const HMTeacherPerformanceView = lazy(() => import('./components/HMTeacherPerformanceView'));
-const HMSessionAnalyticsView = lazy(() => import('./components/HMSessionAnalyticsView'));
 const HMDailyOversight = lazy(() => import('./components/HMDailyOversightEnhanced'));
 
 // Keep lightweight components as regular imports
@@ -481,8 +479,6 @@ const App = () => {
       items.push(
         { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
         { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
-        { id: 'teacher-performance', label: 'Teacher Performance', icon: TrendingUp },
-        { id: 'session-analytics', label: 'Session Analytics', icon: BarChart2 },
         { id: 'daily-oversight', label: 'Daily Oversight (Enhanced)', icon: ClipboardCheck },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
@@ -1256,10 +1252,6 @@ const App = () => {
           return <SchemeLessonPlanning userEmail={user?.email} userName={user?.name} />;
         case 'session-tracking':
           return <SessionCompletionTracker user={user} />;
-        case 'teacher-performance':
-          return <HMTeacherPerformanceView user={user} />;
-        case 'session-analytics':
-          return <HMSessionAnalyticsView user={user} />;
         case 'timetable':
           return <TimetableView />;
         case 'my-substitutions':
