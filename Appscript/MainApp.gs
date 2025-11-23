@@ -2792,9 +2792,19 @@ function getClassSubjectPerformance() {
         riskLevel = 'Medium';
       }
       
+      // Get teacher names from the teachers set
+      const teacherEmails = Array.from(data.teachers);
+      const teacherNames = teacherEmails.map(email => {
+        // Extract name from email or use email
+        const name = email.split('@')[0];
+        return name.charAt(0).toUpperCase() + name.slice(1);
+      }).join(', ');
+      
       return {
         class: data.class,
         subject: data.subject,
+        teacherEmails: teacherEmails.join(', '), // All teacher emails
+        teacherNames: teacherNames, // Display names
         
         // Plan vs Actual (unique lesson plans only)
         plannedSessions: data.plannedSessions,

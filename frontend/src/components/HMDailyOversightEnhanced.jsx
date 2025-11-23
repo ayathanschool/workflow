@@ -34,7 +34,8 @@ const HMDailyOversightEnhanced = ({ user }) => {
   // Class/Subject Performance Analytics
   const [classSubjectPerformance, setClassSubjectPerformance] = useState([]);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [performanceClassFilter, setPerformanceClassFilter] = useState(''); // New filter state
+  const [performanceClassFilter, setPerformanceClassFilter] = useState(''); // Class filter
+  const [performanceTeacherFilter, setPerformanceTeacherFilter] = useState(''); // Teacher filter
   // Real-time features
   const [lastUpdated, setLastUpdated] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -535,7 +536,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-semibold text-gray-900">Subject-wise Performance (Plan vs Actual)</h3>
           <div className="flex items-center gap-3">
-            <label className="text-sm text-gray-600">Filter by Class:</label>
+            <label className="text-sm text-gray-600">Class:</label>
             <select 
               value={performanceClassFilter}
               onChange={(e) => setPerformanceClassFilter(e.target.value)}
@@ -546,12 +547,28 @@ const HMDailyOversightEnhanced = ({ user }) => {
                 <option key={cls} value={cls}>{cls}</option>
               ))}
             </select>
-            {performanceClassFilter && (
+            
+            <label className="text-sm text-gray-600 ml-2">Teacher:</label>
+            <select 
+              value={performanceTeacherFilter}
+              onChange={(e) => setPerformanceTeacherFilter(e.target.value)}
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">All Teachers</option>
+              {[...new Set(classSubjectPerformance.map(p => p.teacherNames).filter(Boolean))].sort().map(teacher => (
+                <option key={teacher} value={teacher}>{teacher}</option>
+              ))}
+            </select>
+            
+            {(performanceClassFilter || performanceTeacherFilter) && (
               <button 
-                onClick={() => setPerformanceClassFilter('')}
+                onClick={() => {
+                  setPerformanceClassFilter('');
+                  setPerformanceTeacherFilter('');
+                }}
                 className="text-xs text-gray-500 hover:text-gray-700 underline"
               >
-                Clear
+                Clear All
               </button>
             )}
           </div>
@@ -562,6 +579,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Subject</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Class</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Teacher(s)</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Planned</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actual (Planned)</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unplanned ⚠️</th>
@@ -573,11 +591,20 @@ const HMDailyOversightEnhanced = ({ user }) => {
             <tbody className="divide-y divide-gray-200">
               {classSubjectPerformance.length > 0 ? (
                 classSubjectPerformance
-                  .filter(performance => !performanceClassFilter || performance.class === performanceClassFilter)
+                  .filter(performance => {
+                    const classMatch = !performanceClassFilter || performance.class === performanceClassFilter;
+                    const teacherMatch = !performanceTeacherFilter || (performance.teacherNames && performance.teacherNames.includes(performanceTeacherFilter));
+                    return classMatch && teacherMatch;
+                  })
                   .map((performance, idx) => (
                   <tr key={idx} className={`hover:bg-gray-50 ${performance.unplannedSessions > 0 ? 'bg-orange-50' : performance.riskLevel === 'High' ? 'bg-red-50' : performance.riskLevel === 'Medium' ? 'bg-yellow-50' : ''}`}>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">{performance.subject}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{performance.class}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      <span className="inline-block max-w-xs truncate" title={performance.teacherNames}>
+                        {performance.teacherNames || 'N/A'}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-sm text-gray-600">{performance.plannedSessions}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{performance.actualPlannedSessions || 0}</td>
                     <td className="px-4 py-3 text-sm">
@@ -620,7 +647,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
+                  <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
                     {analyticsLoading ? 'Loading performance data...' : 'No subject performance data available.'}
                   </td>
                 </tr>
