@@ -2653,7 +2653,7 @@ function getClassSubjectPerformance() {
       });
     });
     
-    // STEP 2: Count PLANNED sessions by class/subject
+    // STEP 2: Count PLANNED sessions by class/subject and track unique lesson plan IDs
     const classSubjectData = {};
     
     allLessonPlans.forEach(lp => {
@@ -2668,7 +2668,8 @@ function getClassSubjectPerformance() {
           class: cls,
           subject: subject,
           plannedSessions: 0,
-          actualPlannedSessions: 0,
+          lessonPlanIds: new Set(), // Track unique lesson plans
+          matchedLessonPlanIds: new Set(), // Track which plans have been taught
           unplannedSessions: 0,
           completedSessions: 0,
           partialSessions: 0,
@@ -2679,6 +2680,9 @@ function getClassSubjectPerformance() {
       }
       
       const data = classSubjectData[key];
+      // Create unique ID for this lesson plan
+      const lpId = `${lp.class}|${lp.subject}|${lp.chapter}|${lp.date}|${lp.teacherEmail}`;
+      data.lessonPlanIds.add(lpId);
       data.plannedSessions++;
       data.teachers.add(lp.teacherEmail);
       if (lp.chapter) data.chapters.add(lp.chapter);
@@ -2699,7 +2703,8 @@ function getClassSubjectPerformance() {
           class: cls,
           subject: subject,
           plannedSessions: 0,
-          actualPlannedSessions: 0,
+          lessonPlanIds: new Set(),
+          matchedLessonPlanIds: new Set(),
           unplannedSessions: 0,
           completedSessions: 0,
           partialSessions: 0,
@@ -2720,17 +2725,18 @@ function getClassSubjectPerformance() {
         `${cls}|${subject}|${date}`,
       ];
       
-      let hasMatchingPlan = false;
+      let matchedPlan = null;
       for (const matchKey of matchKeys) {
         if (lessonPlanIndex[matchKey] && lessonPlanIndex[matchKey].length > 0) {
-          hasMatchingPlan = true;
+          matchedPlan = lessonPlanIndex[matchKey][0]; // Get first matching plan
           break;
         }
       }
       
-      if (hasMatchingPlan) {
-        // This report has a matching lesson plan
-        data.actualPlannedSessions++;
+      if (matchedPlan) {
+        // Mark this lesson plan as taught (using unique ID)
+        const lpId = `${matchedPlan.class}|${matchedPlan.subject}|${matchedPlan.chapter}|${matchedPlan.date}|${matchedPlan.teacherEmail}`;
+        data.matchedLessonPlanIds.add(lpId);
       } else {
         // This report has NO matching lesson plan (taught without preparation)
         data.unplannedSessions++;
@@ -2752,14 +2758,17 @@ function getClassSubjectPerformance() {
         ? Math.round(data.completionValues.reduce((a, b) => a + b, 0) / data.completionValues.length)
         : 0;
       
-      // Plan vs Actual comparison (ONLY count sessions with matching lesson plans)
-      const planActualGap = data.plannedSessions - data.actualPlannedSessions;
+      // Actual = UNIQUE lesson plans that have been taught (not report count)
+      const actualPlannedSessions = data.matchedLessonPlanIds.size;
+      
+      // Plan vs Actual comparison
+      const planActualGap = data.plannedSessions - actualPlannedSessions;
       const coveragePercentage = data.plannedSessions > 0
-        ? Math.round((data.actualPlannedSessions / data.plannedSessions) * 100)
+        ? Math.round((actualPlannedSessions / data.plannedSessions) * 100)
         : 0;
       
       // Total actual includes both planned and unplanned
-      const totalActualSessions = data.actualPlannedSessions + data.unplannedSessions;
+      const totalActualSessions = actualPlannedSessions + data.unplannedSessions;
       
       // Determine status based on coverage and completion
       let status = 'On Track';
@@ -2787,9 +2796,9 @@ function getClassSubjectPerformance() {
         class: data.class,
         subject: data.subject,
         
-        // Plan vs Actual (matching lesson plans only)
+        // Plan vs Actual (unique lesson plans only)
         plannedSessions: data.plannedSessions,
-        actualPlannedSessions: data.actualPlannedSessions,
+        actualPlannedSessions: actualPlannedSessions,
         planActualGap: planActualGap,
         coveragePercentage: coveragePercentage,
         
