@@ -24,6 +24,10 @@ const SHEETS = {
   LessonPlans: ['lpId','schemeId','teacherEmail','teacherName','class','subject','chapter','session','selectedDate','selectedPeriod','learningObjectives','teachingMethods','resourcesRequired','assessmentMethods','status','createdAt','submittedAt','isDuplicate','lessonType','reviewerRemarks'],
   DailyReports: ['date','teacherEmail','teacherName','class','subject','period','planType','lessonPlanId','chapter','sessionNo','totalSessions','completionPercentage','chapterStatus','deviationReason','difficulties','nextSessionPlan','objectives','activities','completed','notes','createdAt'],
   
+  // === SYLLABUS & CALENDAR (2 sheets) ===
+  Syllabus: ['standard','subject','term','chapterNo','chapterName','minSessions','topics','sequence'],
+  AcademicCalendar: ['term','startDate','endDate','examStartDate','examEndDate','eventDates','eventNames','teachingWeeks'],
+  
   // === SUBSTITUTION SYSTEM (2 sheets) ===  
   Substitutions: ['date','period','class','absentTeacher','regularSubject','substituteTeacher','substituteSubject','note','acknowledged','acknowledgedBy','acknowledgedAt','createdAt'],
   SubstitutionNotifications: ['id','recipient','title','message','type','data','acknowledged','acknowledgedAt','createdAt'],

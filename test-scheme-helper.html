@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scheme Submission Helper - Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2563eb;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #64748b;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #334155;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #2563eb;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #1d4ed8;
+        }
+        button:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            border-radius: 6px;
+            display: none;
+        }
+        .result.success {
+            background: #f0fdf4;
+            border: 1px solid #86efac;
+            display: block;
+        }
+        .result.error {
+            background: #fef2f2;
+            border: 1px solid #fca5a5;
+            display: block;
+        }
+        .section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8fafc;
+            border-radius: 6px;
+            border-left: 4px solid #2563eb;
+        }
+        .section h3 {
+            margin-top: 0;
+            color: #1e293b;
+        }
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .metric:last-child {
+            border-bottom: none;
+        }
+        .metric-label {
+            color: #64748b;
+        }
+        .metric-value {
+            font-weight: 600;
+            color: #1e293b;
+        }
+        .risk-LOW { color: #16a34a; }
+        .risk-MEDIUM { color: #ea580c; }
+        .risk-HIGH { color: #dc2626; }
+        .warning {
+            background: #fff7ed;
+            border-left: 4px solid #f59e0b;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 4px;
+        }
+        .chapter {
+            background: white;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 4px;
+            border: 1px solid #e2e8f0;
+        }
+        .chapter-header {
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 4px;
+        }
+        .chapter-sessions {
+            color: #2563eb;
+            font-size: 14px;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #64748b;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Scheme Submission Helper</h1>
+        <p class="subtitle">Test the new planning assistant API</p>
+        
+        <div class="form-group">
+            <label>Teacher Email</label>
+            <input type="email" id="teacherEmail" value="teacher@ayathanschool.com" placeholder="Enter teacher email">
+        </div>
+        
+        <div class="form-group">
+            <label>Class</label>
+            <select id="class">
+                <option value="STD 10A">STD 10A</option>
+                <option value="STD 10B">STD 10B</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label>Subject</label>
+            <select id="subject">
+                <option value="Mathematics">Mathematics</option>
+                <option value="Science">Science</option>
+                <option value="English">English</option>
+                <option value="Social Studies">Social Studies</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label>Term</label>
+            <select id="term">
+                <option value="Term 1">Term 1</option>
+                <option value="Term 2">Term 2</option>
+                <option value="Term 3">Term 3</option>
+            </select>
+        </div>
+        
+        <button onclick="testHelper()" id="testBtn">Get Planning Context</button>
+        
+        <div id="result" class="result"></div>
+    </div>
+
+    <script>
+        const API_URL = 'YOUR_APPSCRIPT_URL_HERE'; // Replace with your Apps Script web app URL
+        
+        async function testHelper() {
+            const btn = document.getElementById('testBtn');
+            const resultDiv = document.getElementById('result');
+            
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+            resultDiv.className = 'result';
+            resultDiv.innerHTML = '<div class="loading">⏳ Fetching planning context...</div>';
+            resultDiv.style.display = 'block';
+            
+            try {
+                const teacherEmail = document.getElementById('teacherEmail').value;
+                const className = document.getElementById('class').value;
+                const subject = document.getElementById('subject').value;
+                const term = document.getElementById('term').value;
+                
+                const url = `${API_URL}?action=getSchemeSubmissionHelper&teacherEmail=${encodeURIComponent(teacherEmail)}&class=${encodeURIComponent(className)}&subject=${encodeURIComponent(subject)}&term=${encodeURIComponent(term)}`;
+                
+                const response = await fetch(url);
+                const result = await response.json();
+                
+                if (result.data && result.data.success) {
+                    displaySuccess(result.data);
+                } else {
+                    displayError(result.data?.error || 'Unknown error occurred');
+                }
+            } catch (error) {
+                displayError(error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Get Planning Context';
+            }
+        }
+        
+        function displaySuccess(data) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.className = 'result success';
+            
+            const { termInfo, timetableInfo, syllabusRequirement, feasibility, upcomingEvents, warnings } = data;
+            
+            let html = '<h2>✅ Planning Context Generated</h2>';
+            
+            // Term Info
+            html += '<div class="section"><h3>⏱️ Term Timeline</h3>';
+            html += `<div class="metric"><span class="metric-label">Term Period</span><span class="metric-value">${termInfo.startDate} to ${termInfo.endDate}</span></div>`;
+            html += `<div class="metric"><span class="metric-label">Teaching Weeks</span><span class="metric-value">${termInfo.teachingWeeks} weeks</span></div>`;
+            html += `<div class="metric"><span class="metric-label">Weeks Remaining</span><span class="metric-value">${termInfo.weeksRemaining} weeks</span></div>`;
+            if (termInfo.examStartDate) {
+                html += `<div class="metric"><span class="metric-label">Exam Starts</span><span class="metric-value">${termInfo.examStartDate}</span></div>`;
+            }
+            html += '</div>';
+            
+            // Timetable Info
+            html += '<div class="section"><h3>📅 Period Allocation</h3>';
+            html += `<div class="metric"><span class="metric-label">Periods/Week</span><span class="metric-value">${timetableInfo.periodsPerWeek}</span></div>`;
+            html += `<div class="metric"><span class="metric-label">Total Periods</span><span class="metric-value">${timetableInfo.totalPeriods}</span></div>`;
+            html += `<div class="metric"><span class="metric-label">Event Impact</span><span class="metric-value">-${timetableInfo.eventsImpact} periods</span></div>`;
+            html += `<div class="metric"><span class="metric-label">Buffer (5%)</span><span class="metric-value">-${timetableInfo.bufferPeriods} periods</span></div>`;
+            html += `<div class="metric"><span class="metric-label">Usable Periods</span><span class="metric-value">${timetableInfo.usablePeriods} periods</span></div>`;
+            html += '</div>';
+            
+            // Syllabus Requirements
+            html += '<div class="section"><h3>📋 Syllabus Requirements</h3>';
+            html += `<div class="metric"><span class="metric-label">Total Chapters</span><span class="metric-value">${syllabusRequirement.totalChapters}</span></div>`;
+            html += `<div class="metric"><span class="metric-label">Min Sessions Required</span><span class="metric-value">${syllabusRequirement.minSessionsRequired}</span></div>`;
+            html += `<div class="metric"><span class="metric-label">Avg Sessions/Chapter</span><span class="metric-value">${syllabusRequirement.avgSessionsPerChapter}</span></div>`;
+            
+            if (syllabusRequirement.chapterDetails.length > 0) {
+                html += '<h4 style="margin-top: 15px; margin-bottom: 10px;">Chapter Breakdown:</h4>';
+                syllabusRequirement.chapterDetails.forEach(ch => {
+                    html += `<div class="chapter">`;
+                    html += `<div class="chapter-header">Ch ${ch.chapterNo}: ${ch.chapterName}</div>`;
+                    html += `<div class="chapter-sessions">${ch.minSessions} sessions</div>`;
+                    if (ch.topics) {
+                        html += `<div style="color: #64748b; font-size: 13px; margin-top: 4px;">${ch.topics}</div>`;
+                    }
+                    html += `</div>`;
+                });
+            }
+            html += '</div>';
+            
+            // Feasibility
+            html += '<div class="section"><h3>🎯 Feasibility Analysis</h3>';
+            html += `<div class="metric"><span class="metric-label">Achievable?</span><span class="metric-value">${feasibility.isAchievable ? '✅ Yes' : '❌ No'}</span></div>`;
+            html += `<div class="metric"><span class="metric-label">Capacity Utilization</span><span class="metric-value">${feasibility.capacityUtilization}</span></div>`;
+            html += `<div class="metric"><span class="metric-label">Risk Level</span><span class="metric-value risk-${feasibility.riskLevel}">${feasibility.riskLevel}</span></div>`;
+            html += `<div style="margin-top: 12px; padding: 12px; background: white; border-radius: 4px;">${feasibility.recommendation}</div>`;
+            html += '</div>';
+            
+            // Upcoming Events
+            if (upcomingEvents && upcomingEvents.length > 0) {
+                html += '<div class="section"><h3>📅 Upcoming Events</h3>';
+                upcomingEvents.forEach(event => {
+                    html += `<div class="metric"><span class="metric-label">${event.name} (${event.date})</span><span class="metric-value">-${event.periodsLost} period(s)</span></div>`;
+                });
+                html += '</div>';
+            }
+            
+            // Warnings
+            if (warnings && warnings.length > 0) {
+                html += '<div class="section"><h3>⚠️ Important Notices</h3>';
+                warnings.forEach(warning => {
+                    html += `<div class="warning">${warning}</div>`;
+                });
+                html += '</div>';
+            }
+            
+            resultDiv.innerHTML = html;
+        }
+        
+        function displayError(errorMessage) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.className = 'result error';
+            resultDiv.innerHTML = `
+                <h2>❌ Error</h2>
+                <p><strong>${errorMessage}</strong></p>
+                <p style="margin-top: 15px; color: #64748b;">Make sure:</p>
+                <ul style="color: #64748b;">
+                    <li>The API URL is configured correctly</li>
+                    <li>Syllabus and AcademicCalendar sheets have data</li>
+                    <li>The Apps Script deployment is published as a web app</li>
+                </ul>
+            `;
+        }
+    </script>
+</body>
+</html>

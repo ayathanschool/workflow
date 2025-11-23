@@ -372,6 +372,14 @@ function doGet(e) {
       return _respond(getHMAnalyticsDashboard());
     }
     
+    if (action === 'getSchemeSubmissionHelper') {
+      const teacherEmail = (e.parameter.teacherEmail || '').toLowerCase().trim();
+      const className = (e.parameter.class || '').trim();
+      const subject = (e.parameter.subject || '').trim();
+      const term = (e.parameter.term || '').trim();
+      return _respond(getSchemeSubmissionHelper(teacherEmail, className, subject, term));
+    }
+    
     if (action === 'syncSessionDependencies') {
       return _handleSyncSessionDependencies(e.parameter);
     }
@@ -2974,6 +2982,203 @@ function getHMAnalyticsDashboard() {
     };
   } catch (error) {
     Logger.log(`ERROR in getHMAnalyticsDashboard: ${error.message}`);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * ====== SCHEME SUBMISSION HELPER API ======
+ * Provides planning context for teachers when creating schemes
+ * Returns: syllabus requirements, available periods, timeline, warnings
+ */
+function getSchemeSubmissionHelper(teacherEmail, className, subject, term) {
+  try {
+    Logger.log(`[SchemeHelper] Request: ${teacherEmail}, ${className}, ${subject}, ${term}`);
+    
+    // 1. Get Academic Calendar for the term
+    const calendarData = _getCachedSheetData('AcademicCalendar');
+    const termInfo = calendarData.data.find(row => 
+      (row.term || '').trim().toLowerCase() === term.toLowerCase()
+    );
+    
+    if (!termInfo) {
+      return {
+        success: false,
+        error: `Term "${term}" not found in Academic Calendar`
+      };
+    }
+    
+    // 2. Calculate term timeline
+    const startDate = _coerceToDate(termInfo.startDate);
+    const endDate = _coerceToDate(termInfo.endDate);
+    const examStartDate = termInfo.examStartDate ? _coerceToDate(termInfo.examStartDate) : null;
+    const today = new Date();
+    
+    const totalWeeks = Math.ceil((endDate - startDate) / (7 * 24 * 60 * 60 * 1000));
+    const teachingWeeks = examStartDate 
+      ? Math.ceil((examStartDate - startDate) / (7 * 24 * 60 * 60 * 1000))
+      : totalWeeks;
+    const weeksElapsed = Math.max(0, Math.ceil((today - startDate) / (7 * 24 * 60 * 60 * 1000)));
+    const weeksRemaining = Math.max(0, teachingWeeks - weeksElapsed);
+    
+    // 3. Get teacher's periods per week from Timetable
+    const timetableData = _getCachedSheetData('Timetable');
+    const teacherPeriods = timetableData.data.filter(row => 
+      (row.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase() &&
+      (row.class || '').trim() === className.trim() &&
+      (row.subject || '').trim().toLowerCase() === subject.toLowerCase()
+    );
+    
+    const periodsPerWeek = teacherPeriods.length;
+    const totalPeriods = periodsPerWeek * teachingWeeks;
+    const periodsRemaining = periodsPerWeek * weeksRemaining;
+    
+    // Parse event dates and names
+    const eventDatesStr = (termInfo.eventDates || '').trim();
+    const eventNamesStr = (termInfo.eventNames || '').trim();
+    const eventDates = eventDatesStr ? eventDatesStr.split(',').map(d => d.trim()) : [];
+    const eventNames = eventNamesStr ? eventNamesStr.split(',').map(n => n.trim()) : [];
+    
+    const events = [];
+    for (let i = 0; i < Math.min(eventDates.length, eventNames.length); i++) {
+      const eventDate = _coerceToDate(eventDates[i]);
+      if (eventDate && eventDate > today) {
+        const eventDayName = _dayNameIST(eventDate);
+        // Check if this event affects teacher's subject periods
+        const affectedPeriods = teacherPeriods.filter(p => 
+          (p.dayOfWeek || '').toLowerCase() === eventDayName.toLowerCase()
+        );
+        if (affectedPeriods.length > 0) {
+          events.push({
+            date: _isoDateIST(eventDate),
+            name: eventNames[i],
+            periodsLost: affectedPeriods.length
+          });
+        }
+      }
+    }
+    
+    const totalPeriodsLost = events.reduce((sum, e) => sum + e.periodsLost, 0);
+    const usablePeriods = totalPeriods - totalPeriodsLost - Math.ceil(totalPeriods * 0.05); // 5% buffer
+    const usablePeriodsRemaining = periodsRemaining - totalPeriodsLost;
+    
+    // 4. Get Syllabus requirements
+    const standard = className.match(/STD\s*(\d+)/i)?.[1] || className.match(/(\d+)/)?.[1];
+    const syllabusData = _getCachedSheetData('Syllabus');
+    const syllabusChapters = syllabusData.data.filter(row => 
+      (row.standard || '').trim() === `STD ${standard}` &&
+      (row.subject || '').trim().toLowerCase() === subject.toLowerCase() &&
+      (row.term || '').trim().toLowerCase() === term.toLowerCase()
+    );
+    
+    // Sort by sequence or chapterNo
+    syllabusChapters.sort((a, b) => {
+      const seqA = parseInt(a.sequence || a.chapterNo || 0);
+      const seqB = parseInt(b.sequence || b.chapterNo || 0);
+      return seqA - seqB;
+    });
+    
+    const totalMinSessions = syllabusChapters.reduce((sum, ch) => 
+      sum + parseInt(ch.minSessions || 0), 0
+    );
+    
+    const chapterDetails = syllabusChapters.map(ch => ({
+      chapterNo: ch.chapterNo || '',
+      chapterName: ch.chapterName || '',
+      minSessions: parseInt(ch.minSessions || 0),
+      topics: ch.topics || ''
+    }));
+    
+    // 5. Calculate feasibility
+    const capacityUtilization = usablePeriods > 0 
+      ? Math.round((totalMinSessions / usablePeriods) * 100) 
+      : 0;
+    
+    let riskLevel = 'LOW';
+    let recommendation = '';
+    let isAchievable = true;
+    
+    if (capacityUtilization > 100) {
+      riskLevel = 'HIGH';
+      isAchievable = false;
+      const shortfall = totalMinSessions - usablePeriods;
+      recommendation = `⚠️ CRITICAL: Need ${shortfall} extra periods. Request additional classes or reduce chapter sessions.`;
+    } else if (capacityUtilization > 90) {
+      riskLevel = 'MEDIUM';
+      recommendation = `⚠️ Tight schedule (${capacityUtilization}% utilization). Plan carefully with minimal buffer.`;
+    } else if (capacityUtilization < 60) {
+      riskLevel = 'LOW';
+      recommendation = `✅ Comfortable pace (${capacityUtilization}% utilization). Consider adding revision sessions or slower pace for difficult chapters.`;
+    } else {
+      riskLevel = 'LOW';
+      recommendation = `✅ Achievable schedule (${capacityUtilization}% utilization). Plan ${Math.ceil(totalMinSessions / syllabusChapters.length)} sessions per chapter on average.`;
+    }
+    
+    // 6. Generate warnings
+    const warnings = [];
+    
+    if (weeksElapsed > 0 && weeksElapsed / teachingWeeks > 0.2) {
+      warnings.push(`⏰ Term is ${Math.round(weeksElapsed / teachingWeeks * 100)}% complete. Ensure timely planning.`);
+    }
+    
+    if (events.length > 0) {
+      warnings.push(`📅 ${events.length} upcoming event(s) will affect ${totalPeriodsLost} period(s).`);
+    }
+    
+    if (periodsPerWeek === 0) {
+      warnings.push(`❌ No periods found in timetable for ${className} ${subject}. Please update timetable first.`);
+    }
+    
+    if (syllabusChapters.length === 0) {
+      warnings.push(`❌ No syllabus data found for ${className} ${subject} ${term}. Please add syllabus entries.`);
+    }
+    
+    // 7. Build response
+    return {
+      success: true,
+      termInfo: {
+        term: termInfo.term,
+        startDate: _isoDateIST(startDate),
+        endDate: _isoDateIST(endDate),
+        examStartDate: examStartDate ? _isoDateIST(examStartDate) : null,
+        totalWeeks: totalWeeks,
+        teachingWeeks: teachingWeeks,
+        weeksElapsed: weeksElapsed,
+        weeksRemaining: weeksRemaining
+      },
+      timetableInfo: {
+        periodsPerWeek: periodsPerWeek,
+        totalPeriods: totalPeriods,
+        periodsRemaining: periodsRemaining,
+        eventsImpact: totalPeriodsLost,
+        usablePeriods: usablePeriods,
+        usablePeriodsRemaining: usablePeriodsRemaining,
+        bufferPeriods: Math.ceil(totalPeriods * 0.05)
+      },
+      syllabusRequirement: {
+        totalChapters: syllabusChapters.length,
+        minSessionsRequired: totalMinSessions,
+        avgSessionsPerChapter: syllabusChapters.length > 0 
+          ? Math.round(totalMinSessions / syllabusChapters.length) 
+          : 0,
+        chapterDetails: chapterDetails
+      },
+      feasibility: {
+        isAchievable: isAchievable,
+        capacityUtilization: `${capacityUtilization}%`,
+        riskLevel: riskLevel,
+        recommendation: recommendation
+      },
+      upcomingEvents: events,
+      warnings: warnings,
+      generatedAt: new Date().toISOString()
+    };
+    
+  } catch (error) {
+    Logger.log(`ERROR in getSchemeSubmissionHelper: ${error.message}\n${error.stack}`);
     return {
       success: false,
       error: error.message
