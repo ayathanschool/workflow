@@ -64,6 +64,24 @@ function doGet(e) {
     if (action === 'ping') {
       return _respond({ ok: true, now: new Date().toISOString() });
     }
+    
+    // Debug: Check current date/time in IST
+    if (action === 'checkDate') {
+      const now = new Date();
+      const todayISO = _todayISO();
+      const dayName = _dayName(todayISO);
+      return _respond({
+        serverTimeUTC: now.toISOString(),
+        serverTimeIST: Utilities.formatDate(now, TZ, 'yyyy-MM-dd HH:mm:ss EEEE'),
+        todayISO: todayISO,
+        todayDayName: dayName,
+        timezone: TZ,
+        test: {
+          input: '2025-11-24',
+          parsed: _dayName('2025-11-24')
+        }
+      });
+    }
 
     // === AUTHENTICATION ROUTES ===
     if (action === 'login') {
@@ -380,6 +398,11 @@ function doGet(e) {
       return _respond(getSchemeSubmissionHelper(teacherEmail, className, subject, term));
     }
     
+    if (action === 'getSyllabusPaceTracking') {
+      const term = (e.parameter.term || '').trim();
+      return _respond(getSyllabusPaceTracking(term));
+    }
+    
     if (action === 'syncSessionDependencies') {
       return _handleSyncSessionDependencies(e.parameter);
     }
@@ -630,6 +653,11 @@ function doPost(e) {
         Logger.log('=== NO DUPLICATE - PROCEEDING WITH SUBMISSION ===');
         
         const now = new Date().toISOString();
+        
+        // Determine planType based on lessonPlanId presence (for backward compatibility)
+        // New submissions won't send planType, but we infer it from lessonPlanId
+        const inferredPlanType = data.lessonPlanId ? 'in plan' : 'not planned';
+        
         const rowData = [
           data.date || '',
           data.teacherEmail || '',
@@ -637,7 +665,7 @@ function doPost(e) {
           data.class || '',
           data.subject || '',
           Number(data.period||0),
-          data.planType || '',
+          data.planType || inferredPlanType, // Use sent value or infer from lessonPlanId
           data.lessonPlanId || '',
           data.chapter || '',
           Number(data.sessionNo || 0),
@@ -1744,14 +1772,43 @@ function _handleGetTeacherDailyReportsForDate(params) {
 function _handleGetDailyReportsForDate(params) {
   try {
     const date = params.date || _todayISO();
+    
+    // CRITICAL: Parse the date string correctly for IST
+    // When client sends "2025-11-24", interpret as IST midnight
     const dayName = _dayName(date); // Get the day of week for this date
-    Logger.log(`Getting daily reports for date: ${date}, day: ${dayName}`);
+    
+    // Enhanced logging for timezone debugging
+    const now = new Date();
+    const istNow = Utilities.formatDate(now, TZ, 'yyyy-MM-dd HH:mm:ss EEEE');
+    const todayISO = _todayISO();
+    const todayDayName = _dayName(todayISO);
+    
+    Logger.log(`=== Daily Reports Request ===`);
+    Logger.log(`Current time (IST): ${istNow}`);
+    Logger.log(`Today (IST): ${todayISO} = ${todayDayName}`);
+    Logger.log(`Requested date: ${date} = ${dayName}`);
+    Logger.log(`Date match: ${date === todayISO ? 'YES (today)' : 'NO (different day)'}`);
+    
+    // Verify date parsing
+    const testDate = new Date(date + 'T00:00:00');
+    Logger.log(`Test parse: ${date} -> ${testDate.toISOString()} -> ${Utilities.formatDate(testDate, TZ, 'EEEE, dd MMM yyyy')}`);
     
     // Get timetable periods for THIS DAY ONLY
     const ttSh = _getSheet('Timetable');
     const ttHeaders = _headers(ttSh);
-    const allTimetable = _rows(ttSh).map(row => _indexByHeader(row, ttHeaders))
-      .filter(tt => _normalizeDayName(tt.dayOfWeek) === _normalizeDayName(dayName));
+    const allTimetable = _rows(ttSh).map(row => _indexByHeader(row, ttHeaders));
+    
+    Logger.log(`Total timetable entries: ${allTimetable.length}`);
+    
+    // Log unique days in timetable for debugging
+    const uniqueDays = [...new Set(allTimetable.map(tt => tt.dayOfWeek))];
+    Logger.log(`Days in timetable: ${uniqueDays.join(', ')}`);
+    Logger.log(`Normalized days: ${uniqueDays.map(d => _normalizeDayName(d)).join(', ')}`);
+    Logger.log(`Looking for day: ${dayName} (normalized: ${_normalizeDayName(dayName)})`);
+    
+    // Filter for today's day
+    const todayTimetable = allTimetable.filter(tt => _normalizeDayName(tt.dayOfWeek) === _normalizeDayName(dayName));
+    Logger.log(`Timetable entries for ${dayName}: ${todayTimetable.length}`);
     
     // Get all daily reports for this date
     const drSh = _getSheet('DailyReports');
@@ -1767,7 +1824,7 @@ function _handleGetDailyReportsForDate(params) {
         return reportDate === queryDate;
       });
     
-    Logger.log(`Found ${allTimetable.length} timetable periods and ${allReports.length} reports`);
+    Logger.log(`Found ${todayTimetable.length} timetable periods and ${allReports.length} reports`);
     
     // Create a map of submitted reports by key (teacherEmail|class|subject|period)
     const reportMap = {};
@@ -1781,7 +1838,7 @@ function _handleGetDailyReportsForDate(params) {
     
     // Group timetable by teacher
     const teacherPeriods = {};
-    allTimetable.forEach(tt => {
+    todayTimetable.forEach(tt => {
       const teacher = String(tt.teacherEmail || tt.teacher || '').toLowerCase().trim();
       if (!teacher) return;
       
@@ -3001,7 +3058,7 @@ function getSchemeSubmissionHelper(teacherEmail, className, subject, term) {
     // 1. Get Academic Calendar for the term
     const calendarData = _getCachedSheetData('AcademicCalendar');
     const termInfo = calendarData.data.find(row => 
-      (row.term || '').trim().toLowerCase() === term.toLowerCase()
+      String(row.term || '').trim().toLowerCase() === term.toLowerCase()
     );
     
     if (!termInfo) {
@@ -3066,12 +3123,11 @@ function getSchemeSubmissionHelper(teacherEmail, className, subject, term) {
     const usablePeriodsRemaining = periodsRemaining - totalPeriodsLost;
     
     // 4. Get Syllabus requirements
-    const standard = className.match(/STD\s*(\d+)/i)?.[1] || className.match(/(\d+)/)?.[1];
     const syllabusData = _getCachedSheetData('Syllabus');
     const syllabusChapters = syllabusData.data.filter(row => 
-      (row.standard || '').trim() === `STD ${standard}` &&
+      (row.standard || '').trim() === className.trim() &&
       (row.subject || '').trim().toLowerCase() === subject.toLowerCase() &&
-      (row.term || '').trim().toLowerCase() === term.toLowerCase()
+      String(row.term || '').trim().toLowerCase() === term.toLowerCase()
     );
     
     // Sort by sequence or chapterNo
@@ -3179,6 +3235,250 @@ function getSchemeSubmissionHelper(teacherEmail, className, subject, term) {
     
   } catch (error) {
     Logger.log(`ERROR in getSchemeSubmissionHelper: ${error.message}\n${error.stack}`);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Get syllabus pace tracking for HM dashboard
+ * Compares Board Syllabus → Teacher Schemes → Actual Progress
+ */
+function getSyllabusPaceTracking(term = 'Term 2') {
+  try {
+    const syllabusData = _getCachedSheetData('Syllabus');
+    const schemesData = _getCachedSheetData('Schemes');
+    const lessonsData = _getCachedSheetData('LessonPlans');
+    const reportsData = _getCachedSheetData('DailyReports');
+    const calendarData = _getCachedSheetData('AcademicCalendar');
+    
+    // Get term info
+    const termInfo = calendarData.data.find(row => 
+      String(row.term || '').trim().toLowerCase() === term.toLowerCase()
+    );
+    
+    if (!termInfo) {
+      return {
+        success: false,
+        error: `Term "${term}" not found in Academic Calendar`
+      };
+    }
+    
+    const startDate = _coerceToDate(termInfo.startDate);
+    const endDate = _coerceToDate(termInfo.endDate);
+    const today = new Date();
+    
+    const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+    const elapsedDays = Math.max(0, Math.ceil((today - startDate) / (1000 * 60 * 60 * 24)));
+    const progressPercent = Math.min(100, Math.round((elapsedDays / totalDays) * 100));
+    
+    // Group syllabus by class-subject
+    const syllabusMap = {};
+    syllabusData.data.forEach(row => {
+      const rowTerm = String(row.term || '').trim();
+      if (rowTerm.toLowerCase() !== term.toLowerCase()) return;
+      
+      const key = `${row.standard}|${row.subject}`;
+      if (!syllabusMap[key]) {
+        syllabusMap[key] = {
+          class: row.standard,
+          subject: row.subject,
+          chapters: [],
+          totalSessions: 0
+        };
+      }
+      
+      const minSessions = parseInt(row.minSessions || 0);
+      syllabusMap[key].chapters.push({
+        chapterNo: row.chapterNo,
+        chapterName: row.chapterName,
+        minSessions: minSessions
+      });
+      syllabusMap[key].totalSessions += minSessions;
+    });
+    
+    // Calculate progress for each class-subject
+    const progressTracking = [];
+    
+    for (const key in syllabusMap) {
+      const syllabus = syllabusMap[key];
+      const [className, subject] = key.split('|');
+      
+      // Get approved schemes
+      const schemes = schemesData.data.filter(row => 
+        (row.class || '').trim() === className.trim() &&
+        (row.subject || '').trim().toLowerCase() === subject.toLowerCase() &&
+        String(row.term || '').trim() === term &&
+        (row.status || '').toLowerCase() === 'approved'
+      );
+      
+      const plannedSessions = schemes.reduce((sum, s) => 
+        sum + parseInt(s.sessions || 0), 0
+      );
+      
+      // Get completed lessons
+      const lessons = lessonsData.data.filter(row => 
+        (row.class || '').trim() === className.trim() &&
+        (row.subject || '').trim().toLowerCase() === subject.toLowerCase() &&
+        String(row.term || '').trim() === term &&
+        (row.status || '').toLowerCase() === 'approved'
+      );
+      
+      const completedSessions = lessons.reduce((sum, l) => 
+        sum + parseInt(l.sessions || 0), 0
+      );
+      
+      // Count actual completed periods from daily reports
+      const reports = reportsData.data.filter(row => 
+        (row.class || '').trim() === className.trim() &&
+        (row.subject || '').trim().toLowerCase() === subject.toLowerCase() &&
+        (row.status || '').toLowerCase() === 'completed'
+      );
+      
+      const actualCompleted = reports.length;
+      
+      // Calculate percentages
+      const syllabusTarget = syllabus.totalSessions;
+      const plannedPercent = syllabusTarget > 0 
+        ? Math.round((plannedSessions / syllabusTarget) * 100) 
+        : 0;
+      const completedPercent = syllabusTarget > 0 
+        ? Math.round((actualCompleted / syllabusTarget) * 100) 
+        : 0;
+      
+      // Calculate expected progress based on time elapsed
+      const expectedPercent = progressPercent;
+      
+      // Find teacher from timetable or schemes
+      const usersData = _getCachedSheetData('Users');
+      const timetableData = _getCachedSheetData('Timetable');
+      
+      let teacherName = 'Not Assigned';
+      const teacherScheme = schemes[0];
+      
+      if (teacherScheme && teacherScheme.teacherEmail) {
+        const teacherUser = usersData.data.find(u => 
+          (u.email || '').toLowerCase() === teacherScheme.teacherEmail.toLowerCase()
+        );
+        teacherName = teacherUser ? teacherUser.name : teacherScheme.teacherEmail;
+      } else {
+        // Try to find from timetable
+        const timetableEntry = timetableData.data.find(row =>
+          (row.standard || '').trim() === className.trim() &&
+          (row.subject || '').trim().toLowerCase() === subject.toLowerCase()
+        );
+        if (timetableEntry && timetableEntry.teacherEmail) {
+          const teacherUser = usersData.data.find(u => 
+            (u.email || '').toLowerCase() === timetableEntry.teacherEmail.toLowerCase()
+          );
+          teacherName = teacherUser ? teacherUser.name : timetableEntry.teacherEmail;
+        }
+      }
+      
+      // Calculate weeks
+      const weeksElapsed = Math.floor(elapsedDays / 7);
+      const totalWeeks = Math.floor(totalDays / 7);
+      
+      // Determine risk level and recommendations
+      const behindBy = expectedPercent - completedPercent;
+      let riskLevel = 'LOW';
+      let recommendation = '';
+      const warnings = [];
+      
+      if (schemes.length === 0) {
+        riskLevel = 'HIGH';
+        warnings.push('No scheme submitted yet for this subject');
+        recommendation = 'Teacher needs to submit a scheme of work immediately';
+      } else if (behindBy > 20) {
+        riskLevel = 'HIGH';
+        warnings.push(`Behind schedule by ${Math.round(behindBy)}%`);
+        recommendation = 'Urgent intervention needed - consider extra classes or reduced scope';
+      } else if (behindBy > 10) {
+        riskLevel = 'MEDIUM';
+        warnings.push(`Slightly behind schedule by ${Math.round(behindBy)}%`);
+        recommendation = 'Monitor closely and encourage teacher to catch up';
+      } else if (behindBy < -10) {
+        riskLevel = 'LOW';
+        recommendation = 'Ahead of schedule - excellent progress';
+      } else {
+        riskLevel = 'LOW';
+        recommendation = 'On track - continue current pace';
+      }
+      
+      // Calculate projected completion
+      let projectedCompletion = 'N/A';
+      if (actualCompleted > 0 && weeksElapsed > 0) {
+        const weeklyRate = actualCompleted / weeksElapsed;
+        const remainingSessions = syllabusTarget - actualCompleted;
+        const weeksNeeded = Math.ceil(remainingSessions / weeklyRate);
+        const projectedWeeks = weeksElapsed + weeksNeeded;
+        if (projectedWeeks <= totalWeeks) {
+          projectedCompletion = `Week ${projectedWeeks} of ${totalWeeks}`;
+        } else {
+          projectedCompletion = `Overdue (Week ${projectedWeeks})`;
+          if (riskLevel === 'LOW') riskLevel = 'MEDIUM';
+        }
+      }
+      
+      progressTracking.push({
+        className: className,
+        subject: subject,
+        teacher: teacherName,
+        syllabusTotal: syllabusTarget,
+        syllabusCompleted: Math.round((completedPercent / 100) * syllabus.chapters.length),
+        syllabusProgress: Math.round((completedPercent / 100) * 100),
+        schemeTotal: plannedSessions,
+        schemeCompleted: completedSessions,
+        schemeProgress: plannedPercent,
+        actualTotal: syllabusTarget,
+        actualCompleted: actualCompleted,
+        actualProgress: completedPercent,
+        weeksElapsed: weeksElapsed,
+        totalWeeks: totalWeeks,
+        expectedProgress: expectedPercent,
+        behindBy: Math.max(0, behindBy),
+        projectedCompletion: projectedCompletion,
+        riskLevel: riskLevel,
+        recommendation: recommendation,
+        warnings: warnings
+      });
+    }
+    
+    // Sort by risk level (HIGH first)
+    const riskOrder = { 'HIGH': 0, 'MEDIUM': 1, 'LOW': 2 };
+    progressTracking.sort((a, b) => {
+      const riskDiff = riskOrder[a.riskLevel] - riskOrder[b.riskLevel];
+      if (riskDiff !== 0) return riskDiff;
+      return a.className.localeCompare(b.className);
+    });
+    
+    // Calculate summary stats
+    const summary = {
+      totalSubjects: progressTracking.length,
+      onTrack: progressTracking.filter(p => p.riskLevel === 'LOW').length,
+      atRisk: progressTracking.filter(p => p.riskLevel === 'MEDIUM').length,
+      critical: progressTracking.filter(p => p.riskLevel === 'HIGH').length
+    };
+    
+    return {
+      success: true,
+      term: term,
+      termProgress: {
+        startDate: _isoDateIST(startDate),
+        endDate: _isoDateIST(endDate),
+        elapsedDays: elapsedDays,
+        totalDays: totalDays,
+        progressPercent: progressPercent
+      },
+      summary: summary,
+      subjects: progressTracking,
+      generatedAt: new Date().toISOString()
+    };
+    
+  } catch (error) {
+    Logger.log(`ERROR in getSyllabusPaceTracking: ${error.message}\n${error.stack}`);
     return {
       success: false,
       error: error.message

@@ -1,4 +1,5 @@
-// DailyReportEnhanced.jsx - Integrated Daily Reports with Session Progress Tracking
+// DailyReportEnhanced.jsx - DEPRECATED: Use DailyReportModern.jsx instead
+// This file is kept for reference but is no longer used in the application
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import {
   getTeacherDailyTimetable,

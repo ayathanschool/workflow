@@ -233,7 +233,6 @@ export default function DailyReportModern({ user }) {
         class: period.class,
         subject: period.subject,
         period: Number(period.period),
-        planType: draft.planType || "not planned",
         lessonPlanId: draft.lessonPlanId || "",
         chapter: chapter,
         sessionNo: Number(draft.sessionNo || 1),
@@ -632,73 +631,30 @@ function PeriodCard({
       {/* Expanded Form */}
       {isExpanded && !isSubmitted && (
         <div className="p-6 border-t border-gray-100 space-y-6">
-          {/* Plan Type Selection */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Planning Type <span className="text-red-500">*</span>
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  onUpdate('planType', 'planned');
-                  if (plan) {
-                    onUpdate('chapter', plan.chapter || '');
-                    onUpdate('objectives', plan.learningObjectives || '');
-                    onUpdate('activities', plan.activities || '');
-                    onUpdate('lessonPlanId', plan.lpId || '');
-                    onUpdate('sessionNo', plan.session || 1);
-                    onUpdate('totalSessions', plan.totalSessions || 1);
-                  }
-                }}
-                className={`p-4 rounded-xl border-2 transition-all ${
-                  data.planType === 'planned'
-                    ? 'bg-blue-50 border-blue-500 shadow-md'
-                    : 'bg-white border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <div className="text-2xl mb-1">📋</div>
-                <div className="text-sm font-semibold text-gray-900">In Plan</div>
-                <div className="text-xs text-gray-600 mt-1">Using lesson plan</div>
-                {plan && <div className="text-xs text-blue-600 mt-1">✓ Plan available</div>}
-              </button>
-              
-              <button
-                type="button"
-                onClick={() => {
-                  onUpdate('planType', 'not planned');
-                  onUpdate('chapter', '');
-                  onUpdate('objectives', '');
-                  onUpdate('activities', '');
-                  onUpdate('lessonPlanId', '');
-                }}
-                className={`p-4 rounded-xl border-2 transition-all ${
-                  data.planType === 'not planned'
-                    ? 'bg-orange-50 border-orange-500 shadow-md'
-                    : 'bg-white border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <div className="text-2xl mb-1">✏️</div>
-                <div className="text-sm font-semibold text-gray-900">Not Planned</div>
-                <div className="text-xs text-gray-600 mt-1">Manual entry</div>
-              </button>
-            </div>
-          </div>
-
-          {/* Show lesson plan details if planned */}
-          {data.planType === 'planned' && plan && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          {/* Show lesson plan details if available */}
+          {plan ? (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
               <div className="flex items-start gap-3">
                 <div className="text-2xl">📚</div>
                 <div className="flex-1">
-                  <div className="font-medium text-blue-900">Lesson Plan: {plan.chapter}</div>
-                  <div className="text-sm text-blue-700 mt-1">Session {plan.session} of {plan.totalSessions}</div>
-                  <div className="text-xs text-blue-600 mt-1">Plan ID: {plan.lpId}</div>
+                  <div className="font-medium text-green-900">Lesson Plan: {plan.chapter}</div>
+                  <div className="text-sm text-green-700 mt-1">Session {plan.session} of {plan.totalSessions}</div>
+                  <div className="text-xs text-green-600 mt-1">Plan ID: {plan.lpId}</div>
                   {plan.learningObjectives && (
-                    <div className="text-xs text-blue-700 mt-2">
+                    <div className="text-xs text-green-700 mt-2">
                       <strong>Objectives:</strong> {plan.learningObjectives.substring(0, 100)}...
                     </div>
                   )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <div className="text-2xl">⚠️</div>
+                <div className="flex-1">
+                  <div className="font-medium text-red-900">No Lesson Plan Found</div>
+                  <div className="text-sm text-red-700 mt-1">Please prepare and submit a lesson plan for approval before teaching this period.</div>
                 </div>
               </div>
             </div>
@@ -714,10 +670,9 @@ function PeriodCard({
                 type="text"
                 value={chapter}
                 onChange={(e) => onUpdate('chapter', e.target.value)}
-                placeholder={data.planType === 'planned' ? "From lesson plan" : "Enter chapter or topic name"}
-                disabled={data.planType === 'planned'}
-                className={`w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                  data.planType === 'planned' ? 'bg-gray-100 cursor-not-allowed' : ''
+                placeholder={plan ? "From lesson plan" : "Enter chapter or topic name"}
+                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                  plan ? 'bg-blue-50 border-blue-300' : 'border-gray-300'
                 }`}
               />
             </div>
@@ -732,10 +687,7 @@ function PeriodCard({
                   value={data.sessionNo || 1}
                   onChange={(e) => onUpdate('sessionNo', e.target.value)}
                   min="1"
-                  disabled={data.planType === 'planned'}
-                  className={`w-24 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                    data.planType === 'planned' ? 'bg-gray-100 cursor-not-allowed' : ''
-                  }`}
+                  className="w-24 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
                 <span className="py-2 text-gray-500">of</span>
                 <input
@@ -743,17 +695,14 @@ function PeriodCard({
                   value={data.totalSessions || 1}
                   onChange={(e) => onUpdate('totalSessions', e.target.value)}
                   min="1"
-                  disabled={data.planType === 'planned'}
-                  className={`w-24 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                    data.planType === 'planned' ? 'bg-gray-100 cursor-not-allowed' : ''
-                  }`}
+                  className="w-24 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
             </div>
           </div>
 
-          {/* Objectives from lesson plan - shown when In Plan is selected */}
-          {data.planType === 'planned' && plan && (
+          {/* Learning Objectives */}
+          {plan && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Learning Objectives (from Lesson Plan) 
@@ -769,8 +718,8 @@ function PeriodCard({
             </div>
           )}
 
-          {/* Activities from lesson plan - shown when In Plan is selected */}
-          {data.planType === 'planned' && plan && plan.teachingMethods && (
+          {/* Teaching Methods/Activities */}
+          {plan && plan.teachingMethods && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Teaching Methods (from Lesson Plan)
@@ -828,8 +777,8 @@ function PeriodCard({
             </div>
           )}
 
-          {/* Learning Objectives - only show for "not planned" when completion > 0 */}
-          {completionPercentage > 0 && data.planType !== 'planned' && (
+          {/* Learning Objectives - show for all cases when completion > 0 */}
+          {completionPercentage > 0 && !plan && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Learning Objectives <span className="text-red-500">*</span>
@@ -844,8 +793,8 @@ function PeriodCard({
             </div>
           )}
 
-          {/* Activities - only show for "not planned" when completion > 0 */}
-          {completionPercentage > 0 && data.planType !== 'planned' && (
+          {/* Activities - show for all cases when completion > 0 */}
+          {completionPercentage > 0 && !plan && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Activities

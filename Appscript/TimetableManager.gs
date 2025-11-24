@@ -9,12 +9,13 @@
  */
 function getTeacherWeeklyTimetable(identifier) {
   // Create array of next 7 days
+  const TZ = 'Asia/Kolkata';
   const days = [];
   const today = new Date();
   for (let i = 0; i < 7; i++) {
     const d = new Date(today.getTime() + i * 24 * 3600 * 1000);
-    const iso = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-    const dayName = Utilities.formatDate(d, Session.getScriptTimeZone(), 'EEEE');
+    const iso = Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
+    const dayName = Utilities.formatDate(d, TZ, 'EEEE');
     days.push({ date: iso, dayName });
   }
   
@@ -299,8 +300,10 @@ function _normalizeDayName(input) {
  */
 function _getDayOfWeek(dateString) {
   try {
+    // Use IST timezone consistently
+    const TZ = 'Asia/Kolkata';
     const date = new Date(dateString + 'T00:00:00');
-    return Utilities.formatDate(date, Session.getScriptTimeZone(), 'EEEE');
+    return Utilities.formatDate(date, TZ, 'EEEE');
   } catch (err) {
     console.error('Error getting day of week for:', dateString, err);
     return '';

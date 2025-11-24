@@ -1,6 +1,6 @@
 // HMDailyOversightEnhanced.jsx - Enhanced HM Dashboard with Session Progress Analytics
 import React, { useState, useEffect } from 'react';
-import { getDailyReportsForDate, getLessonPlansForDate, getClassSubjectPerformance } from '../api';
+import { getDailyReportsForDate, getLessonPlansForDate, getClassSubjectPerformance, getSyllabusPaceTracking } from '../api';
 import { todayIST, formatLocalDate } from '../utils/dateUtils';
 import { Clock, RefreshCw, AlertTriangle } from 'lucide-react';
 
@@ -42,11 +42,15 @@ const HMDailyOversightEnhanced = ({ user }) => {
   const [refreshInterval, setRefreshInterval] = useState(5);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [urgentAlerts, setUrgentAlerts] = useState([]);
+  const [paceTracking, setPaceTracking] = useState(null);
+  const [loadingPaceTracking, setLoadingPaceTracking] = useState(false);
+  const [selectedTerm, setSelectedTerm] = useState('Term 2');
 
   useEffect(() => {
     loadDailyReports();
     loadLessonPlans();
     loadClassSubjectPerformance(); // Load analytics data on mount
+    loadPaceTracking(); // Load pace tracking data
   }, [date]);
 
   // Load class/subject performance analytics
@@ -69,6 +73,28 @@ const HMDailyOversightEnhanced = ({ user }) => {
       setClassSubjectPerformance([]);
     } finally {
       setAnalyticsLoading(false);
+    }
+  }
+
+  // Load pace tracking data
+  async function loadPaceTracking() {
+    setLoadingPaceTracking(true);
+    try {
+      const response = await getSyllabusPaceTracking(selectedTerm);
+      console.log('Pace tracking response:', response);
+      
+      const result = response.data || response;
+      if (result.success) {
+        setPaceTracking(result);
+      } else {
+        console.warn('Failed to load pace tracking:', result.error);
+        setPaceTracking(null);
+      }
+    } catch (err) {
+      console.error('Error loading pace tracking:', err);
+      setPaceTracking(null);
+    } finally {
+      setLoadingPaceTracking(false);
     }
   }
 
@@ -336,6 +362,25 @@ const HMDailyOversightEnhanced = ({ user }) => {
     });
   }
 
+  function getFilteredAnalytics() {
+    return sessionAnalytics.filter(chapter => {
+      if (filters.teacher && !chapter.teachers.some(t => t === filters.teacher)) return false;
+      if (filters.class && chapter.class !== filters.class) return false;
+      if (filters.subject && chapter.subject !== filters.subject) return false;
+      return true;
+    });
+  }
+
+  function getFilteredPaceTracking() {
+    if (!paceTracking || !paceTracking.subjects) return [];
+    return paceTracking.subjects.filter(subject => {
+      if (filters.teacher && subject.teacher !== filters.teacher) return false;
+      if (filters.class && subject.className !== filters.class) return false;
+      if (filters.subject && subject.subject !== filters.subject) return false;
+      return true;
+    });
+  }
+
   function getCompletionColor(percentage) {
     const p = Number(percentage) || 0;
     if (p >= 80) return 'bg-green-100 text-green-800 border-green-200';
@@ -346,6 +391,8 @@ const HMDailyOversightEnhanced = ({ user }) => {
   }
 
   const filteredReports = getFilteredReports();
+  const filteredAnalytics = getFilteredAnalytics();
+  const filteredPaceTrackingSubjects = getFilteredPaceTracking();
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -858,7 +905,17 @@ const HMDailyOversightEnhanced = ({ user }) => {
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
           >
-            Chapter Analytics ({sessionAnalytics.length})
+            Chapter Analytics ({filteredAnalytics.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('pace-tracking')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'pace-tracking'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Syllabus Pace Tracking ({filteredPaceTrackingSubjects.length})
           </button>
         </nav>
       </div>
@@ -964,7 +1021,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
 
       {activeTab === 'analytics' && (
         <div className="space-y-4">
-          {sessionAnalytics.map((chapter, index) => (
+          {filteredAnalytics.map((chapter, index) => (
             <div key={index} className="bg-white border border-gray-200 rounded-lg p-4">
               <div className="flex justify-between items-start mb-3">
                 <div>
@@ -1017,9 +1074,193 @@ const HMDailyOversightEnhanced = ({ user }) => {
             </div>
           ))}
           
-          {sessionAnalytics.length === 0 && !loading && (
+          {filteredAnalytics.length === 0 && !loading && (
             <div className="bg-white border border-gray-200 rounded-lg p-8 text-center text-gray-500">
-              No chapter analytics available for the selected date.
+              No chapter analytics available for the selected filters.
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'pace-tracking' && (
+        <div className="space-y-6">
+          {/* Term Selector */}
+          <div className="flex items-center gap-4 mb-4">
+            <label className="font-medium text-gray-700">Select Term:</label>
+            <select
+              value={selectedTerm}
+              onChange={(e) => {
+                setSelectedTerm(e.target.value);
+                setTimeout(() => loadPaceTracking(), 100);
+              }}
+              className="border border-gray-300 rounded-md px-3 py-2"
+            >
+              <option value="Term 1">Term 1</option>
+              <option value="Term 2">Term 2</option>
+              <option value="Term 3">Term 3</option>
+            </select>
+          </div>
+
+          {loadingPaceTracking && (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+              <div className="ml-3 text-gray-600">Loading pace tracking...</div>
+            </div>
+          )}
+
+          {!loadingPaceTracking && paceTracking && (
+            <>
+              {/* Summary Stats */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div className="bg-white p-4 border border-gray-200 rounded-lg">
+                  <p className="text-sm font-medium text-gray-600">Total Subjects</p>
+                  <p className="text-3xl font-bold text-blue-600">{filteredPaceTrackingSubjects.length}</p>
+                </div>
+                <div className="bg-green-50 p-4 border border-green-200 rounded-lg">
+                  <p className="text-sm font-medium text-gray-600">On Track</p>
+                  <p className="text-3xl font-bold text-green-600">
+                    {filteredPaceTrackingSubjects.filter(s => s.riskLevel === 'LOW').length}
+                  </p>
+                </div>
+                <div className="bg-yellow-50 p-4 border border-yellow-200 rounded-lg">
+                  <p className="text-sm font-medium text-gray-600">At Risk</p>
+                  <p className="text-3xl font-bold text-yellow-600">
+                    {filteredPaceTrackingSubjects.filter(s => s.riskLevel === 'MEDIUM').length}
+                  </p>
+                </div>
+                <div className="bg-red-50 p-4 border border-red-200 rounded-lg">
+                  <p className="text-sm font-medium text-gray-600">Critical</p>
+                  <p className="text-3xl font-bold text-red-600">
+                    {filteredPaceTrackingSubjects.filter(s => s.riskLevel === 'HIGH').length}
+                  </p>
+                </div>
+              </div>
+
+              {/* Subject Details */}
+              <div className="space-y-4">
+                {filteredPaceTrackingSubjects.map((subject, idx) => {
+                  const bgColor = subject.riskLevel === 'HIGH' ? 'bg-red-50 border-red-200' :
+                                  subject.riskLevel === 'MEDIUM' ? 'bg-yellow-50 border-yellow-200' :
+                                  'bg-green-50 border-green-200';
+                  const textColor = subject.riskLevel === 'HIGH' ? 'text-red-700' :
+                                    subject.riskLevel === 'MEDIUM' ? 'text-yellow-700' :
+                                    'text-green-700';
+                  
+                  return (
+                    <div key={idx} className={`p-4 border rounded-lg ${bgColor}`}>
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <h3 className="font-bold text-lg">{subject.className} - {subject.subject}</h3>
+                          <p className="text-sm text-gray-600">Teacher: {subject.teacher}</p>
+                        </div>
+                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${textColor} bg-white`}>
+                          {subject.riskLevel} RISK
+                        </span>
+                      </div>
+
+                      {/* Progress Bars */}
+                      <div className="grid grid-cols-3 gap-4 mb-3">
+                        <div>
+                          <p className="text-xs text-gray-600 mb-1">Syllabus Target</p>
+                          <div className="w-full bg-gray-200 rounded-full h-3">
+                            <div
+                              className="bg-blue-600 h-3 rounded-full flex items-center justify-center text-white text-xs"
+                              style={{ width: `${Math.min(subject.syllabusProgress || 0, 100)}%` }}
+                            >
+                              {subject.syllabusProgress || 0}%
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {subject.syllabusCompleted || 0} / {subject.syllabusTotal || 0} chapters
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-600 mb-1">Scheme Progress</p>
+                          <div className="w-full bg-gray-200 rounded-full h-3">
+                            <div
+                              className="bg-indigo-600 h-3 rounded-full flex items-center justify-center text-white text-xs"
+                              style={{ width: `${Math.min(subject.schemeProgress || 0, 100)}%` }}
+                            >
+                              {subject.schemeProgress || 0}%
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {subject.schemeCompleted || 0} / {subject.schemeTotal || 0} sessions
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-600 mb-1">Actual Completion</p>
+                          <div className="w-full bg-gray-200 rounded-full h-3">
+                            <div
+                              className="bg-green-600 h-3 rounded-full flex items-center justify-center text-white text-xs"
+                              style={{ width: `${Math.min(subject.actualProgress || 0, 100)}%` }}
+                            >
+                              {subject.actualProgress || 0}%
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {subject.actualCompleted || 0} / {subject.actualTotal || 0} sessions
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Stats Grid */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                        <div>
+                          <p className="text-gray-600">Time Elapsed</p>
+                          <p className="font-bold">{subject.weeksElapsed || 0} / {subject.totalWeeks || 0} weeks</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-600">Expected Progress</p>
+                          <p className="font-bold">{subject.expectedProgress || 0}%</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-600">Behind By</p>
+                          <p className={`font-bold ${subject.behindBy > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            {subject.behindBy > 0 ? `${subject.behindBy}%` : 'On track'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-600">Projected Completion</p>
+                          <p className="font-bold">{subject.projectedCompletion || 'N/A'}</p>
+                        </div>
+                      </div>
+
+                      {/* Recommendations */}
+                      {subject.recommendation && (
+                        <div className="mt-3 p-3 bg-white rounded border border-gray-200">
+                          <p className="text-sm font-medium text-gray-700 mb-1">💡 Recommendation:</p>
+                          <p className="text-sm text-gray-600">{subject.recommendation}</p>
+                        </div>
+                      )}
+
+                      {/* Warnings */}
+                      {subject.warnings && subject.warnings.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {subject.warnings.map((warning, wIdx) => (
+                            <p key={wIdx} className="text-sm text-red-600 flex items-start gap-2">
+                              <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                              {warning}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {filteredPaceTrackingSubjects.length === 0 && (
+                <div className="bg-white border border-gray-200 rounded-lg p-8 text-center text-gray-500">
+                  No pace tracking data available for {selectedTerm} with the current filters. Please ensure syllabus and scheme data are configured.
+                </div>
+              )}
+            </>
+          )}
+
+          {!loadingPaceTracking && !paceTracking && (
+            <div className="bg-white border border-gray-200 rounded-lg p-8 text-center text-gray-500">
+              Unable to load pace tracking data. Please try again.
             </div>
           )}
         </div>

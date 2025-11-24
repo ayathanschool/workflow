@@ -913,6 +913,27 @@ export async function getAllTeachers() {
   return getJSON(`${BASE_URL}?${q.toString()}`, LONG_CACHE_DURATION);
 }
 
+// Get scheme submission helper (planning assistant)
+export async function getSchemeSubmissionHelper(teacherEmail, className, subject, term) {
+  const q = new URLSearchParams({
+    action: 'getSchemeSubmissionHelper',
+    teacherEmail,
+    class: className,
+    subject,
+    term
+  });
+  return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+}
+
+// Get syllabus pace tracking for HM dashboard
+export async function getSyllabusPaceTracking(term) {
+  const q = new URLSearchParams({
+    action: 'getSyllabusPaceTracking',
+    term
+  });
+  return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+}
+
 // ===== SESSION COMPLETION TRACKING API =====
 
 // Update session completion status and progress

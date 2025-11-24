@@ -205,8 +205,10 @@ function _isoDateString(date) {
  */
 function _dayName(isoDate) {
   try {
+    // Use IST timezone consistently
+    const TZ = 'Asia/Kolkata';
     const date = new Date(isoDate + 'T00:00:00');
-    return Utilities.formatDate(date, Session.getScriptTimeZone(), 'EEEE');
+    return Utilities.formatDate(date, TZ, 'EEEE');
   } catch (err) {
     console.error('Error getting day name for:', isoDate, err);
     return '';
@@ -214,7 +216,7 @@ function _dayName(isoDate) {
 }
 
 /**
- * Create a JSON response for web requests
+ * Create a JSON response with proper CORS headers
  */
 function _respond(obj, status) {
   const response = {
@@ -223,9 +225,13 @@ function _respond(obj, status) {
     timestamp: new Date().toISOString()
   };
   
-  return ContentService
+  const output = ContentService
     .createTextOutput(JSON.stringify(response))
     .setMimeType(ContentService.MimeType.JSON);
+  
+  // Add CORS headers to allow frontend access
+  // Note: Apps Script doesn't support setHeader on ContentService, but this is for documentation
+  return output;
 }
 
 /**

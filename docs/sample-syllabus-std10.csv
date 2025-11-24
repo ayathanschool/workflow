@@ -1,0 +1,57 @@
+standard,subject,term,chapterNo,chapterName,minSessions,topics,sequence
+STD 10,Maths,Term 2,7,Real Numbers,10,"Euclid's Division, Fundamental Theorem, HCF-LCM",1
+STD 10,Maths,Term 2,8,Polynomials,12,"Zeroes, Relationships, Division Algorithm",2
+STD 10,Maths,Term 2,9,Linear Equations,11,"Pair of Linear Equations, Graphical Method, Algebraic Methods",3
+STD 10,Maths,Term 2,10,Quadratic Equations,14,"Standard Form, Factorization, Quadratic Formula, Nature of Roots",4
+STD 10,Maths,Term 2,11,Arithmetic Progressions,10,"AP, nth term, Sum of n terms, Word Problems",5
+STD 10,Maths,Term 2,12,Triangles,13,"Similar Triangles, Pythagoras Theorem, Areas",6
+STD 10,Physics,Term 2,5,Light - Reflection,14,"Laws of Reflection, Spherical Mirrors, Mirror Formula, Sign Convention",1
+STD 10,Physics,Term 2,6,Light - Refraction,15,"Laws of Refraction, Lenses, Lens Formula, Power",2
+STD 10,Physics,Term 2,7,Human Eye,8,"Structure, Defects, Correction, Optical Instruments",3
+STD 10,Physics,Term 2,8,Electricity,16,"Current, Potential Difference, Ohm's Law, Series-Parallel Circuits, Heating Effect",4
+STD 10,Physics,Term 2,9,Magnetic Effects,12,"Magnetic Field, Electromagnetic Induction, Motor, Generator",5
+STD 10,Chemistry,Term 2,5,Chemical Reactions,12,"Types, Balancing, Oxidation-Reduction",1
+STD 10,Chemistry,Term 2,6,Acids Bases Salts,14,"Properties, pH Scale, Indicators, Neutralization, Salt Preparation",2
+STD 10,Chemistry,Term 2,7,Metals & Non-metals,13,"Physical Properties, Reactions, Extraction, Corrosion",3
+STD 10,Chemistry,Term 2,8,Carbon Compounds,15,"Covalent Bonding, Nomenclature, Homologous Series, Functional Groups",4
+STD 10,Chemistry,Term 2,9,Periodic Classification,10,"Mendeleev, Modern Periodic Table, Trends, Groups",5
+STD 10,Biology,Term 2,5,Life Processes,14,"Nutrition, Respiration, Transportation, Excretion",1
+STD 10,Biology,Term 2,6,Control & Coordination,13,"Nervous System, Reflex Action, Hormones, Plant Movements",2
+STD 10,Biology,Term 2,7,Reproduction,12,"Asexual, Sexual, Reproductive Systems, Contraception",3
+STD 10,Biology,Term 2,8,Heredity & Evolution,11,"Mendel's Laws, Genetics, Evolution, Speciation",4
+STD 10,Biology,Term 2,9,Environment,8,"Ecosystem, Food Chain, Ozone, Waste Management",5
+STD 10,English,Term 2,5,A Letter to God,8,"Story Analysis, Character Study, Themes",1
+STD 10,English,Term 2,6,Nelson Mandela,8,"Biography, Comprehension, Vocabulary",2
+STD 10,English,Term 2,7,The Necklace,10,"Short Story, Plot, Irony, Character Analysis",3
+STD 10,English,Term 2,8,Grammar - Voice,10,"Active-Passive Transformation, Rules, Exercises",4
+STD 10,English,Term 2,9,Writing Skills,12,"Letter Writing, Essay, Report, Article",5
+STD 10,English,Term 2,10,Comprehension,8,"Reading Skills, Inference, Summary",6
+STD 10,Hindi,Term 2,5,हरिहर काका,8,"कहानी विश्लेषण, पात्र चित्रण",1
+STD 10,Hindi,Term 2,6,मानवीय करुणा,8,"भावार्थ, शब्दार्थ, प्रश्नोत्तर",2
+STD 10,Hindi,Term 2,7,व्याकरण - समास,10,"समास के प्रकार, उदाहरण, अभ्यास",3
+STD 10,Hindi,Term 2,8,पत्र लेखन,10,"औपचारिक-अनौपचारिक पत्र, प्रारूप",4
+STD 10,Hindi,Term 2,9,निबंध लेखन,8,"विषय चयन, संरचना, अभ्यास",5
+STD 10,Malayalam,Term 2,5,മലയാള കവിത,10,"കവിതാ വിശകലനം, ഭാവം",1
+STD 10,Malayalam,Term 2,6,ഗദ്യം,10,"കഥ, കഥാപാത്രങ്ങൾ",2
+STD 10,Malayalam,Term 2,7,വ്യാകരണം,12,"സന്ധി, സമാസം, അലങ്കാരം",3
+STD 10,Malayalam,Term 2,8,ഉപന്യാസം,8,"ഉപന്യാസ രചന, ഘടന",4
+STD 10,Malayalam,Term 2,9,കത്തെഴുത്ത്,8,"ഔപചാരിക-അനൗപചാരിക കത്ത്",5
+STD 10,Social,Term 2,5,Nationalism in India,14,"Freedom Movement, Gandhi, Non-Cooperation, Civil Disobedience",1
+STD 10,Social,Term 2,6,Resources & Development,12,"Types, Conservation, Planning, Sustainable Development",2
+STD 10,Social,Term 2,7,Democracy & Diversity,11,"Power Sharing, Belgium, Sri Lanka, Accommodation",3
+STD 10,Social,Term 2,8,Political Parties,10,"Functions, Types, Challenges, Reforms",4
+STD 10,Social,Term 2,9,Agriculture,13,"Types, Green Revolution, Globalization, Issues",5
+STD 10,Social,Term 2,10,Manufacturing Industries,12,"Classification, Location, Industrial Pollution",6
+STD 10,IT Theory,Term 2,5,HTML Basics,10,"Tags, Structure, Forms, Tables",1
+STD 10,IT Theory,Term 2,6,CSS Styling,12,"Selectors, Properties, Box Model, Layout",2
+STD 10,IT Theory,Term 2,7,JavaScript Intro,10,"Variables, Functions, Events",3
+STD 10,IT Lab,Term 2,1,Web Development Practice,12,"Building Websites, HTML-CSS-JS Integration, Projects",1
+STD 10,IT Lab,Term 2,2,Database Basics,10,"SQL, Tables, Queries, Reports",2
+STD 10,Work Education,Term 2,1,Skill Development,6,"Practical Skills, Projects, Presentations",1
+STD 10,Work Education,Term 2,2,Career Guidance,4,"Options, Planning, Goal Setting",2
+STD 10,Physical Education,Term 2,1,Sports & Fitness,6,"Games, Rules, Physical Training",1
+STD 10,Physical Education,Term 2,2,Health & Nutrition,4,"Diet, Exercise, Hygiene",2
+STD 10,Art,Term 2,1,Drawing Techniques,6,"Perspective, Shading, Composition",1
+STD 10,Art,Term 2,2,Practical Projects,6,"Painting, Craft, Creative Work",2
+STD 10,AI,Term 2,1,Introduction to AI,6,"ML Basics, Applications, Ethics",1
+STD 10,AI,Term 2,2,AI Projects,6,"Practical Implementation, Tools",2

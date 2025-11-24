@@ -1309,6 +1309,41 @@ const App = () => {
       month: '',
       noOfSessions: ''
     });
+    const [planningHelper, setPlanningHelper] = useState(null);
+    const [loadingHelper, setLoadingHelper] = useState(false);
+
+    // Load planning helper when class, subject, and term are selected
+    useEffect(() => {
+      const loadPlanningHelper = async () => {
+        if (formData.class && formData.subject && formData.term && user?.email) {
+          try {
+            setLoadingHelper(true);
+            const termStr = `Term ${formData.term}`;
+            const response = await api.getSchemeSubmissionHelper(
+              user.email,
+              formData.class,
+              formData.subject,
+              termStr
+            );
+            const data = response.data || response;
+            if (data.success) {
+              setPlanningHelper(data);
+            } else {
+              console.log('Planning helper not available:', data.error);
+              setPlanningHelper(null);
+            }
+          } catch (err) {
+            console.error('Error loading planning helper:', err);
+            setPlanningHelper(null);
+          } finally {
+            setLoadingHelper(false);
+          }
+        } else {
+          setPlanningHelper(null);
+        }
+      };
+      loadPlanningHelper();
+    }, [formData.class, formData.subject, formData.term, user?.email]);
 
     const handleSubmit = async (e) => {
       e.preventDefault();
@@ -1446,6 +1481,118 @@ const App = () => {
         {showForm && (
           <div className="bg-white rounded-xl shadow-sm p-6">
             <h2 className="text-lg font-semibold mb-4">Submit New Scheme of Work</h2>
+            
+            {/* Planning Assistant Panel */}
+            {planningHelper && planningHelper.success && (
+              <div className={`mb-6 p-4 rounded-lg border-2 ${
+                planningHelper.feasibility.riskLevel === 'LOW' ? 'bg-green-50 border-green-300' :
+                planningHelper.feasibility.riskLevel === 'MEDIUM' ? 'bg-yellow-50 border-yellow-300' :
+                'bg-red-50 border-red-300'
+              }`}>
+                <div className="flex items-start space-x-3">
+                  <div className="flex-shrink-0 mt-1">
+                    {planningHelper.feasibility.riskLevel === 'LOW' ? (
+                      <CheckCircle className="h-6 w-6 text-green-600" />
+                    ) : planningHelper.feasibility.riskLevel === 'MEDIUM' ? (
+                      <AlertCircle className="h-6 w-6 text-yellow-600" />
+                    ) : (
+                      <AlertCircle className="h-6 w-6 text-red-600" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-gray-900 mb-2">📊 Planning Assistant</h3>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
+                      <div className="bg-white p-3 rounded-md">
+                        <div className="text-xs text-gray-600 mb-1">Available Periods</div>
+                        <div className="text-2xl font-bold text-blue-600">
+                          {planningHelper.timetableInfo.usablePeriods}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {planningHelper.timetableInfo.periodsPerWeek} per week
+                        </div>
+                      </div>
+                      
+                      <div className="bg-white p-3 rounded-md">
+                        <div className="text-xs text-gray-600 mb-1">Required Sessions</div>
+                        <div className="text-2xl font-bold text-purple-600">
+                          {planningHelper.syllabusRequirement.minSessionsRequired}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {planningHelper.syllabusRequirement.totalChapters} chapters
+                        </div>
+                      </div>
+                      
+                      <div className="bg-white p-3 rounded-md">
+                        <div className="text-xs text-gray-600 mb-1">Capacity</div>
+                        <div className={`text-2xl font-bold ${
+                          planningHelper.feasibility.riskLevel === 'LOW' ? 'text-green-600' :
+                          planningHelper.feasibility.riskLevel === 'MEDIUM' ? 'text-yellow-600' :
+                          'text-red-600'
+                        }`}>
+                          {planningHelper.feasibility.capacityUtilization}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {planningHelper.feasibility.riskLevel} Risk
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="bg-white p-3 rounded-md mb-3">
+                      <div className="text-sm font-medium text-gray-700 mb-2">💡 Recommendation</div>
+                      <div className="text-sm text-gray-600">{planningHelper.feasibility.recommendation}</div>
+                    </div>
+                    
+                    {planningHelper.upcomingEvents && planningHelper.upcomingEvents.length > 0 && (
+                      <div className="bg-white p-3 rounded-md mb-3">
+                        <div className="text-sm font-medium text-gray-700 mb-2">📅 Upcoming Events</div>
+                        {planningHelper.upcomingEvents.map((event, idx) => (
+                          <div key={idx} className="text-sm text-gray-600">
+                            • {event.name} ({event.date}) - {event.periodsLost} period(s) lost
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {planningHelper.warnings && planningHelper.warnings.length > 0 && (
+                      <div className="bg-yellow-100 p-3 rounded-md">
+                        <div className="text-sm font-medium text-yellow-800 mb-2">⚠️ Important Notices</div>
+                        {planningHelper.warnings.map((warning, idx) => (
+                          <div key={idx} className="text-sm text-yellow-700">{warning}</div>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {planningHelper.syllabusRequirement.chapterDetails && planningHelper.syllabusRequirement.chapterDetails.length > 0 && (
+                      <details className="mt-3">
+                        <summary className="text-sm font-medium text-gray-700 cursor-pointer hover:text-gray-900">
+                          View Chapter Breakdown ({planningHelper.syllabusRequirement.totalChapters} chapters)
+                        </summary>
+                        <div className="mt-2 bg-white p-3 rounded-md max-h-48 overflow-y-auto">
+                          {planningHelper.syllabusRequirement.chapterDetails.map((ch, idx) => (
+                            <div key={idx} className="text-sm text-gray-600 py-1 border-b border-gray-100 last:border-0">
+                              <span className="font-medium">Ch {ch.chapterNo}: {ch.chapterName}</span>
+                              <span className="text-blue-600 ml-2">({ch.minSessions} sessions)</span>
+                              {ch.topics && <div className="text-xs text-gray-500 mt-1">{ch.topics}</div>}
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {loadingHelper && (
+              <div className="mb-6 p-4 bg-blue-50 border-2 border-blue-200 rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                  <span className="text-blue-700">Loading planning context...</span>
+                </div>
+              </div>
+            )}
+            
             <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4 mobile-stack">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Class</label>
@@ -2876,6 +3023,9 @@ const App = () => {
     const [dailyReportsData, setDailyReportsData] = useState({ reports: [], stats: {} });
     const [autoRefresh, setAutoRefresh] = useState(true);
     const [lastRefresh, setLastRefresh] = useState(new Date());
+    const [paceTracking, setPaceTracking] = useState(null);
+    const [loadingPaceTracking, setLoadingPaceTracking] = useState(false);
+    const [selectedPeriod, setSelectedPeriod] = useState(null);
 
   // Update current time every minute
   useEffect(() => {
@@ -2908,18 +3058,55 @@ const App = () => {
     async function loadTodayReports() {
       try {
         const today = new Date().toISOString().split('T')[0];
+        console.log('📊 Loading daily reports for:', today);
         const response = await api.getDailyReportsForDate(today);
         const data = response?.data || response;
+        console.log('📊 Daily reports response:', data);
+        console.log('📊 Reports array:', data.reports);
+        console.log('📊 Reports count:', data.reports?.length || 0);
+        console.log('📊 Stats:', data.stats);
+        
+        if (data.reports && data.reports.length > 0) {
+          console.log('📊 Sample report:', data.reports[0]);
+          // Group by period to see distribution
+          const byPeriod = {};
+          data.reports.forEach(r => {
+            const p = r.period;
+            byPeriod[p] = (byPeriod[p] || 0) + 1;
+          });
+          console.log('📊 Reports by period:', byPeriod);
+        } else {
+          console.warn('⚠️ NO REPORTS FOUND - Check backend logs for timetable data');
+        }
+        
         setDailyReportsData({
           reports: data.reports || [],
           stats: data.stats || {}
         });
         setLastRefresh(new Date());
       } catch (err) {
-        console.error('Failed to load daily reports:', err);
+        console.error('❌ Failed to load daily reports:', err);
       }
     }
     loadTodayReports();
+  }, []);
+  
+  // Load syllabus pace tracking
+  useEffect(() => {
+    async function loadPaceTracking() {
+      setLoadingPaceTracking(true);
+      try {
+        const response = await api.getSyllabusPaceTracking('Term 2');
+        if (response?.success) {
+          setPaceTracking(response);
+        }
+      } catch (err) {
+        console.error('Failed to load pace tracking:', err);
+      } finally {
+        setLoadingPaceTracking(false);
+      }
+    }
+    loadPaceTracking();
   }, []);
 
   // Determine current period based on time
@@ -3037,45 +3224,111 @@ const App = () => {
       {/* Real-Time Activity Monitor */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">📊 Live Activity Monitor <span className="text-sm font-normal text-blue-600">[{new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})}]</span></h2>
+          <h2 className="text-lg font-semibold text-gray-900">📊 Live Class Schedule <span className="text-sm font-normal text-blue-600">[{new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})}]</span></h2>
           <span className="text-xs text-gray-500">
             Last updated: {lastRefresh.toLocaleTimeString()}
           </span>
         </div>
         
-        {/* Period Heatmap */}
+        {/* Period Heatmap - Show what's running in each period */}
         <div className="grid grid-cols-8 gap-2 mb-6">
           {[1,2,3,4,5,6,7,8].map(period => {
-            const periodReports = dailyReportsData.reports.filter(r => parseInt(r.period) === period);
-            const submitted = periodReports.filter(r => r.submitted).length;
-            const total = periodReports.length;
-            const percentage = total > 0 ? Math.round((submitted / total) * 100) : 0;
+            const periodClasses = dailyReportsData.reports.filter(r => parseInt(r.period) === period);
             const isCurrent = currentPeriod === period;
             const isPast = currentPeriod && period < currentPeriod;
+            const isFuture = currentPeriod && period > currentPeriod;
+            
+            // Group by subject to show what's being taught
+            const subjectCount = {};
+            periodClasses.forEach(c => {
+              const subj = c.subject || 'Unknown';
+              subjectCount[subj] = (subjectCount[subj] || 0) + 1;
+            });
+            const topSubjects = Object.entries(subjectCount)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 2)
+              .map(([subj]) => subj);
             
             let bgColor = 'bg-gray-100';
-            if (total === 0) bgColor = 'bg-gray-50';
-            else if (percentage >= 90) bgColor = 'bg-green-500';
-            else if (percentage >= 70) bgColor = 'bg-green-400';
-            else if (percentage >= 50) bgColor = 'bg-yellow-400';
-            else if (percentage >= 30) bgColor = 'bg-orange-400';
-            else bgColor = 'bg-red-400';
+            let textColor = 'text-gray-700';
+            let borderColor = '';
+            
+            if (periodClasses.length === 0) {
+              bgColor = 'bg-gray-50 border-2 border-dashed border-gray-300';
+              textColor = 'text-gray-400';
+            } else if (isCurrent) {
+              bgColor = 'bg-blue-500';
+              textColor = 'text-white';
+              borderColor = 'ring-4 ring-blue-300';
+            } else if (isPast) {
+              bgColor = 'bg-green-100 border border-green-300';
+              textColor = 'text-green-800';
+            } else if (isFuture) {
+              bgColor = 'bg-orange-50 border border-orange-200';
+              textColor = 'text-orange-700';
+            }
             
             return (
-              <div key={period} className={`relative p-3 rounded-lg ${bgColor} ${isCurrent ? 'ring-4 ring-blue-500' : ''}`}>
+              <button 
+                key={period} 
+                onClick={() => setSelectedPeriod(period)}
+                className={`relative p-2 rounded-lg ${bgColor} ${borderColor} transition-all hover:shadow-md cursor-pointer hover:scale-105`}
+              >
                 <div className="text-center">
-                  <div className="text-xs font-medium text-gray-700">P{period}</div>
-                  <div className="text-lg font-bold text-gray-900">{percentage}%</div>
-                  <div className="text-xs text-gray-600">{submitted}/{total}</div>
-                  {isCurrent && <div className="text-xs font-bold text-blue-600 mt-1">NOW</div>}
-                  {isPast && submitted < total && (
-                    <div className="text-xs font-bold text-red-600 mt-1">LATE</div>
+                  <div className={`text-xs font-bold ${textColor} mb-1`}>
+                    Period {period}
+                  </div>
+                  {periodClasses.length > 0 ? (
+                    <>
+                      <div className={`text-lg font-bold ${textColor}`}>
+                        {periodClasses.length}
+                      </div>
+                      <div className={`text-xs ${textColor} opacity-90`}>
+                        classes
+                      </div>
+                      {topSubjects.length > 0 && (
+                        <div className={`text-xs ${textColor} mt-1 font-medium truncate`}>
+                          {topSubjects.join(', ')}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className={`text-lg font-bold ${textColor}`}>-</div>
+                      <div className={`text-xs ${textColor}`}>No TT</div>
+                    </>
+                  )}
+                  {isCurrent && (
+                    <div className="text-xs font-bold text-white mt-1 bg-blue-700 rounded px-1">
+                      LIVE NOW
+                    </div>
                   )}
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
+
+        {/* Info Message if no timetable data */}
+        {dailyReportsData.reports.length === 0 && (
+          <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-blue-900">No Timetable Data for Today</h3>
+                <p className="text-sm text-blue-700 mt-1">
+                  The system cannot find any timetable periods scheduled for today ({new Date().toLocaleDateString('en-US', {weekday: 'long'})}). 
+                  Please ensure:
+                </p>
+                <ul className="text-sm text-blue-700 mt-2 ml-4 list-disc space-y-1">
+                  <li>Timetable data is uploaded in the Timetable sheet</li>
+                  <li>Today's day name matches the timetable day entries</li>
+                  <li>Period numbers are correctly assigned (1-8)</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Quick Stats */}
         <div className="grid grid-cols-4 gap-4">
@@ -3099,6 +3352,116 @@ const App = () => {
           </div>
         </div>
       </div>
+
+      {/* Period Detail Modal */}
+      {selectedPeriod && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedPeriod(null)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center p-6 border-b border-gray-200 bg-gradient-to-r from-blue-500 to-blue-600">
+              <h2 className="text-xl font-bold text-white">
+                Period {selectedPeriod} - Class Schedule
+                {currentPeriod === selectedPeriod && (
+                  <span className="ml-3 text-sm bg-white text-blue-600 px-3 py-1 rounded-full font-semibold animate-pulse">
+                    🔴 LIVE NOW
+                  </span>
+                )}
+              </h2>
+              <button 
+                onClick={() => setSelectedPeriod(null)}
+                className="text-white hover:text-gray-200 transition-colors"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto max-h-[calc(80vh-120px)]">
+              {(() => {
+                const periodClasses = dailyReportsData.reports
+                  .filter(r => parseInt(r.period) === selectedPeriod)
+                  .sort((a, b) => (a.class || '').localeCompare(b.class || ''));
+                
+                if (periodClasses.length === 0) {
+                  return (
+                    <div className="text-center py-12">
+                      <div className="text-gray-400 mb-3">
+                        <Calendar className="h-16 w-16 mx-auto" />
+                      </div>
+                      <p className="text-gray-500 text-lg">No classes scheduled for Period {selectedPeriod}</p>
+                    </div>
+                  );
+                }
+                
+                return (
+                  <div className="space-y-4">
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="font-semibold text-blue-900">Period {selectedPeriod} Overview</h3>
+                          <p className="text-sm text-blue-700">{periodClasses.length} classes running</p>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-2xl font-bold text-blue-600">
+                            {Math.round((periodClasses.filter(c => c.submitted).length / periodClasses.length) * 100)}%
+                          </div>
+                          <div className="text-xs text-blue-700">Reports Submitted</div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {periodClasses.map((classData, idx) => (
+                        <div 
+                          key={idx}
+                          className={`border-2 rounded-lg p-4 transition-all hover:shadow-md ${
+                            classData.submitted 
+                              ? 'border-green-300 bg-green-50' 
+                              : 'border-orange-300 bg-orange-50'
+                          }`}
+                        >
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <h4 className="font-bold text-gray-900 text-lg">{classData.class}</h4>
+                              <p className="text-sm font-medium text-blue-600">{classData.subject}</p>
+                            </div>
+                            <div className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                              classData.submitted 
+                                ? 'bg-green-200 text-green-800' 
+                                : 'bg-orange-200 text-orange-800'
+                            }`}>
+                              {classData.submitted ? '✓ Reported' : '○ Pending'}
+                            </div>
+                          </div>
+                          
+                          <div className="mt-3 pt-3 border-t border-gray-200">
+                            <div className="flex items-center gap-2 text-sm text-gray-700">
+                              <User className="h-4 w-4" />
+                              <span className="font-medium">{classData.teacher || classData.teacherEmail}</span>
+                            </div>
+                            {classData.isSubstitution && (
+                              <div className="mt-2 text-xs bg-yellow-100 border border-yellow-300 rounded px-2 py-1 text-yellow-800">
+                                🔄 Substitution Class
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+            
+            <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-end">
+              <button
+                onClick={() => setSelectedPeriod(null)}
+                className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Substitution Notifications */}
       {substitutionNotifications.length > 0 && (
@@ -3808,11 +4171,15 @@ const App = () => {
     const [pendingLessons, setPendingLessons] = useState([]);
     const [allLessons, setAllLessons] = useState([]); // Store all lessons for filter options
     const [showFilters, setShowFilters] = useState(false);
+    const [showDateSelector, setShowDateSelector] = useState(false);
+    const [selectedTimetableDate, setSelectedTimetableDate] = useState('');
     const [filters, setFilters] = useState({
       teacher: '',
       class: '',
       subject: '',
-      status: 'Pending Review' // Default to pending for approvals
+      status: 'Pending Review', // Default to pending for approvals
+      dateFrom: '',
+      dateTo: ''
     });
 
     // Auto-hide sidebar when viewing approvals
@@ -3861,6 +4228,21 @@ const App = () => {
           
           const data = await api.getPendingLessonReviews(teacherFilter, classFilter, subjectFilter, statusFilter);
           let lessons = Array.isArray(data) ? data : [];
+          
+          // Client-side date filtering
+          if (filters.dateFrom || filters.dateTo) {
+            lessons = lessons.filter(lesson => {
+              if (!lesson.selectedDate) return false;
+              const lessonDate = new Date(lesson.selectedDate);
+              const fromDate = filters.dateFrom ? new Date(filters.dateFrom) : null;
+              const toDate = filters.dateTo ? new Date(filters.dateTo) : null;
+              
+              if (fromDate && lessonDate < fromDate) return false;
+              if (toDate && lessonDate > toDate) return false;
+              return true;
+            });
+          }
+          
           // Sort by selectedDate in descending order (latest planned date first)
           lessons.sort((a, b) => {
             const dateA = new Date(a.selectedDate || 0);
@@ -3890,7 +4272,20 @@ const App = () => {
           <h1 className="text-2xl font-bold text-gray-900">Lesson Plan Approvals</h1>
           <div className="flex space-x-3">
             <button 
-              onClick={() => setShowFilters(!showFilters)}
+              onClick={() => {
+                setShowDateSelector(!showDateSelector);
+                if (!showDateSelector) setShowFilters(false);
+              }}
+              className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-green-700"
+            >
+              <Calendar className="h-4 w-4 mr-2" />
+              {showDateSelector ? 'Hide Date View' : 'View by Timetable Date'}
+            </button>
+            <button 
+              onClick={() => {
+                setShowFilters(!showFilters);
+                if (!showFilters) setShowDateSelector(false);
+              }}
               className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700"
             >
               <Filter className="h-4 w-4 mr-2" />
@@ -3898,6 +4293,105 @@ const App = () => {
             </button>
           </div>
         </div>
+
+        {/* Date Selector Panel */}
+        {showDateSelector && (
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">📅 View Lessons by Planned Timetable Date</h3>
+            <div className="flex gap-4 items-end">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Select Timetable Date</label>
+                <input
+                  type="date"
+                  value={selectedTimetableDate}
+                  onChange={(e) => {
+                    const date = e.target.value;
+                    setSelectedTimetableDate(date);
+                    if (date) {
+                      setFilters({
+                        teacher: '',
+                        class: '',
+                        subject: '',
+                        status: '',
+                        dateFrom: date,
+                        dateTo: date
+                      });
+                    } else {
+                      setFilters({
+                        teacher: '',
+                        class: '',
+                        subject: '',
+                        status: 'Pending Review',
+                        dateFrom: '',
+                        dateTo: ''
+                      });
+                    }
+                  }}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+              </div>
+              <button
+                onClick={() => {
+                  const today = new Date().toISOString().split('T')[0];
+                  setSelectedTimetableDate(today);
+                  setFilters({
+                    teacher: '',
+                    class: '',
+                    subject: '',
+                    status: '',
+                    dateFrom: today,
+                    dateTo: today
+                  });
+                }}
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+              >
+                Today
+              </button>
+              <button
+                onClick={() => {
+                  const tomorrow = new Date();
+                  tomorrow.setDate(tomorrow.getDate() + 1);
+                  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+                  setSelectedTimetableDate(tomorrowStr);
+                  setFilters({
+                    teacher: '',
+                    class: '',
+                    subject: '',
+                    status: '',
+                    dateFrom: tomorrowStr,
+                    dateTo: tomorrowStr
+                  });
+                }}
+                className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600"
+              >
+                Tomorrow
+              </button>
+              <button
+                onClick={() => {
+                  setSelectedTimetableDate('');
+                  setFilters({
+                    teacher: '',
+                    class: '',
+                    subject: '',
+                    status: 'Pending Review',
+                    dateFrom: '',
+                    dateTo: ''
+                  });
+                }}
+                className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+              >
+                Clear
+              </button>
+            </div>
+            {selectedTimetableDate && (
+              <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-green-800 text-sm">
+                  📚 Showing lesson plans planned for <strong>{new Date(selectedTimetableDate + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}</strong>
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Filter Panel */}
         {showFilters && (
@@ -3937,18 +4431,45 @@ const App = () => {
                   ⚠ Needs Rework
                 </button>
                 <button
-                  onClick={() => setFilters({ teacher: '', class: '', subject: '', status: '' })}
+                  onClick={() => setFilters({ teacher: '', class: '', subject: '', status: '' , dateFrom: '', dateTo: ''})}
                   className={`px-3 py-1 text-sm rounded-full transition-all ${
-                    !filters.status && !filters.teacher && !filters.class && !filters.subject
+                    !filters.status && !filters.teacher && !filters.class && !filters.subject && !filters.dateFrom && !filters.dateTo
                       ? 'bg-purple-500 text-white'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
                 >
                   All Plans
                 </button>
+                <button
+                  onClick={() => {
+                    const today = new Date().toISOString().split('T')[0];
+                    setFilters({ teacher: '', class: '', subject: '', status: 'Pending Review', dateFrom: today, dateTo: today });
+                  }}
+                  className="px-3 py-1 text-sm rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all"
+                >
+                  📅 Today
+                </button>
+                <button
+                  onClick={() => {
+                    const today = new Date();
+                    const weekFromNow = new Date(today);
+                    weekFromNow.setDate(today.getDate() + 7);
+                    setFilters({ 
+                      teacher: '', 
+                      class: '', 
+                      subject: '', 
+                      status: 'Pending Review', 
+                      dateFrom: today.toISOString().split('T')[0], 
+                      dateTo: weekFromNow.toISOString().split('T')[0]
+                    });
+                  }}
+                  className="px-3 py-1 text-sm rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all"
+                >
+                  📆 Next 7 Days
+                </button>
               </div>
               {/* Advanced Filters */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Teacher</label>
                   <select
@@ -4002,6 +4523,24 @@ const App = () => {
                     <option value="">All Statuses</option>
                   </select>
                 </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">From Date</label>
+                  <input
+                    type="date"
+                    value={filters.dateFrom}
+                    onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">To Date</label>
+                  <input
+                    type="date"
+                    value={filters.dateTo}
+                    onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -4016,7 +4555,7 @@ const App = () => {
                 ({pendingLessons.length})
               </h2>
               {/* Active Filter Status Display */}
-              {(filters.teacher || filters.class || filters.subject || (filters.status && filters.status !== 'Pending Review')) && (
+              {(filters.teacher || filters.class || filters.subject || (filters.status && filters.status !== 'Pending Review') || filters.dateFrom || filters.dateTo) && (
                 <div className="flex flex-wrap gap-1 text-xs">
                   {filters.teacher && (
                     <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded">Teacher: {filters.teacher}</span>
@@ -4029,6 +4568,12 @@ const App = () => {
                   )}
                   {filters.status && filters.status !== 'Pending Review' && (
                     <span className="px-2 py-0.5 bg-orange-100 text-orange-800 rounded">Status: {filters.status}</span>
+                  )}
+                  {filters.dateFrom && (
+                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded">From: {filters.dateFrom}</span>
+                  )}
+                  {filters.dateTo && (
+                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded">To: {filters.dateTo}</span>
                   )}
                 </div>
               )}

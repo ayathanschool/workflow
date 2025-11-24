@@ -11,13 +11,11 @@ import { todayIST, formatLocalDate, periodToTimeString } from "./utils/dateUtils
 
 const COMPLETION = [
   "Not Started",
-  "Partially Completed", 
+  "0-25% Complete",
+  "25-50% Complete",
+  "50-75% Complete",
+  "75-100% Complete",
   "Fully Completed",
-];
-
-const PLAN_TYPES = [
-  "in plan",
-  "not planned",
 ];
 
 export default function DailyReportTimetable({ user }) {
@@ -386,7 +384,6 @@ export default function DailyReportTimetable({ user }) {
         class: r.class,
         subject: r.subject,
         period: Number(r.period),
-        planType: d.planType || "not planned",
         lessonPlanId: d.lessonPlanId || "",
         chapter: chapter,
         sessionNo: Number(d.sessionNo || 0),
@@ -514,19 +511,23 @@ export default function DailyReportTimetable({ user }) {
             </svg>
           </div>
           <div className="flex-1">
-            <h3 className="text-sm font-semibold text-blue-900 mb-2">Quick Daily Reporting Guide:</h3>
+            <h3 className="text-sm font-semibold text-blue-900 mb-2">Daily Reporting Guide:</h3>
             <ul className="text-xs text-blue-800 space-y-1.5">
               <li className="flex items-start gap-2">
-                <span className="font-bold">📚 Pre-planned:</span>
-                <span>Lesson details auto-filled from approved plans - just select completion status!</span>
+                <span className="font-bold">📋 Prepare Plans:</span>
+                <span>All timetabled periods require an approved lesson plan before the day starts.</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="font-bold">⚠️ Unplanned:</span>
-                <span>Enter chapter and activities manually, then select completion status.</span>
+                <span className="font-bold">📚 Auto-filled:</span>
+                <span>Lesson details load automatically from your approved plans - just update completion!</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="font-bold">✓ Quick Submit:</span>
-                <span>Select completion status, add notes (optional), and submit - that's it!</span>
+                <span className="font-bold">📊 Completion:</span>
+                <span>Select 0% if lesson couldn't start, use progression percentages, and add notes to explain delays.</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="font-bold">⏰ Extended Sessions:</span>
+                <span>If chapter needs more time, don't mark complete - system will auto-extend to next session.</span>
               </li>
             </ul>
           </div>
@@ -577,19 +578,22 @@ export default function DailyReportTimetable({ user }) {
                   const submitted = statusMap[k] === "Submitted";
                   const d = drafts[k] || {};
                   const isLoading = saving[k];
-                  const isPlanned = d.planType === "in plan" && d.lessonPlanId;
+                  const hasLessonPlan = !!d.lessonPlanId;
                   const isSubstitution = d._isSubstitution || r.isSubstitution || false;
+                  const noPlan = d._noPlan || false;
                   
-                  // Row background color based on status - ENHANCED COLORS for better visibility
+                  // Row background color based on status
                   let rowBgClass = "";
                   if (submitted) {
                     rowBgClass = "bg-green-100 border-l-4 border-green-500"; // Green for submitted
                   } else if (isSubstitution) {
-                    rowBgClass = "bg-pink-100 border-l-4 border-pink-600"; // Pink/Red for substitution - more distinctive
-                  } else if (isPlanned) {
-                    rowBgClass = "bg-blue-100 border-l-4 border-blue-500"; // Blue for in-plan
+                    rowBgClass = "bg-pink-100 border-l-4 border-pink-600"; // Pink for substitution
+                  } else if (noPlan) {
+                    rowBgClass = "bg-red-100 border-l-4 border-red-500"; // Red for missing lesson plan
+                  } else if (hasLessonPlan) {
+                    rowBgClass = "bg-blue-100 border-l-4 border-blue-500"; // Blue for has plan
                   } else {
-                    rowBgClass = "bg-yellow-100 border-l-4 border-yellow-500"; // Yellow for not-planned
+                    rowBgClass = "bg-gray-50"; // Default
                   }
                   
                   return (
@@ -598,8 +602,8 @@ export default function DailyReportTimetable({ user }) {
                       <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
                         <div className="flex items-center gap-2">
                           #{r.period}
-                          {isPlanned && !isSubstitution && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800" title="Pre-planned lesson">
+                          {hasLessonPlan && !isSubstitution && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800" title="Lesson plan ready">
                               📚
                             </span>
                           )}
@@ -608,9 +612,9 @@ export default function DailyReportTimetable({ user }) {
                               🔄
                             </span>
                           )}
-                          {!isPlanned && !isSubstitution && !submitted && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800" title="Unplanned period">
-                              ⚠️
+                          {noPlan && !isSubstitution && !submitted && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800" title="Missing lesson plan! Please prepare plan before teaching.">
+                              ❌
                             </span>
                           )}
                         </div>
@@ -633,27 +637,16 @@ export default function DailyReportTimetable({ user }) {
                       {/* Subject */}
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{r.subject}</td>
                       
-                      {/* Lesson Details - Read-only info card */}
+                      {/* Lesson Details */}
                       <td className="px-4 py-3">
                         <div className="space-y-2">
-                          {/* Plan Type Toggle */}
-                          <div className="flex gap-2 pb-2 border-b">
-                            {PLAN_TYPES.map(type => (
-                              <button
-                                key={type}
-                                type="button"
-                                disabled={submitted}
-                                onClick={() => setDraft(k, "planType", type)}
-                                className={`px-2 py-1 text-xs font-medium rounded border ${
-                                  d.planType === type
-                                    ? 'bg-blue-100 border-blue-300 text-blue-800'
-                                    : 'bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200'
-                                } disabled:opacity-50`}
-                              >
-                                {type}
-                              </button>
-                            ))}
-                          </div>
+                          {/* Warning if no lesson plan */}
+                          {noPlan && !submitted && (
+                            <div className="text-xs bg-red-50 border border-red-300 rounded p-2 mb-2">
+                              <span className="font-bold text-red-800">⚠️ No Lesson Plan Found!</span>
+                              <p className="text-red-700 mt-1">Please prepare and get approval for lesson plan before teaching this period.</p>
+                            </div>
+                          )}
                           
                           {/* Chapter/Topic - REQUIRED */}
                           <div>
@@ -673,10 +666,10 @@ export default function DailyReportTimetable({ user }) {
                             />
                           </div>
                           
-                          {/* Status badge for planned lessons */}
-                          {isPlanned && d.lessonPlanId && (
+                          {/* Status badge for lesson plan */}
+                          {hasLessonPlan && d.lessonPlanId && (
                             <div className="text-xs bg-green-50 border border-green-200 rounded p-2">
-                              ✓ Pre-planned {(d._session || d.sessionNo) ? `(Session ${d._session || d.sessionNo})` : ''}
+                              ✓ Lesson Plan Ready {d.sessionNo ? `(Session ${d.sessionNo})` : ''}
                             </div>
                           )}
                           
