@@ -188,6 +188,34 @@ export default function DailyReportModern({ user }) {
     }));
   }, []);
 
+  // Initialize drafts with lesson plan data when plans are loaded
+  useEffect(() => {
+    if (Object.keys(lessonPlans).length > 0 && periods.length > 0) {
+      setDrafts(prev => {
+        const newDrafts = { ...prev };
+        periods.forEach(period => {
+          const key = periodKey(period);
+          const planKey = `${period.period}|${period.class}|${period.subject}`;
+          const plan = lessonPlans[planKey];
+          
+          // Only initialize if not already submitted and plan exists
+          if (plan && !reports[key] && !newDrafts[key]?.lessonPlanId) {
+            newDrafts[key] = {
+              ...newDrafts[key],
+              lessonPlanId: plan.lpId,
+              chapter: plan.chapter,
+              sessionNo: plan.sessionNo,
+              totalSessions: plan.totalSessions,
+              objectives: plan.learningObjectives,
+              activities: plan.teachingMethods
+            };
+          }
+        });
+        return newDrafts;
+      });
+    }
+  }, [lessonPlans, periods, reports]);
+
   const getDraft = useCallback((key) => drafts[key] || {}, [drafts]);
   const getReport = useCallback((key) => reports[key], [reports]);
 
