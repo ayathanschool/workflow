@@ -670,6 +670,7 @@ function PeriodCard({
                 type="text"
                 value={chapter}
                 onChange={(e) => onUpdate('chapter', e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()}
                 placeholder={plan ? "From lesson plan" : "Enter chapter or topic name"}
                 className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
                   plan ? 'bg-blue-50 border-blue-300' : 'border-gray-300'
@@ -686,6 +687,7 @@ function PeriodCard({
                   type="number"
                   value={data.sessionNo || 1}
                   onChange={(e) => onUpdate('sessionNo', e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()}
                   min="1"
                   className="w-24 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
@@ -694,6 +696,7 @@ function PeriodCard({
                   type="number"
                   value={data.totalSessions || 1}
                   onChange={(e) => onUpdate('totalSessions', e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()}
                   min="1"
                   className="w-24 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
