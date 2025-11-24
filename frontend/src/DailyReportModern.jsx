@@ -193,7 +193,6 @@ export default function DailyReportModern({ user }) {
 
   const handleSubmit = async (period) => {
     const key = periodKey(period);
-    const draft = getDraft(key);
     const report = getReport(key);
 
     if (report) {
@@ -201,12 +200,22 @@ export default function DailyReportModern({ user }) {
       return;
     }
 
-    // Validation
-    const chapter = (draft.chapter || "").trim();
-    const objectives = (draft.objectives || "").trim();
-    const completionPercentage = Number(draft.completionPercentage || 0);
-    const deviationReason = (draft.deviationReason || "").trim();
+    // Get current draft state
+    const draft = getDraft(key);
 
+    // Read CURRENT values from DOM to avoid stale state issues
+    // When user types and immediately clicks submit, onChange might not have updated state yet
+    const elementId = `${period.period}-${period.class}`;
+    const chapterInput = document.getElementById(`chapter-${elementId}`);
+    const objectivesInput = document.getElementById(`objectives-${elementId}`);
+    const deviationReasonSelect = document.getElementById(`deviationReason-${elementId}`);
+    
+    const chapter = chapterInput ? chapterInput.value.trim() : (draft.chapter || "").trim();
+    const objectives = objectivesInput ? objectivesInput.value.trim() : (draft.objectives || "").trim();
+    const completionPercentage = Number(draft.completionPercentage || 0);
+    const deviationReason = deviationReasonSelect ? deviationReasonSelect.value.trim() : (draft.deviationReason || "").trim();
+
+    // Validation using current DOM values
     if (!chapter) {
       setMessage({ text: "❌ Chapter/Topic is required", type: "error" });
       return;
@@ -668,6 +677,7 @@ function PeriodCard({
               </label>
               <input
                 type="text"
+                id={`chapter-${period.period}-${period.class}`}
                 value={chapter}
                 onChange={(e) => onUpdate('chapter', e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()}
@@ -712,6 +722,7 @@ function PeriodCard({
                 <span className="text-blue-600 text-xs ml-2">✏️ Editable</span>
               </label>
               <textarea
+                id={`objectives-${period.period}-${period.class}`}
                 value={objectives}
                 onChange={(e) => onUpdate('objectives', e.target.value)}
                 placeholder="Learning objectives from lesson plan..."
@@ -769,6 +780,7 @@ function PeriodCard({
                 Reason for 0% Completion <span className="text-red-500">*</span>
               </label>
               <select
+                id={`deviationReason-${period.period}-${period.class}`}
                 value={data.deviationReason || ""}
                 onChange={(e) => onUpdate('deviationReason', e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -787,6 +799,7 @@ function PeriodCard({
                 Learning Objectives <span className="text-red-500">*</span>
               </label>
               <textarea
+                id={`objectives-${period.period}-${period.class}`}
                 value={objectives}
                 onChange={(e) => onUpdate('objectives', e.target.value)}
                 placeholder="What learning objectives were covered?"
