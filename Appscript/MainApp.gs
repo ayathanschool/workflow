@@ -1538,7 +1538,17 @@ function _handleGetPlannedLessonsForDate(params) {
     
     // Filter for Ready status and matching date
     const matchingPlans = allLessonPlans.filter(plan => {
-      const selectedDateVal = plan.selectedDate || plan.date;
+      let selectedDateVal = plan.selectedDate || plan.date;
+      
+      // FALLBACK: Parse date from uniqueKey if selectedDate is missing
+      // uniqueKey format: "email|YYYY-MM-DD|period"
+      if (!selectedDateVal && plan.uniqueKey) {
+        const parts = String(plan.uniqueKey).split('|');
+        if (parts.length >= 2) {
+          selectedDateVal = parts[1]; // Extract date from uniqueKey
+        }
+      }
+      
       const planDate = _isoDateIST(selectedDateVal);
       
       return String(plan.status || '') === 'Ready' && planDate === queryDate;
@@ -1630,7 +1640,17 @@ function _handleGetPlannedLessonForPeriod(params) {
     const matchingPlan = lessonPlans.find(plan => {
       // Try multiple field name variations for date and period (selectedDate is primary)
       // Use IST helper to normalize plan date - handles Date objects, strings, numbers
-      const selectedDateVal = plan.selectedDate || plan.date;
+      let selectedDateVal = plan.selectedDate || plan.date;
+      
+      // FALLBACK: Parse date from uniqueKey if selectedDate is missing
+      // uniqueKey format: "email|YYYY-MM-DD|period"
+      if (!selectedDateVal && plan.uniqueKey) {
+        const parts = String(plan.uniqueKey).split('|');
+        if (parts.length >= 2) {
+          selectedDateVal = parts[1]; // Extract date from uniqueKey
+        }
+      }
+      
       const planDate = _isoDateIST(selectedDateVal);
       
       const planPeriod = String(plan.selectedPeriod || plan.period || '');
