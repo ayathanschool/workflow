@@ -50,7 +50,7 @@ export default function DailyReportModern({ user }) {
   const email = user?.email || "";
   const teacherName = user?.name || "";
 
-  const periodKey = (p) => `${p.period}_${p.class}_${p.subject}`;
+  const periodKey = (p) => `${p.period}|${p.class}|${p.subject}`;
 
   const loadData = useCallback(async () => {
     if (!email || !date) {
@@ -195,7 +195,9 @@ export default function DailyReportModern({ user }) {
     const key = periodKey(period);
     const draft = getDraft(key);
     const report = getReport(key);
-    const plan = plans[key]; // Get the lesson plan for this period
+    const plan = lessonPlans[key]; // Get the lesson plan for this period
+    
+    console.log('🔍 Submit Debug:', { key, draft, plan, chapter: draft.chapter || plan?.chapter });
 
     if (report) {
       setMessage({ text: "Already submitted", type: "info" });
@@ -564,6 +566,8 @@ function PeriodCard({
   const objectives = data.objectives || plan?.learningObjectives || "";
   const teachingMethods = data.activities || plan?.teachingMethods || "";
   const resources = data.resources || plan?.resourcesRequired || "";
+  const sessionNo = data.sessionNo || plan?.sessionNo || 1;
+  const totalSessions = data.totalSessions || plan?.totalSessions || 1;
   const completionPercentage = data.completionPercentage || 0;
 
   return (
@@ -688,7 +692,7 @@ function PeriodCard({
               <div className="flex gap-2">
                 <input
                   type="number"
-                  value={data.sessionNo || 1}
+                  value={sessionNo}
                   onChange={(e) => onUpdate('sessionNo', e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()}
                   min="1"
@@ -697,7 +701,7 @@ function PeriodCard({
                 <span className="py-2 text-gray-500">of</span>
                 <input
                   type="number"
-                  value={data.totalSessions || 1}
+                  value={totalSessions}
                   onChange={(e) => onUpdate('totalSessions', e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()}
                   min="1"
