@@ -477,29 +477,36 @@ function getApprovedSchemesForLessonPlanning(teacherEmail) {
             String(plan.chapter || '').toLowerCase() === String(chapter.name || '').toLowerCase() &&
             parseInt(plan.session || '1') === session.sessionNumber
           );
-          
-          // Determine status: pass through actual status or 'not-planned' if no plan exists
+
           let status = 'not-planned';
+          let cascadeMarked = false;
           if (existingPlan) {
-            // Pass through the actual status from LessonPlans sheet
-            status = String(existingPlan.status || 'planned').trim();
-            
-            // Check if this session has a daily report submitted
+            const rawStatus = String(existingPlan.status || 'planned').trim();
+            const statusLower = rawStatus.toLowerCase();
+            const hasOriginalSlotChange = existingPlan.originalDate && existingPlan.originalDate !== existingPlan.selectedDate;
+            const isOriginalCascade = /rescheduled\s*\(cascade\)/i.test(rawStatus); // only original missed session
+
+            // Check for daily report for this session
             const hasReport = teacherReports.some(report => {
               const matchesClass = String(report.class || '') === String(scheme.class || '');
               const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
               const matchesChapter = String(report.chapter || '').toLowerCase() === String(chapter.name || '').toLowerCase();
               const matchesSession = Number(report.sessionNo) === session.sessionNumber;
-              
               return matchesClass && matchesSubject && matchesChapter && matchesSession;
             });
-            
-            // If report exists, override status to 'Reported'
-            if (hasReport && !['Cancelled', 'Rejected'].includes(status)) {
+
+            // Decide displayed status:
+            // Only show 'Cascaded' for the originally missed session (explicit status + original slot recorded)
+            if (isOriginalCascade && hasOriginalSlotChange) {
+              status = 'Cascaded';
+              cascadeMarked = true;
+            } else if (hasReport && !['cancelled','rejected'].includes(statusLower)) {
               status = 'Reported';
+            } else {
+              status = rawStatus; // Planned / Ready / Pending Review etc.
             }
           }
-          
+
           return {
             sessionNumber: session.sessionNumber,
             sessionName: session.sessionName,
@@ -507,7 +514,10 @@ function getApprovedSchemesForLessonPlanning(teacherEmail) {
             status: status,
             plannedDate: existingPlan ? existingPlan.selectedDate : null,
             plannedPeriod: existingPlan ? existingPlan.selectedPeriod : null,
-            lessonPlanId: existingPlan ? existingPlan.lpId : null
+            originalDate: existingPlan ? (existingPlan.originalDate || null) : null,
+            originalPeriod: existingPlan ? (existingPlan.originalPeriod || null) : null,
+            lessonPlanId: existingPlan ? existingPlan.lpId : null,
+            cascadeMarked: cascadeMarked
           };
         });
         

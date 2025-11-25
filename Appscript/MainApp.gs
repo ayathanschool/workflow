@@ -659,7 +659,53 @@ function doPost(e) {
         sh.appendRow(sanitizedRowData);
         SpreadsheetApp.flush();
         appLog('INFO', 'daily report submitted', { email: teacherEmail, class: reportClass, subject: reportSubject, period: reportPeriod });
-        return _respond({ ok: true, submitted: true });
+
+        // Optional AUTO-CASCADE: if 0% completion and a lessonPlanId provided, attempt cascade immediately
+        let autoCascade = null;
+        try {
+          const completionPct = Number(data.completionPercentage || 0);
+          const lpIdForCascade = String(data.lessonPlanId || '').trim();
+          const autoCascadeEnabled = _isAutoCascadeEnabled();
+          if (autoCascadeEnabled && completionPct === 0 && lpIdForCascade) {
+            appLog('INFO', 'autoCascade trigger check passed', { lpId: lpIdForCascade });
+            // Use reportDate (normalized) as originalDate reference
+            const preview = getCascadePreview(lpIdForCascade, teacherEmail, reportDate);
+            if (preview && preview.success && preview.needsCascade && preview.canCascade && Array.isArray(preview.sessionsToReschedule) && preview.sessionsToReschedule.length) {
+              appLog('INFO', 'autoCascade executing', { affected: preview.sessionsToReschedule.length });
+              const execPayload = {
+                sessionsToReschedule: preview.sessionsToReschedule,
+                mode: preview.mode,
+                dailyReportContext: {
+                  date: reportDate,
+                  teacherEmail: teacherEmail,
+                  class: reportClass,
+                  subject: reportSubject,
+                  period: reportPeriod
+                }
+              };
+              const cascadeResult = executeCascade(execPayload);
+              autoCascade = {
+                attempted: true,
+                previewSessions: preview.sessionsToReschedule.length,
+                success: cascadeResult && cascadeResult.success,
+                updatedCount: cascadeResult && cascadeResult.updatedCount,
+                errors: cascadeResult && cascadeResult.errors,
+                flagEnabled: autoCascadeEnabled
+              };
+              appLog('INFO', 'autoCascade result', autoCascade);
+            } else {
+              autoCascade = { attempted: true, success: false, reason: 'preview_not_cascadable', preview: preview, flagEnabled: autoCascadeEnabled };
+              appLog('INFO', 'autoCascade preview not cascadable', { preview });
+            }
+          } else {
+            autoCascade = { attempted: false, reason: autoCascadeEnabled ? 'completion_not_zero_or_missing_lpId' : 'auto_disabled', flagEnabled: autoCascadeEnabled };
+          }
+        } catch (acErr) {
+          autoCascade = { attempted: true, success: false, error: acErr.message, flagEnabled: _isAutoCascadeEnabled() };
+          appLog('ERROR', 'autoCascade exception', { message: acErr.message, stack: acErr.stack });
+        }
+
+        return _respond({ ok: true, submitted: true, autoCascade: autoCascade });
       } catch (err) {
         appLog('ERROR', 'submitDailyReport failed', { message: err.message, stack: err.stack });
         return _respond({ error: 'Failed to submit: ' + err.message });
@@ -738,6 +784,11 @@ function doPost(e) {
     
     if (action === 'updateLessonPlanDetailsStatus') {
       return _handleUpdateLessonPlanStatus(data); // Same handler, different name for compatibility
+    }
+
+    // Simple diagnostic: reveals LessonPlans sheet headers and detects status column
+    if (action === 'diagnoseLessonPlanHeaders') {
+      return _respond(_handleDiagnoseLessonPlanHeaders());
     }
     
     // === OTHER POST ROUTES ===
@@ -1167,26 +1218,50 @@ function _handleUpdateLessonPlanStatus(data) {
       return _respond({ error: 'Lesson plan not found' });
     }
     
-    // Update status (row index + 2 because: 1 for header, 1 for 0-based to 1-based)
-    const statusColIndex = headers.indexOf('status') + 1;
+    // Find status column (case-insensitive) and update
+    // Normalize headers (trim + lowercase) for flexible matching
+    const normalizedHeaders = headers.map(h => String(h).trim());
+    let rawStatusIdx = normalizedHeaders.findIndex(h => h === 'status');
+    if (rawStatusIdx === -1) {
+      rawStatusIdx = normalizedHeaders.findIndex(h => h.toLowerCase() === 'status');
+    }
+    if (rawStatusIdx === -1) {
+      Logger.log('ERROR: Could not find status column (status/Status). Headers: ' + JSON.stringify(headers));
+      return _respond({ error: 'Status column not found in sheet' });
+    }
+    const statusColIndex = rawStatusIdx + 1; // convert to 1-based
+    const previousStatus = sh.getRange(rowIndex + 2, statusColIndex).getValue();
     sh.getRange(rowIndex + 2, statusColIndex).setValue(status);
+    const writtenStatus = sh.getRange(rowIndex + 2, statusColIndex).getValue();
+    Logger.log(`Status cell write check: prev='${previousStatus}' new='${writtenStatus}' expected='${status}'`);
     
     // Update review comments if provided
     if (comments) {
-      const commentsIdx = headers.indexOf('reviewComments');
+      let commentsIdx = normalizedHeaders.findIndex(h => h === 'reviewComments');
+      if (commentsIdx === -1) {
+        commentsIdx = normalizedHeaders.findIndex(h => h.toLowerCase() === 'reviewcomments');
+      }
       if (commentsIdx >= 0) {
         sh.getRange(rowIndex + 2, commentsIdx + 1).setValue(comments);
+      } else {
+        Logger.log('WARNING: reviewComments column not found; skipping comment write');
       }
     }
     
     // Update reviewedAt timestamp
-    const reviewedAtIdx = headers.indexOf('reviewedAt');
+    let reviewedAtIdx = normalizedHeaders.findIndex(h => h === 'reviewedAt');
+    if (reviewedAtIdx === -1) {
+      reviewedAtIdx = normalizedHeaders.findIndex(h => h.toLowerCase() === 'reviewedat');
+    }
     if (reviewedAtIdx >= 0) {
       sh.getRange(rowIndex + 2, reviewedAtIdx + 1).setValue(new Date().toISOString());
+    } else {
+      Logger.log('INFO: reviewedAt column not present; timestamp skipped');
     }
     
-    Logger.log(`Lesson plan ${lpId} status updated to ${status}`);
-    return _respond({ success: true, message: 'Lesson plan status updated successfully' });
+    Logger.log(`Lesson plan ${lpId} status updated to ${status} (verification: '${writtenStatus}')`);
+    // Include verification data for debugging on client side
+    return _respond({ success: true, message: 'Lesson plan status updated successfully', lpId, previousStatus, writtenStatus });
   } catch (error) {
     Logger.log('Error updating lesson plan status: ' + error.message);
     return _respond({ error: error.message });
@@ -1538,7 +1613,9 @@ function _handleGetPlannedLessonsForDate(params) {
       
       const planDate = _isoDateIST(selectedDateVal);
       
-      return String(plan.status || '') === 'Ready' && planDate === queryDate;
+      const statusRaw = String(plan.status || '');
+      const isFetchableStatus = statusRaw === 'Ready' || /rescheduled\s*\(cascade\)/i.test(statusRaw);
+      return isFetchableStatus && planDate === queryDate;
     });
     
     Logger.log(`[BATCH] Found ${matchingPlans.length} lesson plans for ${queryDate}`);
@@ -1645,8 +1722,10 @@ function _handleGetPlannedLessonForPeriod(params) {
       // Debug logging for each plan
       Logger.log(`Checking plan ${plan.lpId}: status=${plan.status}, selectedDate=${plan.selectedDate}, selectedPeriod=${plan.selectedPeriod}, planDate=${planDate}, planPeriod=${planPeriod}, class=${plan.class}, subject=${plan.subject}`);
       
+      const statusRaw = String(plan.status || '');
+      const isFetchableStatus = statusRaw === 'Ready' || /rescheduled\s*\(cascade\)/i.test(statusRaw);
       const matches = 
-        String(plan.status || '') === 'Ready' &&
+        isFetchableStatus &&
         planDate === queryDate &&
         planPeriod === String(period) &&
         String(plan.class || '').toLowerCase() === String(className).toLowerCase() &&
@@ -1654,7 +1733,7 @@ function _handleGetPlannedLessonForPeriod(params) {
       
       if (matches) {
         Logger.log(`✅ FOUND MATCHING PLAN: ${plan.lpId} for ${className}/${subject}`);
-      } else if (String(plan.status || '') === 'Ready') {
+      } else if (/^(Ready|Rescheduled\s*\(Cascade\))$/i.test(String(plan.status || ''))) {
         Logger.log(`❌ No match: planDate=${planDate} vs queryDate=${queryDate}, planPeriod=${planPeriod} vs ${period}, class=${plan.class} vs ${className}, subject=${plan.subject} vs ${subject}`);
       }
       
@@ -3697,6 +3776,8 @@ function executeCascade(cascadeData) {
     lock.waitLock(10000);
     
     Logger.log(`=== EXECUTE CASCADE ===`);
+    const cascadeId = 'CASCADE_' + Date.now();
+    Logger.log(`[executeCascade] id=${cascadeId} payload keys: ${Object.keys(cascadeData || {}).join(',')}`);
     
     const { sessionsToUpdate, sessionsToReschedule, mode } = cascadeData;
     // Support both naming from preview: sessionsToReschedule or legacy sessionsToUpdate
@@ -3707,6 +3788,16 @@ function executeCascade(cascadeData) {
     }
     
     const lpSh = _getSheet('LessonPlans');
+    // Ensure headers include originalDate/originalPeriod to preserve pre-cascade slot
+    const baseHeaders = _headers(lpSh);
+    try {
+      const requiredHeaders = baseHeaders.slice();
+      if (!requiredHeaders.includes('originalDate')) requiredHeaders.push('originalDate');
+      if (!requiredHeaders.includes('originalPeriod')) requiredHeaders.push('originalPeriod');
+      _ensureHeaders(lpSh, requiredHeaders);
+    } catch (ensureErr) {
+      Logger.log(`[executeCascade] Header ensure warning: ${ensureErr && ensureErr.message ? ensureErr.message : ensureErr}`);
+    }
     const lpHeaders = _headers(lpSh);
     const allPlans = _rows(lpSh).map((row, index) => ({ 
       ..._indexByHeader(row, lpHeaders), 
@@ -3716,9 +3807,19 @@ function executeCascade(cascadeData) {
     const updatedPlans = [];
     const errors = [];
     
+    // Pre-compute occupancy map for post-move validation
+    const teacherEmailLower = updates[0] && updates[0].teacherEmail ? String(updates[0].teacherEmail).toLowerCase() : null;
+    const skippedPlans = [];
+    // Identify the ORIGINAL missed session (manual cascade may pass currentLpId)
+    const originalLpId = cascadeData.currentLpId || cascadeData.originalLpId || (updates.length ? updates[0].lpId : null);
     updates.forEach(session => {
       try {
         const { lpId, proposedDate, proposedPeriod, learningObjectives, teachingMethods } = session;
+        if (!lpId || !proposedDate || proposedPeriod === undefined || proposedPeriod === null) {
+          skippedPlans.push({ lpId: lpId || 'UNKNOWN', reason: 'missing_fields' });
+          Logger.log(`[executeCascade] SKIP ${lpId} missing fields`);
+          return;
+        }
         
         const planIndex = allPlans.findIndex(p => p.lpId === lpId);
         if (planIndex === -1) {
@@ -3731,11 +3832,39 @@ function executeCascade(cascadeData) {
         
         const dateCol = lpHeaders.indexOf('selectedDate') + 1;
         if (dateCol > 0) {
+          // Before overwriting, persist originalDate if not already set
+          const originalDateCol = lpHeaders.indexOf('originalDate') + 1;
+          try {
+            if (originalDateCol > 0) {
+              const existingOriginalDate = plan.originalDate || '';
+              if (!existingOriginalDate) {
+                // Normalize selectedDate to ISO if it's a Date
+                let priorDate = plan.selectedDate;
+                if (priorDate instanceof Date) priorDate = _isoDateIST(priorDate);
+                else if (typeof priorDate === 'string' && priorDate.indexOf('T') >= 0) priorDate = priorDate.split('T')[0];
+                lpSh.getRange(rowNum, originalDateCol).setValue(priorDate || '');
+              }
+            }
+          } catch (odErr) {
+            Logger.log(`[executeCascade] originalDate persist warning for ${lpId}: ${odErr && odErr.message ? odErr.message : odErr}`);
+          }
           lpSh.getRange(rowNum, dateCol).setValue(proposedDate);
         }
         
         const periodCol = lpHeaders.indexOf('selectedPeriod') + 1;
         if (periodCol > 0) {
+          // Before overwriting, persist originalPeriod if not already set
+          const originalPeriodCol = lpHeaders.indexOf('originalPeriod') + 1;
+          try {
+            if (originalPeriodCol > 0) {
+              const existingOriginalPeriod = plan.originalPeriod || '';
+              if (!existingOriginalPeriod) {
+                lpSh.getRange(rowNum, originalPeriodCol).setValue(plan.selectedPeriod || '');
+              }
+            }
+          } catch (opErr) {
+            Logger.log(`[executeCascade] originalPeriod persist warning for ${lpId}: ${opErr && opErr.message ? opErr.message : opErr}`);
+          }
           lpSh.getRange(rowNum, periodCol).setValue(parseInt(proposedPeriod));
         }
         
@@ -3752,6 +3881,22 @@ function executeCascade(cascadeData) {
             lpSh.getRange(rowNum, methodsCol).setValue(teachingMethods);
           }
         }
+
+        // Mark ONLY the originally missed session with cascade status;
+        // Others keep their existing status (date/period moved silently)
+        try {
+          if (lpId === originalLpId) {
+            const statusCol = lpHeaders.indexOf('status') + 1;
+            if (statusCol > 0) {
+              const existingStatus = String(plan.status || '').trim().toLowerCase();
+              if (!['cancelled','rejected'].includes(existingStatus)) {
+                lpSh.getRange(rowNum, statusCol).setValue('Rescheduled (Cascade)');
+              }
+            }
+          }
+        } catch (statusErr) {
+          Logger.log(`[executeCascade] Status update skipped for ${lpId}: ${statusErr.message}`);
+        }
         
         updatedPlans.push({
           lpId: lpId,
@@ -3762,10 +3907,13 @@ function executeCascade(cascadeData) {
           oldObjectives: plan.learningObjectives,
           newObjectives: learningObjectives,
           oldMethods: plan.teachingMethods,
-          newMethods: teachingMethods
+          newMethods: teachingMethods,
+          originalDate: plan.originalDate || plan.selectedDate,
+          originalPeriod: plan.originalPeriod || plan.selectedPeriod
+          , cascadeMarked: lpId === originalLpId
         });
         
-        Logger.log(`✅ Updated ${lpId}: ${plan.selectedDate} P${plan.selectedPeriod} → ${proposedDate} P${proposedPeriod}`);
+        Logger.log(`✅ [${cascadeId}] Updated ${lpId}: ${plan.selectedDate} P${plan.selectedPeriod} → ${proposedDate} P${proposedPeriod}`);
         
       } catch (sessionError) {
         errors.push(`Error updating ${session.lpId}: ${sessionError.message}`);
@@ -3827,7 +3975,10 @@ function executeCascade(cascadeData) {
       updatedCount: updatedPlans.length,
       updatedPlans: updatedPlans,
       errors: errors.length > 0 ? errors : null,
-      dailyReportUpdated: !!cascadeData.dailyReportContext
+      skippedPlans: skippedPlans.length ? skippedPlans : null,
+      cascadeId: cascadeId,
+      dailyReportUpdated: !!cascadeData.dailyReportContext,
+      statusApplied: 'Rescheduled (Cascade)'
     };
     
   } catch (error) {
@@ -3835,5 +3986,61 @@ function executeCascade(cascadeData) {
     return { success: false, error: error.message };
   } finally {
     lock.releaseLock();
+  }
+}
+
+/**
+ * Read Settings to determine if auto-cascade is enabled.
+ * Settings sheet row: key = 'cascade_auto_enabled', value in {true/false/yes/no/on/off/1/0}
+ * Defaults to TRUE (enabled) if missing or on error so existing behaviour continues.
+ */
+function _isAutoCascadeEnabled() {
+  try {
+    const settingsSheet = _getSheet('Settings');
+    const headers = _headers(settingsSheet);
+    const rows = _rows(settingsSheet).map(r => _indexByHeader(r, headers));
+    const flagRow = rows.find(r => String(r.key || '').toLowerCase().trim() === 'cascade_auto_enabled');
+    if (!flagRow || flagRow.value === undefined || flagRow.value === '') {
+      Logger.log('[autoCascadeFlag] Missing flag row – default ENABLED');
+      return true;
+    }
+    const raw = String(flagRow.value).toLowerCase().trim();
+    const enabled = ['1','true','yes','on','enabled'].includes(raw);
+    Logger.log(`[autoCascadeFlag] Raw="${raw}" → enabled=${enabled}`);
+    return enabled;
+  } catch (err) {
+    Logger.log(`[autoCascadeFlag] Error reading flag: ${err.message} – default ENABLED`);
+    return true;
+  }
+}
+
+/**
+ * Diagnose LessonPlans headers and status column detection.
+ * Returns headers, trimmedHeaders, detectedStatusIndex (0-based), sample first 3 row statuses.
+ */
+function _handleDiagnoseLessonPlanHeaders() {
+  try {
+    var sh = _getSheet('LessonPlans');
+    var headers = _headers(sh);
+    var trimmed = headers.map(function(h){ return String(h).trim(); });
+    var statusIdx = trimmed.findIndex(function(h){ return h === 'status'; });
+    if (statusIdx === -1) statusIdx = trimmed.findIndex(function(h){ return h.toLowerCase() === 'status'; });
+    var rows = _rows(sh).slice(0,3); // sample only first 3
+    var statuses = [];
+    if (statusIdx !== -1) {
+      for (var i=0;i<rows.length;i++) {
+        statuses.push(rows[i][statusIdx]);
+      }
+    }
+    return {
+      success: true,
+      headers: headers,
+      trimmedHeaders: trimmed,
+      detectedStatusIndex: statusIdx,
+      sampleStatuses: statuses,
+      suggestion: statusIdx === -1 ? 'Rename the status column header cell to "status" (lowercase) or "Status".' : 'Status column detected correctly.'
+    };
+  } catch (e) {
+    return { success:false, error: e && e.message ? e.message : String(e) };
   }
 }

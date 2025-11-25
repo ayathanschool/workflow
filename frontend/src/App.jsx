@@ -1887,6 +1887,28 @@ const App = () => {
       fetchData();
     }, [user]);
 
+    // Helper to force-refresh lesson plans when status updates elsewhere (e.g., HM approvals)
+    const refreshTeacherLessonPlans = useCallback(async () => {
+      if (!user) return;
+      try {
+        api.clearCache('getTeacherLessonPlans');
+        const fresh = await api.getTeacherLessonPlans(user.email);
+        setLessonPlans(Array.isArray(fresh) ? fresh : []);
+      } catch (e) {
+        console.warn('Refresh lesson plans failed:', e);
+      }
+    }, [user]);
+
+    // Listen for global lesson plan status update events
+    useEffect(() => {
+      const handler = (e) => {
+        // Optionally inspect e.detail.lpId/e.detail.status
+        refreshTeacherLessonPlans();
+      };
+      window.addEventListener('lesson-plan-status-updated', handler);
+      return () => window.removeEventListener('lesson-plan-status-updated', handler);
+    }, [refreshTeacherLessonPlans]);
+
     const handlePrepareLesson = (slot) => {
       // First check if planning is allowed based on settings
   const today = new Date();
@@ -4183,6 +4205,8 @@ const App = () => {
     const [showFilters, setShowFilters] = useState(false);
     const [showDateSelector, setShowDateSelector] = useState(false);
     const [selectedTimetableDate, setSelectedTimetableDate] = useState('');
+    const [rowSubmitting, setRowSubmitting] = useState({});
+    const [refreshing, setRefreshing] = useState(false);
     const [filters, setFilters] = useState({
       teacher: '',
       class: '',
@@ -4293,6 +4317,7 @@ const App = () => {
 
     const handleApproveLesson = async (lpId, status) => {
       try {
+        setRowSubmitting(prev => ({ ...prev, [lpId]: true }));
         await withSubmit('Updating lesson status...', () => api.updateLessonPlanDetailsStatus(lpId, status));
         setPendingLessons(prev => {
           return prev
@@ -4305,8 +4330,102 @@ const App = () => {
               return true;
             });
         });
+        // Broadcast status update so other views can reload
+        window.dispatchEvent(new CustomEvent('lesson-plan-status-updated', { detail: { lpId, status } }));
+        // Clear caches explicitly (defensive)
+        api.clearCache('getPendingLessonReviews');
+        api.clearCache('getTeacherLessonPlans');
+        api.clearCache('getLessonPlan');
+        // Immediate refetch (cache-busting)
+        const teacherFilter = filters.teacher === '' ? '' : filters.teacher;
+        const classFilter = filters.class === '' ? '' : filters.class;
+        const subjectFilter = filters.subject === '' ? '' : filters.subject;
+        const statusFilter = filters.status === '' || filters.status === 'All' ? '' : filters.status;
+        const fresh = await api.getPendingLessonReviews(teacherFilter, classFilter, subjectFilter, statusFilter, { noCache: true });
+        // Apply date filters again (reuse logic)
+        let lessons = Array.isArray(fresh) ? fresh : [];
+        const fromStr = filters.dateFrom || '';
+        const toStr = filters.dateTo || '';
+        const singleDay = fromStr && toStr && fromStr === toStr;
+        const normalizeDate = (raw) => {
+          if (!raw) return '';
+          if (typeof raw === 'string') {
+            if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+            if (/^\d{4}-\d{2}-\d{2}T/.test(raw)) return raw.split('T')[0];
+            const dm = raw.match(/^(\d{2})-(\d{2})-(\d{4})$/); if (dm) return `${dm[3]}-${dm[2]}-${dm[1]}`;
+            const slash = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/); if (slash) return `${slash[3]}-${slash[2]}-${slash[1]}`;
+          }
+          try { const d = new Date(raw); if (!isNaN(d.getTime())) return d.toISOString().split('T')[0]; } catch (e) {}
+          return '';
+        };
+        if (fromStr || toStr) {
+          lessons = lessons.filter(lesson => {
+            const raw = lesson.selectedDate || lesson.plannedDate || lesson.date || '';
+            const dateStr = normalizeDate(raw);
+            if (!dateStr) return false;
+            if (singleDay) return dateStr === fromStr;
+            if (fromStr && dateStr < fromStr) return false;
+            if (toStr && dateStr > toStr) return false;
+            return true;
+          });
+        }
+        lessons.sort((a, b) => new Date(b.selectedDate || 0) - new Date(a.selectedDate || 0));
+        // If still filtering by Pending Review, drop updated item
+        if (filters.status === 'Pending Review') {
+          lessons = lessons.filter(l => l.status === 'Pending Review');
+        }
+        setPendingLessons(lessons);
       } catch (err) {
         console.error(err);
+      } finally {
+        setRowSubmitting(prev => ({ ...prev, [lpId]: false }));
+      }
+    };
+
+    // Manual refresh (cache-busting, does not change filters)
+    const refreshApprovals = async () => {
+      setRefreshing(true);
+      try {
+        api.clearCache('getPendingLessonReviews');
+        const teacherFilter = filters.teacher === '' ? '' : filters.teacher;
+        const classFilter = filters.class === '' ? '' : filters.class;
+        const subjectFilter = filters.subject === '' ? '' : filters.subject;
+        const statusFilter = filters.status === '' || filters.status === 'All' ? '' : filters.status;
+        let lessons = await api.getPendingLessonReviews(teacherFilter, classFilter, subjectFilter, statusFilter, { noCache: true });
+        lessons = Array.isArray(lessons) ? lessons : [];
+        // Apply date filtering if active
+        if (filters.dateFrom || filters.dateTo) {
+          const fromStr = filters.dateFrom || '';
+          const toStr = filters.dateTo || '';
+          const singleDay = fromStr && toStr && fromStr === toStr;
+          const norm = (raw) => {
+            if (!raw) return '';
+            if (typeof raw === 'string') {
+              if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+              if (/^\d{4}-\d{2}-\d{2}T/.test(raw)) return raw.split('T')[0];
+            }
+            try { const d = new Date(raw); if (!isNaN(d.getTime())) return d.toISOString().split('T')[0]; } catch(e){}
+            return '';
+          };
+          lessons = lessons.filter(l => {
+            const raw = l.selectedDate || l.plannedDate || l.date || '';
+            const ds = norm(raw);
+            if (!ds) return false;
+            if (singleDay) return ds === fromStr;
+            if (fromStr && ds < fromStr) return false;
+            if (toStr && ds > toStr) return false;
+            return true;
+          });
+        }
+        lessons.sort((a,b) => new Date(b.selectedDate || 0) - new Date(a.selectedDate || 0));
+        if (filters.status === 'Pending Review') {
+          lessons = lessons.filter(l => l.status === 'Pending Review');
+        }
+        setPendingLessons(lessons);
+      } catch (e) {
+        console.warn('Manual refresh failed:', e);
+      } finally {
+        setRefreshing(false);
       }
     };
 
@@ -4315,6 +4434,15 @@ const App = () => {
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">Lesson Plan Approvals</h1>
           <div className="flex space-x-3">
+            <button
+              onClick={refreshApprovals}
+              disabled={refreshing}
+              className={`bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed`}
+              title="Force refresh (bypass cache)"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
             <button 
               onClick={() => {
                 setShowDateSelector(!showDateSelector);
@@ -4680,24 +4808,27 @@ const App = () => {
                           <>
                             <button 
                               onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
-                              className="text-green-600 hover:text-green-900 px-1.5 py-0.5 bg-green-100 rounded text-xs"
+                              disabled={!!rowSubmitting[lesson.lpId]}
+                              className={`text-green-600 px-1.5 py-0.5 bg-green-100 rounded text-xs ${rowSubmitting[lesson.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-green-900'}`}
                               title="Approve"
                             >
-                              ✓
+                              {rowSubmitting[lesson.lpId] ? '…' : '✓'}
                             </button>
                             <button 
                               onClick={() => handleApproveLesson(lesson.lpId, 'Needs Rework')}
-                              className="text-yellow-600 hover:text-yellow-900 px-1.5 py-0.5 bg-yellow-100 rounded text-xs"
+                              disabled={!!rowSubmitting[lesson.lpId]}
+                              className={`text-yellow-600 px-1.5 py-0.5 bg-yellow-100 rounded text-xs ${rowSubmitting[lesson.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-yellow-900'}`}
                               title="Send for rework"
                             >
-                              ⚠
+                              {rowSubmitting[lesson.lpId] ? '…' : '⚠'}
                             </button>
                             <button 
                               onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
-                              className="text-red-600 hover:text-red-900 px-1.5 py-0.5 bg-red-100 rounded text-xs"
+                              disabled={!!rowSubmitting[lesson.lpId]}
+                              className={`text-red-600 px-1.5 py-0.5 bg-red-100 rounded text-xs ${rowSubmitting[lesson.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-red-900'}`}
                               title="Reject"
                             >
-                              ✗
+                              {rowSubmitting[lesson.lpId] ? '…' : '✗'}
                             </button>
                           </>
                         )}
@@ -4705,17 +4836,19 @@ const App = () => {
                           <>
                             <button 
                               onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
-                              className="text-green-600 hover:text-green-900 px-1.5 py-0.5 bg-green-100 rounded text-xs"
+                              disabled={!!rowSubmitting[lesson.lpId]}
+                              className={`text-green-600 px-1.5 py-0.5 bg-green-100 rounded text-xs ${rowSubmitting[lesson.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-green-900'}`}
                               title="Approve"
                             >
-                              ✓
+                              {rowSubmitting[lesson.lpId] ? '…' : '✓'}
                             </button>
                             <button 
                               onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
-                              className="text-red-600 hover:text-red-900 px-1.5 py-0.5 bg-red-100 rounded text-xs"
+                              disabled={!!rowSubmitting[lesson.lpId]}
+                              className={`text-red-600 px-1.5 py-0.5 bg-red-100 rounded text-xs ${rowSubmitting[lesson.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-red-900'}`}
                               title="Reject"
                             >
-                              ✗
+                              {rowSubmitting[lesson.lpId] ? '…' : '✗'}
                             </button>
                           </>
                         )}

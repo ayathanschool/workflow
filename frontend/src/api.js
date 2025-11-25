@@ -107,6 +107,11 @@ async function postJSON(url, payload) {
       clearCache('getTeacherLessonPlan');
       clearCache('getApprovedSchemes');
       clearCache('getAvailablePeriods');
+      // Additional lesson plan views relying on cached data
+      clearCache('getPendingLessonReviews');
+      clearCache('getTeacherLessonPlans');
+      clearCache('getPendingPreparationLessonPlans');
+      clearCache('getAllPlans');
     }
     if (action.includes('Substitution') || action === 'assignSubstitution') {
       clearCache('Substitution');
@@ -276,11 +281,12 @@ export async function getLessonReviewFilters() {
   return result?.data || result || {}
 }
 
-export async function getPendingLessonReviews(teacher='', cls='', subject='', status='Pending Review') {
-  const q = new URLSearchParams({ action: 'getPendingLessonReviews', teacher, class: cls, subject, status })
-  const response = await getJSON(`${BASE_URL}?${q.toString()}`)
-  // Unwrap the response: backend returns { status, data, timestamp }
-  return response?.data || response || []
+export async function getPendingLessonReviews(teacher='', cls='', subject='', status='Pending Review', options = {}) {
+  const { noCache = false } = options || {};
+  const q = new URLSearchParams({ action: 'getPendingLessonReviews', teacher, class: cls, subject, status });
+  if (noCache) q.append('_', String(Date.now()));
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`);
+  return response?.data || response || [];
 }
 
 export async function getPendingPreparationLessonPlans(email) {

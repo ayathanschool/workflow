@@ -273,8 +273,10 @@ export default function DailyReportModern({ user }) {
     }
     
     // Validate cascade option if lesson plan exists and 0% completion
-    if (completionPercentage === 0 && plan && !cascadeOption) {
-      setMessage({ text: "❌ Please select cascade option (Continue or Reschedule)", type: "error" });
+    // Only require explicit cascade option if auto-cascade is disabled (backend flag) – optimistic assumption via window flag
+    const autoCascadeDisabled = window.__AUTO_CASCADE_DISABLED__ === true; // can be set after fetching settings
+    if (autoCascadeDisabled && completionPercentage === 0 && plan && !cascadeOption) {
+      setMessage({ text: "❌ Select cascade option (Continue or Reschedule)", type: "error" });
       return;
     }
 
@@ -318,6 +320,19 @@ export default function DailyReportModern({ user }) {
 
       if (result && (result.ok || result.submitted)) {
         console.log('✅ Daily report submitted successfully');
+        // Handle auto-cascade feedback (backend may have moved sessions automatically)
+        const autoCascade = result.autoCascade || result.data?.autoCascade || null;
+        if (autoCascade && autoCascade.attempted && cascadeOption !== 'cascade') {
+          if (autoCascade.success) {
+            setMessage({ text: `✅ Report submitted. Auto-cascade rescheduled ${autoCascade.updatedCount} session(s).`, type: 'success' });
+          } else if (autoCascade.reason === 'auto_disabled') {
+            setMessage({ text: 'ℹ️ Report submitted. Auto-cascade disabled. You can manually choose Reschedule.', type: 'info' });
+          } else if (autoCascade.reason === 'completion_not_zero_or_missing_lpId') {
+            // Do nothing: normal non-zero completion path
+          } else {
+            setMessage({ text: `⚠️ Report submitted. Cascade not applied (${autoCascade.reason || autoCascade.error || 'Unknown reason'}).`, type: 'warning' });
+          }
+        }
         
         // Execute cascade if option was selected
         if (cascadeOption === 'cascade' && cascadePreview[key]) {
@@ -401,8 +416,17 @@ export default function DailyReportModern({ user }) {
 
         setMessage({ text: `✅ Period ${period.period} submitted successfully!`, type: "success" });
 
-        // Check chapter completion
+        // Check chapter completion (show immediate loading modal to avoid UX lag)
         if (draft.chapterCompleted) {
+          // Show a loading modal instantly so teacher knows a check is happening
+          setCompletionModalData({
+            chapter: chapter,
+            class: period.class,
+            subject: period.subject,
+            remainingPlans: [],
+            loading: true
+          });
+          setShowCompletionModal(true);
           try {
             const completionCheck = await checkChapterCompletion({
               teacherEmail: email,
@@ -411,20 +435,35 @@ export default function DailyReportModern({ user }) {
               chapter: chapter,
               date: date
             });
-
             const checkResult = completionCheck.data || completionCheck;
-
             if (checkResult.success && checkResult.hasRemainingPlans) {
+              const remainingPlans = checkResult.remainingPlans || [];
+              const uniqueDates = Array.from(new Set(remainingPlans.map(p => p.selectedDate))).sort();
+              const earliestDate = uniqueDates[0] || null;
+              const latestDate = uniqueDates[uniqueDates.length - 1] || null;
+              const periodsFreed = remainingPlans.length; // if cancelled
+              // Simple heuristic: if many sessions remain, recommend cancel; if only 1, recommend keep for revision
+              const recommendedAction = remainingPlans.length <= 1 ? 'keep' : 'cancel';
               setCompletionModalData({
                 chapter: chapter,
                 class: period.class,
                 subject: period.subject,
-                remainingPlans: checkResult.remainingPlans
+                remainingPlans: remainingPlans,
+                earliestDate,
+                latestDate,
+                periodsFreed,
+                recommendedAction,
+                loading: false
               });
-              setShowCompletionModal(true);
+            } else {
+              // No remaining plans; close modal and show toast
+              setShowCompletionModal(false);
+              setMessage({ text: 'Chapter completed – no remaining planned sessions.', type: 'info' });
             }
           } catch (checkError) {
             console.error('Error checking chapter completion:', checkError);
+            setCompletionModalData(prev => ({ ...prev, loading: false }));
+            setMessage({ text: 'Chapter completion check failed', type: 'warning' });
           }
         }
 
@@ -1096,6 +1135,13 @@ function ChapterCompletionModal({ data, onClose, onAction }) {
     setIsProcessing(false);
   };
 
+  // Sync default selection to recommended action when modal first loads finished
+  useEffect(() => {
+    if (!data.loading && data.recommendedAction) {
+      setSelectedAction(data.recommendedAction);
+    }
+  }, [data.loading, data.recommendedAction]);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-4 animate-fadeIn">
       <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-slideUp">
@@ -1117,45 +1163,72 @@ function ChapterCompletionModal({ data, onClose, onAction }) {
         </div>
 
         <div className="p-6 space-y-6">
-          {/* Chapter Info */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="text-sm text-gray-600 mb-1">Completed Chapter:</div>
-            <div className="font-semibold text-gray-900">{data.chapter}</div>
-            <div className="text-sm text-gray-600 mt-1">{data.class} • {data.subject}</div>
+          {/* Chapter Info & Summary */}
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 md:col-span-1">
+              <div className="text-xs uppercase tracking-wide text-blue-600 font-semibold mb-1">Completed Chapter</div>
+              <div className="font-semibold text-gray-900 truncate" title={data.chapter}>{data.chapter}</div>
+              <div className="text-sm text-gray-600 mt-1">{data.class} • {data.subject}</div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-4 flex flex-col justify-center">
+              <div className="text-xs text-gray-500">Remaining Sessions</div>
+              <div className="text-lg font-bold text-gray-900">{data.loading ? '…' : data.remainingPlans.length}</div>
+              {(!data.loading && data.remainingPlans.length > 0) && (
+                <div className="mt-1 text-xs text-gray-500">Earliest: {data.earliestDate || '-'} • Latest: {data.latestDate || '-'}</div>
+              )}
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-4 flex flex-col justify-center">
+              <div className="text-xs text-gray-500">Recommended Action</div>
+              <div className="text-lg font-bold {data.recommendedAction === 'cancel' ? 'text-green-600' : 'text-blue-600'}">
+                {data.loading ? 'Analyzing…' : (data.recommendedAction === 'cancel' ? 'Cancel & Free Periods' : 'Keep for Revision')}
+              </div>
+              {!data.loading && (
+                <div className="mt-1 text-xs text-gray-500">
+                  {data.recommendedAction === 'cancel' ? `${data.periodsFreed} period(s) will open for next chapter` : 'Retain planned slots for reinforcement'}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Remaining Plans */}
           <div>
             <h4 className="font-medium text-gray-900 mb-3">
-              Remaining Planned Sessions ({data.remainingPlans.length})
+              {data.loading ? 'Checking remaining planned sessions…' : `Remaining Planned Sessions (${data.remainingPlans.length})`}
             </h4>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {data.remainingPlans.map((plan, idx) => (
-                <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-medium text-sm">
-                      {plan.selectedPeriod || 'N/A'}
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">
-                        {plan.selectedDate ? new Date(plan.selectedDate + 'T00:00:00').toLocaleDateString('en-IN', { 
-                          year: 'numeric', 
-                          month: 'short', 
-                          day: 'numeric' 
-                        }) : 'No date'}
+            {data.loading ? (
+              <div className="flex items-center gap-3 text-sm text-gray-600">
+                <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent"></div>
+                <span>Analyzing scheduled sessions…</span>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {data.remainingPlans.map((plan, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-medium text-sm">
+                        {plan.selectedPeriod || 'N/A'}
                       </div>
-                      <div className="text-xs text-gray-500">Session {plan.session || 'N/A'}</div>
+                      <div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {plan.selectedDate ? new Date(plan.selectedDate + 'T00:00:00').toLocaleDateString('en-IN', { 
+                            year: 'numeric', 
+                            month: 'short', 
+                            day: 'numeric' 
+                          }) : 'No date'}
+                        </div>
+                        <div className="text-xs text-gray-500">Session {plan.session || 'N/A'}</div>
+                      </div>
                     </div>
+                    <div className="text-xs text-gray-500">{plan.status || 'Unknown'}</div>
                   </div>
-                  <div className="text-xs text-gray-500">{plan.status || 'Unknown'}</div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Action Options */}
           <div className="space-y-3">
-            <label className="flex items-start p-4 border-2 rounded-xl cursor-pointer transition-all hover:bg-green-50 ${selectedAction === 'cancel' ? 'border-green-500 bg-green-50' : 'border-gray-200'}">
+            <label className={`flex items-start p-4 border-2 rounded-xl cursor-pointer transition-all hover:bg-green-50 ${selectedAction === 'cancel' ? 'border-green-500 bg-green-50 shadow-sm' : 'border-gray-200'}`}>
               <input
                 type="radio"
                 name="action"
@@ -1172,10 +1245,15 @@ function ChapterCompletionModal({ data, onClose, onAction }) {
                 <div className="text-xs text-green-600 mt-2">
                   ✓ Recommended when chapter is fully taught
                 </div>
+                {data.recommendedAction === 'cancel' && !data.loading && (
+                  <div className="mt-2 inline-flex items-center text-xs font-medium text-green-700 bg-green-100 px-2 py-1 rounded">
+                    Recommended
+                  </div>
+                )}
               </div>
             </label>
 
-            <label className="flex items-start p-4 border-2 rounded-xl cursor-pointer transition-all hover:bg-blue-50 ${selectedAction === 'keep' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}">
+            <label className={`flex items-start p-4 border-2 rounded-xl cursor-pointer transition-all hover:bg-blue-50 ${selectedAction === 'keep' ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200'}`}>
               <input
                 type="radio"
                 name="action"
@@ -1192,34 +1270,44 @@ function ChapterCompletionModal({ data, onClose, onAction }) {
                 <div className="text-xs text-blue-600 mt-2">
                   ✓ Useful for important topics needing more practice
                 </div>
+                {data.recommendedAction === 'keep' && !data.loading && (
+                  <div className="mt-2 inline-flex items-center text-xs font-medium text-blue-700 bg-blue-100 px-2 py-1 rounded">
+                    Recommended
+                  </div>
+                )}
               </div>
             </label>
+            <div className="text-xs text-gray-400 mt-2">You can revisit cancelled periods during next planning cycle.</div>
           </div>
         </div>
-
-        {/* Action Buttons */}
+        {/* Footer Actions */}
         <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
           <button
             onClick={onClose}
             disabled={isProcessing}
             className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
           >
-            Cancel
+            Later
           </button>
           <button
             onClick={handleAction}
-            disabled={isProcessing}
-            className="px-8 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            disabled={isProcessing || data.loading}
+            className={`px-8 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${selectedAction === 'cancel' ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
           >
             {isProcessing ? (
               <>
                 <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
                 <span>Processing...</span>
               </>
+            ) : data.loading ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                <span>Analyzing...</span>
+              </>
             ) : (
               <>
-                <span>Confirm</span>
-                <span>→</span>
+                <span>✓</span>
+                <span>{selectedAction === 'cancel' ? 'Confirm Cancellation' : 'Confirm Keep'}</span>
               </>
             )}
           </button>

@@ -296,6 +296,8 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   const getStatusIcon = (status) => {
     const normalizedStatus = String(status || '').toLowerCase();
     switch (normalizedStatus) {
+      case 'cascaded':
+        return <CheckCircle className="w-4 h-4 text-orange-600" />;
       case 'reported':
         return <CheckCircle className="w-4 h-4 text-purple-600" />;
       case 'ready':
@@ -472,6 +474,8 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                             className={`p-3 rounded transition-colors ${
                               String(session.status || '').toLowerCase() === 'reported'
                                 ? 'bg-purple-50 border-2 border-purple-300 opacity-90 cursor-default'
+                                : String(session.status || '').toLowerCase() === 'cascaded'
+                                ? 'bg-orange-50 border-2 border-orange-300 hover:bg-orange-100 cursor-default'
                                 : String(session.status || '').toLowerCase() === 'ready'
                                 ? 'bg-blue-50 border-2 border-blue-300 hover:bg-blue-100 cursor-pointer'
                                 : ['planned', 'pending review'].includes(String(session.status || '').toLowerCase())
@@ -497,6 +501,25 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                 </div>
                                 <div className="text-xs text-purple-700">
                                   {formatDate(session.plannedDate)} P{session.plannedPeriod}
+                                </div>
+                              </div>
+                            )}
+                            {String(session.status || '').toLowerCase() === 'cascaded' && (
+                              <div className="space-y-1" title={`Moved from ${session.originalDate ? formatDate(session.originalDate) : 'original date unavailable'}${session.originalPeriod ? ` P${session.originalPeriod}` : ''} → ${session.plannedDate ? formatDate(session.plannedDate) : ''}${session.plannedPeriod ? ` P${session.plannedPeriod}` : ''}`}>
+                                <div className="text-xs text-orange-700 font-semibold bg-orange-100 rounded px-2 py-1 inline-block">
+                                  ↻ Cascaded
+                                </div>
+                                <div className="text-xs text-orange-700">
+                                  {session.originalDate ? (
+                                    <>
+                                      <span className="opacity-80">from</span> {formatDate(session.originalDate)}{session.originalPeriod ? ` P${session.originalPeriod}` : ''}
+                                      <span className="opacity-80"> to</span> {session.plannedDate ? formatDate(session.plannedDate) : ''}{session.plannedPeriod ? ` P${session.plannedPeriod}` : ''}
+                                    </>
+                                  ) : (
+                                    <>
+                                      Rescheduled via cascade{session.plannedDate && session.plannedPeriod ? `: ${formatDate(session.plannedDate)} P${session.plannedPeriod}` : ''}
+                                    </>
+                                  )}
                                 </div>
                               </div>
                             )}
