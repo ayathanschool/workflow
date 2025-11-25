@@ -486,15 +486,19 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
             const hasSubstitution = !!substitution;
             const isItLab = isItLabPeriod(item.subject);
             const itLabSupport = isItLab ? getAssignedItLabSupport(parseInt(period), item.class) : null;
+            const originalSubject = hasSubstitution ? (substitution.regularSubject || item.subject) : item.subject;
+            const substituteSubject = hasSubstitution ? (substitution.substituteSubject || substitution.regularSubject || item.subject) : '';
+            const originalTeacher = hasSubstitution ? (substitution.absentTeacher || item.teacherName) : item.teacherName;
+            const substituteTeacher = hasSubstitution ? (substitution.substituteTeacher || '') : '';
             
             return {
               period: period,
               time: getPeriodTime(parseInt(period)),
               class: item.class,
               subject: hasSubstitution && showWithSubstitutions ? 
-                `${item.subject} → ${substitution.substituteSubject}` : item.subject,
+                `${originalSubject} → ${substituteSubject}` : originalSubject,
               teacher: hasSubstitution && showWithSubstitutions ? 
-                `${item.teacherName} → ${substitution.substituteTeacher}` : item.teacherName,
+                `${originalTeacher} → ${substituteTeacher}` : originalTeacher,
               itLabSupport: itLabSupport || '',
               status: hasSubstitution ? 'Substituted' : (isItLab ? 'IT Lab' : 'Regular'),
               note: hasSubstitution ? substitution.note : ''
@@ -506,6 +510,7 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
       const htmlContent = `
         <html>
           <head>
+            <meta charset="UTF-8" />
             <title>Timetable - ${formatLocalDate(selectedDate)}</title>
             <style>
               body { font-family: Arial, sans-serif; margin: 20px; }
@@ -580,15 +585,19 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
             const hasSubstitution = !!substitution;
             const isItLab = isItLabPeriod(item.subject);
             const itLabSupport = isItLab ? getAssignedItLabSupport(parseInt(period), item.class) : null;
+            const originalSubject = hasSubstitution ? (substitution.regularSubject || item.subject) : item.subject;
+            const substituteSubject = hasSubstitution ? (substitution.substituteSubject || substitution.regularSubject || item.subject) : '';
+            const originalTeacher = hasSubstitution ? (substitution.absentTeacher || item.teacherName) : item.teacherName;
+            const substituteTeacher = hasSubstitution ? (substitution.substituteTeacher || '') : '';
             
             return [
               period,
               getPeriodTime(parseInt(period)),
               item.class,
               hasSubstitution && showWithSubstitutions ? 
-                `${item.subject} → ${substitution.substituteSubject}` : item.subject,
+                `${originalSubject} → ${substituteSubject}` : originalSubject,
               hasSubstitution && showWithSubstitutions ? 
-                `${item.teacherName} → ${substitution.substituteTeacher}` : item.teacherName,
+                `${originalTeacher} → ${substituteTeacher}` : originalTeacher,
               itLabSupport || '',
               hasSubstitution ? 'Substituted' : (isItLab ? 'IT Lab' : 'Regular'),
               hasSubstitution ? substitution.note : ''
@@ -605,7 +614,8 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
       ].join('\n');
 
       // Create blob and download
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      // Prepend UTF-8 BOM to ensure correct rendering in Excel on Windows
+      const blob = new Blob(['\ufeff', csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -950,6 +960,10 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
                         const itLabSupport = isItLab ? getAssignedItLabSupport(parseInt(period), className) : null;
                         const rowKey = `${period}-${className}`;
                         const isItLabAssigning = itLabAssigning[rowKey] || false;
+                        const originalSubject = hasSubstitution ? (substitution.regularSubject || item.subject) : item.subject;
+                        const substituteSubject = hasSubstitution ? (substitution.substituteSubject || substitution.regularSubject || item.subject) : '';
+                        const originalTeacher = hasSubstitution ? (substitution.absentTeacher || item.teacherName) : item.teacherName;
+                        const substituteTeacher = hasSubstitution ? (substitution.substituteTeacher || '') : '';
                         
                         return (
                           <td 
@@ -961,22 +975,24 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
                                 {isItLab && <Monitor className="w-3 h-3 text-blue-500" />}
                                 {hasSubstitution && showWithSubstitutions ? (
                                   <>
-                                    <span className="line-through text-gray-500">{item.subject}</span>
-                                    <div className="text-orange-600 dark:text-orange-400">{substitution.substituteSubject || substitution.regularSubject}</div>
+                                    <span>{originalSubject}</span>
+                                    <span className="mx-1">→</span>
+                                    <span className="text-orange-600 dark:text-orange-400">{substituteSubject}</span>
                                   </>
                                 ) : (
-                                  item.subject
+                                  originalSubject
                                 )}
                                 {isItLab && <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-100 dark:bg-blue-800 text-blue-800 dark:text-blue-200 rounded-full">IT Lab</span>}
                               </div>
                               <div className="text-xs mt-1">
                                 {hasSubstitution && showWithSubstitutions ? (
                                   <>
-                                    <span className="line-through text-gray-500">{item.teacherName}</span>
-                                    <div className="text-orange-600 dark:text-orange-400">{substitution.substituteTeacher}</div>
+                                    <span>{originalTeacher}</span>
+                                    <span className="mx-1">→</span>
+                                    <span className="text-orange-600 dark:text-orange-400">{substituteTeacher}</span>
                                   </>
                                 ) : (
-                                  item.teacherName
+                                  originalTeacher
                                 )}
                               </div>
                               <div className="mt-2 space-y-1">

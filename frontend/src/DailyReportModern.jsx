@@ -27,6 +27,12 @@ const DEVIATION_REASONS = [
   { value: "Other", label: "📋 Other (specify in notes)" }
 ];
 
+const CASCADE_OPTIONS = [
+  { value: "", label: "Select cascade option" },
+  { value: "continue", label: "📌 Continue with existing plan" },
+  { value: "cascade", label: "🔄 Reschedule remaining sessions" }
+];
+
 export default function DailyReportModern({ user }) {
   const [date, setDate] = useState(todayIST());
   const [periods, setPeriods] = useState([]);
@@ -37,6 +43,9 @@ export default function DailyReportModern({ user }) {
   const [submitting, setSubmitting] = useState({});
   const [message, setMessage] = useState({ text: "", type: "" });
   const [lessonPlans, setLessonPlans] = useState({});
+  const [cascadePreview, setCascadePreview] = useState({});
+  const [cascadeMoves, setCascadeMoves] = useState({});
+  const [cascadeLoading, setCascadeLoading] = useState({});
   
   // Chapter completion modal
   const [showCompletionModal, setShowCompletionModal] = useState(false);
@@ -107,7 +116,8 @@ export default function DailyReportModern({ user }) {
       const reportsMap = {};
       if (Array.isArray(reportsData)) {
         reportsData.forEach(report => {
-          const key = `${report.period}_${report.class}_${report.subject}`;
+          // Use pipe-delimited key consistent with periodKey()
+          const key = `${report.period}|${report.class}|${report.subject}`;
           reportsMap[key] = report;
         });
       }
@@ -186,7 +196,48 @@ export default function DailyReportModern({ user }) {
         [field]: value
       }
     }));
-  }, []);
+    
+    // When cascade option is selected, fetch preview
+    if (field === 'cascadeOption' && value === 'cascade') {
+      const plan = lessonPlans[key];
+      if (plan && plan.lpId) {
+        fetchCascadePreview(key, plan.lpId);
+      }
+    }
+  }, [lessonPlans]);
+  
+  const fetchCascadePreview = async (key, lpId) => {
+    try {
+      setCascadeLoading(prev => ({ ...prev, [key]: true }));
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'https://script.google.com/macros/s/AKfycbyfKlfWqiDRkNF_Cjft73qHpGQm8tQ-nHjPSPHOKfuC1l8H5JH5gfippuhNqjvtx5dsDg/exec'}?action=getCascadePreview&lpId=${lpId}&teacherEmail=${email}&originalDate=${date}`);
+      const result = await response.json();
+      
+      console.log('🔍 Cascade API Response:', result);
+      
+      // Handle Apps Script response format: {status: 200, data: {...}}
+      if (result.status === 200 && result.data) {
+        const cascadeData = result.data;
+        
+        if (cascadeData.success) {
+          setCascadePreview(prev => ({
+            ...prev,
+            [key]: cascadeData
+          }));
+        } else {
+          console.error('Cascade preview failed:', cascadeData);
+          setMessage({ text: `❌ Cannot calculate cascade: ${cascadeData.error || 'Unknown error'}`, type: 'error' });
+        }
+      } else {
+        console.error('Invalid API response:', result);
+        setMessage({ text: '❌ Invalid cascade response', type: 'error' });
+      }
+    } catch (error) {
+      console.error('Error fetching cascade preview:', error);
+      setMessage({ text: '❌ Failed to calculate cascade preview', type: 'error' });
+    } finally {
+      setCascadeLoading(prev => ({ ...prev, [key]: false }));
+    }
+  };
 
   const getDraft = useCallback((key) => drafts[key] || {}, [drafts]);
   const getReport = useCallback((key) => reports[key], [reports]);
@@ -209,6 +260,7 @@ export default function DailyReportModern({ user }) {
     const objectives = (draft.objectives || plan?.learningObjectives || "").trim();
     const completionPercentage = Number(draft.completionPercentage || 0);
     const deviationReason = (draft.deviationReason || "").trim();
+    const cascadeOption = draft.cascadeOption || "";
 
     if (!chapter) {
       setMessage({ text: "❌ Chapter/Topic is required", type: "error" });
@@ -217,6 +269,12 @@ export default function DailyReportModern({ user }) {
 
     if (completionPercentage === 0 && !deviationReason) {
       setMessage({ text: "❌ For 0% completion, please select a reason", type: "error" });
+      return;
+    }
+    
+    // Validate cascade option if lesson plan exists and 0% completion
+    if (completionPercentage === 0 && plan && !cascadeOption) {
+      setMessage({ text: "❌ Please select cascade option (Continue or Reschedule)", type: "error" });
       return;
     }
 
@@ -260,17 +318,76 @@ export default function DailyReportModern({ user }) {
 
       if (result && (result.ok || result.submitted)) {
         console.log('✅ Daily report submitted successfully');
+        
+        // Execute cascade if option was selected
+        if (cascadeOption === 'cascade' && cascadePreview[key]) {
+          console.log('🔄 Executing cascade...');
+          try {
+            const cascadePayload = {
+              currentLpId: plan.lpId,
+              sessionsToUpdate: cascadePreview[key].sessionsToReschedule,
+              dailyReportContext: {
+                date,
+                teacherEmail: email,
+                class: period.class,
+                subject: period.subject,
+                period: Number(period.period)
+              }
+            };
+            const cascadeRes = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'https://script.google.com/macros/s/AKfycbyfKlfWqiDRkNF_Cjft73qHpGQm8tQ-nHjPSPHOKfuC1l8H5JH5gfippuhNqjvtx5dsDg/exec'}?action=executeCascade`, {
+              method: 'POST',
+              body: JSON.stringify(cascadePayload)
+            });
+            const cascadeData = await cascadeRes.json();
+            if (cascadeData.status === 200 && cascadeData.data.success) {
+              console.log('✅ Cascade executed successfully');
+              // Record moved target for this specific period to show banner
+              try {
+                const moved = (cascadePreview[key]?.sessionsToReschedule || []).find(s => s.lpId === plan.lpId);
+                if (moved) {
+                  setCascadeMoves(prev => ({
+                    ...prev,
+                    [key]: { date: moved.proposedDate, period: moved.proposedPeriod }
+                  }));
+                }
+              } catch {}
+              // Refresh planned lessons for the day so UI reflects moved sessions
+              try {
+                const refreshed = await getPlannedLessonsForDate(email, date);
+                const lessonsByPeriod = refreshed?.data?.lessonsByPeriod || refreshed?.lessonsByPeriod || {};
+                setLessonPlans(lessonsByPeriod);
+                console.log('🔄 Lesson plans refreshed after cascade');
+              } catch (e) {
+                console.warn('⚠️ Failed to refresh lesson plans after cascade', e);
+              }
+              setMessage({ text: `✅ Report submitted and ${cascadeData.data.updatedCount} sessions rescheduled!`, type: "success" });
+            } else {
+              console.error('Cascade failed:', cascadeData);
+              setMessage({ text: `⚠️ Report submitted but cascade failed: ${cascadeData.data.error}`, type: "warning" });
+            }
+          } catch (cascadeError) {
+            console.error('Cascade error:', cascadeError);
+            setMessage({ text: '⚠️ Report submitted but cascade failed', type: "warning" });
+          }
+        }
+        
         // Update reports map WITHOUT reloading entire page
         setReports(prev => ({
           ...prev,
           [key]: { ...payload, reportId: result.reportId }
         }));
 
-        // Clear draft
+        // Clear draft and cascade preview
         setDrafts(prev => {
           const newDrafts = { ...prev };
           delete newDrafts[key];
           return newDrafts;
+        });
+        
+        setCascadePreview(prev => {
+          const newPreview = { ...prev };
+          delete newPreview[key];
+          return newPreview;
         });
 
         // Collapse this period and expand next
@@ -478,6 +595,10 @@ export default function DailyReportModern({ user }) {
                 draft={draft}
                 report={report}
                 plan={plan}
+                cascadePreview={cascadePreview[key]}
+                cascadeLoading={!!cascadeLoading[key]}
+                cascadeMoves={cascadeMoves}
+                periodKey={key}
                 onToggle={() => setExpandedPeriod(isExpanded ? null : key)}
                 onUpdate={(field, value) => updateDraft(key, field, value)}
                 onSubmit={() => handleSubmit(period)}
@@ -557,6 +678,10 @@ function PeriodCard({
   draft = {}, 
   report = null, 
   plan = null,
+  cascadePreview = null,
+  cascadeLoading = false,
+  cascadeMoves = {},
+  periodKey = '',
   onToggle, 
   onUpdate, 
   onSubmit 
@@ -656,12 +781,23 @@ function PeriodCard({
               </div>
             </div>
           ) : (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <div className={`rounded-lg p-4 border ${cascadeMoves[periodKey] ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200'}`}>
               <div className="flex items-start gap-3">
-                <div className="text-2xl">⚠️</div>
+                <div className="text-2xl">{cascadeMoves[periodKey] ? 'ℹ️' : '⚠️'}</div>
                 <div className="flex-1">
-                  <div className="font-medium text-red-900">No Lesson Plan Found</div>
-                  <div className="text-sm text-red-700 mt-1">Please prepare and submit a lesson plan for approval before teaching this period.</div>
+                  {cascadeMoves[periodKey] ? (
+                    <>
+                      <div className="font-medium text-blue-900">Plan moved due to cascade</div>
+                      <div className="text-sm text-blue-700 mt-1">
+                        New schedule: {cascadeMoves[periodKey].date} • P{cascadeMoves[periodKey].period}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="font-medium text-red-900">No Lesson Plan Found</div>
+                      <div className="text-sm text-red-700 mt-1">Please prepare and submit a lesson plan for approval before teaching this period.</div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -771,20 +907,83 @@ function PeriodCard({
 
           {/* Deviation Reason (only for 0%) */}
           {completionPercentage === 0 && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Reason for 0% Completion <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={data.deviationReason || ""}
-                onChange={(e) => onUpdate('deviationReason', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                {DEVIATION_REASONS.map(reason => (
-                  <option key={reason.value} value={reason.value}>{reason.label}</option>
-                ))}
-              </select>
-            </div>
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Reason for 0% Completion <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={data.deviationReason || ""}
+                  onChange={(e) => onUpdate('deviationReason', e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  {DEVIATION_REASONS.map(reason => (
+                    <option key={reason.value} value={reason.value}>{reason.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Cascade Option (only when lesson plan exists and reason is selected) */}
+              {plan && data.deviationReason && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Lesson Plan Action <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={data.cascadeOption || ""}
+                    onChange={(e) => onUpdate('cascadeOption', e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    {CASCADE_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-sm text-gray-600">
+                    {data.cascadeOption === 'continue' && '📌 Remaining sessions will keep their original dates'}
+                    {data.cascadeOption === 'cascade' && '🔄 All remaining sessions will be rescheduled to next available periods'}
+                  </p>
+                  {data.cascadeOption === 'cascade' && cascadeLoading && (
+                    <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
+                      <span className="animate-spin inline-block w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full"></span>
+                      Generating cascade preview...
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Cascade Preview */}
+              {data.cascadeOption === 'cascade' && cascadePreview && !cascadeLoading && (
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+                  <h4 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                    <span className="text-xl">🔄</span>
+                    Cascade Preview: {cascadePreview.sessionsToReschedule?.length || 0} Sessions
+                  </h4>
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {cascadePreview.sessionsToReschedule?.map((session, idx) => (
+                      <div key={idx} className="bg-white p-3 rounded border border-blue-200">
+                        <div className="flex justify-between items-center">
+                          <div className="font-medium text-gray-900">Session {session.sessionNo}</div>
+                          <div className="text-sm text-gray-600">
+                            {session.currentDate} P{session.currentPeriod} → {session.proposedDate} P{session.proposedPeriod}
+                          </div>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {session.dayName} • {session.startTime} - {session.endTime}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {cascadePreview.examWarnings?.length > 0 && (
+                    <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded">
+                      <div className="font-semibold text-orange-900 mb-2">⚠️ Exam Warnings</div>
+                      {cascadePreview.examWarnings.map((warn, idx) => (
+                        <div key={idx} className="text-sm text-orange-800">{warn.warning}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
 
           {/* Learning Objectives - show for all cases when completion > 0 */}

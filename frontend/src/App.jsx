@@ -677,22 +677,23 @@ const App = () => {
       }
     };
 
+    // Ref to guarantee single dashboard fetch per mount even if state updates quickly
+    const dashboardFetchRef = useRef(false);
+
     useEffect(() => {
       async function fetchDashboardData() {
-        // Prevent multiple fetches
-        if (dashboardLoading || dashboardLoaded) return;
-        
+        // Run only once
+        if (dashboardFetchRef.current) return;
+        if (!user?.email) return;
+        dashboardFetchRef.current = true;
         try {
-          if (!user?.email) return;
-          
           setDashboardLoading(true);
-          
           // Headmaster view: use HM insights and classes count
           if (hasRole('h m')) {
-            const hmData = await api.getHmInsights();
-            
-            const classes = await api.getAllClasses();
-            
+            const [hmData, classes] = await Promise.all([
+              api.getHmInsights(),
+              api.getAllClasses()
+            ]);
             const newInsights = {
               planCount: hmData?.planCount || 0,
               lessonCount: hmData?.lessonCount || 0,
@@ -701,7 +702,6 @@ const App = () => {
               subjectCount: 0,
               pendingReports: 0
             };
-            
             setInsights(newInsights);
           } else if (hasAnyRole(['teacher','class teacher','daily reporting teachers'])) {
             // Teacher view: compute classes and subjects from user object
@@ -842,7 +842,6 @@ const App = () => {
               classPerformance
             });
           }
-          setDashboardLoaded(true);
         } catch (err) {
           console.error('Error loading dashboard data:', err);
         } finally {
@@ -850,11 +849,8 @@ const App = () => {
         }
       }
       
-      // Only run once when component mounts
-      if (user?.email && !dashboardLoaded) {
-        fetchDashboardData();
-      }
-    }, [user?.email, dashboardLoaded, dashboardLoading]); // Only fetch once
+      if (user?.email) fetchDashboardData();
+    }, [user?.email]);
 
     return (
       <div className="space-y-6">
@@ -3114,17 +3110,31 @@ const App = () => {
     const hour = currentTime.getHours();
     const minute = currentTime.getMinutes();
     const time = hour * 60 + minute;
-    
-    // School periods (approximate)
-    if (time >= 9*60 && time < 9*60+40) return 1;
-    if (time >= 9*60+40 && time < 10*60+20) return 2;
-    if (time >= 10*60+20 && time < 11*60) return 3;
-    if (time >= 11*60 && time < 11*60+40) return 4;
-    if (time >= 11*60+40 && time < 12*60+20) return 5;
-    if (time >= 13*60+30 && time < 14*60+10) return 6;
-    if (time >= 14*60+10 && time < 14*60+50) return 7;
-    if (time >= 14*60+50 && time < 15*60+30) return 8;
-    return null;
+
+    // Prefer dynamic period times from settings if available
+    const dynamicTimes = (memoizedSettings?.periodTimes && Array.isArray(memoizedSettings.periodTimes) && memoizedSettings.periodTimes.length)
+      ? memoizedSettings.periodTimes.map(p => {
+          if (!p.start || !p.end) return null;
+          const [sh, sm] = p.start.split(':').map(Number);
+          const [eh, em] = p.end.split(':').map(Number);
+          return { period: p.period, start: sh * 60 + sm, end: eh * 60 + em };
+        }).filter(Boolean)
+      : null;
+
+    const fallbackTimes = [
+      { period: 1, start: 8 * 60 + 50, end: 9 * 60 + 35 },
+      { period: 2, start: 9 * 60 + 35, end: 10 * 60 + 20 },
+      { period: 3, start: 10 * 60 + 30, end: 11 * 60 + 15 },
+      { period: 4, start: 11 * 60 + 15, end: 12 * 60 },
+      { period: 5, start: 12 * 60, end: 12 * 60 + 45 },
+      { period: 6, start: 13 * 60 + 15, end: 14 * 60 },
+      { period: 7, start: 14 * 60, end: 14 * 60 + 40 },
+      { period: 8, start: 14 * 60 + 45, end: 15 * 60 + 25 }
+    ];
+
+    const ranges = dynamicTimes || fallbackTimes;
+    const current = ranges.find(r => time >= r.start && time < r.end);
+    return current ? current.period : null;
   };
 
   const currentPeriod = getCurrentPeriod();
@@ -4229,16 +4239,40 @@ const App = () => {
           const data = await api.getPendingLessonReviews(teacherFilter, classFilter, subjectFilter, statusFilter);
           let lessons = Array.isArray(data) ? data : [];
           
-          // Client-side date filtering
+          // Client-side date filtering (robust normalization & exact match when single day)
+          const normalizeDate = (raw) => {
+            if (!raw) return '';
+            if (typeof raw === 'string') {
+              // Already ISO
+              if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+              // Has time part
+              if (/^\d{4}-\d{2}-\d{2}T/.test(raw)) return raw.split('T')[0];
+              // dd-mm-yyyy
+              const dm = raw.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+              if (dm) return `${dm[3]}-${dm[2]}-${dm[1]}`;
+              // dd/mm/yyyy
+              const slash = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+              if (slash) return `${slash[3]}-${slash[2]}-${slash[1]}`;
+            }
+            try {
+              const d = new Date(raw);
+              if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+            } catch (e) {}
+            return '';
+          };
           if (filters.dateFrom || filters.dateTo) {
+            const fromStr = filters.dateFrom || '';
+            const toStr = filters.dateTo || '';
+            const singleDay = fromStr && toStr && fromStr === toStr;
             lessons = lessons.filter(lesson => {
-              if (!lesson.selectedDate) return false;
-              const lessonDate = new Date(lesson.selectedDate);
-              const fromDate = filters.dateFrom ? new Date(filters.dateFrom) : null;
-              const toDate = filters.dateTo ? new Date(filters.dateTo) : null;
-              
-              if (fromDate && lessonDate < fromDate) return false;
-              if (toDate && lessonDate > toDate) return false;
+              const raw = lesson.selectedDate || lesson.plannedDate || lesson.date || '';
+              const dateStr = normalizeDate(raw);
+              if (!dateStr) return false; // require a valid date when filtering
+              if (singleDay) {
+                return dateStr === fromStr; // exact match for single day view
+              }
+              if (fromStr && dateStr < fromStr) return false;
+              if (toStr && dateStr > toStr) return false;
               return true;
             });
           }
@@ -4260,7 +4294,17 @@ const App = () => {
     const handleApproveLesson = async (lpId, status) => {
       try {
         await withSubmit('Updating lesson status...', () => api.updateLessonPlanDetailsStatus(lpId, status));
-        setPendingLessons(pendingLessons.filter(lesson => lesson.lpId !== lpId));
+        setPendingLessons(prev => {
+          return prev
+            .map(lesson => lesson.lpId === lpId ? { ...lesson, status } : lesson)
+            .filter(lesson => {
+              // If current filter is explicitly pending review, remove non-pending lessons
+              if (filters.status === 'Pending Review') {
+                return lesson.status === 'Pending Review';
+              }
+              return true;
+            });
+        });
       } catch (err) {
         console.error(err);
       }

@@ -627,7 +627,8 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
           const emailMatch = String(p.teacherEmail || '').trim().toLowerCase() === teacherEmail.toLowerCase();
           const hasDate    = p.selectedDate !== undefined && p.selectedDate !== '';
           const hasPeriod  = p.selectedPeriod !== undefined && p.selectedPeriod !== '';
-          const active     = !['cancelled','rejected','completed early'].includes(String(p.status || '').trim().toLowerCase());
+          const statusNorm = String(p.status || '').trim().toLowerCase();
+          const active     = !['cancelled','rejected','completed early','skipped'].includes(statusNorm);
           
           return emailMatch && hasDate && hasPeriod && active;
         })
@@ -1174,7 +1175,8 @@ function _validatePeriodAvailability(teacherEmail, date, period) {
       const planDateNorm = _normalizeQueryDate(p.selectedDate);
       const dateMatch  = planDateNorm === dateNorm;
       const periodMatch= parseInt(String(p.selectedPeriod || '').trim(),10) === periodNum;
-      const active     = !['cancelled','rejected'].includes(String(p.status || '').trim().toLowerCase());
+      const statusNorm = String(p.status || '').trim().toLowerCase();
+      const active     = !['cancelled','rejected','completed early','skipped'].includes(statusNorm);
       
       return emailMatch && dateMatch && periodMatch && active;
     });
@@ -1463,7 +1465,8 @@ function _findRemainingLessonPlans(teacherEmail, classValue, subject, chapter, a
     });
     
     const remainingPlans = chapterPlans.filter(plan => {
-      const isActive = !['Cancelled', 'Rejected', 'Completed Early'].includes(String(plan.status || ''));
+      const statusNorm = String(plan.status || '').trim().toLowerCase();
+      const isActive = !['cancelled', 'rejected', 'completed early', 'skipped'].includes(statusNorm);
       const planDateNorm = _normalizeQueryDate(plan.selectedDate);
       const isAfterDate = planDateNorm > afterDateNorm;
       
@@ -1668,15 +1671,17 @@ function _skipRemainingSessionsForCompletedChapter(reportData) {
     for (let i = 0; i < rowsData.length; i++) {
       const lp = _indexByHeader(rowsData[i], lpHeaders);
       const lpSession = Number(lp.session || 0);
+      const statusNorm = String(lp.status || '').trim().toLowerCase();
       
-      // Check if this is a remaining session of the same lesson plan
-      if (String(lp.lpId || '').toLowerCase() === String(lessonPlanId || '').toLowerCase() &&
+      // Check if this is a remaining session of the same scheme/class/subject/chapter
+      if (lp.schemeId === baseLessonPlan.schemeId &&
           lp.teacherEmail === baseLessonPlan.teacherEmail &&
           lp.class === baseLessonPlan.class &&
           lp.subject === baseLessonPlan.subject &&
           lp.chapter === baseLessonPlan.chapter &&
           lpSession > currentSession &&
-          lpSession <= totalSessions) {
+          lpSession <= totalSessions &&
+          !['cancelled','rejected','skipped'].includes(statusNorm)) {
         
         // Mark as Skipped
         const rowIndex = i + 2; // +1 for header, +1 for 0-based index

@@ -324,6 +324,14 @@ function doGet(e) {
       return _handleGetPlannedLessonsForDate(e.parameter);
     }
     
+    // CASCADE ROUTES
+    if (action === 'getCascadePreview') {
+      const lpId = e.parameter.lpId || '';
+      const teacherEmail = e.parameter.teacherEmail || '';
+      const originalDate = e.parameter.originalDate || '';
+      return _respond(getCascadePreview(lpId, teacherEmail, originalDate));
+    }
+    
     // NEW: Batch endpoint for teacher timetable with reports (reduces 2 calls to 1)
     if (action === 'getTeacherDailyData') {
       return _handleGetTeacherDailyData(e.parameter);
@@ -573,135 +581,96 @@ function doPost(e) {
       return _handleUpdateSchemeStatus(data);
     }
     
+    // === CASCADE ROUTES ===
+    if (action === 'executeCascade') {
+      return _respond(executeCascade(data));
+    }
+    
     // === DAILY REPORT ROUTES ===
     if (action === 'submitDailyReport') {
       const lock = LockService.getScriptLock();
       try {
-        // Wait up to 10 seconds for other submissions to complete
         lock.waitLock(10000);
-        
-        Logger.log('=== SUBMITTING DAILY REPORT (VERSION 90) ===');
-        Logger.log('Data received: ' + JSON.stringify(data));
-        
+        appLog('INFO', 'submitDailyReport start', { version: 90 });
+        appLog('DEBUG', 'payload', data);
+
         const sh = _getSheet('DailyReports');
-        Logger.log('DailyReports sheet obtained');
-        
         const headers = ['date', 'teacherEmail', 'teacherName', 'class', 'subject', 'period', 'planType', 'lessonPlanId', 'chapter', 'sessionNo', 'totalSessions', 'completionPercentage', 'chapterStatus', 'deviationReason', 'difficulties', 'nextSessionPlan', 'objectives', 'activities', 'completed', 'notes', 'createdAt'];
         _ensureHeaders(sh, headers);
-        Logger.log('Headers ensured');
-        
-        // Check for duplicate submission (same date + teacher + class + subject + period)
-        const reportDate = _normalizeQueryDate(data.date);  // Use helper to normalize query date
+
+        const reportDate = _normalizeQueryDate(data.date);
         const teacherEmail = String(data.teacherEmail || '').toLowerCase().trim();
         const reportClass = String(data.class || '').trim();
         const reportSubject = String(data.subject || '').trim();
         const reportPeriod = Number(data.period || 0);
-        
-        Logger.log('=== DUPLICATE CHECK (USING IST HELPERS) ===');
-        Logger.log(`Looking for duplicates: date=${reportDate}, email=${teacherEmail}, class=${reportClass}, subject=${reportSubject}, period=${reportPeriod}`);
-        
-        // Force sheet to flush any pending operations
+        appLog('DEBUG', 'duplicateCheck params', { date: reportDate, email: teacherEmail, class: reportClass, subject: reportSubject, period: reportPeriod });
+
         SpreadsheetApp.flush();
-        
-        // Get fresh data from sheet
         const existingReports = _rows(sh).map(row => _indexByHeader(row, headers));
-        Logger.log(`Found ${existingReports.length} existing reports in sheet`);
-        
-        // Log a sample of existing reports to check data structure
-        if (existingReports.length > 0) {
-          Logger.log(`Sample existing report structure: ${JSON.stringify(existingReports[0])}`);
-          Logger.log(`Sample date: ${existingReports[0].date} (raw type: ${typeof existingReports[0].date}), IST-normalized: ${_isoDateIST(existingReports[0].date)}`);
-        } else {
-          Logger.log('No existing reports found in sheet');
-        }
-        
+        appLog('DEBUG', 'existingReports count', { count: existingReports.length });
+
         const duplicate = existingReports.find(r => {
-          // Use IST helper to normalize report date - handles Date objects, strings, numbers
           const rDate = _isoDateIST(r.date);
-          
           const rEmail = String(r.teacherEmail || '').toLowerCase().trim();
           const rClass = String(r.class || '').trim();
           const rSubject = String(r.subject || '').trim();
           const rPeriod = Number(r.period || 0);
-          
-          const dateMatch = rDate === reportDate;
-          const emailMatch = rEmail === teacherEmail;
-          const classMatch = rClass === reportClass;
-          const subjectMatch = rSubject === reportSubject;
-          const periodMatch = rPeriod === reportPeriod;
-          
-          // NOTE: We DO NOT include sessionNo in duplicate check because:
-          // - sessionNo is auto-filled from approved lesson plans
-          // - A teacher shouldn't be able to submit twice even if sessionNo changes
-          // - The duplicate check is about preventing double submissions for the same period
-          
-          Logger.log(`Checking report: date=${rDate}(${dateMatch}), email=${rEmail}(${emailMatch}), class=${rClass}(${classMatch}), subject=${rSubject}(${subjectMatch}), period=${rPeriod}(${periodMatch}) - MATCH ALL: ${dateMatch && emailMatch && classMatch && subjectMatch && periodMatch}`);
-          
-          return dateMatch && emailMatch && classMatch && subjectMatch && periodMatch;
+          return rDate === reportDate && rEmail === teacherEmail && rClass === reportClass && rSubject === reportSubject && rPeriod === reportPeriod;
         });
-        
+
         if (duplicate) {
-          Logger.log('=== DUPLICATE FOUND - PREVENTING SUBMISSION ===');
-          Logger.log('Existing report: ' + JSON.stringify(duplicate));
-          return _respond({ 
-            ok: false, 
-            error: 'duplicate',
-            message: 'Report already submitted for this period'
-          });
+          appLog('INFO', 'duplicate daily report', { duplicate: duplicate });
+          return _respond({ ok: false, error: 'duplicate', message: 'Report already submitted for this period' });
         }
-        
-        Logger.log('=== NO DUPLICATE - PROCEEDING WITH SUBMISSION ===');
-        
+
         const now = new Date().toISOString();
-        
-        // Determine planType based on lessonPlanId presence (for backward compatibility)
-        // New submissions won't send planType, but we infer it from lessonPlanId
         const inferredPlanType = data.lessonPlanId ? 'in plan' : 'not planned';
-        
         const rowData = [
           data.date || '',
           data.teacherEmail || '',
           data.teacherName || '',
           data.class || '',
           data.subject || '',
-          Number(data.period||0),
-          data.planType || inferredPlanType, // Use sent value or infer from lessonPlanId
+          Number(data.period || 0),
+          data.planType || inferredPlanType,
           data.lessonPlanId || '',
           data.chapter || '',
           Number(data.sessionNo || 0),
           Number(data.totalSessions || 1),
           Number(data.completionPercentage || 0),
-          data.chapterStatus || '', // NEW: Chapter status field
-          data.deviationReason || '', // NEW: Deviation reason field
+          data.chapterStatus || '',
+          data.deviationReason || '',
           data.difficulties || '',
           data.nextSessionPlan || '',
           data.objectives || '',
           data.activities || '',
-          data.chapterCompleted ? 'Chapter Complete' : (data.completed || ''), // Handle chapter completion
+          data.chapterCompleted ? 'Chapter Complete' : (data.completed || ''),
           data.notes || '',
           now
         ];
-        
-        Logger.log('Row data prepared: ' + JSON.stringify(rowData));
-        sh.appendRow(rowData);
-        
-        // CRITICAL: Force immediate write to sheet before releasing lock
+        // Sanitize string fields to prevent formula injection in Sheets
+        var sanitizedRowData = rowData.map(function(v){
+          if (v === null || v === undefined) return '';
+          if (typeof v === 'string') {
+            return (/^[=+\-@]/.test(v) ? ('\'' + v) : v);
+          }
+          return v;
+        });
+        sh.appendRow(sanitizedRowData);
         SpreadsheetApp.flush();
-        
-        Logger.log('Row appended successfully and flushed to sheet');
-        
-        // NOTE: Cascading tracking and auto-skip features disabled for now
-        // They can be re-enabled once the required functions are implemented
-        
+        appLog('INFO', 'daily report submitted', { email: teacherEmail, class: reportClass, subject: reportSubject, period: reportPeriod });
         return _respond({ ok: true, submitted: true });
       } catch (err) {
-        Logger.log('ERROR in submitDailyReport: ' + err.message);
-        Logger.log('Error stack: ' + err.stack);
+        appLog('ERROR', 'submitDailyReport failed', { message: err.message, stack: err.stack });
         return _respond({ error: 'Failed to submit: ' + err.message });
       } finally {
-        // Always release the lock
         lock.releaseLock();
       }
+    }
+    
+    // === CASCADE EXECUTION ROUTE ===
+    if (action === 'executeCascade') {
+      return _respond(executeCascade(data));
     }
     
     // === SCHEME-BASED LESSON PLANNING ROUTES ===
@@ -715,15 +684,7 @@ function doPost(e) {
     }
     
     if (action === 'applyChapterCompletionAction') {
-      Logger.log('==============================================');
-      Logger.log('ROUTING: applyChapterCompletionAction called in doPost');
-      Logger.log('Raw e object: ' + JSON.stringify(e));
-      Logger.log('e.postData: ' + JSON.stringify(e.postData));
-      Logger.log('e.postData.contents: ' + (e.postData ? e.postData.contents : 'NO POSTDATA'));
-      Logger.log('Parsed data: ' + JSON.stringify(data));
-      Logger.log('data.action: ' + data.action);
-      Logger.log('data.lessonPlanIds: ' + JSON.stringify(data.lessonPlanIds));
-      Logger.log('==============================================');
+      appLog('INFO', 'applyChapterCompletionAction', { action: data && data.action, idsCount: (data && data.lessonPlanIds && data.lessonPlanIds.length) || 0 });
       return _handleApplyChapterCompletionAction(data);
     }
     
@@ -1337,15 +1298,41 @@ function _handleGetPendingLessonPlans(params) {
     const allLessonPlans = _rows(sh).map(row => _indexByHeader(row, headers));
     Logger.log(`Total lesson plans found: ${allLessonPlans.length}`);
     
+    // Normalize planned date/period fields for consistent filtering (selectedDate/selectedPeriod)
+    const normalizedPlans = allLessonPlans.map(function(plan){
+      // selectedDate fallback sequence: selectedDate -> date -> parse from uniqueKey
+      var selectedDateVal = plan.selectedDate || plan.date || '';
+      if (!selectedDateVal && plan.uniqueKey) {
+        try {
+          var parts = String(plan.uniqueKey).split('|');
+          if (parts.length >= 2) selectedDateVal = parts[1];
+        } catch (e) {}
+      }
+      var normalizedDate = selectedDateVal;
+      try {
+        if (selectedDateVal instanceof Date) {
+          normalizedDate = _isoDateIST(selectedDateVal);
+        } else if (typeof selectedDateVal === 'string' && selectedDateVal.indexOf('T') >= 0) {
+          normalizedDate = selectedDateVal.split('T')[0];
+        }
+      } catch (e) {}
+      plan.selectedDate = normalizedDate || plan.selectedDate || '';
+      plan.selectedPeriod = plan.selectedPeriod || plan.period || '';
+      return plan;
+    });
+
     // Apply filters
-    let filteredPlans = allLessonPlans;
+    let filteredPlans = normalizedPlans;
     
-    // Filter by status (default to 'Pending Review')
-    const statusFilter = params.status || 'Pending Review';
-    if (statusFilter && statusFilter !== '' && statusFilter !== 'All') {
-      filteredPlans = filteredPlans.filter(plan => 
-        String(plan.status || '') === statusFilter
-      );
+    // Status filtering rules:
+    // - If params.status is undefined (missing), default to 'Pending Review'
+    // - If params.status is '' or 'All', do NOT filter by status
+    // - Otherwise, filter by the provided status
+    var hasStatusParam = Object.prototype.hasOwnProperty.call(params, 'status');
+    if (!hasStatusParam) {
+      filteredPlans = filteredPlans.filter(function(plan){ return String(plan.status || '') === 'Pending Review'; });
+    } else if (params.status && params.status !== 'All') {
+      filteredPlans = filteredPlans.filter(function(plan){ return String(plan.status || '') === params.status; });
     }
     
     // Filter by teacher (can be teacherName or teacherEmail)
@@ -1371,7 +1358,7 @@ function _handleGetPendingLessonPlans(params) {
       );
     }
     
-    Logger.log(`Filtered lesson plans: ${filteredPlans.length} (status: ${statusFilter})`);
+    Logger.log(`Filtered lesson plans: ${filteredPlans.length}`);
     
     return _respond(filteredPlans);
   } catch (error) {
@@ -3503,5 +3490,350 @@ function getSyllabusPaceTracking(term = 'Term 2') {
       success: false,
       error: error.message
     };
+  }
+}
+
+/**
+ * ====== CASCADE MANAGEMENT SYSTEM ======
+ * Handles automatic rescheduling of lesson plans when sessions are marked 0% complete
+ */
+
+/**
+ * Get cascade preview for a specific lesson plan marked as 0% complete
+ */
+function getCascadePreview(lpId, teacherEmail, originalDate) {
+  try {
+    Logger.log(`=== GET CASCADE PREVIEW ===`);
+    Logger.log(`LP ID: ${lpId}, Teacher: ${teacherEmail}, Original Date: ${originalDate}`);
+    
+    const lpSh = _getSheet('LessonPlans');
+    const lpHeaders = _headers(lpSh);
+    const allPlans = _rows(lpSh).map(row => _indexByHeader(row, lpHeaders));
+    
+    const currentPlan = allPlans.find(p => p.lpId === lpId);
+    if (!currentPlan) {
+      return { success: false, error: 'Lesson plan not found' };
+    }
+    
+    const { schemeId, chapter, session, class: className, subject } = currentPlan;
+    const currentSession = parseInt(session) || 1;
+    
+    const relatedPlans = allPlans.filter(p => 
+      p.schemeId === schemeId && 
+      String(p.chapter).toLowerCase() === String(chapter).toLowerCase()
+    );
+    
+    const totalSessions = Math.max(...relatedPlans.map(p => parseInt(p.session) || 0));
+    
+    const remainingSessions = [];
+    for (let i = currentSession; i <= totalSessions; i++) {
+      const sessionPlan = allPlans.find(p => {
+        return p.schemeId === schemeId &&
+               String(p.chapter).toLowerCase() === String(chapter).toLowerCase() &&
+               parseInt(p.session) === i;
+      });
+      
+      if (sessionPlan) {
+        let normalizedDate = sessionPlan.selectedDate;
+        if (sessionPlan.selectedDate instanceof Date) {
+          normalizedDate = _isoDateIST(sessionPlan.selectedDate);
+        } else if (typeof sessionPlan.selectedDate === 'string') {
+          normalizedDate = sessionPlan.selectedDate.split('T')[0];
+        }
+        
+        remainingSessions.push({
+          lpId: sessionPlan.lpId,
+          sessionNo: i,
+          currentDate: normalizedDate,
+          currentPeriod: sessionPlan.selectedPeriod,
+          learningObjectives: sessionPlan.learningObjectives || '',
+          teachingMethods: sessionPlan.teachingMethods || ''
+        });
+      }
+    }
+    
+    if (remainingSessions.length === 0) {
+      return {
+        success: true,
+        needsCascade: false,
+        message: 'No sessions found to cascade'
+      };
+    }
+
+    // Helper to get next working (Mon-Fri) day string from a YYYY-MM-DD
+    function _nextWorkingDay(dateStr) {
+      const parts = dateStr.split('-');
+      let d = new Date(parts[0], parts[1] - 1, parts[2]);
+      do {
+        d.setDate(d.getDate() + 1);
+      } while (d.getDay() === 0 || d.getDay() === 6); // Skip Sunday(0) & Saturday(6)
+      return _isoDateIST(d);
+    }
+
+    // Build proposed cascade: shift every affected session forward by ONE working day
+    // and roll content so teacher restarts from session 1 while choosing NEXT AVAILABLE period for class+subject
+    // Prepare timetable for teacher filtered to matching class & subject
+    const timetableSheet = _getSheet('Timetable');
+    const ttHeaders = _headers(timetableSheet);
+    const timetableRows = _rows(timetableSheet).map(r => _indexByHeader(r, ttHeaders));
+    const teacherClassSubjectPeriods = timetableRows.filter(r => {
+      return (r.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase() &&
+             (r.class || '').toLowerCase() === String(className).toLowerCase() &&
+             (r.subject || '').toLowerCase() === String(subject).toLowerCase();
+    });
+
+    // Occupied slots excluding the ones we are cascading (they will move)
+    const remainingLpIds = new Set(remainingSessions.map(s => s.lpId));
+    const occupiedSlots = allPlans.filter(p => {
+      if (remainingLpIds.has(p.lpId)) return false; // treat as freed
+      const emailMatch = String(p.teacherEmail || '').trim().toLowerCase() === teacherEmail.toLowerCase();
+      const hasDate = p.selectedDate !== undefined && p.selectedDate !== '';
+      const hasPeriod = p.selectedPeriod !== undefined && p.selectedPeriod !== '';
+      const active = !['cancelled','rejected','completed early'].includes(String(p.status || '').trim().toLowerCase());
+      return emailMatch && hasDate && hasPeriod && active;
+    }).map(p => {
+      let normalizedDate = p.selectedDate;
+      if (p.selectedDate instanceof Date) normalizedDate = _isoDateIST(p.selectedDate);
+      else if (typeof p.selectedDate === 'string') normalizedDate = p.selectedDate.split('T')[0];
+      return normalizedDate + '|' + parseInt(String(p.selectedPeriod).trim(),10);
+    });
+
+    const usedNewSlots = new Set();
+    function _findNextAvailablePeriod(startDateStr) {
+      let dStr = startDateStr;
+      let safety = 0;
+      while (safety < 60) { // cap search to 60 working days
+        const parts = dStr.split('-');
+        const dObj = new Date(parts[0], parts[1]-1, parts[2]);
+        const dayName = _dayNameIST(dStr);
+        if (!(dayName === 'Saturday' || dayName === 'Sunday')) {
+          // periods for that day
+            const periodsToday = teacherClassSubjectPeriods.filter(p => _normalizeDayName(p.dayOfWeek || '') === _normalizeDayName(dayName));
+            // sort by period number
+            periodsToday.sort((a,b) => parseInt(a.period)-parseInt(b.period));
+            for (const per of periodsToday) {
+              const key = dStr + '|' + parseInt(String(per.period).trim(),10);
+              if (!occupiedSlots.includes(key) && !usedNewSlots.has(key)) {
+                usedNewSlots.add(key);
+                const timing = _getPeriodTiming(per.period, dayName);
+                return {
+                  date: dStr,
+                  period: per.period,
+                  dayName: dayName,
+                  startTime: timing.start,
+                  endTime: timing.end
+                };
+              }
+            }
+        }
+        // advance to next working day
+        dStr = _nextWorkingDay(dStr);
+        safety++;
+      }
+      return null; // not found
+    }
+
+    const proposedCascade = [];
+    for (let idx = 0; idx < remainingSessions.length; idx++) {
+      const sess = remainingSessions[idx];
+      const newDateCandidate = _nextWorkingDay(sess.currentDate); // base forward one working day
+      const slot = _findNextAvailablePeriod(newDateCandidate);
+      // Preserve each session's own planned content instead of rolling back
+      const sourceContent = sess;
+      if (!slot) {
+        // If we fail to find slot, mark cascade impossible
+        return {
+          success: true,
+          needsCascade: true,
+          canCascade: false,
+          warning: 'Could not find available period for all sessions',
+          sessionsResolved: proposedCascade.length,
+          sessionsPending: remainingSessions.length - proposedCascade.length
+        };
+      }
+      proposedCascade.push({
+        lpId: sess.lpId,
+        sessionNo: sess.sessionNo,
+        originalDate: sess.currentDate,
+        proposedDate: slot.date,
+        originalPeriod: sess.currentPeriod,
+        proposedPeriod: slot.period,
+        learningObjectives: sourceContent.learningObjectives,
+        teachingMethods: sourceContent.teachingMethods,
+        dayName: slot.dayName,
+        startTime: slot.startTime,
+        endTime: slot.endTime
+      });
+    }
+
+    return {
+      success: true,
+      needsCascade: true,
+      canCascade: true,
+      mode: 'forward-one-day-with-content-roll',
+      chapter: chapter,
+      totalSessionsAffected: proposedCascade.length,
+      sessionsToReschedule: proposedCascade,
+      summary: {
+        earliestOriginalDate: proposedCascade[0].originalDate,
+        earliestNewDate: proposedCascade[0].proposedDate,
+        latestOriginalDate: proposedCascade[proposedCascade.length - 1].originalDate,
+        latestNewDate: proposedCascade[proposedCascade.length - 1].proposedDate
+      }
+    };
+    
+  } catch (error) {
+    Logger.log(`Error in getCascadePreview: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Execute cascade: Update lesson plan dates for all affected sessions
+ */
+function executeCascade(cascadeData) {
+  const lock = LockService.getDocumentLock();
+  try {
+    lock.waitLock(10000);
+    
+    Logger.log(`=== EXECUTE CASCADE ===`);
+    
+    const { sessionsToUpdate, sessionsToReschedule, mode } = cascadeData;
+    // Support both naming from preview: sessionsToReschedule or legacy sessionsToUpdate
+    const updates = Array.isArray(sessionsToReschedule) && sessionsToReschedule.length ? sessionsToReschedule : sessionsToUpdate;
+    
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return { success: false, error: 'No sessions to update' };
+    }
+    
+    const lpSh = _getSheet('LessonPlans');
+    const lpHeaders = _headers(lpSh);
+    const allPlans = _rows(lpSh).map((row, index) => ({ 
+      ..._indexByHeader(row, lpHeaders), 
+      rowIndex: index + 2 
+    }));
+    
+    const updatedPlans = [];
+    const errors = [];
+    
+    updates.forEach(session => {
+      try {
+        const { lpId, proposedDate, proposedPeriod, learningObjectives, teachingMethods } = session;
+        
+        const planIndex = allPlans.findIndex(p => p.lpId === lpId);
+        if (planIndex === -1) {
+          errors.push(`Plan ${lpId} not found`);
+          return;
+        }
+        
+        const plan = allPlans[planIndex];
+        const rowNum = plan.rowIndex;
+        
+        const dateCol = lpHeaders.indexOf('selectedDate') + 1;
+        if (dateCol > 0) {
+          lpSh.getRange(rowNum, dateCol).setValue(proposedDate);
+        }
+        
+        const periodCol = lpHeaders.indexOf('selectedPeriod') + 1;
+        if (periodCol > 0) {
+          lpSh.getRange(rowNum, periodCol).setValue(parseInt(proposedPeriod));
+        }
+        
+        if (learningObjectives) {
+          const objCol = lpHeaders.indexOf('learningObjectives') + 1;
+          if (objCol > 0) {
+            lpSh.getRange(rowNum, objCol).setValue(learningObjectives);
+          }
+        }
+        
+        if (teachingMethods) {
+          const methodsCol = lpHeaders.indexOf('teachingMethods') + 1;
+          if (methodsCol > 0) {
+            lpSh.getRange(rowNum, methodsCol).setValue(teachingMethods);
+          }
+        }
+        
+        updatedPlans.push({
+          lpId: lpId,
+          oldDate: plan.selectedDate,
+          newDate: proposedDate,
+          oldPeriod: plan.selectedPeriod,
+          newPeriod: proposedPeriod,
+          oldObjectives: plan.learningObjectives,
+          newObjectives: learningObjectives,
+          oldMethods: plan.teachingMethods,
+          newMethods: teachingMethods
+        });
+        
+        Logger.log(`✅ Updated ${lpId}: ${plan.selectedDate} P${plan.selectedPeriod} → ${proposedDate} P${proposedPeriod}`);
+        
+      } catch (sessionError) {
+        errors.push(`Error updating ${session.lpId}: ${sessionError.message}`);
+      }
+    });
+    
+    // Optional: update the daily report row to reflect cascade (plan moved)
+    try {
+      if (cascadeData.dailyReportContext) {
+        const ctx = cascadeData.dailyReportContext;
+        const drSh = _getSheet('DailyReports');
+        const drHeaders = _headers(drSh);
+        const drRows = _rows(drSh);
+        const dateCol = drHeaders.indexOf('date') + 1;
+        const emailCol = drHeaders.indexOf('teacherEmail') + 1;
+        const classCol = drHeaders.indexOf('class') + 1;
+        const subjectCol = drHeaders.indexOf('subject') + 1;
+        const periodCol = drHeaders.indexOf('period') + 1;
+        const planTypeCol = drHeaders.indexOf('planType') + 1;
+        const lessonPlanIdCol = drHeaders.indexOf('lessonPlanId') + 1;
+        const notesCol = drHeaders.indexOf('notes') + 1;
+        if (dateCol && emailCol && classCol && subjectCol && periodCol && planTypeCol) {
+          for (let i = 0; i < drRows.length; i++) {
+            const r = drRows[i];
+            // Normalize date in row (may be Date object)
+            const rowDate = _isoDateIST(r[dateCol - 1]);
+            if (
+              rowDate === ctx.date &&
+              String(r[emailCol - 1]).toLowerCase().trim() === String(ctx.teacherEmail).toLowerCase().trim() &&
+              String(r[classCol - 1]).trim() === String(ctx.class).trim() &&
+              String(r[subjectCol - 1]).trim() === String(ctx.subject).trim() &&
+              Number(r[periodCol - 1]) === Number(ctx.period)
+            ) {
+              // Mark as cascaded: change planType and clear lessonPlanId (optional)
+              drSh.getRange(i + 2, planTypeCol).setValue('cascaded');
+              if (lessonPlanIdCol) {
+                drSh.getRange(i + 2, lessonPlanIdCol).setValue('');
+              }
+              if (notesCol) {
+                const existingNotes = String(r[notesCol - 1] || '').trim();
+                const appendNote = `Cascade: plan moved to new dates (${updates.length} sessions rescheduled)`;
+                drSh.getRange(i + 2, notesCol).setValue(existingNotes ? (existingNotes + ' | ' + appendNote) : appendNote);
+              }
+              Logger.log(`DailyReport row updated for cascade (row ${i + 2})`);
+              break;
+            }
+          }
+        }
+      }
+    } catch (drErr) {
+      Logger.log(`Warning: failed to update DailyReports for cascade context: ${drErr.message}`);
+    }
+
+    SpreadsheetApp.flush();
+    
+    return {
+      success: true,
+      mode: mode || 'forward-one-day-with-content-roll',
+      updatedCount: updatedPlans.length,
+      updatedPlans: updatedPlans,
+      errors: errors.length > 0 ? errors : null,
+      dailyReportUpdated: !!cascadeData.dailyReportContext
+    };
+    
+  } catch (error) {
+    Logger.log(`Error in executeCascade: ${error.message}`);
+    return { success: false, error: error.message };
+  } finally {
+    lock.releaseLock();
   }
 }
