@@ -372,8 +372,8 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
 }
 
 /**
- * Calculate lesson planning date range - show till end of current month
- * SIMPLIFIED: No preparation day restriction, just show available periods till month-end
+ * Calculate lesson planning date range - next 30 days rolling
+ * SIMPLIFIED: No preparation day restriction, show available periods for next 30 days
  */
 function _calculateLessonPlanningDateRange() {
   try {
@@ -383,8 +383,9 @@ function _calculateLessonPlanningDateRange() {
     // Start from today
     const startDate = new Date(today);
     
-    // End at last day of current month
-    const endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    // End at 30 days from start (inclusive window)
+    const endDate = new Date(today);
+    endDate.setDate(endDate.getDate() + 30);
     endDate.setHours(0, 0, 0, 0);
     
     // Format as ISO date strings
@@ -393,10 +394,10 @@ function _calculateLessonPlanningDateRange() {
     
     const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
     
-    Logger.log(`=== LESSON PLANNING DATE RANGE (TILL MONTH END) ===`);
+    Logger.log(`=== LESSON PLANNING DATE RANGE (NEXT 30 DAYS) ===`);
     Logger.log(`TODAY: ${_isoDateString(today)}`);
     Logger.log(`START: ${startDateString}`);
-    Logger.log(`END: ${endDateString} (Last day of month)`);
+    Logger.log(`END: ${endDateString} (+30 days)`);
     Logger.log(`TOTAL DAYS: ${totalDays}`);
     
     return {
@@ -410,10 +411,11 @@ function _calculateLessonPlanningDateRange() {
     };
   } catch (error) {
     Logger.log(`Error calculating date range: ${error.message}, using defaults`);
-    // Default: rest of current month
+    // Default: next 30 days
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    const endDate = new Date(today);
+    endDate.setDate(endDate.getDate() + 30);
     
     return {
       startDate: _isoDateString(today),
@@ -670,9 +672,9 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
       // Find periods for this day that match the scheme's class and subject
       const dayPeriods = teacherTimetable.filter(slot => {
         const dayMatch = _normalizeDayName(slot.dayOfWeek || '') === _normalizeDayName(dayName);
-        // ONLY show periods that match the scheme's class and subject
-        const classMatch = (slot.class || '').toLowerCase() === (schemeClass || '').toLowerCase();
-        const subjectMatch = (slot.subject || '').toLowerCase() === (schemeSubject || '').toLowerCase();
+        // ONLY show periods that match the scheme's class and subject (trim + case-insensitive)
+        const classMatch = String(slot.class || '').toLowerCase().trim() === String(schemeClass || '').toLowerCase().trim();
+        const subjectMatch = String(slot.subject || '').toLowerCase().trim() === String(schemeSubject || '').toLowerCase().trim();
         
         return dayMatch && classMatch && subjectMatch;
       });
@@ -744,6 +746,16 @@ function createSchemeLessonPlan(lessonPlanData) {
     const missing = requiredFields.filter(field => !String(lessonPlanData[field] ?? '').trim());
     if (missing.length) {
       const errorMsg = `Missing required field(s): ${missing.join(', ')}`;
+      Logger.log(`ERROR: ${errorMsg}`);
+      return { success: false, error: errorMsg };
+    }
+
+    // Enforce mandatory pedagogy fields
+    const pedagogyMissing = [];
+    if (!String(lessonPlanData.learningObjectives || '').trim()) pedagogyMissing.push('learningObjectives');
+    if (!String(lessonPlanData.teachingMethods || '').trim()) pedagogyMissing.push('teachingMethods');
+    if (pedagogyMissing.length) {
+      const errorMsg = `Missing required field(s): ${pedagogyMissing.join(', ')}`;
       Logger.log(`ERROR: ${errorMsg}`);
       return { success: false, error: errorMsg };
     }

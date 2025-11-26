@@ -157,39 +157,6 @@ function doGet(e) {
       return _respond(getSubstitutionsForDate(date));
     }
     
-    if (action === 'getTeacherSubstitutions') {
-      const email = (e.parameter.email || '').toLowerCase().trim();
-      const date = (e.parameter.date || _todayISO()).trim();
-      return _respond(getTeacherSubstitutions(email, date));
-    }
-    
-    if (action === 'getTeacherSubstitutionsRange') {
-      const email = (e.parameter.email || '').toLowerCase().trim();
-      const startDate = e.parameter.startDate || '';
-      const endDate = e.parameter.endDate || '';
-      return _respond(getTeacherSubstitutionsRange(email, startDate, endDate));
-    }
-    
-    // Debug endpoint to check all substitutions
-    if (action === 'getAllSubstitutions') {
-      const sh = _getSheet('Substitutions');
-      const headers = _headers(sh);
-      const allRows = _rows(sh).map(r => _indexByHeader(r, headers));
-      
-      Logger.log(`[getAllSubstitutions] Total rows: ${allRows.length}`);
-      Logger.log(`[getAllSubstitutions] Headers: ${JSON.stringify(headers)}`);
-      
-      if (allRows.length > 0) {
-        Logger.log(`[getAllSubstitutions] Sample row: ${JSON.stringify(allRows[0])}`);
-      }
-      
-      return _respond({
-        total: allRows.length,
-        headers: headers,
-        data: allRows,
-        sampleDateNormalized: allRows.length > 0 ? _isoDateString(allRows[0].date) : null
-      });
-    }
     
     if (action === 'getUnacknowledgedSubstitutions') {
       const email = (e.parameter.email || '').toLowerCase().trim();
@@ -487,6 +454,11 @@ function doGet(e) {
       const toDate = e.parameter.toDate || '';
       return _respond(getDailyReports(teacher, fromDate || date, toDate || date, cls, subject));
     }
+    if (action === 'deleteDailyReport') {
+      const reportId = (e.parameter && e.parameter.reportId) || '';
+      const email = (e.parameter && e.parameter.email) || '';
+      return _respond(deleteDailyReport(reportId, email));
+    }
     
     // === ATTENDANCE ROUTES ===
     if (action === 'getAttendance') {
@@ -515,6 +487,7 @@ function doGet(e) {
     console.error('Error in doGet:', err);
     return _respond({ error: String(err && err.message ? err.message : err) });
   }
+
 }
 
 /**
@@ -595,7 +568,7 @@ function doPost(e) {
         appLog('DEBUG', 'payload', data);
 
         const sh = _getSheet('DailyReports');
-        const headers = ['date', 'teacherEmail', 'teacherName', 'class', 'subject', 'period', 'planType', 'lessonPlanId', 'chapter', 'sessionNo', 'totalSessions', 'completionPercentage', 'chapterStatus', 'deviationReason', 'difficulties', 'nextSessionPlan', 'objectives', 'activities', 'completed', 'notes', 'createdAt'];
+        const headers = ['date', 'teacherEmail', 'teacherName', 'class', 'subject', 'period', 'planType', 'lessonPlanId', 'chapter', 'sessionNo', 'totalSessions', 'completionPercentage', 'chapterStatus', 'deviationReason', 'difficulties', 'nextSessionPlan', 'objectives', 'activities', 'completed', 'notes', 'createdAt', 'isSubstitution', 'absentTeacher', 'regularSubject', 'substituteSubject'];
         _ensureHeaders(sh, headers);
 
         const reportDate = _normalizeQueryDate(data.date);
@@ -623,8 +596,89 @@ function doPost(e) {
           return _respond({ ok: false, error: 'duplicate', message: 'Report already submitted for this period' });
         }
 
+        // Enforce: a matching Ready/Approved lesson plan must exist for this period (unless valid substitution)
+        const lpSheet = _getSheet('LessonPlans');
+        const lpHeaders = _headers(lpSheet);
+        const lessonPlans = _rows(lpSheet).map(row => _indexByHeader(row, lpHeaders));
+        const isFetchableStatus = (s) => {
+          const v = String(s || '').trim();
+          return v === 'Ready' || v === 'Approved' || /rescheduled\s*\(cascade\)/i.test(v);
+        };
+        const matchingPlan = lessonPlans.find(p => {
+          const emailMatch = String(p.teacherEmail || '').trim().toLowerCase() === teacherEmail;
+          const dateMatch = _normalizeQueryDate(p.selectedDate || p.date) === reportDate;
+          const periodMatch = String(p.selectedPeriod || p.period || '').trim() === String(reportPeriod);
+          const classMatch = String(p.class || '').trim() === reportClass;
+          const subjectMatch = String(p.subject || '').trim() === reportSubject;
+          return emailMatch && dateMatch && periodMatch && classMatch && subjectMatch && isFetchableStatus(p.status);
+        });
+
+        // Check if this is a valid substitution slot for the requester
+        let isSubstitution = false;
+        let subAbsentTeacher = '';
+        let subRegularSubject = '';
+        let subSubstituteSubject = '';
+        try {
+          const subSh = _getSheet('Substitutions');
+          const subHeaders = _headers(subSh);
+          const subs = _rows(subSh).map(r => _indexByHeader(r, subHeaders));
+          const subRow = subs.find(s => {
+            const dMatch = _normalizeQueryDate(s.date) === reportDate;
+            const pMatch = String(s.period || '').trim() === String(reportPeriod);
+            const classMatch = String(s.class || '').trim() === reportClass;
+            const subTeacherMatch = String(s.substituteTeacher || '').toLowerCase().trim() === teacherEmail;
+            return dMatch && pMatch && classMatch && subTeacherMatch;
+          });
+          if (subRow) {
+            const regSubj = String(subRow.regularSubject || '').toLowerCase().trim();
+            const subSubj = String(subRow.substituteSubject || '').toLowerCase().trim();
+            const rptSubj = String(reportSubject || '').toLowerCase().trim();
+            const subjOk = !rptSubj || rptSubj === regSubj || (subSubj && rptSubj === subSubj);
+            if (subjOk) {
+              isSubstitution = true;
+              subAbsentTeacher = String(subRow.absentTeacher || '').trim();
+              subRegularSubject = String(subRow.regularSubject || '').trim();
+              subSubstituteSubject = String(subRow.substituteSubject || '').trim();
+            }
+          }
+        } catch (subErr) {
+          appLog('WARN', 'Substitution check failed', { error: subErr && subErr.message });
+        }
+
+        if (!matchingPlan && !isSubstitution) {
+          appLog('WARN', 'Daily report blocked: no Ready lesson plan', { reportDate, reportPeriod, reportClass, reportSubject, teacherEmail });
+          return _respond({ ok: false, error: 'plan_required', message: 'A Ready lesson plan is required for this period. Please prepare and get it approved before submitting the report.' });
+        }
+
+        // Objectives/methods: for substitution require a free-text answer; for planned, auto-fill if missing
+        var objectivesVal = String(data.objectives || '').trim();
+        var activitiesVal = String(data.activities || '').trim();
+        if (isSubstitution) {
+          if (!objectivesVal) {
+            return _respond({ ok: false, error: 'sub_note_required', message: 'Please describe what you did in this substitution period.' });
+          }
+        } else {
+          if (!objectivesVal) objectivesVal = String(matchingPlan.learningObjectives || '').trim();
+          if (!activitiesVal) activitiesVal = String(matchingPlan.teachingMethods || '').trim();
+        }
+
+        // Compute total sessions from scheme if available
+        var totalSessionsVal = Number(data.totalSessions || 0);
+        if (!isSubstitution && !totalSessionsVal && matchingPlan && matchingPlan.schemeId) {
+          try {
+            const schemeSheet = _getSheet('Schemes');
+            const schemeHeaders = _headers(schemeSheet);
+            const schemes = _rows(schemeSheet).map(row => _indexByHeader(row, schemeHeaders));
+            const scheme = schemes.find(s => String(s.schemeId || '').trim() === String(matchingPlan.schemeId || '').trim());
+            totalSessionsVal = Number(scheme && scheme.noOfSessions ? scheme.noOfSessions : 1);
+          } catch (e3) {
+            totalSessionsVal = 1;
+          }
+        }
+        if (!totalSessionsVal) totalSessionsVal = 1;
+
         const now = new Date().toISOString();
-        const inferredPlanType = data.lessonPlanId ? 'in plan' : 'not planned';
+        const inferredPlanType = isSubstitution ? 'substitution' : 'in plan';
         const rowData = [
           data.date || '',
           data.teacherEmail || '',
@@ -632,21 +686,25 @@ function doPost(e) {
           data.class || '',
           data.subject || '',
           Number(data.period || 0),
-          data.planType || inferredPlanType,
-          data.lessonPlanId || '',
-          data.chapter || '',
-          Number(data.sessionNo || 0),
-          Number(data.totalSessions || 1),
+          inferredPlanType,
+          String((!isSubstitution && matchingPlan && matchingPlan.lpId) || data.lessonPlanId || ''),
+          String((!isSubstitution && matchingPlan && matchingPlan.chapter) || ''),
+          Number((!isSubstitution && (data.sessionNo || matchingPlan.session)) || 0),
+          Number(totalSessionsVal || 1),
           Number(data.completionPercentage || 0),
           data.chapterStatus || '',
           data.deviationReason || '',
           data.difficulties || '',
           data.nextSessionPlan || '',
-          data.objectives || '',
-          data.activities || '',
+          objectivesVal,
+          activitiesVal,
           data.chapterCompleted ? 'Chapter Complete' : (data.completed || ''),
           data.notes || '',
-          now
+          now,
+          isSubstitution ? 'TRUE' : 'FALSE',
+          subAbsentTeacher,
+          subRegularSubject,
+          subSubstituteSubject
         ];
         // Sanitize string fields to prevent formula injection in Sheets
         var sanitizedRowData = rowData.map(function(v){
@@ -664,7 +722,7 @@ function doPost(e) {
         let autoCascade = null;
         try {
           const completionPct = Number(data.completionPercentage || 0);
-          const lpIdForCascade = String(data.lessonPlanId || '').trim();
+          const lpIdForCascade = String((matchingPlan && matchingPlan.lpId) || data.lessonPlanId || '').trim();
           const autoCascadeEnabled = _isAutoCascadeEnabled();
           if (autoCascadeEnabled && completionPct === 0 && lpIdForCascade) {
             appLog('INFO', 'autoCascade trigger check passed', { lpId: lpIdForCascade });
@@ -705,13 +763,59 @@ function doPost(e) {
           appLog('ERROR', 'autoCascade exception', { message: acErr.message, stack: acErr.stack });
         }
 
-        return _respond({ ok: true, submitted: true, autoCascade: autoCascade });
+        // NEW: If this was a substitution, also cascade the ABSENT teacher's plan for this slot (if any)
+        let absentCascade = null;
+        try {
+          if (isSubstitution && subAbsentTeacher && subRegularSubject) {
+            const absentEmail = String(subAbsentTeacher || '').toLowerCase().trim();
+            const absentPlan = lessonPlans.find(p => {
+              const emailMatch = String(p.teacherEmail || '').trim().toLowerCase() === absentEmail;
+              const dateMatch = _normalizeQueryDate(p.selectedDate || p.date) === reportDate;
+              const periodMatch = String(p.selectedPeriod || p.period || '').trim() === String(reportPeriod);
+              const classMatch = String(p.class || '').trim() === reportClass;
+              const subjectMatch = String(p.subject || '').trim().toLowerCase() === String(subRegularSubject).toLowerCase();
+              return emailMatch && dateMatch && periodMatch && classMatch && subjectMatch && isFetchableStatus(p.status);
+            });
+            if (absentPlan && absentPlan.lpId) {
+              const preview = getCascadePreview(absentPlan.lpId, absentEmail, reportDate);
+              if (preview && preview.success && preview.needsCascade && preview.canCascade && Array.isArray(preview.sessionsToReschedule) && preview.sessionsToReschedule.length) {
+                const execPayload = {
+                  sessionsToReschedule: preview.sessionsToReschedule,
+                  mode: preview.mode,
+                  dailyReportContext: {
+                    date: reportDate,
+                    teacherEmail: absentEmail,
+                    class: reportClass,
+                    subject: subRegularSubject,
+                    period: reportPeriod
+                  }
+                };
+                const exec = executeCascade(execPayload);
+                absentCascade = { attempted: true, success: exec && exec.success, updatedCount: exec && exec.updatedCount, errors: exec && exec.errors };
+              } else {
+                absentCascade = { attempted: true, success: false, reason: 'preview_not_cascadable' };
+              }
+            } else {
+              absentCascade = { attempted: false, reason: 'no_absent_plan_found' };
+            }
+          }
+        } catch (abErr) {
+          absentCascade = { attempted: true, success: false, error: abErr && abErr.message };
+        }
+
+        return _respond({ ok: true, submitted: true, autoCascade: autoCascade, absentCascade: absentCascade, isSubstitution });
       } catch (err) {
         appLog('ERROR', 'submitDailyReport failed', { message: err.message, stack: err.stack });
         return _respond({ error: 'Failed to submit: ' + err.message });
       } finally {
         lock.releaseLock();
       }
+    }
+    // Daily report deletion (time-window enforced in helper)
+    if (action === 'deleteDailyReport') {
+      const reportId = (data.reportId || e.parameter.reportId || '').trim();
+      const email = (data.email || e.parameter.email || '').trim();
+      return _respond(deleteDailyReport(reportId, email));
     }
     
     // === CASCADE EXECUTION ROUTE ===
@@ -1082,17 +1186,23 @@ function _handleGetApprovedSchemesForLessonPlanning(params) {
 function _handleGetAvailablePeriodsForLessonPlan(params) {
   try {
     const teacherEmail = params.teacherEmail;
-    const startDate = params.startDate;
-    const endDate = params.endDate;
+    let startDate = params.startDate;
+    let endDate = params.endDate;
     const excludeExisting = params.excludeExisting !== 'false';
     const schemeClass = params.class || '';  // Class from scheme
     const schemeSubject = params.subject || '';  // Subject from scheme
     
-    if (!teacherEmail || !startDate || !endDate) {
-      return _respond({ 
-        success: false, 
-        error: 'Teacher email, start date, and end date are required' 
-      });
+    // Default to next 30 days if no explicit range provided
+    const todayISO = _todayISO();
+    if (!startDate) startDate = todayISO;
+    if (!endDate) {
+      const d = new Date(startDate + 'T00:00:00');
+      d.setDate(d.getDate() + 30);
+      endDate = Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
+    }
+
+    if (!teacherEmail) {
+      return _respond({ success: false, error: 'Teacher email is required' });
     }
     
     Logger.log(`Getting periods for ${teacherEmail} - filtering by class: ${schemeClass}, subject: ${schemeSubject}`);

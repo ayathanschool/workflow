@@ -670,22 +670,25 @@ export default function DailyReportEnhanced({ user }) {
                             </div>
                           )}
                           
-                          {/* Chapter - REQUIRED */}
+                          {/* Chapter - locked to matching lesson plan */}
                           <div>
-                            <label className="block text-xs font-medium text-red-700 mb-1">
-                              Chapter/Topic <span className="text-red-600">*</span>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              Chapter/Topic (auto from plan)
                             </label>
                             <input
                               type="text"
                               placeholder="Chapter taught (REQUIRED)"
                               value={d.chapter || ""}
-                              disabled={submitted}
-                              onChange={e => setDraft(k, "chapter", e.target.value)}
-                              className={`w-full text-xs border rounded px-2 py-1.5 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 ${
-                                !d.chapter?.trim() && !submitted ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                              disabled={true}
+                              readOnly
+                              className={`w-full text-xs border rounded px-2 py-1.5 bg-gray-100 ${
+                                d.chapter?.trim() ? 'border-gray-300' : 'border-red-300'
                               }`}
                               required
                             />
+                            {!d.chapter?.trim() && (
+                              <p className="text-xs text-red-600 mt-1">No planned chapter found for this period. Please prepare a lesson plan first.</p>
+                            )}
                           </div>
                           
                           {/* Objectives - REQUIRED if completion > 0% */}

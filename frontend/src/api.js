@@ -759,7 +759,18 @@ export async function getAllSchemes(page=1, pageSize=10, teacher='', cls='', sub
 export async function getDailyReports({ teacher = '', cls = '', subject = '', date = '', fromDate = '', toDate = '', status = '' } = {}) {
   const params = new URLSearchParams({ action: 'getDailyReports', teacher, class: cls, subject, date, fromDate, toDate, status })
   const result = await getJSON(`${BASE_URL}?${params.toString()}`)
-  return result?.data || result || []
+  // Handle multiple response formats: direct array, {data: [...]}, {reports: [...]}
+  if (Array.isArray(result)) return result;
+  if (result?.data) return Array.isArray(result.data) ? result.data : (result.data.reports || []);
+  if (result?.reports) return result.reports;
+  return [];
+}
+
+export async function deleteDailyReport(reportId, email) {
+  const payload = { action: 'deleteDailyReport', reportId, email };
+  const res = await postJSON(`${BASE_URL}?action=deleteDailyReport`, payload);
+  const unwrapped = res?.data || res;
+  return unwrapped;
 }
 
 // Students and Attendance

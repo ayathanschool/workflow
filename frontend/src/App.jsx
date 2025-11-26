@@ -452,6 +452,7 @@ const App = () => {
         { id: 'timetable', label: 'Timetable', icon: Calendar },
         { id: 'my-substitutions', label: 'My Substitutions', icon: UserPlus },
         { id: 'reports', label: 'Daily Reports (Enhanced)', icon: FileText },
+        { id: 'my-daily-reports', label: 'My Reports History', icon: FileClock },
         { id: 'smart-reminders', label: 'Smart Reminders', icon: Bell }
       );
       // Teachers and class teachers can also manage exams: view available exams,
@@ -1263,6 +1264,8 @@ const App = () => {
         return <SchemeApprovalsView />;
       case 'lesson-approvals':
         return <LessonApprovalsView />;
+      case 'my-daily-reports':
+        return <MyDailyReportsView />;
       case 'daily-oversight':
         return <HMDailyOversight user={user} />;
       case 'substitutions':
@@ -7160,6 +7163,215 @@ const App = () => {
                     </td>
                   </tr>
                 )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // My Daily Reports (Teacher self-history)
+  const MyDailyReportsView = () => {
+    const [reports, setReports] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [rangeMode, setRangeMode] = useState('7d'); // 7d | month | custom
+    const [customFrom, setCustomFrom] = useState('');
+    const [customTo, setCustomTo] = useState('');
+    const [subjectFilter, setSubjectFilter] = useState('');
+    const [classFilter, setClassFilter] = useState('');
+    const [pageSize, setPageSize] = useState(50);
+    const [page, setPage] = useState(1);
+    const [maxDisplay, setMaxDisplay] = useState(1000); // soft cap
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
+    const email = user?.email || '';
+
+    const computeDates = useCallback(() => {
+      const today = new Date();
+      const isoToday = today.toISOString().split('T')[0];
+      if (rangeMode === '7d') {
+        const past = new Date(); past.setDate(past.getDate() - 6);
+        return { from: past.toISOString().split('T')[0], to: isoToday };
+      }
+      if (rangeMode === 'month') {
+        const start = new Date(today.getFullYear(), today.getMonth(), 1);
+        return { from: start.toISOString().split('T')[0], to: isoToday };
+      }
+      if (rangeMode === 'custom' && customFrom && customTo) {
+        return { from: customFrom, to: customTo };
+      }
+      return { from: isoToday, to: isoToday };
+    }, [rangeMode, customFrom, customTo]);
+
+    const loadMyReports = useCallback(async () => {
+      if (!email) return;
+      const { from, to } = computeDates();
+      setLoading(true);
+      try {
+        const data = await api.getDailyReports({ teacher: email, fromDate: from, toDate: to, cls: classFilter, subject: subjectFilter });
+        let arr = Array.isArray(data) ? data : [];
+        if (arr.length > maxDisplay) arr = arr.slice(0, maxDisplay);
+        setReports(arr);
+      } catch (e) {
+        console.warn('Failed to load my reports', e);
+        setReports([]);
+      } finally {
+        setLoading(false);
+      }
+    }, [email, computeDates, classFilter, subjectFilter, maxDisplay]);
+
+    useEffect(() => { 
+      setPage(1); 
+      loadMyReports(); 
+    }, [rangeMode, customFrom, customTo, subjectFilter, classFilter, email, maxDisplay, refreshTrigger, loadMyReports]);
+
+    const total = reports.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const paginated = reports.slice((page - 1) * pageSize, page * pageSize);
+
+    const exportCSV = () => {
+      if (!reports.length) return;
+      const headers = ['Date','Class','Subject','Period','Chapter','Session','Completed','Notes'];
+      const lines = [headers.join(',')].concat(reports.map(r => [r.date, r.class, r.subject, `P${r.period}`, (r.chapter||'').replace(/,/g,';'), r.sessionNo||'', r.completed||'', (r.notes||'').replace(/\n/g,' ').replace(/,/g,';')].join(',')));
+      const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const { from, to } = computeDates();
+      a.download = `daily-reports-${email}-${from}-to-${to}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-gray-900">My Daily Reports History</h1>
+          <button onClick={() => setRefreshTrigger(t => t + 1)} disabled={loading} className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-indigo-700 disabled:opacity-50">
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} /> {loading ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
+          <div className="flex flex-wrap gap-3 items-end">
+            <div className="flex gap-2">
+              <button onClick={() => setRangeMode('7d')} className={`px-3 py-1 rounded-full text-sm ${rangeMode==='7d' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}>Last 7 Days</button>
+              <button onClick={() => setRangeMode('month')} className={`px-3 py-1 rounded-full text-sm ${rangeMode==='month' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}>This Month</button>
+              <button onClick={() => setRangeMode('custom')} className={`px-3 py-1 rounded-full text-sm ${rangeMode==='custom' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}>Custom</button>
+            </div>
+            {rangeMode === 'custom' && (
+              <div className="flex gap-2 items-center">
+                <input type="date" value={customFrom} onChange={e=>setCustomFrom(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
+                <span className="text-gray-500">to</span>
+                <input type="date" value={customTo} onChange={e=>setCustomTo(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
+              </div>
+            )}
+            <input placeholder="Class" value={classFilter} onChange={e=>setClassFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
+            <input placeholder="Subject" value={subjectFilter} onChange={e=>setSubjectFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-gray-500">Page size</span>
+              <select value={pageSize} onChange={e=>{setPageSize(Number(e.target.value)); setPage(1);}} className="px-2 py-1 border rounded-lg">
+                {[25,50,100,200].map(n=> <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-gray-500">Max</span>
+              <select value={maxDisplay} onChange={e=> setMaxDisplay(Number(e.target.value))} className="px-2 py-1 border rounded-lg">
+                {[200,500,1000].map(n=> <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+            <button onClick={exportCSV} disabled={!reports.length} className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-40">Export CSV</button>
+          </div>
+          <div className="text-xs text-gray-600">Showing reports for <strong>{email}</strong> {(() => { const {from,to}=computeDates(); return `(${from} → ${to})`; })()} • {total} total{total === maxDisplay ? ' (truncated)' : ''}</div>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+            <h2 className="text-lg font-medium text-gray-900">Reports ({total})</h2>
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              <button onClick={()=> setPage(p=> Math.max(1, p-1))} disabled={page===1} className="px-2 py-1 border rounded disabled:opacity-40">Prev</button>
+              <span>Page {page}/{totalPages}</span>
+              <button onClick={()=> setPage(p=> Math.min(totalPages, p+1))} disabled={page===totalPages} className="px-2 py-1 border rounded disabled:opacity-40">Next</button>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Date</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Class</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Subject</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Period</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Chapter</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Session</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Completed</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Notes</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {loading && (
+                  <tr><td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-500">Loading...</td></tr>
+                )}
+                {!loading && reports.length === 0 && (
+                  <tr><td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-500">No reports in this range.</td></tr>
+                )}
+                {!loading && paginated.map(r => {
+                  const id = r.id || r.reportId || `${(r.date||'').toString()}|${r.class||''}|${r.subject||''}|${r.period||''}|${String(r.teacherEmail||'').toLowerCase()}`;
+                  const displayDate = (() => {
+                    const d = r.date;
+                    if (!d) return '-';
+                    const s = String(d);
+                    // If backend already normalized yyyy-MM-dd, show as-is
+                    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+                    // If ISO datetime, compute IST date string
+                    try {
+                      const dt = new Date(s);
+                      if (!isNaN(dt.getTime())) {
+                        // en-CA with timeZone gives YYYY-MM-DD
+                        return dt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+                      }
+                    } catch {}
+                    // Fallback: strip time part
+                    if (/^\d{4}-\d{2}-\d{2}T/.test(s)) return s.split('T')[0];
+                    return s;
+                  })();
+                  const completedVal = r.completed || r.lessonProgressTracked || r.status || '-';
+                  return (
+                  <tr key={id || `${r.date}|${r.class}|${r.subject}|${r.period}`}> 
+                    <td className="px-2 py-2 text-xs text-gray-900">{displayDate}</td>
+                    <td className="px-2 py-2 text-xs text-gray-900">{r.class}</td>
+                    <td className="px-2 py-2 text-xs text-gray-900">{r.subject}</td>
+                    <td className="px-2 py-2 text-xs text-gray-900">P{r.period}</td>
+                    <td className="px-2 py-2 text-xs text-gray-700 truncate">{r.chapter || '-'}</td>
+                    <td className="px-2 py-2 text-xs text-gray-700">{r.sessionNo || '-'}</td>
+                    <td className="px-2 py-2 text-xs">{completedVal}</td>
+                    <td className="px-2 py-2 text-xs text-gray-600 max-w-[180px] truncate" title={r.notes || ''}>{r.notes || '-'}</td>
+                    <td className="px-2 py-2 text-xs text-right">
+                      {(() => {
+                        // Show delete for own reports; backend enforces time window
+                        const isOwner = String(r.teacherEmail || '').toLowerCase() === String(email || '').toLowerCase();
+                        if (!isOwner) return null;
+                        const onDelete = async () => {
+                          if (!id) return alert('Missing report id');
+                          if (!confirm('Delete this report? This cannot be undone.')) return;
+                          try {
+                            const res = await api.deleteDailyReport(id, email);
+                            if (res && res.success) {
+                              setReports(prev => prev.filter(x => (x.id || x.reportId || '') !== id));
+                            } else {
+                              alert('Delete failed: ' + (res && res.error ? res.error : 'Not allowed'));
+                            }
+                          } catch (err) {
+                            alert('Delete failed: ' + (err && err.message ? err.message : String(err)));
+                          }
+                        };
+                        return (
+                          <button onClick={onDelete} disabled={!id} className="px-2 py-1 border rounded text-red-600 hover:bg-red-50 disabled:opacity-40">Delete</button>
+                        );
+                      })()}
+                    </td>
+                  </tr>
+                )})}
               </tbody>
             </table>
           </div>

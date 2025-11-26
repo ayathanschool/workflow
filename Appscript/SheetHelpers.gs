@@ -291,32 +291,38 @@ function submitDailyReportWithProgressTracking(reportData) {
     const requiredHeaders = [
       'id', 'teacherEmail', 'teacherName', 'date', 'class', 'subject',
       'topicsCovered', 'studentsPresent', 'studentsAbsent', 'remarks',
+      'teachingMethod', // ensure Teaching Method exists
       'submittedAt', 'lessonProgressTracked'
     ];
-    _ensureHeaders(sheet, requiredHeaders);
+    // Use enhanced ensure to avoid overwriting existing header orders
+    _ensureHeadersEnhanced(sheet, requiredHeaders);
     
     // Generate report ID and timestamp
     const reportId = _generateId('DR_');
     const timestamp = new Date().toISOString();
     
     // Prepare row data
-    const rowData = [
-      reportId,
-      reportData.teacherEmail || '',
-      reportData.teacherName || '',
-      _dateToISO(reportData.date),
-      reportData.class || '',
-      reportData.subject || '',
-      reportData.topicsCovered || '',
-      reportData.studentsPresent || 0,
-      reportData.studentsAbsent || 0,
-      reportData.remarks || '',
-      timestamp,
-      'pending' // Will be updated after progress tracking
-    ];
+    // Build row aligned to current headers to avoid column mismatch
+    const rowValues = new Array(headers.length).fill('');
+    const setIfExists = (colName, value) => {
+      const idx = headers.indexOf(colName);
+      if (idx !== -1) rowValues[idx] = value;
+    };
+    setIfExists('id', reportId);
+    setIfExists('teacherEmail', reportData.teacherEmail || '');
+    setIfExists('teacherName', reportData.teacherName || '');
+    setIfExists('date', _dateToISO(reportData.date));
+    setIfExists('class', reportData.class || '');
+    setIfExists('subject', reportData.subject || '');
+    setIfExists('topicsCovered', reportData.topicsCovered || '');
+    setIfExists('studentsPresent', reportData.studentsPresent || 0);
+    setIfExists('studentsAbsent', reportData.studentsAbsent || 0);
+    setIfExists('remarks', reportData.remarks || '');
+    setIfExists('teachingMethod', reportData.teachingMethod || reportData.activities || '');
+    setIfExists('submittedAt', timestamp);
+    setIfExists('lessonProgressTracked', 'pending');
     
-    // Append the row
-    sheet.appendRow(rowData);
+    sheet.appendRow(rowValues);
     
     // Track lesson progress automatically
     const progressData = Object.assign({}, reportData, { id: reportId });
@@ -478,14 +484,25 @@ function getDailyReports(teacherEmail, startDate = null, endDate = null, cls = '
       return emailMatch && classMatch && subjectMatch && dateMatch;
     });
     
-    // Sort by date descending
+    // Normalize date to IST yyyy-MM-dd for consistent display and filtering
+    const TZ = 'Asia/Kolkata';
+    filteredReports = filteredReports.map(r => {
+      const out = Object.assign({}, r);
+      try {
+        if (r.date) {
+          const d = new Date(r.date);
+          if (!isNaN(d.getTime())) {
+            out.date = Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
+          }
+        }
+      } catch (e) { /* ignore */ }
+      return out;
+    });
+
+    // Sort by date descending (string yyyy-MM-dd safe lexicographically by date parse)
     filteredReports.sort((a, b) => new Date(b.date) - new Date(a.date));
     
-    return {
-      success: true,
-      reports: filteredReports,
-      count: filteredReports.length
-    };
+    return filteredReports;
   } catch (error) {
     console.error(`Error getting daily reports: ${error.message}`);
     return { success: false, error: error.message };
@@ -514,5 +531,84 @@ function getAllTeachers() {
   } catch (error) {
     console.error(`Error getting all teachers: ${error.message}`);
     return [];
+  }
+}
+
+/**
+ * Check if a report can be deleted by the requester within a time window
+ */
+function _canDeleteDailyReport(report, requesterEmail, minutesWindow) {
+  try {
+    const owner = String(report.teacherEmail || '').toLowerCase();
+    const requester = String(requesterEmail || '').toLowerCase();
+    if (!owner || !requester || owner !== requester) return false;
+    const submittedAt = report.submittedAt || report.createdAt || '';
+    if (!submittedAt) return false;
+    const submitted = new Date(submittedAt);
+    if (isNaN(submitted.getTime())) return false;
+    const now = new Date();
+    const diffMs = now.getTime() - submitted.getTime();
+    const allowedMs = (Number(minutesWindow) || 30) * 60 * 1000;
+    return diffMs <= allowedMs;
+  } catch (err) {
+    console.error('Error in _canDeleteDailyReport', err);
+    return false;
+  }
+}
+
+/**
+ * Delete a daily report by id if requester is owner and within allowed time window.
+ * Settings key: DAILY_REPORT_DELETE_MINUTES (default 30)
+ */
+function deleteDailyReport(reportId, requesterEmail) {
+  try {
+    if (!reportId) return { success: false, error: 'Missing reportId' };
+    if (!requesterEmail) return { success: false, error: 'Missing requesterEmail' };
+    const sh = _getSheet('DailyReports');
+    const headers = _headers(sh);
+    const data = _rows(sh);
+    const idxMap = {};
+    headers.forEach((h, i) => idxMap[h] = i);
+    const idCol = idxMap['id'] != null ? idxMap['id'] : idxMap['reportId'];
+    const delMinutesSetting = _getCachedSettings()['DAILY_REPORT_DELETE_MINUTES'];
+    const minutesWindow = delMinutesSetting != null ? Number(delMinutesSetting) : 30;
+
+    let rowToDelete = -1;
+    let reportObj = null;
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      // Match by id/reportId if available
+      if (idCol != null && String(row[idCol]) === String(reportId)) {
+        reportObj = _indexByHeader(row, headers);
+        rowToDelete = i + 2;
+        break;
+      }
+      // Fallback: composite key match date|class|subject|period|teacherEmail
+      if (idCol == null) {
+        const dateVal = String(row[idxMap['date']] || '').trim();
+        const classVal = String(row[idxMap['class']] || '').trim();
+        const subjectVal = String(row[idxMap['subject']] || '').trim();
+        const periodVal = String(row[idxMap['period']] || '').trim();
+        const emailVal = String(row[idxMap['teacherEmail']] || '').trim().toLowerCase();
+        const composite = [dateVal, classVal, subjectVal, periodVal, emailVal].join('|');
+        if (composite === String(reportId)) {
+          reportObj = _indexByHeader(row, headers);
+          rowToDelete = i + 2;
+          break;
+        }
+      }
+    }
+    if (rowToDelete < 0 || !reportObj) {
+      return { success: false, error: 'Report not found' };
+    }
+    if (!_canDeleteDailyReport(reportObj, requesterEmail, minutesWindow)) {
+      return { success: false, error: 'Delete not allowed (owner/time-window check failed)' };
+    }
+
+    sh.deleteRow(rowToDelete);
+    return { success: true, deletedId: reportId };
+  } catch (err) {
+    console.error('deleteDailyReport error', err);
+    return { success: false, error: err && err.message ? err.message : String(err) };
   }
 }

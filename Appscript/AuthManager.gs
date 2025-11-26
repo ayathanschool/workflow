@@ -8,48 +8,50 @@
  * Handle regular email/password login
  */
 function handleBasicLogin(email, password) {
+  email = String(email || '').toLowerCase().trim();
   const sh = _getSheet('Users');
   const headers = _headers(sh);
   const list = _rows(sh).map(r => _indexByHeader(r, headers));
   const found = list.find(u => String(u.email||'').toLowerCase() === email);
-  
+
   if (!found) return { error: 'User not found' };
-  
-  // Check password if provided
+
+  // Check password if provided (optional)
   if (password && String(found.password || '') !== '') {
-    if (String(found.password || '') !== password) {
+    if (String(found.password || '') !== String(password)) {
       return { error: 'Invalid password' };
     }
   }
-  
+
   // Parse user roles and permissions
   const roles = String(found.roles || '')
     .split(',')
     .map(r => r.trim().toLowerCase())
     .filter(r => r.length > 0);
-  
+
   const classes = String(found.classes || '')
     .split(',')
     .map(c => c.trim())
     .filter(c => c.length > 0);
-  
+
   const subjects = String(found.subjects || '')
     .split(',')
     .map(s => s.trim())
     .filter(s => s.length > 0);
-  
+
   const classTeacherFor = String(found.classTeacherFor || '')
     .split(',')
     .map(c => c.trim())
     .filter(c => c.length > 0);
-  
-  return { 
+
+  return {
     name: found.name || '',
     email: found.email || '',
-    roles,
-    classes,
-    subjects,
-    classTeacherFor
+    roles: roles,
+    classes: classes,
+    subjects: subjects,
+    classTeacherFor: classTeacherFor,
+    loginMethod: 'basic'
   };
 }
 

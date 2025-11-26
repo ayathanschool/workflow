@@ -8,6 +8,7 @@ import {
   applyChapterCompletionAction,
   getPlannedLessonsForDate,
   getAppSettings,
+  getSubstitutionsForDate,
 } from "./api";
 import { todayIST, formatLocalDate } from "./utils/dateUtils";
 
@@ -88,10 +89,11 @@ export default function DailyReportModern({ user }) {
 
     try {
       // Load timetable and existing reports in parallel
-      const [timetableRes, reportsRes, plansRes] = await Promise.all([
+      const [timetableRes, reportsRes, plansRes, subsAll] = await Promise.all([
         getTeacherDailyTimetable(email, date),
         getTeacherDailyReportsForDate(email, date),
-        getPlannedLessonsForDate(email, date)
+        getPlannedLessonsForDate(email, date),
+        getSubstitutionsForDate(date, { noCache: true })
       ]);
 
       // Handle different response structures
@@ -110,7 +112,25 @@ export default function DailyReportModern({ user }) {
       const reportsData = Array.isArray(reportsRes?.data) ? reportsRes.data : (Array.isArray(reportsRes) ? reportsRes : []);
       const plansData = plansRes?.data || plansRes || { lessonsByPeriod: {} };
 
-      setPeriods(timetableData);
+      // Merge substitution assignments for this teacher into periods list
+      const mySubs = Array.isArray(subsAll) ? subsAll.filter(s => String(s.substituteTeacher || '').toLowerCase() === String(email).toLowerCase()) : [];
+      const subPeriods = mySubs.map(s => ({
+        period: s.period,
+        class: s.class,
+        subject: s.substituteSubject || s.regularSubject || '',
+        startTime: '',
+        endTime: '',
+        isSubstitution: true,
+        absentTeacher: s.absentTeacher || '',
+        regularSubject: s.regularSubject || '',
+        substituteSubject: s.substituteSubject || ''
+      }));
+
+      // Avoid duplicates if somehow a timetable entry exists for same key
+      const ttKeys = new Set((timetableData || []).map(p => `${p.period}|${p.class}|${p.subject}`));
+      const merged = [...timetableData, ...subPeriods.filter(p => !ttKeys.has(`${p.period}|${p.class}|${p.subject}`))];
+
+      setPeriods(merged);
       
       // Map existing reports by period key
       const reportsMap = {};
@@ -181,6 +201,24 @@ export default function DailyReportModern({ user }) {
       }
     }
   }, [email, date]);
+
+  // Legend component
+  const LegendBar = () => (
+    <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-green-100 text-green-800 border border-green-200">
+        <span className="inline-block w-2 h-2 rounded-full bg-green-500"></span>
+        <span className="text-sm">Planned</span>
+      </div>
+      <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+        <span className="inline-block w-2 h-2 rounded-full bg-amber-500"></span>
+        <span className="text-sm">Substitution</span>
+      </div>
+      <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+        <span className="inline-block w-2 h-2 rounded-full bg-blue-500"></span>
+        <span className="text-sm">Cascaded</span>
+      </div>
+    </div>
+  );
 
   useEffect(() => {
     if (Object.keys(drafts).length > 0) {
@@ -255,7 +293,57 @@ export default function DailyReportModern({ user }) {
       return;
     }
 
-    // Validation - check draft first, then fallback to lesson plan
+    // If substitution period: require only answer box (what done) and skip plan validations
+    if (period?.isSubstitution) {
+      const whatDone = String((draft.subNotes || draft.objectives || '').trim());
+      if (!whatDone) {
+        setMessage({ text: '❌ Please describe what you did in this substitution period', type: 'error' });
+        return;
+      }
+
+      setSubmitting(prev => ({ ...prev, [key]: true }));
+      setMessage({ text: '', type: '' });
+      try {
+        const payload = {
+          date,
+          teacherEmail: email,
+          teacherName,
+          class: period.class,
+          subject: period.subject,
+          period: Number(period.period),
+          objectives: whatDone, // store in objectives field
+          activities: '',
+          completionPercentage: 0,
+          isSubstitution: true,
+          absentTeacher: period.absentTeacher || '',
+          regularSubject: period.regularSubject || '',
+          substituteSubject: period.substituteSubject || ''
+        };
+        const res = await submitDailyReport(payload);
+        const result = res?.data || res;
+        if (result && (result.ok || result.submitted)) {
+          setReports(prev => ({ ...prev, [key]: { ...payload, reportId: result.reportId } }));
+          setDrafts(prev => { const n = { ...prev }; delete n[key]; return n; });
+          setExpandedPeriod(null);
+          const absentInfo = result?.absentCascade;
+          if (absentInfo?.attempted && absentInfo?.success) {
+            setMessage({ text: `✅ Substitution submitted. Absent teacher plan rescheduled (${absentInfo.updatedCount} session(s)).`, type: 'success' });
+          } else {
+            setMessage({ text: '✅ Substitution report submitted successfully.', type: 'success' });
+          }
+        } else {
+          const errMsg = result?.message || result?.error || 'Submission failed';
+          setMessage({ text: `❌ ${errMsg}`, type: 'error' });
+        }
+      } catch (e) {
+        setMessage({ text: `❌ ${e.message || e}`, type: 'error' });
+      } finally {
+        setSubmitting(prev => ({ ...prev, [key]: false }));
+      }
+      return;
+    }
+
+    // Validation - check draft first, then fallback to lesson plan (regular periods)
     const chapter = (draft.chapter || plan?.chapter || "").trim();
     const objectives = (draft.objectives || plan?.learningObjectives || "").trim();
     const completionPercentage = Number(draft.completionPercentage || 0);
@@ -577,6 +665,10 @@ export default function DailyReportModern({ user }) {
               {message.text}
             </div>
           )}
+          {/* Legend */}
+          <div className="mt-4">
+            <LegendBar />
+          </div>
         </div>
       </div>
 
@@ -733,6 +825,7 @@ function PeriodCard({
   const sessionNo = data.sessionNo || plan?.sessionNo || 1;
   const totalSessions = data.totalSessions || plan?.totalSessions || 1;
   const completionPercentage = data.completionPercentage || 0;
+  const isSub = !!period.isSubstitution;
 
   return (
     <div className={`bg-white rounded-xl shadow-md transition-all duration-300 ${
@@ -740,13 +833,13 @@ function PeriodCard({
     }`}>
       {/* Card Header */}
       <div
-        className={`p-6 cursor-pointer ${isSubmitted ? 'bg-green-50' : 'hover:bg-gray-50'} rounded-t-xl transition-colors`}
+        className={`p-6 cursor-pointer ${isSubmitted ? 'bg-green-50' : (isSub ? 'bg-amber-50' : 'hover:bg-gray-50')} rounded-t-xl transition-colors`}
         onClick={!isSubmitted ? onToggle : undefined}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className={`flex-shrink-0 w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold ${
-              isSubmitted ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+              isSubmitted ? 'bg-green-100 text-green-700' : (isSub ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700')
             }`}>
               P{period.period}
             </div>
@@ -771,7 +864,7 @@ function PeriodCard({
 
           <div className="flex items-center gap-3">
             {/* Completion Badge */}
-            <div className={`px-4 py-2 rounded-full border-2 flex items-center gap-2 ${completionLevel.color}`}>
+            <div className={`px-4 py-2 rounded-full border-2 flex items-center gap-2 ${isSub ? 'bg-amber-50 border-amber-300' : completionLevel.color}`}>
               <span className="text-lg">{completionLevel.icon}</span>
               <span className="text-sm font-medium">{completionPercentage}%</span>
             </div>
@@ -783,6 +876,11 @@ function PeriodCard({
                 <span>Submitted</span>
               </div>
             ) : (
+              isSub ? (
+                <div className="px-4 py-2 bg-amber-100 text-amber-700 rounded-full font-medium text-sm">
+                  Substitution
+                </div>
+              ) : (
               <button
                 className="text-gray-400 hover:text-gray-600 transition-colors"
                 onClick={(e) => {
@@ -794,6 +892,7 @@ function PeriodCard({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
               </button>
+              )
             )}
           </div>
         </div>
@@ -802,8 +901,18 @@ function PeriodCard({
       {/* Expanded Form */}
       {isExpanded && !isSubmitted && (
         <div className="p-6 border-t border-gray-100 space-y-6">
-          {/* Show lesson plan details if available */}
-          {plan ? (
+          {/* Substitution banner */}
+          {isSub && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <div className="font-medium text-amber-900">Substitution period – lesson plan not required</div>
+              {period.absentTeacher && (
+                <div className="text-sm text-amber-700 mt-1">Absent Teacher: {period.absentTeacher} • Regular Subject: {period.regularSubject || '-'}</div>
+              )}
+            </div>
+          )}
+
+          {/* Show lesson plan details if available and not substitution */}
+          {!isSub && plan ? (
             <div className="bg-green-50 border border-green-200 rounded-lg p-4">
               <div className="flex items-start gap-3">
                 <div className="text-2xl">📚</div>
@@ -819,7 +928,7 @@ function PeriodCard({
                 </div>
               </div>
             </div>
-          ) : (
+          ) : (!isSub && (
             <div className={`rounded-lg p-4 border ${cascadeMoves[periodKey] ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200'}`}>
               <div className="flex items-start gap-3">
                 <div className="text-2xl">{cascadeMoves[periodKey] ? 'ℹ️' : '⚠️'}</div>
@@ -840,9 +949,24 @@ function PeriodCard({
                 </div>
               </div>
             </div>
-          )}
+          ))}
 
-          {/* Chapter & Session */}
+          {/* Substitution simplified form */}
+          {isSub ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                What did you do in this period? <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={data.subNotes || data.objectives || ''}
+                onChange={(e) => { onUpdate('subNotes', e.target.value); onUpdate('objectives', e.target.value); }}
+                placeholder="Briefly describe the activities/coverage during substitution"
+                rows={4}
+                className="w-full px-4 py-2 border border-amber-300 bg-amber-50 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent resize-none"
+              />
+            </div>
+          ) : (
+          /* Chapter & Session */
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -851,13 +975,17 @@ function PeriodCard({
               <input
                 type="text"
                 value={chapter}
-                onChange={(e) => onUpdate('chapter', e.target.value)}
+                readOnly
+                disabled={true}
                 onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()}
-                placeholder={plan ? "From lesson plan" : "Enter chapter or topic name"}
-                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                  plan ? 'bg-blue-50 border-blue-300' : 'border-gray-300'
+                placeholder={plan ? "From lesson plan" : "No planned chapter – prepare a lesson plan"}
+                className={`w-full px-4 py-2 border rounded-lg bg-gray-100 ${
+                  plan ? 'border-blue-300' : 'border-red-300'
                 }`}
               />
+              {!plan && (
+                <p className="mt-1 text-xs text-red-600">No planned chapter found for this period. Please prepare a lesson plan first.</p>
+              )}
             </div>
 
             <div>
@@ -885,9 +1013,10 @@ function PeriodCard({
               </div>
             </div>
           </div>
+          )}
 
           {/* Learning Objectives */}
-          {plan && (
+          {!isSub && plan && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Learning Objectives (from Lesson Plan) 
@@ -904,7 +1033,7 @@ function PeriodCard({
           )}
 
           {/* Teaching Methods/Activities */}
-          {plan && plan.teachingMethods && (
+          {!isSub && plan && plan.teachingMethods && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Teaching Methods (from Lesson Plan)
@@ -921,6 +1050,7 @@ function PeriodCard({
           )}
 
           {/* Completion Percentage */}
+          {!isSub && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-3">
               Completion Level <span className="text-red-500">*</span>
@@ -943,9 +1073,10 @@ function PeriodCard({
               ))}
             </div>
           </div>
+          )}
 
           {/* Deviation Reason (only for 0%) */}
-          {completionPercentage === 0 && (
+          {!isSub && completionPercentage === 0 && (
             <>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1026,7 +1157,7 @@ function PeriodCard({
           )}
 
           {/* Learning Objectives - show for all cases when completion > 0 */}
-          {completionPercentage > 0 && !plan && (
+          {!isSub && completionPercentage > 0 && !plan && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Learning Objectives <span className="text-red-500">*</span>
@@ -1042,7 +1173,7 @@ function PeriodCard({
           )}
 
           {/* Activities - show for all cases when completion > 0 */}
-          {completionPercentage > 0 && !plan && (
+          {!isSub && completionPercentage > 0 && !plan && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Activities
@@ -1077,7 +1208,7 @@ function PeriodCard({
           </div>
 
           {/* Chapter Complete Checkbox */}
-          {completionPercentage === 100 && (
+          {!isSub && completionPercentage === 100 && (
             <div className="flex items-center gap-3 p-4 bg-green-50 border-2 border-green-200 rounded-lg">
               <input
                 type="checkbox"
