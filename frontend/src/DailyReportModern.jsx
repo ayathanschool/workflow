@@ -321,7 +321,8 @@ export default function DailyReportModern({ user }) {
         };
         const res = await submitDailyReport(payload);
         const result = res?.data || res;
-        if (result && (result.ok || result.submitted)) {
+        // Treat success if backend returns ok | submitted | success
+        if (result && (result.ok || result.submitted || result.success)) {
           setReports(prev => ({ ...prev, [key]: { ...payload, reportId: result.reportId } }));
           setDrafts(prev => { const n = { ...prev }; delete n[key]; return n; });
           setExpandedPeriod(null);
@@ -406,7 +407,8 @@ export default function DailyReportModern({ user }) {
       const result = res.data || res;
       console.log('📦 UNWRAPPED RESULT:', result);
 
-      if (result && (result.ok || result.submitted)) {
+      // Success criteria broadened to include 'success' flag from backend
+      if (result && (result.ok || result.submitted || result.success)) {
         console.log('✅ Daily report submitted successfully');
         // Handle auto-cascade feedback (backend may have moved sessions automatically)
         const autoCascade = result.autoCascade || result.data?.autoCascade || null;
