@@ -33,6 +33,55 @@ const HMTeacherPerformanceView = ({ user }) => {
   const [refreshInterval, setRefreshInterval] = useState(5); // minutes
   const [criticalAlerts, setCriticalAlerts] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  const exportPerformanceCSV = () => {
+    const rows = [
+      [
+        'Teacher Email',
+        'Teacher Name',
+        'Total Sessions',
+        'Completed Sessions',
+        'Partial Sessions',
+        'Average Completion %',
+        'On-Time %',
+        'Cascading Issues',
+        'Performance Grade',
+        'Submission Rate %',
+        'Last Submit Date'
+      ],
+      ...filteredTeachers.map(t => [
+        t.teacherEmail,
+        t.teacherName || t.teacherEmail.split('@')[0],
+        t.totalSessions || 0,
+        t.completedSessions || 0,
+        t.partialSessions || 0,
+        t.averageCompletion || 0,
+        t.onTimeCompletion || 0,
+        t.cascadingIssues || 0,
+        t.performanceGrade || 'No Data',
+        t.submissionRate || 0,
+        t.lastSubmitDate || ''
+      ])
+    ];
+
+    const csv = rows
+      .map(r => r.map(val => {
+        const s = String(val ?? '')
+          .replace(/"/g, '""');
+        return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
+      }).join(','))
+      .join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `teacher-performance-${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   useEffect(() => {
     loadAllTeacherPerformances();
@@ -306,7 +355,7 @@ const HMTeacherPerformanceView = ({ user }) => {
             Refresh
           </button>
           
-          <button className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center">
+          <button onClick={exportPerformanceCSV} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center">
             <Download className="h-4 w-4 mr-2" />
             Export Report
           </button>

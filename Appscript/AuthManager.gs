@@ -139,9 +139,10 @@ function handleGoogleLogin(payload) {
 }
 
 /**
- * Check if a user has a specific role (like 'teacher' or 'hm')
+ * DEPRECATED: Use userHasRole() from SheetHelpers.gs instead (enhanced version with better role matching)
+ * Legacy role check - kept for backwards compatibility
  */
-function userHasRole(userEmail, requiredRole) {
+function userHasRoleLegacy(userEmail, requiredRole) {
   const sh = _getSheet('Users');
   const headers = _headers(sh);
   const list = _rows(sh).map(r => _indexByHeader(r, headers));

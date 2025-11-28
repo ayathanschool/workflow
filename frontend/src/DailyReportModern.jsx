@@ -9,6 +9,7 @@ import {
   getPlannedLessonsForDate,
   getAppSettings,
   getSubstitutionsForDate,
+  getTeacherWeeklyTimetable
 } from "./api";
 import { todayIST, formatLocalDate } from "./utils/dateUtils";
 
@@ -47,6 +48,8 @@ export default function DailyReportModern({ user }) {
   const [cascadePreview, setCascadePreview] = useState({});
   const [cascadeMoves, setCascadeMoves] = useState({});
   const [cascadeLoading, setCascadeLoading] = useState({});
+  // Fallback tracking
+  const [fallbackInfo, setFallbackInfo] = useState({ used: false, weeklyCount: 0, matchedCount: 0, dayName: '' });
   
   // Chapter completion modal
   const [showCompletionModal, setShowCompletionModal] = useState(false);
@@ -107,6 +110,65 @@ export default function DailyReportModern({ user }) {
         timetableData = timetableRes.data;
       } else {
         timetableData = [];
+      }
+
+      // Fallback: if no daily timetable returned, derive periods from weekly timetable structure
+      if ((!timetableData || timetableData.length === 0) && email) {
+        try {
+          console.warn('⚠️ Daily timetable empty. Attempting weekly fallback for', { email, date });
+          const weekly = await getTeacherWeeklyTimetable(email);
+          const weeklyDays = Array.isArray(weekly?.data) ? weekly.data : (Array.isArray(weekly) ? weekly : []); // expect array of day objects
+          if (weeklyDays.length > 0) {
+            const dayName = new Date(`${date}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Asia/Kolkata' });
+            // Find the matching day object, then flatten its periods
+            const dayObj = weeklyDays.find(d => {
+              const raw = d.dayOfWeek || d.day || d.dayname || d.dayName;
+              let dow = String(raw || '').trim();
+              if (/^[0-7]$/.test(dow)) {
+                const map = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+                dow = map[Number(dow)];
+              }
+              return dow.toLowerCase() === dayName.toLowerCase();
+            });
+            if (dayObj && Array.isArray(dayObj.periods) && dayObj.periods.length > 0) {
+              console.log('✅ Weekly fallback found day periods:', dayObj.periods.length);
+              const norm = dayObj.periods.map(p => {
+                const periodValRaw = p.period || p.Period || p.periodNumber || p.slot || p.slotNumber || p.index;
+                const classValRaw = p.class || p.Class || p.className || p.standard || p.grade || p.Grade || p.Standard;
+                const subjectValRaw = p.subject || p.Subject || p.subjectName || p.subj || p.course || p.topic || p.Topic;
+                const periodVal = periodValRaw !== undefined && periodValRaw !== '' ? periodValRaw : '1';
+                const classVal = classValRaw !== undefined && classValRaw !== '' ? String(classValRaw) : 'UNKNOWN-CLASS';
+                const subjectVal = subjectValRaw !== undefined && subjectValRaw !== '' ? String(subjectValRaw) : 'UNKNOWN-SUBJECT';
+                return {
+                  period: periodVal,
+                  class: classVal,
+                  subject: subjectVal,
+                  startTime: p.startTime || p.begin || p.StartTime || '',
+                  endTime: p.endTime || p.finish || p.EndTime || '',
+                  isFallback: true,
+                  teacherEmail: p.teacherEmail || p.TeacherEmail || email,
+                  teacherName: p.teacherName || p.TeacherName || teacherName,
+                  _raw: p
+                };
+              });
+              const placeholderCount = norm.filter(x => x.class === 'UNKNOWN-CLASS' || x.subject === 'UNKNOWN-SUBJECT').length;
+              if (placeholderCount > 0) {
+                console.warn(`⚠️ ${placeholderCount} fallback periods missing class/subject; placeholders applied.`);
+              }
+              timetableData = norm;
+              setFallbackInfo({ used: true, weeklyCount: weeklyDays.length, matchedCount: norm.length, dayName });
+            } else {
+              console.warn('⚠️ Weekly fallback found matching day but no periods');
+              setFallbackInfo({ used: true, weeklyCount: weeklyDays.length, matchedCount: 0, dayName });
+            }
+          } else {
+            console.warn('⚠️ Weekly timetable also empty for teacher');
+            setFallbackInfo({ used: true, weeklyCount: 0, matchedCount: 0, dayName: '' });
+          }
+        } catch (fbErr) {
+          console.error('❌ Weekly fallback failed:', fbErr);
+          setFallbackInfo({ used: true, weeklyCount: 0, matchedCount: 0, dayName: '' });
+        }
       }
       
       const reportsData = Array.isArray(reportsRes?.data) ? reportsRes.data : (Array.isArray(reportsRes) ? reportsRes : []);
@@ -237,9 +299,24 @@ export default function DailyReportModern({ user }) {
     
     // When cascade option is selected, fetch preview
     if (field === 'cascadeOption' && value === 'cascade') {
-      const plan = lessonPlans[key];
-      if (plan && plan.lpId) {
-        fetchCascadePreview(key, plan.lpId);
+      // Robust plan lookup: direct key, fuzzy by period+class, fallback id fields
+      let plan = lessonPlans[key];
+      if (!plan) {
+        plan = Object.values(lessonPlans).find(lp => {
+          const lpPeriod = String(lp.period || lp.selectedPeriod || lp.periodNumber || lp.sessionPeriod || lp.session || '').trim();
+          const lpClass = String(lp.class || lp.className || '').trim().toLowerCase();
+          const [periodPart, classPart] = key.split('|');
+          return lpPeriod === periodPart && lpClass === String(classPart || '').trim().toLowerCase();
+        }) || null;
+        if (plan && typeof window !== 'undefined' && !window.__SUPPRESS_CASCADE_DEBUG__) {
+          console.log('[Cascade/Fuzzy] Preview trigger matched plan via fuzzy lookup:', { key, matchedPlanId: plan.lpId || plan.lessonPlanId || plan.planId || plan.id });
+        }
+      }
+      const planId = plan?.lpId || plan?.lessonPlanId || plan?.planId || plan?.id;
+      if (plan && planId) {
+        fetchCascadePreview(key, planId);
+      } else {
+        setCascadePreview(prev => ({ ...prev, [key]: { success: false, sessionsToReschedule: [], error: 'No lesson plan ID found for cascade.' } }));
       }
     }
   }, [lessonPlans]);
@@ -247,30 +324,35 @@ export default function DailyReportModern({ user }) {
   const fetchCascadePreview = async (key, lpId) => {
     try {
       setCascadeLoading(prev => ({ ...prev, [key]: true }));
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'https://script.google.com/macros/s/AKfycbyfKlfWqiDRkNF_Cjft73qHpGQm8tQ-nHjPSPHOKfuC1l8H5JH5gfippuhNqjvtx5dsDg/exec'}?action=getCascadePreview&lpId=${lpId}&teacherEmail=${email}&originalDate=${date}`);
+      const base = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_GAS_WEB_APP_URL || import.meta.env.VITE_APP_SCRIPT_URL;
+      if (!base) {
+        console.error('Missing API base URL for cascade preview');
+        setCascadePreview(prev => ({ ...prev, [key]: { success: false, sessionsToReschedule: [], error: 'Missing API base URL (set VITE_API_BASE_URL)' } }));
+        return;
+      }
+      const response = await fetch(`${base}?action=getCascadePreview&lpId=${lpId}&teacherEmail=${email}&originalDate=${date}`);
       const result = await response.json();
       
       console.log('🔍 Cascade API Response:', result);
       
-      // Handle Apps Script response format: {status: 200, data: {...}}
-      if (result.status === 200 && result.data) {
-        const cascadeData = result.data;
-        
-        if (cascadeData.success) {
-          setCascadePreview(prev => ({
-            ...prev,
-            [key]: cascadeData
-          }));
-        } else {
-          console.error('Cascade preview failed:', cascadeData);
-          setMessage({ text: `❌ Cannot calculate cascade: ${cascadeData.error || 'Unknown error'}`, type: 'error' });
-        }
+      // Normalize possible response shapes
+      const cascadeData = (result?.data && (result.status === 200 || result.success === true)) ? result.data : (result.success && result.sessionsToReschedule ? result : null);
+      if (cascadeData && (cascadeData.success || Array.isArray(cascadeData.sessionsToReschedule))) {
+        const normalized = {
+          success: cascadeData.success !== false,
+            sessionsToReschedule: cascadeData.sessionsToReschedule || cascadeData.sessions || [],
+            examWarnings: cascadeData.examWarnings || cascadeData.warnings || [],
+            updatedCount: cascadeData.updatedCount || (cascadeData.sessionsToReschedule ? cascadeData.sessionsToReschedule.length : 0)
+        };
+        setCascadePreview(prev => ({ ...prev, [key]: normalized }));
       } else {
-        console.error('Invalid API response:', result);
-        setMessage({ text: '❌ Invalid cascade response', type: 'error' });
+        console.error('Cascade preview failed or malformed:', result);
+        setCascadePreview(prev => ({ ...prev, [key]: { success: false, sessionsToReschedule: [], error: cascadeData?.error || result?.error || 'Malformed response' } }));
+        setMessage({ text: `❌ Cannot calculate cascade: ${cascadeData?.error || result?.error || 'Unknown error'}`, type: 'error' });
       }
     } catch (error) {
       console.error('Error fetching cascade preview:', error);
+      setCascadePreview(prev => ({ ...prev, [key]: { success: false, sessionsToReschedule: [], error: error.message || String(error) } }));
       setMessage({ text: '❌ Failed to calculate cascade preview', type: 'error' });
     } finally {
       setCascadeLoading(prev => ({ ...prev, [key]: false }));
@@ -439,7 +521,9 @@ export default function DailyReportModern({ user }) {
                 period: Number(period.period)
               }
             };
-            const cascadeRes = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'https://script.google.com/macros/s/AKfycbyfKlfWqiDRkNF_Cjft73qHpGQm8tQ-nHjPSPHOKfuC1l8H5JH5gfippuhNqjvtx5dsDg/exec'}?action=executeCascade`, {
+            const baseExec = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_GAS_WEB_APP_URL || import.meta.env.VITE_APP_SCRIPT_URL;
+            if (!baseExec) throw new Error('Missing API base URL for cascade execution (set VITE_API_BASE_URL)');
+            const cascadeRes = await fetch(`${baseExec}?action=executeCascade`, {
               method: 'POST',
               body: JSON.stringify(cascadePayload)
             });
@@ -689,57 +773,88 @@ export default function DailyReportModern({ user }) {
             <div className="text-6xl mb-4">📅</div>
             <h3 className="text-xl font-semibold text-gray-900 mb-2">No Classes Today</h3>
             <p className="text-gray-600">You don't have any scheduled periods for {displayDate}</p>
+            {fallbackInfo.used && (
+              <div className="mt-4 inline-block text-xs text-gray-500 bg-gray-100 px-3 py-2 rounded">
+                Fallback attempted • Weekly entries: {fallbackInfo.weeklyCount} • Matched day ({fallbackInfo.dayName || 'N/A'}): {fallbackInfo.matchedCount}
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* Period Cards */}
-      {!loading && periods.length > 0 && (
-        <div className="max-w-5xl mx-auto space-y-4">
-          {periods.map((period) => {
-            if (!period || !period.period || !period.class || !period.subject) {
-              console.warn('Invalid period data:', period);
-              return null;
-            }
-            
-            const key = periodKey(period);
-            const report = getReport(key);
-            const draft = getDraft(key);
-            const isExpanded = expandedPeriod === key;
-            const isSubmitted = !!report;
-            const isSubmitting = submitting[key] || false;
-            
-            // Match lesson plan by period|class|subject
-            const planKey = `${period.period}|${period.class}|${period.subject}`;
-            const plan = lessonPlans[planKey] || null;
-            
-            const completionLevel = getCompletionLevel(
-              isSubmitted ? (report.completionPercentage || 0) : (draft.completionPercentage || 0)
-            );
-
-            return (
-              <PeriodCard
-                key={key}
-                period={period}
-                isExpanded={isExpanded}
-                isSubmitted={isSubmitted}
-                isSubmitting={isSubmitting}
-                completionLevel={completionLevel}
-                draft={draft}
-                report={report}
-                plan={plan}
-                cascadePreview={cascadePreview[key]}
-                cascadeLoading={!!cascadeLoading[key]}
-                cascadeMoves={cascadeMoves}
-                periodKey={key}
-                onToggle={() => setExpandedPeriod(isExpanded ? null : key)}
-                onUpdate={(field, value) => updateDraft(key, field, value)}
-                onSubmit={() => handleSubmit(period)}
-              />
-            );
-          })}
-        </div>
-      )}
+      {!loading && periods.length > 0 && (() => {
+        const renderable = periods.filter(p => p && p.period && p.class && p.subject);
+        if (renderable.length === 0) {
+          return (
+            <div className="max-w-5xl mx-auto">
+              <div className="bg-white rounded-2xl shadow p-8 text-center border border-amber-200">
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">Timetable Loaded – Missing Fields</h3>
+                <p className="text-sm text-gray-600 mb-3">Entries were received but lacked required fields (period/class/subject). Please verify timetable sheet column names.</p>
+                {fallbackInfo.used && (
+                  <p className="text-xs text-gray-500">Fallback weekly matched: {fallbackInfo.matchedCount} • Normalized after filter: 0</p>
+                )}
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div className="max-w-5xl mx-auto space-y-4">
+            {renderable.map((period) => {
+              const key = periodKey(period);
+              const report = getReport(key);
+              const draft = getDraft(key);
+              const isExpanded = expandedPeriod === key;
+              const isSubmitted = !!report;
+              const isSubmitting = submitting[key] || false;
+              const planKey = `${period.period}|${period.class}|${period.subject}`;
+              // Attempt direct key lookup first
+              let plan = lessonPlans[planKey] || null;
+              // Fuzzy fallback: match by period + class if exact subject key not found (subject naming variations)
+              if (!plan) {
+                const fuzzy = Object.values(lessonPlans).find(lp => {
+                  const lpPeriod = String(lp.period || lp.selectedPeriod || lp.periodNumber || lp.sessionPeriod || '').trim();
+                  const lpClass = String(lp.class || lp.className || '').trim();
+                  return lpPeriod === String(period.period).trim() && lpClass.toLowerCase() === String(period.class).trim().toLowerCase();
+                });
+                if (fuzzy) {
+                  plan = fuzzy;
+                  // Optional lightweight debug (dev only)
+                  if (typeof window !== 'undefined' && !window.__SUPPRESS_CASCADE_DEBUG__) {
+                    console.log('[Cascade/Fuzzy] Matched lesson plan via period+class fallback:', {
+                      period: period.period,
+                      class: period.class,
+                      subjectOriginal: period.subject,
+                      planSubject: fuzzy.subject || fuzzy.chapter || '(none)'
+                    });
+                  }
+                }
+              }
+              const completionLevel = getCompletionLevel(isSubmitted ? (report.completionPercentage || 0) : (draft.completionPercentage || 0));
+              return (
+                <PeriodCard
+                  key={key}
+                  period={period}
+                  isExpanded={isExpanded}
+                  isSubmitted={isSubmitted}
+                  isSubmitting={isSubmitting}
+                  completionLevel={completionLevel}
+                  draft={draft}
+                  report={report}
+                  plan={plan}
+                  cascadePreview={cascadePreview[key]}
+                  cascadeLoading={!!cascadeLoading[key]}
+                  cascadeMoves={cascadeMoves}
+                  periodKey={key}
+                  onToggle={() => setExpandedPeriod(isExpanded ? null : key)}
+                  onUpdate={(field, value) => updateDraft(key, field, value)}
+                  onSubmit={() => handleSubmit(period)}
+                />
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* Chapter Completion Modal */}
       {showCompletionModal && completionModalData && (
@@ -1055,7 +1170,7 @@ function PeriodCard({
           {!isSub && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-3">
-              Completion Level <span className="text-red-500">*</span>
+              Session Completion level <span className="text-red-500">*</span>
             </label>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               {COMPLETION_LEVELS.map((level) => (
@@ -1130,6 +1245,11 @@ function PeriodCard({
                     <span className="text-xl">🔄</span>
                     Cascade Preview: {cascadePreview.sessionsToReschedule?.length || 0} Sessions
                   </h4>
+                  {(cascadePreview.sessionsToReschedule?.length || 0) === 0 && (
+                    <div className="text-sm text-blue-700 mb-2">
+                      {cascadePreview.message || cascadePreview.error || 'No eligible sessions were found to reschedule.'}
+                    </div>
+                  )}
                   <div className="space-y-2 max-h-64 overflow-y-auto">
                     {cascadePreview.sessionsToReschedule?.map((session, idx) => (
                       <div key={idx} className="bg-white p-3 rounded border border-blue-200">

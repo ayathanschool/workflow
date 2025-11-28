@@ -4,9 +4,10 @@
  */
 
 /**
- * Your Google Spreadsheet ID - DON'T CHANGE THIS!
+ * Your Google Spreadsheet ID (staging)
+ * NOTE: For production, update this in the prod Apps Script deployment.
  */
-const SPREADSHEET_ID = '1PWD9XxQlnYcIgZqgY4LcnM4YgG0ciAtAYRVhv6lWKRg';
+const SPREADSHEET_ID = '1F52WckRRMjFZjgaDax8hKAdj1acCwWXRrahWnQxtHsw';
 
 /**
  * All the sheets (tabs) in your spreadsheet and what columns they have
@@ -20,9 +21,11 @@ const SHEETS = {
   
   // === ACADEMIC WORKFLOW (4 sheets) ===
   Timetable: ['class','dayOfWeek','period','subject','teacherEmail','teacherName'],
-  Schemes: ['schemeId','teacherEmail','teacherName','class','subject','term','unit','chapter','month','noOfSessions','status','createdAt'],
+  // Schemes sheet headers expanded to include approval + academic context columns
+  // Must match MainApp _handleSubmitScheme headers to prevent header resets truncating columns
+  Schemes: ['schemeId','teacherEmail','teacherName','class','subject','term','unit','chapter','month','noOfSessions','status','createdAt','approvedAt','academicYear','content'],
   LessonPlans: ['lpId','schemeId','teacherEmail','teacherName','class','subject','chapter','session','selectedDate','selectedPeriod','learningObjectives','teachingMethods','resourcesRequired','assessmentMethods','status','createdAt','submittedAt','isDuplicate','lessonType','reviewerRemarks'],
-  DailyReports: ['date','teacherEmail','teacherName','class','subject','period','planType','lessonPlanId','chapter','sessionNo','totalSessions','completionPercentage','chapterStatus','deviationReason','difficulties','nextSessionPlan','objectives','activities','completed','notes','createdAt'],
+  DailyReports: ['id','date','teacherEmail','teacherName','class','subject','period','planType','lessonPlanId','chapter','sessionNo','totalSessions','completionPercentage','chapterStatus','deviationReason','difficulties','nextSessionPlan','objectives','activities','completed','notes','createdAt','isSubstitution','absentTeacher','regularSubject','substituteSubject','verified','verifiedBy','verifiedAt','reopenReason','reopenedBy','reopenedAt'],
   
   // === SYLLABUS & CALENDAR (2 sheets) ===
   Syllabus: ['standard','subject','term','chapterNo','chapterName','minSessions','topics','sequence'],

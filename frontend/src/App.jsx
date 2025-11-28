@@ -17,7 +17,6 @@ import PWAInstallBanner from './components/PWAInstallBanner';
 const SmartReminders = lazy(() => import('./components/SmartReminders'));
 const SubstitutionModule = lazy(() => import('./components/SubstitutionModule'));
 const EnhancedSubstitutionView = lazy(() => import('./components/EnhancedSubstitutionView'));
-const DailyReportTimetable = lazy(() => import('./DailyReportEnhanced'));
 const DailyReportModern = lazy(() => import('./DailyReportModern'));
 const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodSubstitutionView'));
 const ExamManagement = lazy(() => import('./components/ExamManagement'));
@@ -25,6 +24,7 @@ const ReportCard = lazy(() => import('./components/ReportCard'));
 const SchemeLessonPlanning = lazy(() => import('./components/SchemeLessonPlanning'));
 const SessionCompletionTracker = lazy(() => import('./components/SessionCompletionTracker'));
 const HMDailyOversight = lazy(() => import('./components/HMDailyOversightEnhanced'));
+const HMTeacherPerformanceView = lazy(() => import('./components/HMTeacherPerformanceView'));
 
 // Keep lightweight components as regular imports
 import AppLayout from './components/AppLayout';
@@ -481,6 +481,7 @@ const App = () => {
         { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
         { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
         { id: 'daily-oversight', label: 'Daily Oversight (Enhanced)', icon: ClipboardCheck },
+        { id: 'teacher-performance', label: 'Teacher Performance', icon: BarChart2 },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
@@ -1268,6 +1269,8 @@ const App = () => {
         return <MyDailyReportsView />;
       case 'daily-oversight':
         return <HMDailyOversight user={user} />;
+      case 'teacher-performance':
+        return <HMTeacherPerformanceView user={user} />;
       case 'substitutions':
         return <EnhancedSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
       case 'full-timetable':
@@ -7133,10 +7136,27 @@ const App = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Objectives</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Activities</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {reports.map((r, idx) => (
+                {reports.map((r, idx) => {
+                  const id = r.id || r.reportId || `${(r.date||'').toString()}|${r.class||''}|${r.subject||''}|${r.period||''}|${String(r.teacherEmail||'').toLowerCase()}`;
+                  const onDelete = async () => {
+                    if (!id) return alert('Missing report id');
+                    if (!confirm('Delete this report? This cannot be undone.')) return;
+                    try {
+                      const res = await api.deleteDailyReport(id, user.email);
+                      if (res && res.success) {
+                        setReports(prev => prev.filter(x => (x.id || x.reportId || `${(x.date||'').toString()}|${x.class||''}|${x.subject||''}|${x.period||''}|${String(x.teacherEmail||'').toLowerCase()}`) !== id));
+                      } else {
+                        alert('Delete failed: ' + (res && res.error ? res.error : 'Not allowed'));
+                      }
+                    } catch (err) {
+                      alert('Delete failed: ' + (err && err.message ? err.message : String(err)));
+                    }
+                  };
+                  return (
                   <tr key={idx}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.date}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.teacherName}</td>
@@ -7147,8 +7167,11 @@ const App = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.completed}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.objectives}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.activities}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
+                      <button onClick={onDelete} disabled={!id} className="px-2 py-1 border rounded text-red-600 hover:bg-red-50 disabled:opacity-40">Delete</button>
+                    </td>
                   </tr>
-                ))}
+                )})}
                 {reports.length === 0 && !loadingReports && (
                   <tr>
                     <td colSpan={9} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
@@ -7306,14 +7329,15 @@ const App = () => {
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Session</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Completed</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Notes</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Status</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {loading && (
-                  <tr><td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-500">Loading...</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-6 text-center text-sm text-gray-500">Loading...</td></tr>
                 )}
                 {!loading && reports.length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-500">No reports in this range.</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-6 text-center text-sm text-gray-500">No reports in this range.</td></tr>
                 )}
                 {!loading && paginated.map(r => {
                   const id = r.id || r.reportId || `${(r.date||'').toString()}|${r.class||''}|${r.subject||''}|${r.period||''}|${String(r.teacherEmail||'').toLowerCase()}`;
@@ -7346,6 +7370,39 @@ const App = () => {
                     <td className="px-2 py-2 text-xs text-gray-700">{r.sessionNo || '-'}</td>
                     <td className="px-2 py-2 text-xs">{completedVal}</td>
                     <td className="px-2 py-2 text-xs text-gray-600 max-w-[180px] truncate" title={r.notes || ''}>{r.notes || '-'}</td>
+                    <td className="px-2 py-2 text-xs">
+                      {r.verified === 'TRUE' ? (
+                        <div className="flex flex-col gap-1">
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            ✓ Verified
+                          </span>
+                          {r.verifiedBy && (
+                            <span className="text-[10px] text-gray-500">
+                              by {r.verifiedBy.split('@')[0]}
+                            </span>
+                          )}
+                        </div>
+                      ) : r.reopenReason ? (
+                        <div className="flex flex-col gap-1">
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                            ⚠ Reopened
+                          </span>
+                          <span 
+                            className="text-[10px] text-gray-600 cursor-help max-w-[120px] truncate" 
+                            title={r.reopenReason}
+                          >
+                            {r.reopenReason}
+                          </span>
+                          {r.reopenedBy && (
+                            <span className="text-[10px] text-gray-500">
+                              by {r.reopenedBy.split('@')[0]}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400">Pending</span>
+                      )}
+                    </td>
                     <td className="px-2 py-2 text-xs text-right">
                       {(() => {
                         // Show delete for own reports; backend enforces time window

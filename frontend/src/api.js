@@ -1,7 +1,12 @@
 // src/api.js
-// Configure this to your deployed Google Apps Script Web App URL (ends with /exec)
-// PRODUCTION: Uses this URL for both development and Vercel deployment
-const BASE_URL = 'https://script.google.com/macros/s/AKfycbyfKlfWqiDRkNF_Cjft73qHpGQm8tQ-nHjPSPHOKfuC1l8H5JH5gfippuhNqjvtx5dsDg/exec';
+// Apps Script Web App URL (ends with /exec)
+// MUST be provided via env var: VITE_API_BASE_URL (preferred) or VITE_GAS_WEB_APP_URL or VITE_APP_SCRIPT_URL
+// Remove legacy hardcoded fallback to avoid accidental calls to old deployments.
+const BASE_URL = (import.meta && import.meta.env && (
+  import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_GAS_WEB_APP_URL || import.meta.env.VITE_APP_SCRIPT_URL
+)) ? (
+  import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_GAS_WEB_APP_URL || import.meta.env.VITE_APP_SCRIPT_URL
+) : (() => { throw new Error('Missing API base URL. Set VITE_API_BASE_URL in .env'); })();
 
 // Export BASE_URL for components that need to build direct URLs
 export function getBaseUrl() {
@@ -183,14 +188,16 @@ export async function ping() {
 export async function login(email, password = '') {
   const url = `${BASE_URL}?action=login&email=${encodeURIComponent(email)}`;
   const fullUrl = password ? `${url}&password=${encodeURIComponent(password)}` : url;
-  return getJSON(fullUrl);
+  const res = await getJSON(fullUrl);
+  return res?.data || res;
 }
 
 // Google OAuth exchange: send auth info to backend; backend validates and returns user profile & roles
 export async function googleLogin(googleAuthInfo) {
   try {
     devLog('Sending Google auth info to backend (POST)');
-    return await postJSON(`${BASE_URL}?action=googleLogin`, googleAuthInfo);
+    const postRes = await postJSON(`${BASE_URL}?action=googleLogin`, googleAuthInfo);
+    return postRes?.data || postRes;
   } catch (err) {
     devLog('googleLogin POST failed, attempting GET fallback');
     try {
@@ -203,7 +210,8 @@ export async function googleLogin(googleAuthInfo) {
         google_id: googleAuthInfo.google_id || '',
         picture: googleAuthInfo.picture || ''
       });
-      return await getJSON(`${BASE_URL}?action=googleLogin&${params.toString()}`);
+      const getRes = await getJSON(`${BASE_URL}?action=googleLogin&${params.toString()}`);
+      return getRes?.data || getRes;
     } catch (err2) {
       console.error('Both POST and GET Google login attempts failed:', 
                     { postError: err?.message, getError: err2?.message });
@@ -390,6 +398,13 @@ export async function getDailyReportsForDate(date) {
 export async function getLessonPlansForDate(date) {
   const q = new URLSearchParams({ action: 'getLessonPlansForDate', date })
   return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION)
+}
+
+// HM: Missing submissions for a date
+export async function getMissingSubmissions(date) {
+  const q = new URLSearchParams({ action: 'getMissingSubmissions', date })
+  const res = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION)
+  return res?.data || res || { success: false };
 }
 
 export async function getAllClasses() {
@@ -771,6 +786,22 @@ export async function deleteDailyReport(reportId, email) {
   const res = await postJSON(`${BASE_URL}?action=deleteDailyReport`, payload);
   const unwrapped = res?.data || res;
   return unwrapped;
+}
+
+// HM: Verify/reopen daily reports
+export async function verifyDailyReport(reportId, verifierEmail) {
+  const res = await postJSON(`${BASE_URL}?action=verifyDailyReport`, { action: 'verifyDailyReport', reportId, verifierEmail });
+  return res?.data || res;
+}
+
+export async function reopenDailyReport(reportId, requesterEmail, reason = '') {
+  const res = await postJSON(`${BASE_URL}?action=reopenDailyReport`, { action: 'reopenDailyReport', reportId, requesterEmail, reason });
+  return res?.data || res;
+}
+
+export async function notifyMissingSubmissions(date, requesterEmail) {
+  const res = await postJSON(`${BASE_URL}?action=notifyMissingSubmissions`, { action: 'notifyMissingSubmissions', date, requesterEmail });
+  return res?.data || res;
 }
 
 // Students and Attendance

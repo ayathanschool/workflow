@@ -285,7 +285,7 @@ function submitDailyReportWithProgressTracking(reportData) {
     
     // Get DailyReports sheet
     const sheet = _getSheet('DailyReports');
-    const headers = _headers(sheet);
+    let headers = _headers(sheet);
     
     // Ensure required columns exist
     const requiredHeaders = [
@@ -296,9 +296,11 @@ function submitDailyReportWithProgressTracking(reportData) {
     ];
     // Use enhanced ensure to avoid overwriting existing header orders
     _ensureHeadersEnhanced(sheet, requiredHeaders);
+    // Refresh headers after ensuring, so indexes align with current sheet
+    headers = _headers(sheet);
     
-    // Generate report ID and timestamp
-    const reportId = _generateId('DR_');
+    // Generate report ID and timestamp (use UUID for consistency across system)
+    const reportId = _uuid();
     const timestamp = new Date().toISOString();
     
     // Prepare row data
@@ -320,6 +322,8 @@ function submitDailyReportWithProgressTracking(reportData) {
     setIfExists('remarks', reportData.remarks || '');
     setIfExists('teachingMethod', reportData.teachingMethod || reportData.activities || '');
     setIfExists('submittedAt', timestamp);
+    // Some sheets use 'createdAt'; populate when present for compatibility
+    setIfExists('createdAt', timestamp);
     setIfExists('lessonProgressTracked', 'pending');
     
     sheet.appendRow(rowValues);
@@ -601,8 +605,25 @@ function deleteDailyReport(reportId, requesterEmail) {
     if (rowToDelete < 0 || !reportObj) {
       return { success: false, error: 'Report not found' };
     }
-    if (!_canDeleteDailyReport(reportObj, requesterEmail, minutesWindow)) {
-      return { success: false, error: 'Delete not allowed (owner/time-window check failed)' };
+    // Allow HM/headmaster role to delete any report without time-window/ownership restriction
+    var isHM = false;
+    try {
+      isHM = userHasRole(requesterEmail, 'hm') || userHasRole(requesterEmail, 'headmaster');
+    } catch (e) { /* role check unavailable, default false */ }
+
+    // If verified, block deletion for teachers unless HM or the report has been reopened
+    const verifiedVal = String(reportObj.verified || '').trim().toUpperCase() === 'TRUE';
+    const reopenedFlag = !!(reportObj.reopenReason || reportObj.reopenedAt);
+    if (!isHM && verifiedVal && !reopenedFlag) {
+      return { success: false, error: 'Delete not allowed: report is verified. Please request HM to reopen.' };
+    }
+
+    // If reopened, allow owner to delete even if time-window elapsed (since HM requested correction)
+    if (!isHM) {
+      const canDeleteByWindow = _canDeleteDailyReport(reportObj, requesterEmail, minutesWindow);
+      if (!reopenedFlag && !canDeleteByWindow) {
+        return { success: false, error: 'Delete not allowed (owner/time-window check failed)' };
+      }
     }
 
     sh.deleteRow(rowToDelete);
@@ -610,5 +631,430 @@ function deleteDailyReport(reportId, requesterEmail) {
   } catch (err) {
     console.error('deleteDailyReport error', err);
     return { success: false, error: err && err.message ? err.message : String(err) };
+  }
+}
+
+/**
+ * Ensure verification/reopen columns exist in DailyReports
+ */
+function _ensureDailyReportVerificationHeaders(sheet) {
+  const required = ['verified', 'verifiedBy', 'verifiedAt', 'reopenReason', 'reopenedBy', 'reopenedAt'];
+  _ensureHeadersEnhanced(sheet, required);
+}
+
+/**
+ * Verify a daily report (HM/headmaster only)
+ */
+function verifyDailyReport(reportId, verifierEmail) {
+  try {
+    if (!reportId) return { success: false, error: 'Missing reportId' };
+    if (!verifierEmail) return { success: false, error: 'Missing verifierEmail' };
+
+    var isHM = false;
+    try {
+      isHM = userHasRole(verifierEmail, 'hm') || userHasRole(verifierEmail, 'headmaster');
+    } catch (e) { /* ignore */ }
+    if (!isHM) {
+      // Provide enriched debug info when authorization fails
+      var roleInfo = {};
+      try { roleInfo = debugUserRoles(verifierEmail); } catch (e) { roleInfo = { debugError: e && e.message ? e.message : String(e) }; }
+      return { success: false, error: 'Not authorized (HM role not detected)', roleInfo: roleInfo };
+    }
+
+    const sh = _getSheet('DailyReports');
+    const headers = _headers(sh);
+    const data = _rows(sh);
+    const idxMap = {};
+    headers.forEach((h, i) => idxMap[h] = i);
+    const idCol = idxMap['id'] != null ? idxMap['id'] : idxMap['reportId'];
+
+    console.log('[verifyDailyReport] Headers:', headers.join(', '));
+    console.log('[verifyDailyReport] Total rows:', data.length);
+
+    let rowIndex = -1;
+    let rowObj = null;
+    
+    const reportIdStr = String(reportId);
+    console.log('[verifyDailyReport] Looking for:', reportIdStr);
+    
+    // Try direct ID match first if ID column exists and looks like UUID
+    const hasUuidFormat = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(reportIdStr);
+    if (idCol != null && hasUuidFormat) {
+      console.log('[verifyDailyReport] Attempting direct ID match');
+      for (let i = 0; i < data.length; i++) {
+        if (String(data[i][idCol]) === reportIdStr) {
+          rowObj = _indexByHeader(data[i], headers);
+          rowIndex = i + 2;
+          console.log('[verifyDailyReport] Direct ID match found at row', rowIndex);
+          break;
+        }
+      }
+    }
+    
+    // Fall back to composite key matching if no ID match
+    if (rowIndex < 0) {
+      console.log('[verifyDailyReport] Falling back to composite key matching');
+    
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      
+      // Build composite from row (normalize date to YYYY-MM-DD)
+      const rowDate = _isoDateString(row[idxMap['date']] || '');
+      const rowClass = String(row[idxMap['class']] || '').trim();
+      const rowSubject = String(row[idxMap['subject']] || '').trim();
+      // Strip 'Period ' prefix if present to match numeric-only format from frontend
+      const rowPeriodRaw = String(row[idxMap['period']] || '').trim();
+      const rowPeriod = rowPeriodRaw.replace(/^Period\s*/i, '');
+      const rowEmail = String(row[idxMap['teacherEmail']] || '').trim().toLowerCase();
+      const composite = [rowDate, rowClass, rowSubject, rowPeriod, rowEmail].join('|');
+      
+      if (composite === reportIdStr) {
+        rowObj = _indexByHeader(row, headers);
+        rowIndex = i + 2;
+        console.log('[verifyDailyReport] Composite key match found at row', rowIndex);
+        break;
+      }
+    }
+    } // End composite key matching block
+
+    if (rowIndex < 0) {
+      console.log('[verifyDailyReport] No match found.');
+      console.log('[verifyDailyReport] Searched for:', reportIdStr);
+      console.log('[verifyDailyReport] Total rows in DailyReports:', data.length);
+      if (data.length > 0) {
+        // Log first 3 composites for debugging
+        for (let i = 0; i < Math.min(3, data.length); i++) {
+          const sampleDate = _isoDateString(data[i][idxMap['date']] || '');
+          const sampleClass = String(data[i][idxMap['class']] || '').trim();
+          const sampleSubject = String(data[i][idxMap['subject']] || '').trim();
+          const samplePeriodRaw = String(data[i][idxMap['period']] || '').trim();
+          const samplePeriod = samplePeriodRaw.replace(/^Period\s*/i, '');
+          const sampleEmail = String(data[i][idxMap['teacherEmail']] || '').trim().toLowerCase();
+          console.log(`[verifyDailyReport] Row ${i+1} composite:`, [sampleDate, sampleClass, sampleSubject, samplePeriod, sampleEmail].join('|'));
+        }
+      }
+      return { success: false, error: 'Report not found', debug: { reportId: reportIdStr, rowCount: data.length } };
+    }
+
+    _ensureDailyReportVerificationHeaders(sh);
+    const hdrs = _headers(sh);
+    const set = (col, val) => {
+      const cIdx = hdrs.indexOf(col);
+      if (cIdx !== -1) sh.getRange(rowIndex, cIdx + 1).setValue(val);
+    };
+    set('verified', 'TRUE');
+    set('verifiedBy', verifierEmail);
+    set('verifiedAt', new Date().toISOString());
+    // Clear any previous reopen flags
+    set('reopenReason', '');
+    set('reopenedBy', '');
+    set('reopenedAt', '');
+
+    return { success: true, verifiedId: reportId };
+  } catch (err) {
+    console.error('verifyDailyReport error', err);
+    return { success: false, error: err && err.message ? err.message : String(err) };
+  }
+}
+
+/**
+ * Reopen a daily report (HM/headmaster only)
+ */
+function reopenDailyReport(reportId, requesterEmail, reason) {
+  try {
+    if (!reportId) return { success: false, error: 'Missing reportId' };
+    if (!requesterEmail) return { success: false, error: 'Missing requesterEmail' };
+
+    var isHM = false;
+    try {
+      isHM = userHasRole(requesterEmail, 'hm') || userHasRole(requesterEmail, 'headmaster');
+    } catch (e) { /* ignore */ }
+    if (!isHM) return { success: false, error: 'Not authorized' };
+
+    const sh = _getSheet('DailyReports');
+    const headers = _headers(sh);
+    const data = _rows(sh);
+    const idxMap = {};
+    headers.forEach((h, i) => idxMap[h] = i);
+    const idCol = idxMap['id'] != null ? idxMap['id'] : idxMap['reportId'];
+
+    let rowIndex = -1;
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      if (idCol != null && String(row[idCol]) === String(reportId)) { rowIndex = i + 2; break; }
+      if (idCol == null) {
+        const composite = [
+          String(row[idxMap['date']] || '').trim(),
+          String(row[idxMap['class']] || '').trim(),
+          String(row[idxMap['subject']] || '').trim(),
+          String(row[idxMap['period']] || '').trim(),
+          String(row[idxMap['teacherEmail']] || '').trim().toLowerCase()
+        ].join('|');
+        if (composite === String(reportId)) { rowIndex = i + 2; break; }
+      }
+    }
+    if (rowIndex < 0) return { success: false, error: 'Report not found' };
+
+    _ensureDailyReportVerificationHeaders(sh);
+    const hdrs = _headers(sh);
+    const set = (col, val) => {
+      const cIdx = hdrs.indexOf(col);
+      if (cIdx !== -1) sh.getRange(rowIndex, cIdx + 1).setValue(val);
+    };
+    set('verified', '');
+    set('verifiedBy', '');
+    set('verifiedAt', '');
+    set('reopenReason', reason || '');
+    set('reopenedBy', requesterEmail);
+    set('reopenedAt', new Date().toISOString());
+
+    return { success: true, reopenedId: reportId };
+  } catch (err) {
+    console.error('reopenDailyReport error', err);
+    return { success: false, error: err && err.message ? err.message : String(err) };
+  }
+}
+
+// ==== SAFE STUBS to avoid missing reference errors ====
+function _trackLessonProgress(progressData, timestamp) {
+  try {
+    return { success: true, details: [] };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+function getLessonProgressSummary(teacherEmail) {
+  try {
+    return { success: true, summary: {}, details: [], teacherStats: {} };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Robust role check: case-insensitive, ignores spaces and punctuation.
+ * Examples: 'HM', 'h m', 'Headmaster' all match when appropriate.
+ */
+function userHasRole(email, role) {
+  try {
+    if (!email || !role) return false;
+    const targetEmail = String(email).toLowerCase().trim();
+    const targetNorm = String(role).toLowerCase().replace(/[^a-z]/g, '');
+
+    const usersSheet = _getSheet('Users');
+    const headers = _headers(usersSheet);
+    const rows = _rows(usersSheet).map(r => _indexByHeader(r, headers));
+    const user = rows.find(u => String(u.email || '').toLowerCase().trim() === targetEmail);
+    if (!user) return false;
+
+    const rawRoles = String(user.roles || user.role || '');
+    // Tokenize on any non-letter separator and also keep a joined form without separators
+    const tokens = rawRoles.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+    const joined = tokens.join('');
+
+    // Helper checks
+    const hasToken = (t) => tokens.includes(t);
+    const joinedHas = (t) => joined.indexOf(t) !== -1;
+    const hasPair = (a, b) => hasToken(a) && hasToken(b);
+
+    // Direct match by tokens or joined string
+    if (hasToken(targetNorm) || joinedHas(targetNorm)) return true;
+
+    // HM/headmaster synonyms
+    const hmSynonyms = ['hm', 'headmaster', 'headteacher', 'headmistress', 'principal'];
+    const targetIsHM = ['hm', 'headmaster', 'headteacher', 'headmistress', 'principal'].includes(targetNorm);
+    if (targetIsHM) {
+      if (hmSynonyms.some(s => hasToken(s) || joinedHas(s))) return true;
+      // Handle split-word variants like "head master", "head teacher"
+      if (hasPair('head', 'master') || hasPair('head', 'teacher') || hasPair('head', 'mistress')) return true;
+    }
+
+    return false;
+  } catch (err) {
+    console.error('userHasRole error', err);
+    return false;
+  }
+}
+
+/**
+ * Debug helper: inspect how roles are parsed for a user and if HM matches
+ */
+function debugUserRoles(email) {
+  try {
+    const targetEmail = String(email || '').toLowerCase().trim();
+    const usersSheet = _getSheet('Users');
+    const headers = _headers(usersSheet);
+    const rows = _rows(usersSheet).map(r => _indexByHeader(r, headers));
+    const user = rows.find(u => String(u.email || '').toLowerCase().trim() === targetEmail);
+    if (!user) return { found: false, email: targetEmail };
+    const rawRoles = String(user.roles || user.role || '');
+    const tokens = rawRoles.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+    const joined = tokens.join('');
+    const hmSynonyms = ['hm', 'headmaster', 'headteacher', 'headmistress', 'principal'];
+    const has = (t) => tokens.includes(t) || joined.indexOf(t) !== -1;
+    const hmMatched = hmSynonyms.some(has) || (tokens.includes('head') && (tokens.includes('master') || tokens.includes('teacher') || tokens.includes('mistress')));
+    return {
+      found: true,
+      email: targetEmail,
+      rawRoles: rawRoles,
+      tokens: tokens,
+      joined: joined,
+      hmMatched: hmMatched
+    };
+  } catch (e) {
+    return { error: e && e.message ? e.message : String(e) };
+  }
+}
+
+// ===== Chapter Completion: Remaining Sessions & Apply Action =====
+
+function _getIdx(headers, names) {
+  for (var i = 0; i < names.length; i++) {
+    var idx = headers.indexOf(names[i]);
+    if (idx !== -1) return idx;
+  }
+  return -1;
+}
+
+function _ensureLessonPlanCancellationHeaders(sheet) {
+  _ensureHeadersEnhanced(sheet, ['cancelledAt', 'cancelReason', 'forRevision']);
+}
+
+function _collectRemainingPlansForChapter(teacherEmail, cls, subject, chapter, dateISO) {
+  var lpSh = _getSheet('LessonPlans');
+  var lpHdr = _headers(lpSh);
+  var lpRows = _rows(lpSh);
+  var out = [];
+  var idx = {
+    lpId: _getIdx(lpHdr, ['lpId','lessonPlanId','planId','id']),
+    teacherEmail: _getIdx(lpHdr, ['teacherEmail','teacher']),
+    class: _getIdx(lpHdr, ['class','className']),
+    subject: _getIdx(lpHdr, ['subject','subjectName']),
+    chapter: _getIdx(lpHdr, ['chapter','topic']),
+    session: _getIdx(lpHdr, ['session','sessionNo']),
+    selectedDate: _getIdx(lpHdr, ['selectedDate','date']),
+    selectedPeriod: _getIdx(lpHdr, ['selectedPeriod','period']),
+    status: _getIdx(lpHdr, ['status'])
+  };
+  var cutoff = dateISO ? new Date(dateISO) : null;
+  for (var i = 0; i < lpRows.length; i++) {
+    var r = lpRows[i];
+    var tEmail = String(r[idx.teacherEmail] || '').toLowerCase();
+    if (tEmail !== String(teacherEmail || '').toLowerCase()) continue;
+    if (idx.class !== -1 && String(r[idx.class] || '') !== String(cls || '')) continue;
+    if (idx.subject !== -1 && String(r[idx.subject] || '') !== String(subject || '')) continue;
+    if (idx.chapter !== -1 && String(r[idx.chapter] || '') !== String(chapter || '')) continue;
+    var dtStr = idx.selectedDate !== -1 ? _isoDateString(r[idx.selectedDate] || '') : '';
+    if (cutoff && dtStr) {
+      var d = new Date(dtStr);
+      if (!(d >= cutoff)) continue;
+    }
+    var st = idx.status !== -1 ? String(r[idx.status] || '') : '';
+    var planned = !st || /ready|approved|planned|scheduled/i.test(st);
+    if (!planned) continue;
+    out.push({
+      lpId: idx.lpId !== -1 ? String(r[idx.lpId] || '') : '',
+      class: idx.class !== -1 ? r[idx.class] : '',
+      subject: idx.subject !== -1 ? r[idx.subject] : '',
+      chapter: idx.chapter !== -1 ? r[idx.chapter] : '',
+      session: idx.session !== -1 ? r[idx.session] : '',
+      selectedDate: dtStr,
+      selectedPeriod: idx.selectedPeriod !== -1 ? r[idx.selectedPeriod] : '',
+      status: st
+    });
+  }
+  return out;
+}
+
+function checkChapterCompletion(params) {
+  try {
+    var teacherEmail = params && params.teacherEmail;
+    var cls = params && params.class;
+    var subject = params && params.subject;
+    var chapter = params && params.chapter;
+    var date = params && params.date;
+    if (!teacherEmail || !cls || !subject || !chapter) {
+      return { success: false, error: 'Missing required parameters' };
+    }
+    var remainingPlans = _collectRemainingPlansForChapter(teacherEmail, cls, subject, chapter, _isoDateString(date || ''));
+    return { success: true, hasRemainingPlans: remainingPlans.length > 0, remainingPlans: remainingPlans };
+  } catch (e) {
+    return { success: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
+function applyChapterCompletionAction(params) {
+  var lock;
+  try {
+    var action = params && params.action;
+    var lessonPlanIds = params && (params.lessonPlanIds || params.ids || []);
+    var requesterEmail = params && params.requesterEmail;
+    if (!action || !Array.isArray(lessonPlanIds)) {
+      return { success: false, error: 'Missing action or lessonPlanIds' };
+    }
+    lock = LockService.getDocumentLock();
+    lock.waitLock(28000);
+
+    var lpSh = _getSheet('LessonPlans');
+    var lpHdr = _headers(lpSh);
+    _ensureLessonPlanCancellationHeaders(lpSh);
+    lpHdr = _headers(lpSh);
+    var data = _rows(lpSh);
+    var idx = {
+      lpId: _getIdx(lpHdr, ['lpId','lessonPlanId','planId','id']),
+      status: _getIdx(lpHdr, ['status']),
+      selectedDate: _getIdx(lpHdr, ['selectedDate','date']),
+      selectedPeriod: _getIdx(lpHdr, ['selectedPeriod','period']),
+      cancelledAt: _getIdx(lpHdr, ['cancelledAt']),
+      cancelReason: _getIdx(lpHdr, ['cancelReason']),
+      forRevision: _getIdx(lpHdr, ['forRevision'])
+    };
+
+    var drSh = _getSheet('DailyReports');
+    var drHdr = _headers(drSh);
+    var drData = _rows(drSh);
+    var drIdx = { lessonPlanId: _getIdx(drHdr, ['lessonPlanId','lpId','planId']) };
+
+    var updated = 0;
+    var skipped = [];
+    var nowISO = new Date().toISOString();
+
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      var rowId = idx.lpId !== -1 ? String(row[idx.lpId] || '') : '';
+      if (!rowId || lessonPlanIds.indexOf(rowId) === -1) continue;
+
+      if (action === 'cancel') {
+        var hasReport = false;
+        if (drIdx.lessonPlanId !== -1) {
+          for (var j = 0; j < drData.length; j++) {
+            if (String(drData[j][drIdx.lessonPlanId] || '') === rowId) { hasReport = true; break; }
+          }
+        }
+        if (hasReport) { skipped.push({ lpId: rowId, reason: 'Already reported' }); continue; }
+        if (idx.status !== -1) lpSh.getRange(i+2, idx.status+1).setValue('Cancelled (Chapter Complete)');
+        if (idx.selectedDate !== -1) lpSh.getRange(i+2, idx.selectedDate+1).setValue('');
+        if (idx.selectedPeriod !== -1) lpSh.getRange(i+2, idx.selectedPeriod+1).setValue('');
+        if (idx.cancelledAt !== -1) lpSh.getRange(i+2, idx.cancelledAt+1).setValue(nowISO);
+        if (idx.cancelReason !== -1) lpSh.getRange(i+2, idx.cancelReason+1).setValue('Chapter completed');
+        updated++;
+      } else if (action === 'keep') {
+        if (idx.forRevision !== -1) lpSh.getRange(i+2, idx.forRevision+1).setValue('TRUE');
+        // Optionally mark status
+        if (idx.status !== -1 && !String(row[idx.status] || '').toLowerCase().includes('revision')) {
+          lpSh.getRange(i+2, idx.status+1).setValue('Revision');
+        }
+        updated++;
+      } else {
+        skipped.push({ lpId: rowId, reason: 'Unknown action' });
+      }
+    }
+
+    return { success: true, action: action, updatedCount: updated, skipped: skipped };
+  } catch (e) {
+    return { success: false, error: e && e.message ? e.message : String(e) };
+  } finally {
+    try { if (lock) lock.releaseLock(); } catch (ee) {}
   }
 }

@@ -5,7 +5,10 @@ import { resolve } from 'path'
 export default defineConfig(({ mode }) => {
   // Load env variables
   const env = loadEnv(mode, process.cwd(), '');
-  const gasTarget = env.VITE_GAS_WEB_APP_URL || 'https://script.google.com/macros/s/AKfycbyfKlfWqiDRkNF_Cjft73qHpGQm8tQ-nHjPSPHOKfuC1l8H5JH5gfippuhNqjvtx5dsDg/exec';
+  const gasTarget = env.VITE_API_BASE_URL || env.VITE_GAS_WEB_APP_URL || env.VITE_APP_SCRIPT_URL || '';
+  if (!gasTarget) {
+    console.warn('[vite] No API base URL provided. Set VITE_API_BASE_URL in .env');
+  }
   const isProd = mode === 'production';
 
   return {

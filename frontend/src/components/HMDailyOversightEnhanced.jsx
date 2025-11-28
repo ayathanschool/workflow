@@ -1,8 +1,8 @@
 // HMDailyOversightEnhanced.jsx - Enhanced HM Dashboard with Session Progress Analytics
 import React, { useState, useEffect } from 'react';
-import { getDailyReportsForDate, getLessonPlansForDate, getClassSubjectPerformance, getSyllabusPaceTracking } from '../api';
+import { getDailyReportsForDate, getLessonPlansForDate, getClassSubjectPerformance, getSyllabusPaceTracking, getMissingSubmissions, verifyDailyReport, reopenDailyReport, notifyMissingSubmissions } from '../api';
 import { todayIST, formatLocalDate } from '../utils/dateUtils';
-import { Clock, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Clock, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, CheckCircle, Undo2 } from 'lucide-react';
 
 const HMDailyOversightEnhanced = ({ user }) => {
   const [date, setDate] = useState(todayIST());
@@ -45,12 +45,20 @@ const HMDailyOversightEnhanced = ({ user }) => {
   const [paceTracking, setPaceTracking] = useState(null);
   const [loadingPaceTracking, setLoadingPaceTracking] = useState(false);
   const [selectedTerm, setSelectedTerm] = useState('Term 2');
+  // Missing submissions
+  const [missing, setMissing] = useState({ list: [], byTeacher: [], stats: { totalPeriods: 0, missingCount: 0, teachersImpacted: 0 } });
+  const [missingLoading, setMissingLoading] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  // Collapsible sections
+  const [subjectPerfOpen, setSubjectPerfOpen] = useState(false);
+  const [classPerfOpen, setClassPerfOpen] = useState(false);
 
   useEffect(() => {
     loadDailyReports();
     loadLessonPlans();
     loadClassSubjectPerformance(); // Load analytics data on mount
     loadPaceTracking(); // Load pace tracking data
+    loadMissing();
   }, [date]);
 
   // Load class/subject performance analytics
@@ -149,6 +157,116 @@ const HMDailyOversightEnhanced = ({ user }) => {
     } catch (err) {
       console.error('Failed to load lesson plans:', err);
       setLessonPlans([]);
+    }
+  }
+
+  async function loadMissing() {
+    setMissingLoading(true);
+    try {
+      const resp = await getMissingSubmissions(date);
+      const data = resp.data || resp;
+      if (data && data.success) {
+        setMissing({ list: data.missing || [], byTeacher: data.byTeacher || [], stats: data.stats || { totalPeriods: 0, missingCount: 0, teachersImpacted: 0 } });
+      } else {
+        setMissing({ list: [], byTeacher: [], stats: { totalPeriods: 0, missingCount: 0, teachersImpacted: 0 } });
+      }
+    } catch (e) {
+      console.warn('failed to load missing submissions', e);
+      setMissing({ list: [], byTeacher: [], stats: { totalPeriods: 0, missingCount: 0, teachersImpacted: 0 } });
+    } finally {
+      setMissingLoading(false);
+    }
+  }
+
+  async function handleNotifyAllMissing() {
+    if (!user?.email) return alert('Missing user email for notification.');
+    setActionBusy(true);
+    try {
+      const res = await notifyMissingSubmissions(date, user.email);
+      const out = res?.data || res;
+      if (out && out.success) {
+        alert(`Notifications sent: ${out.notified || 0}${out.failed ? `, failed: ${out.failed}` : ''}`);
+      } else {
+        alert(`Failed to send notifications: ${out?.error || 'unknown error'}`);
+      }
+    } catch (e) {
+      alert(`Failed to send notifications: ${e?.message || e}`);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function handleVerify(report) {
+    if (!user?.email) return alert('Missing verifier email.');
+    
+    // Prefer report.id if available (UUID format)
+    let key;
+    if (report.id && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(report.id)) {
+      key = report.id;
+      console.log('[handleVerify] Using report ID:', key);
+    } else {
+      // Fall back to composite key
+      // Normalize date to YYYY-MM-DD to match backend format
+      const normalizedDate = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Date(date).toISOString().split('T')[0];
+      // Strip 'Period ' prefix if present to get just the number
+      const periodNum = String(report.period || '').replace(/^Period\s*/i, '').trim();
+      key = [normalizedDate, report.class, report.subject, periodNum, String(report.teacherEmail || '').toLowerCase()].join('|');
+      console.log('[handleVerify] Using composite key:', key);
+    }
+    
+    setActionBusy(true);
+    try {
+      const res = await verifyDailyReport(key, user.email);
+      const out = res?.data || res;
+      if (out && out.success) {
+        alert('Report verified.');
+        await loadDailyReports();
+      } else {
+        console.error('[handleVerify] Failed:', out);
+        alert(`Verify failed: ${out?.error || 'unknown error'}`);
+      }
+    } catch (e) {
+      alert(`Verify failed: ${e?.message || e}`);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function handleReopen(report) {
+    if (!user?.email) return alert('Missing requester email.');
+    const reason = window.prompt('Enter reason to reopen this report:', 'Please add more detail');
+    if (reason === null) return; // cancelled
+    
+    // Prefer report.id if available (UUID format)
+    let key;
+    if (report.id && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(report.id)) {
+      key = report.id;
+      console.log('[handleReopen] Using report ID:', key);
+    } else {
+      // Fall back to composite key
+      // Normalize date to YYYY-MM-DD to match backend format
+      const normalizedDate = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Date(date).toISOString().split('T')[0];
+      // Strip 'Period ' prefix if present to get just the number
+      const periodNum = String(report.period || '').replace(/^Period\s*/i, '').trim();
+      key = [normalizedDate, report.class, report.subject, periodNum, String(report.teacherEmail || '').toLowerCase()].join('|');
+      console.log('[handleReopen] Using composite key:', key);
+    }
+    
+    setActionBusy(true);
+    try {
+      const res = await reopenDailyReport(key, user.email, reason);
+      const out = res?.data || res;
+      if (out && out.success) {
+        alert('Report reopened.');
+        await loadDailyReports();
+      } else {
+        console.error('[handleReopen] Failed:', out);
+        alert(`Reopen failed: ${out?.error || 'unknown error'}`);
+      }
+    } catch (e) {
+      alert(`Reopen failed: ${e?.message || e}`);
+    } finally {
+      setActionBusy(false);
     }
   }
 
@@ -578,148 +696,181 @@ const HMDailyOversightEnhanced = ({ user }) => {
         </div>
       </div>
 
-      {/* Subject-wise Performance */}
+      {/* Subject-wise Performance (Collapsible) */}
       <div className="bg-white p-6 border border-gray-200 rounded-lg mb-6">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Subject-wise Performance (Plan vs Actual)</h3>
-          <div className="flex items-center gap-3">
-            <label className="text-sm text-gray-600">Class:</label>
-            <select 
-              value={performanceClassFilter}
-              onChange={(e) => setPerformanceClassFilter(e.target.value)}
-              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">All Classes</option>
-              {[...new Set(classSubjectPerformance.map(p => p.class))].sort().map(cls => (
-                <option key={cls} value={cls}>{cls}</option>
-              ))}
-            </select>
-            
-            <label className="text-sm text-gray-600 ml-2">Teacher:</label>
-            <select 
-              value={performanceTeacherFilter}
-              onChange={(e) => setPerformanceTeacherFilter(e.target.value)}
-              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">All Teachers</option>
-              {[...new Set(classSubjectPerformance.map(p => p.teacherNames).filter(Boolean))].sort().map(teacher => (
-                <option key={teacher} value={teacher}>{teacher}</option>
-              ))}
-            </select>
-            
-            {(performanceClassFilter || performanceTeacherFilter) && (
-              <button 
-                onClick={() => {
-                  setPerformanceClassFilter('');
-                  setPerformanceTeacherFilter('');
-                }}
-                className="text-xs text-gray-500 hover:text-gray-700 underline"
-              >
-                Clear All
-              </button>
+        <div
+          className="flex justify-between items-center mb-2 cursor-pointer select-none"
+          onClick={() => setSubjectPerfOpen(prev => !prev)}
+        >
+          <div className="flex items-center gap-2">
+            {subjectPerfOpen ? (
+              <ChevronDown className="w-5 h-5 text-gray-500" />
+            ) : (
+              <ChevronRight className="w-5 h-5 text-gray-500" />
             )}
+            <h3 className="text-lg font-semibold text-gray-900">Subject-wise Performance (Plan vs Actual)</h3>
           </div>
+          {!subjectPerfOpen && (
+            <span className="text-xs text-gray-500">
+              {classSubjectPerformance.length} subjects
+            </span>
+          )}
         </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Subject</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Class</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Teacher(s)</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Planned</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actual (Planned)</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unplanned ⚠️</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gap</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Coverage</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Avg Completion</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {classSubjectPerformance.length > 0 ? (
-                classSubjectPerformance
-                  .filter(performance => {
-                    const classMatch = !performanceClassFilter || performance.class === performanceClassFilter;
-                    const teacherMatch = !performanceTeacherFilter || (performance.teacherNames && performance.teacherNames.includes(performanceTeacherFilter));
-                    return classMatch && teacherMatch;
-                  })
-                  .map((performance, idx) => (
-                  <tr key={idx} className={`hover:bg-gray-50 ${performance.unplannedSessions > 0 ? 'bg-orange-50' : performance.riskLevel === 'High' ? 'bg-red-50' : performance.riskLevel === 'Medium' ? 'bg-yellow-50' : ''}`}>
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{performance.subject}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{performance.class}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      <span className="inline-block max-w-xs truncate" title={performance.teacherNames}>
-                        {performance.teacherNames || 'N/A'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{performance.plannedSessions}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{performance.actualPlannedSessions || 0}</td>
-                    <td className="px-4 py-3 text-sm">
-                      {performance.unplannedSessions > 0 ? (
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-orange-100 text-orange-800">
-                          {performance.unplannedSessions} ⚠️
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">0</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <span className={performance.planActualGap > 0 ? 'text-red-600 font-medium' : 'text-green-600 font-medium'}>
-                        {performance.planActualGap > 0 ? '+' : ''}{performance.planActualGap}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="w-16 bg-gray-200 rounded-full h-2 overflow-hidden">
-                          <div 
-                            className={performance.coveragePercentage >= 80 ? 'bg-green-600' : performance.coveragePercentage >= 50 ? 'bg-yellow-600' : 'bg-red-600'} 
-                            style={{ width: `${Math.min(performance.coveragePercentage || 0, 100)}%`, height: '100%', borderRadius: '4px' }}
-                          ></div>
-                        </div>
-                        <span className="text-sm font-medium text-gray-900">{performance.coveragePercentage || 0}%</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="w-16 bg-gray-200 rounded-full h-2 overflow-hidden">
-                          <div 
-                            className="bg-blue-600 h-2 rounded-full" 
-                            style={{ width: `${Math.min(performance.avgCompletion || 0, 100)}%` }}
-                          ></div>
-                        </div>
-                        <span className="text-sm font-medium text-gray-900">{performance.avgCompletion || 0}%</span>
-                      </div>
-                    </td>
+        {subjectPerfOpen && (
+          <>
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="text-sm text-gray-600">Class:</label>
+                <select 
+                  value={performanceClassFilter}
+                  onChange={(e) => setPerformanceClassFilter(e.target.value)}
+                  className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">All Classes</option>
+                  {[...new Set(classSubjectPerformance.map(p => p.class))].sort().map(cls => (
+                    <option key={cls} value={cls}>{cls}</option>
+                  ))}
+                </select>
+                <label className="text-sm text-gray-600 ml-2">Teacher:</label>
+                <select 
+                  value={performanceTeacherFilter}
+                  onChange={(e) => setPerformanceTeacherFilter(e.target.value)}
+                  className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">All Teachers</option>
+                  {[...new Set(classSubjectPerformance.map(p => p.teacherNames).filter(Boolean))].sort().map(teacher => (
+                    <option key={teacher} value={teacher}>{teacher}</option>
+                  ))}
+                </select>
+                {(performanceClassFilter || performanceTeacherFilter) && (
+                  <button 
+                    onClick={() => {
+                      setPerformanceClassFilter('');
+                      setPerformanceTeacherFilter('');
+                    }}
+                    className="text-xs text-gray-500 hover:text-gray-700 underline"
+                  >
+                    Clear All
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Subject</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Class</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Teacher(s)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Planned</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actual (Planned)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unplanned ⚠️</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gap</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Coverage</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Avg Completion</th>
                   </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
-                    {analyticsLoading ? 'Loading performance data...' : 'No subject performance data available.'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        
-        {/* Legend */}
-        <div className="mt-4 p-3 bg-gray-50 rounded border border-gray-200">
-          <p className="text-xs font-semibold text-gray-700 mb-2">📖 Legend:</p>
-          <ul className="text-xs text-gray-600 space-y-1">
-            <li><strong>Planned:</strong> Total lesson plans created</li>
-            <li><strong>Actual (Planned):</strong> Daily reports with matching lesson plans</li>
-            <li><strong className="text-orange-600">Unplanned ⚠️:</strong> Daily reports WITHOUT lesson plans (taught without preparation)</li>
-            <li><strong>Gap:</strong> Planned sessions not yet taught (+ means pending)</li>
-            <li><strong>Coverage:</strong> (Actual Planned / Planned) × 100%</li>
-          </ul>
-        </div>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {classSubjectPerformance.length > 0 ? (
+                    classSubjectPerformance
+                      .filter(performance => {
+                        const classMatch = !performanceClassFilter || performance.class === performanceClassFilter;
+                        const teacherMatch = !performanceTeacherFilter || (performance.teacherNames && performance.teacherNames.includes(performanceTeacherFilter));
+                        return classMatch && teacherMatch;
+                      })
+                      .map((performance, idx) => (
+                      <tr key={idx} className={`hover:bg-gray-50 ${performance.unplannedSessions > 0 ? 'bg-orange-50' : performance.riskLevel === 'High' ? 'bg-red-50' : performance.riskLevel === 'Medium' ? 'bg-yellow-50' : ''}`}>
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{performance.subject}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{performance.class}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          <span className="inline-block max-w-xs truncate" title={performance.teacherNames}>
+                            {performance.teacherNames || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{performance.plannedSessions}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{performance.actualPlannedSessions || 0}</td>
+                        <td className="px-4 py-3 text-sm">
+                          {performance.unplannedSessions > 0 ? (
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-orange-100 text-orange-800">
+                              {performance.unplannedSessions} ⚠️
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">0</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          <span className={performance.planActualGap > 0 ? 'text-red-600 font-medium' : 'text-green-600 font-medium'}>
+                            {performance.planActualGap > 0 ? '+' : ''}{performance.planActualGap}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          <div className="flex items-center gap-2">
+                            <div className="w-16 bg-gray-200 rounded-full h-2 overflow-hidden">
+                              <div 
+                                className={performance.coveragePercentage >= 80 ? 'bg-green-600' : performance.coveragePercentage >= 50 ? 'bg-yellow-600' : 'bg-red-600'} 
+                                style={{ width: `${Math.min(performance.coveragePercentage || 0, 100)}%`, height: '100%', borderRadius: '4px' }}
+                              ></div>
+                            </div>
+                            <span className="text-sm font-medium text-gray-900">{performance.coveragePercentage || 0}%</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          <div className="flex items-center gap-2">
+                            <div className="w-16 bg-gray-200 rounded-full h-2 overflow-hidden">
+                              <div 
+                                className="bg-blue-600 h-2 rounded-full" 
+                                style={{ width: `${Math.min(performance.avgCompletion || 0, 100)}%` }}
+                              ></div>
+                            </div>
+                            <span className="text-sm font-medium text-gray-900">{performance.avgCompletion || 0}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
+                        {analyticsLoading ? 'Loading performance data...' : 'No subject performance data available.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 p-3 bg-gray-50 rounded border border-gray-200">
+              <p className="text-xs font-semibold text-gray-700 mb-2">📖 Legend:</p>
+              <ul className="text-xs text-gray-600 space-y-1">
+                <li><strong>Planned:</strong> Total lesson plans created</li>
+                <li><strong>Actual (Planned):</strong> Daily reports with matching lesson plans</li>
+                <li><strong className="text-orange-600">Unplanned ⚠️:</strong> Daily reports WITHOUT lesson plans (taught without preparation)</li>
+                <li><strong>Gap:</strong> Planned sessions not yet taught (+ means pending)</li>
+                <li><strong>Coverage:</strong> (Actual Planned / Planned) × 100%</li>
+              </ul>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Class-wise Performance */}
+      {/* Class-wise Performance (Collapsible) */}
       <div className="bg-white p-6 border border-gray-200 rounded-lg mb-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Class-wise Performance (Plan vs Actual)</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div
+          className="flex justify-between items-center mb-2 cursor-pointer select-none"
+          onClick={() => setClassPerfOpen(prev => !prev)}
+        >
+          <div className="flex items-center gap-2">
+            {classPerfOpen ? (
+              <ChevronDown className="w-5 h-5 text-gray-500" />
+            ) : (
+              <ChevronRight className="w-5 h-5 text-gray-500" />
+            )}
+            <h3 className="text-lg font-semibold text-gray-900">Class-wise Performance (Plan vs Actual)</h3>
+          </div>
+          {!classPerfOpen && (
+            <span className="text-xs text-gray-500">{[...new Set(classSubjectPerformance.map(p => p.class))].length} classes</span>
+          )}
+        </div>
+        {classPerfOpen && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {classSubjectPerformance.length > 0 ? (
             // Group by class from the performance data
             Object.entries(
@@ -806,7 +957,8 @@ const HMDailyOversightEnhanced = ({ user }) => {
               {analyticsLoading ? 'Loading performance data...' : 'No class performance data available.'}
             </div>
           )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Filters */}
@@ -917,6 +1069,26 @@ const HMDailyOversightEnhanced = ({ user }) => {
           >
             Syllabus Pace Tracking ({filteredPaceTrackingSubjects.length})
           </button>
+          <button
+            onClick={() => setActiveTab('missing')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'missing'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Missing Submissions ({missing.stats.missingCount || 0})
+          </button>
+          <button
+            onClick={() => setActiveTab('insights')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'insights'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Performance Insights
+          </button>
         </nav>
       </div>
 
@@ -933,12 +1105,15 @@ const HMDailyOversightEnhanced = ({ user }) => {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter & Session</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Completion</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Issues</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {filteredReports.map((report, index) => {
                   const completion = Number(report.completionPercentage) || 0;
                   const isSubmitted = report.submitted || report.completionPercentage !== undefined;
+                  const isVerified = String(report.verified ?? report.Verified ?? '').toLowerCase() === 'true';
+                  const isReopened = Boolean(report.reopenedAt || report.reopenReason || (String(report.reopened ?? '').toLowerCase() === 'true'));
                   
                   return (
                     <tr key={index} className={isSubmitted ? 'bg-green-50' : 'bg-yellow-50'}>
@@ -1002,6 +1177,44 @@ const HMDailyOversightEnhanced = ({ user }) => {
                           )}
                         </div>
                       </td>
+                      <td className="px-4 py-3 text-sm">
+                        {isSubmitted ? (
+                          <div className="flex flex-col gap-2">
+                            {(isVerified || isReopened) && (
+                              <div className="flex flex-wrap items-center gap-2">
+                                {isVerified && (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    <CheckCircle className="w-3 h-3 mr-1" /> Verified
+                                  </span>
+                                )}
+                                {isReopened && (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                                    <Undo2 className="w-3 h-3 mr-1" /> Reopened
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            <div className="flex gap-2">
+                            <button
+                              disabled={actionBusy}
+                              onClick={() => handleVerify(report)}
+                              className="px-2 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                            >
+                              Verify
+                            </button>
+                            <button
+                              disabled={actionBusy}
+                              onClick={() => handleReopen(report)}
+                              className="px-2 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                            >
+                              Reopen
+                            </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -1011,6 +1224,66 @@ const HMDailyOversightEnhanced = ({ user }) => {
                     <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                       No reports found for the selected filters.
                     </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'missing' && (
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">Missing Submissions</h3>
+              <p className="text-sm text-gray-600">Total periods: {missing.stats.totalPeriods} • Missing: {missing.stats.missingCount} • Teachers: {missing.stats.teachersImpacted}</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={loadMissing}
+                disabled={missingLoading}
+                className="px-3 py-2 text-sm rounded bg-gray-100 hover:bg-gray-200 disabled:opacity-50"
+              >
+                {missingLoading ? 'Refreshing…' : 'Refresh'}
+              </button>
+              <button
+                onClick={handleNotifyAllMissing}
+                disabled={actionBusy || (missing.stats.missingCount || 0) === 0}
+                className="px-3 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                Notify All Pending
+              </button>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Teacher</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pending Count</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Periods</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {(missing.byTeacher || []).map((t, idx) => (
+                  <tr key={idx}>
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{t.teacher}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{t.teacherEmail}</td>
+                    <td className="px-4 py-3 text-sm text-red-600 font-semibold">{t.count}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">
+                      {(t.periods || []).map((p, i) => (
+                        <span key={i} className="inline-block mr-2 mb-1 px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 text-xs border border-yellow-200">
+                          P{p.period}: {p.class} {p.subject}
+                        </span>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+                {(!missing.byTeacher || missing.byTeacher.length === 0) && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-8 text-center text-gray-500">No pending submissions for this date.</td>
                   </tr>
                 )}
               </tbody>
@@ -1079,6 +1352,60 @@ const HMDailyOversightEnhanced = ({ user }) => {
               No chapter analytics available for the selected filters.
             </div>
           )}
+        </div>
+      )}
+
+      {activeTab === 'insights' && (
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">Performance Insights</h3>
+              <p className="text-sm text-gray-600">Aggregated metrics powered by the analytics API</p>
+            </div>
+            <button
+              onClick={loadClassSubjectPerformance}
+              disabled={analyticsLoading}
+              className="px-3 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {analyticsLoading ? 'Recomputing…' : 'Recompute Insights'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            {(() => {
+              const items = classSubjectPerformance || [];
+              const subjectCount = items.length;
+              const avgCoverage = subjectCount > 0
+                ? Math.round(items.reduce((s, x) => s + (x.coveragePercentage || 0), 0) / subjectCount)
+                : 0;
+              const totalUnplanned = items.reduce((s, x) => s + (x.unplannedSessions || 0), 0);
+              const highRisk = items.filter(x => x.riskLevel === 'High').length;
+              return (
+                <>
+                  <div className="p-4 rounded-lg border bg-gray-50">
+                    <p className="text-sm text-gray-600">Subjects Analyzed</p>
+                    <p className="text-2xl font-bold text-gray-900">{subjectCount}</p>
+                  </div>
+                  <div className="p-4 rounded-lg border bg-gray-50">
+                    <p className="text-sm text-gray-600">Average Coverage</p>
+                    <p className="text-2xl font-bold text-blue-700">{avgCoverage}%</p>
+                  </div>
+                  <div className="p-4 rounded-lg border bg-gray-50">
+                    <p className="text-sm text-gray-600">Unplanned Sessions</p>
+                    <p className="text-2xl font-bold text-amber-700">{totalUnplanned}</p>
+                  </div>
+                  <div className="p-4 rounded-lg border bg-gray-50">
+                    <p className="text-sm text-gray-600">High Risk Subjects</p>
+                    <p className="text-2xl font-bold text-red-700">{highRisk}</p>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+
+          {(!classSubjectPerformance || classSubjectPerformance.length === 0) && !analyticsLoading ? (
+            <div className="text-center py-8 text-gray-500">No insights available. Try "Recompute Insights".</div>
+          ) : null}
         </div>
       )}
 
