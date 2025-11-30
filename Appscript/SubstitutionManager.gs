@@ -60,7 +60,25 @@ function assignSubstitution(data) {
     _sendSubstitutionNotification(data);
   }
   
-  return { submitted: true };
+  // AUTO-CASCADE: Check if absent teacher has a lesson plan for this slot and cascade it
+  let cascadeResult = null;
+  try {
+    cascadeResult = _handleAbsentTeacherLessonPlan(
+      data.absentTeacher,
+      normalizedDate,
+      data.period,
+      data.class,
+      data.regularSubject
+    );
+  } catch (cascadeErr) {
+    Logger.log(`[assignSubstitution] Cascade error: ${cascadeErr.message}`);
+    // Don't fail substitution if cascade fails
+  }
+  
+  return { 
+    submitted: true, 
+    cascadeInfo: cascadeResult 
+  };
 }
 
 /**
@@ -389,5 +407,98 @@ function acknowledgeSubstitutionAssignment(data) {
   } catch (error) {
     Logger.log(`[acknowledgeSubstitutionAssignment] Error: ${error}`);
     return { error: 'Failed to acknowledge substitution: ' + error.toString() };
+  }
+}
+
+/**
+ * Handle absent teacher's lesson plan when substitution is assigned
+ * Automatically cascades scheme-based lesson plans to preserve preparation work
+ */
+function _handleAbsentTeacherLessonPlan(absentTeacher, date, period, className, subject) {
+  try {
+    // Find the absent teacher's lesson plan for this slot
+    const lessonPlansSheet = _getSheet('LessonPlans');
+    const headers = _headers(lessonPlansSheet);
+    const allPlans = _rows(lessonPlansSheet).map(r => _indexByHeader(r, headers));
+    
+    const absentEmail = String(absentTeacher || '').toLowerCase().trim();
+    const normalizedDate = _isoDateString(date);
+    
+    const absentPlan = allPlans.find(p => {
+      const emailMatch = String(p.teacherEmail || '').trim().toLowerCase() === absentEmail;
+      const dateMatch = _isoDateString(p.selectedDate) === normalizedDate;
+      const periodMatch = String(p.selectedPeriod || '').trim() === String(period).trim();
+      const classMatch = String(p.class || '').trim() === String(className).trim();
+      const subjectMatch = String(p.subject || '').trim().toLowerCase() === String(subject).toLowerCase();
+      const statusMatch = ['Ready', 'Approved'].includes(p.status);
+      
+      return emailMatch && dateMatch && periodMatch && classMatch && subjectMatch && statusMatch;
+    });
+    
+    if (!absentPlan) {
+      Logger.log('[_handleAbsentTeacherLessonPlan] No lesson plan found for absent teacher');
+      return { handled: false, reason: 'no_plan_found' };
+    }
+    
+    Logger.log(`[_handleAbsentTeacherLessonPlan] Found plan: ${absentPlan.lpId}, Chapter: ${absentPlan.chapter}, Session: ${absentPlan.session}`);
+    
+    // Check if this is a scheme-based plan that can be cascaded
+    if (absentPlan.lessonType !== 'scheme-based' || !absentPlan.schemeId) {
+      Logger.log('[_handleAbsentTeacherLessonPlan] Plan is not scheme-based, skipping cascade');
+      return { handled: false, reason: 'not_scheme_based' };
+    }
+    
+    // Get cascade preview
+    const preview = getCascadePreview(absentPlan.lpId, absentEmail, normalizedDate);
+    
+    if (!preview || !preview.success) {
+      Logger.log('[_handleAbsentTeacherLessonPlan] Cascade preview failed');
+      return { handled: false, reason: 'preview_failed', details: preview };
+    }
+    
+    if (!preview.needsCascade) {
+      Logger.log('[_handleAbsentTeacherLessonPlan] No cascade needed');
+      return { handled: false, reason: 'no_cascade_needed' };
+    }
+    
+    if (!preview.canCascade || !Array.isArray(preview.sessionsToReschedule) || !preview.sessionsToReschedule.length) {
+      Logger.log('[_handleAbsentTeacherLessonPlan] Cannot cascade');
+      return { handled: false, reason: 'cannot_cascade', details: preview };
+    }
+    
+    // Execute the cascade
+    const execPayload = {
+      sessionsToReschedule: preview.sessionsToReschedule,
+      mode: preview.mode,
+      dailyReportContext: {
+        date: normalizedDate,
+        teacherEmail: absentEmail,
+        class: className,
+        subject: subject,
+        period: period,
+        reason: 'teacher_absent_substitution'
+      }
+    };
+    
+    const result = executeCascade(execPayload);
+    
+    Logger.log(`[_handleAbsentTeacherLessonPlan] Cascade executed: ${JSON.stringify(result)}`);
+    
+    return {
+      handled: true,
+      cascaded: result && result.success,
+      updatedCount: result && result.updatedCount,
+      errors: result && result.errors,
+      planId: absentPlan.lpId,
+      chapter: absentPlan.chapter,
+      originalSession: absentPlan.session
+    };
+    
+  } catch (error) {
+    Logger.log(`[_handleAbsentTeacherLessonPlan] Error: ${error.message}`);
+    return { 
+      handled: false, 
+      error: error.message 
+    };
   }
 }
