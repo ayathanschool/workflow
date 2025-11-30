@@ -67,7 +67,10 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         }
         
         // Get all unique chapters that have been started (have daily reports)
-        const startedChapters = [...new Set(teacherReports.map(r => String(r.chapter || '')))];
+        // Collect distinct non-empty chapter names previously started
+        const startedChapters = [...new Set(teacherReports
+          .map(r => String(r.chapter || '').trim())
+          .filter(name => name))];
         Logger.log(`Started chapters for ${scheme.teacherEmail}: ${startedChapters.join(', ')}`);
         
         // Check if the current chapter being prepared already has reports
@@ -146,13 +149,15 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
             Number(report.sessionNo) === lastSessionNo
           );
           
-          const isMarkedComplete = lastSessionReport && 
-            String(lastSessionReport.completed || '').toLowerCase().includes('chapter complete');
+          // Determine completion: explicit "Chapter Complete" OR all planned sessions reported
+          const explicitComplete = lastSessionReport && String(lastSessionReport.completed || '').toLowerCase().includes('chapter complete');
+          const implicitComplete = (lastSessionNo >= originalSessionCount) && missingSessions.length === 0;
+          const isMarkedComplete = explicitComplete || implicitComplete;
           
           Logger.log(`Chapter "${chapterName}" - Last session ${lastSessionNo} marked complete: ${isMarkedComplete}, completed field: "${lastSessionReport?.completed}"`);
           
           if (!isMarkedComplete) {
-            incompletedChapters.push(`${chapterName} (Last session ${lastSessionNo} not marked "Chapter Complete")`);
+            incompletedChapters.push(`${chapterName || 'Unnamed Chapter'} (Last session ${lastSessionNo} not marked "Chapter Complete")`);
             Logger.log(`Chapter "${chapterName}" incomplete - last session not marked complete`);
             continue;
           }
@@ -196,14 +201,27 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
       const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
       
       // First, check if this chapter has ANY reports (is it started?)
+      Logger.log(`=== LOOKING FOR CHAPTER REPORTS ===`);
+      Logger.log(`Scheme teacher: "${scheme.teacherEmail}"`);
+      Logger.log(`Chapter name: "${chapter.name}"`);
+      Logger.log(`Scheme class: "${scheme.class}"`);
+      Logger.log(`Scheme subject: "${scheme.subject}"`);
+      Logger.log(`Total reports in sheet: ${allReports.length}`);
+      
       const chapterReports = allReports.filter(report => {
-        const matchesTeacher = String(report.teacherEmail || '').toLowerCase() === String(scheme.teacherEmail || '').toLowerCase();
-        const matchesChapter = String(report.chapter || '') === String(chapter.name || '');
-        const matchesClass = String(report.class || '') === String(scheme.class || '');
-        const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
+        const matchesTeacher = String(report.teacherEmail || '').trim().toLowerCase() === String(scheme.teacherEmail || '').trim().toLowerCase();
+        const matchesChapter = String(report.chapter || '').trim().toLowerCase() === String(chapter.name || '').trim().toLowerCase();
+        const matchesClass = String(report.class || '').trim().toLowerCase() === String(scheme.class || '').trim().toLowerCase();
+        const matchesSubject = String(report.subject || '').trim().toLowerCase() === String(scheme.subject || '').trim().toLowerCase();
+        
+        if (matchesTeacher && matchesClass && matchesSubject) {
+          Logger.log(`Report chapter: "${report.chapter}" -> matches chapter: ${matchesChapter}, session: ${report.sessionNo || report.session}`);
+        }
         
         return matchesTeacher && matchesChapter && matchesClass && matchesSubject;
       });
+      
+      Logger.log(`Found ${chapterReports.length} reports for this chapter`);
       
       // If chapter has no reports, check if previous chapters are complete
       if (chapterReports.length === 0) {
@@ -229,7 +247,9 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         }
         
         // Check if all previous chapters are complete
-        const startedChapters = [...new Set(teacherReports.map(r => String(r.chapter || '')))];
+        const startedChapters = [...new Set(teacherReports
+          .map(r => String(r.chapter || '').trim())
+          .filter(name => name))];
         const incompletedChapters = [];
         
         // Get all schemes for reference
@@ -286,11 +306,12 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
             Number(report.sessionNo) === lastSessionNo
           );
           
-          const isMarkedComplete = lastSessionReport && 
-            String(lastSessionReport.completed || '').toLowerCase().includes('chapter complete');
+          const explicitCompletePrev = lastSessionReport && String(lastSessionReport.completed || '').toLowerCase().includes('chapter complete');
+          const implicitCompletePrev = (lastSessionNo >= originalSessionCount) && missingSessions.length === 0;
+          const isMarkedComplete = explicitCompletePrev || implicitCompletePrev;
           
           if (!isMarkedComplete) {
-            incompletedChapters.push(`${chapterName} (Last session ${lastSessionNo} not marked "Chapter Complete")`);
+            incompletedChapters.push(`${chapterName || 'Unnamed Chapter'} (Last session ${lastSessionNo} not marked "Chapter Complete")`);
             continue;
           }
         }
@@ -314,18 +335,31 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
       }
       
       // Chapter has reports - check if previous session has daily report submitted
-      const previousSessionReport = chapterReports.find(report => 
-        Number(report.sessionNo) === sessionNum - 1
-      );
+      // Support both 'sessionNo' and legacy 'session' column names
+      Logger.log(`=== LOOKING FOR PREVIOUS SESSION ${sessionNum - 1} ===`);
+      Logger.log(`Chapter reports found: ${chapterReports.length}`);
+      chapterReports.forEach(r => {
+        const sessNum = Number(r.sessionNo || r.session || 0);
+        Logger.log(`  Report: session=${sessNum}, sessionNo="${r.sessionNo}", session="${r.session}", date=${r.date}`);
+      });
+      
+      const previousSessionReport = chapterReports.find(report => {
+        const num = Number(report.sessionNo || report.session || 0);
+        Logger.log(`  Checking report: sessionNo="${report.sessionNo}", session="${report.session}" -> parsed as ${num}, looking for ${sessionNum - 1}`);
+        return num === (sessionNum - 1);
+      });
       
       if (!previousSessionReport) {
-        Logger.log(`Previous session ${sessionNum - 1} not found - blocking session ${sessionNum}`);
+        Logger.log(`❌ Previous session ${sessionNum - 1} not found`);
+        Logger.log(`Available sessions in reports: ${chapterReports.map(r => Number(r.sessionNo || r.session || 0)).join(', ')}`);
         return {
           allowed: false,
           reason: 'previous_session_not_completed',
           message: `Previous session ${sessionNum - 1} of "${chapter.name}" must have a daily report submitted before preparing session ${sessionNum}`
         };
       }
+      
+      Logger.log(`✅ Found previous session ${sessionNum - 1} report`);
       
       // CRITICAL FIX: Check if CURRENT session we're trying to create is beyond the original count
       // This means previous session MUST be the last original session and MUST be marked complete

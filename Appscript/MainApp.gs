@@ -59,6 +59,15 @@
     try {
       _clearRequestCache(); // PERFORMANCE: Clear cache at start of each request
       _bootstrapSheets();
+            // === AUTH: Google ID token verification via GET (avoids preflight) ===
+            if (action === 'auth.verify') {
+              var token = (e.parameter.token || e.parameter.id_token || e.parameter.idToken || '').trim();
+              if (!token) {
+                return _respond({ success: false, error: 'Missing token' });
+              }
+              return _respond(verifyGoogleLogin(token));
+            }
+
       
       // Basic system check
       if (action === 'ping') {
@@ -352,10 +361,6 @@
         return _handleGetCascadingIssuesReport(e.parameter);
       }
       
-      if (action === 'getAllTeachersPerformance') {
-        return _handleGetAllTeachersPerformance(e.parameter);
-      }
-      
       if (action === 'getClassSubjectPerformance') {
         return _respond(getClassSubjectPerformance());
       }
@@ -491,11 +496,6 @@
         const date = e.parameter.date || '';
         return _respond(checkChapterCompletion({ teacherEmail: teacherEmail, class: cls, subject: subject, chapter: chapter, date: date }));
       }
-      if (action === 'deleteDailyReport') {
-        const reportId = (e.parameter && e.parameter.reportId) || '';
-        const email = (e.parameter && e.parameter.email) || '';
-        return _respond(deleteDailyReport(reportId, email));
-      }
       
       // === ATTENDANCE ROUTES ===
       if (action === 'getAttendance') {
@@ -541,6 +541,24 @@
       // === AUTHENTICATION ROUTES ===
       if (action === 'googleLogin') {
         return handleGoogleLogin(data);
+      }
+      if (action === 'auth.verify') {
+        // Accept token from Authorization header (Bearer) or payload
+        var authHeader = (e && e.parameter && e.parameter.Authorization) || (e && e.postData && e.postData.type && e.postData.contents && (e.postData.contents.match(/Authorization":"([^"]+)/) || [])[1]) || '';
+        var bearer = '';
+        try {
+          // Also check raw headers if available via e.headers (not standard)
+          bearer = String((e && e.headers && e.headers.Authorization) || '').trim();
+        } catch (ee) { /* ignore */ }
+        var token = String(data.token || '').trim();
+        if (!token) {
+          var hVal = String(authHeader || bearer || '').trim();
+          if (/^Bearer\s+/i.test(hVal)) token = hVal.replace(/^Bearer\s+/i, '').trim();
+        }
+        if (!token) {
+          return _respond({ success: false, error: 'Missing token' });
+        }
+        return _respond(verifyGoogleLogin(token));
       }
       
       // === EXAM ROUTES ===
@@ -605,7 +623,8 @@
           appLog('DEBUG', 'payload', data);
 
           const sh = _getSheet('DailyReports');
-          const headers = ['date', 'teacherEmail', 'teacherName', 'class', 'subject', 'period', 'planType', 'lessonPlanId', 'chapter', 'sessionNo', 'totalSessions', 'completionPercentage', 'chapterStatus', 'deviationReason', 'difficulties', 'nextSessionPlan', 'objectives', 'activities', 'completed', 'notes', 'createdAt', 'isSubstitution', 'absentTeacher', 'regularSubject', 'substituteSubject'];
+          // Include id as first column to match configured schema and new UUID flow
+          const headers = ['id', 'date', 'teacherEmail', 'teacherName', 'class', 'subject', 'period', 'planType', 'lessonPlanId', 'chapter', 'sessionNo', 'totalSessions', 'completionPercentage', 'chapterStatus', 'deviationReason', 'difficulties', 'nextSessionPlan', 'objectives', 'activities', 'completed', 'notes', 'createdAt', 'isSubstitution', 'absentTeacher', 'regularSubject', 'substituteSubject'];
           _ensureHeaders(sh, headers);
 
           const reportDate = _normalizeQueryDate(data.date);
@@ -715,8 +734,10 @@
           if (!totalSessionsVal) totalSessionsVal = 1;
 
           const now = new Date().toISOString();
+          const reportId = _uuid();
           const inferredPlanType = isSubstitution ? 'substitution' : 'in plan';
           const rowData = [
+            reportId,
             data.date || '',
             data.teacherEmail || '',
             data.teacherName || '',
@@ -875,11 +896,6 @@
         return _respond(_handleNotifyMissingSubmissions(data));
       }
       
-      // === CASCADE EXECUTION ROUTE ===
-      if (action === 'executeCascade') {
-        return _respond(executeCascade(data));
-      }
-      
       // === SCHEME-BASED LESSON PLANNING ROUTES ===
       if (action === 'createSchemeLessonPlan') {
         return _handleCreateSchemeLessonPlan(data);
@@ -945,6 +961,10 @@
       
       if (action === 'updateLessonPlanDetailsStatus') {
         return _handleUpdateLessonPlanStatus(data); // Same handler, different name for compatibility
+      }
+      
+      if (action === 'batchUpdateLessonPlanStatus') {
+        return _handleBatchUpdateLessonPlanStatus(data);
       }
 
       // Simple diagnostic: reveals LessonPlans sheet headers and detects status column
@@ -1363,6 +1383,82 @@
   /**
   * Handle UPDATE lesson plan status (HM approval/rejection)
   */
+  /**
+   * Check if all sessions of a chapter have been submitted
+   * Returns {complete: true} if all sessions exist, or {complete: false, missing: [], total: N}
+   */
+  function _checkChapterSessionsComplete(schemeId, chapter) {
+    try {
+      Logger.log(`=== CHECKING CHAPTER COMPLETENESS ===`);
+      Logger.log(`Scheme ID: ${schemeId}, Chapter: ${chapter}`);
+      
+      // Get the scheme to find noOfSessions
+      const schemesSheet = _getSheet('Schemes');
+      const schemesHeaders = _headers(schemesSheet);
+      const allSchemes = _rows(schemesSheet).map(row => _indexByHeader(row, schemesHeaders));
+      
+      const scheme = allSchemes.find(s => s.schemeId === schemeId);
+      if (!scheme) {
+        Logger.log(`ERROR: Scheme ${schemeId} not found`);
+        return { complete: false, error: 'Scheme not found' };
+      }
+      
+      const totalSessions = parseInt(scheme.noOfSessions || 2);
+      Logger.log(`Total sessions expected: ${totalSessions}`);
+      
+      // Get all lesson plans for this scheme and chapter
+      const lpSheet = _getSheet('LessonPlans');
+      const lpHeaders = _headers(lpSheet);
+      const allPlans = _rows(lpSheet).map(row => _indexByHeader(row, lpHeaders));
+      
+      const chapterPlans = allPlans.filter(plan => {
+        const matchScheme = plan.schemeId === schemeId;
+        const matchChapter = String(plan.chapter || '').toLowerCase().trim() === String(chapter || '').toLowerCase().trim();
+        const notCancelled = !['Cancelled', 'Rejected'].includes(String(plan.status || '').trim());
+        
+        return matchScheme && matchChapter && notCancelled;
+      });
+      
+      Logger.log(`Found ${chapterPlans.length} active lesson plans for this chapter`);
+      
+      // Check which sessions exist
+      const existingSessions = new Set();
+      chapterPlans.forEach(plan => {
+        const sessionNum = parseInt(plan.session || 0);
+        if (sessionNum > 0) {
+          existingSessions.add(sessionNum);
+        }
+      });
+      
+      Logger.log(`Existing sessions: ${Array.from(existingSessions).sort((a, b) => a - b).join(', ')}`);
+      
+      // Find missing sessions
+      const missingSessions = [];
+      for (let i = 1; i <= totalSessions; i++) {
+        if (!existingSessions.has(i)) {
+          missingSessions.push(i);
+        }
+      }
+      
+      const isComplete = missingSessions.length === 0;
+      Logger.log(`Chapter complete: ${isComplete}`);
+      if (!isComplete) {
+        Logger.log(`Missing sessions: ${missingSessions.join(', ')}`);
+      }
+      
+      return {
+        complete: isComplete,
+        missing: missingSessions,
+        total: totalSessions,
+        submitted: existingSessions.size
+      };
+      
+    } catch (error) {
+      Logger.log(`Error checking chapter completeness: ${error.message}`);
+      return { complete: false, error: error.message };
+    }
+  }
+
   function _handleUpdateLessonPlanStatus(data) {
     try {
       Logger.log(`Updating lesson plan status: ${JSON.stringify(data)}`);
@@ -1383,6 +1479,26 @@
       
       if (rowIndex === -1) {
         return _respond({ error: 'Lesson plan not found' });
+      }
+      
+      const lessonPlan = lessonPlans[rowIndex];
+      
+      // CRITICAL VALIDATION: When HM tries to approve (status='Ready'), check if ALL sessions are submitted
+      if (status === 'Ready' && lessonPlan.schemeId && lessonPlan.chapter) {
+        const completenessCheck = _checkChapterSessionsComplete(lessonPlan.schemeId, lessonPlan.chapter);
+        
+        if (!completenessCheck.complete) {
+          Logger.log(`APPROVAL BLOCKED: Chapter not complete`);
+          return _respond({
+            error: `Cannot approve: All ${completenessCheck.total} sessions must be submitted before approval. Missing sessions: ${completenessCheck.missing.join(', ')}`,
+            incomplete: true,
+            missing: completenessCheck.missing,
+            submitted: completenessCheck.submitted,
+            total: completenessCheck.total
+          });
+        }
+        
+        Logger.log(`✅ All ${completenessCheck.total} sessions submitted - approval allowed`);
       }
       
       // Find status column (case-insensitive) and update
@@ -1431,6 +1547,117 @@
       return _respond({ success: true, message: 'Lesson plan status updated successfully', lpId, previousStatus, writtenStatus });
     } catch (error) {
       Logger.log('Error updating lesson plan status: ' + error.message);
+      return _respond({ error: error.message });
+    }
+  }
+
+  /**
+   * Handle batch update of lesson plan statuses
+   * Allows HM to approve multiple lesson plans at once
+   */
+  function _handleBatchUpdateLessonPlanStatus(data) {
+    try {
+      Logger.log(`=== BATCH UPDATE LESSON PLAN STATUS ===`);
+      Logger.log(`Data: ${JSON.stringify(data)}`);
+      
+      const { lessonPlanIds, status, reviewComments } = data;
+      
+      if (!lessonPlanIds || !Array.isArray(lessonPlanIds) || lessonPlanIds.length === 0) {
+        return _respond({ error: 'lessonPlanIds array is required' });
+      }
+      
+      if (!status) {
+        return _respond({ error: 'status is required' });
+      }
+      
+      Logger.log(`Updating ${lessonPlanIds.length} lesson plans to status: ${status}`);
+      
+      const sh = _getSheet('LessonPlans');
+      const headers = _headers(sh);
+      const allPlans = _rows(sh).map(row => _indexByHeader(row, headers));
+      
+      const results = [];
+      const errors = [];
+      let successCount = 0;
+      
+      // Process each lesson plan
+      for (let i = 0; i < lessonPlanIds.length; i++) {
+        const lpId = lessonPlanIds[i];
+        
+        try {
+          const rowIndex = allPlans.findIndex(row => row.lpId === lpId);
+          
+          if (rowIndex === -1) {
+            errors.push({ lpId, error: 'Lesson plan not found' });
+            continue;
+          }
+          
+          const lessonPlan = allPlans[rowIndex];
+          
+          // CRITICAL VALIDATION: When approving (status='Ready'), check if ALL sessions are submitted
+          if (status === 'Ready' && lessonPlan.schemeId && lessonPlan.chapter) {
+            const completenessCheck = _checkChapterSessionsComplete(lessonPlan.schemeId, lessonPlan.chapter);
+            
+            if (!completenessCheck.complete) {
+              errors.push({
+                lpId,
+                error: `All ${completenessCheck.total} sessions must be submitted. Missing: ${completenessCheck.missing.join(', ')}`,
+                chapter: lessonPlan.chapter,
+                missing: completenessCheck.missing
+              });
+              continue;
+            }
+          }
+          
+          // Update status
+          const normalizedHeaders = headers.map(h => String(h).trim());
+          let statusColIndex = normalizedHeaders.findIndex(h => h === 'status');
+          if (statusColIndex === -1) {
+            statusColIndex = normalizedHeaders.findIndex(h => h.toLowerCase() === 'status');
+          }
+          
+          if (statusColIndex === -1) {
+            errors.push({ lpId, error: 'Status column not found' });
+            continue;
+          }
+          
+          sh.getRange(rowIndex + 2, statusColIndex + 1).setValue(status);
+          
+          // Update review comments if provided
+          if (reviewComments) {
+            let commentsIdx = normalizedHeaders.findIndex(h => h.toLowerCase() === 'reviewcomments');
+            if (commentsIdx >= 0) {
+              sh.getRange(rowIndex + 2, commentsIdx + 1).setValue(reviewComments);
+            }
+          }
+          
+          // Update reviewedAt timestamp
+          let reviewedAtIdx = normalizedHeaders.findIndex(h => h.toLowerCase() === 'reviewedat');
+          if (reviewedAtIdx >= 0) {
+            sh.getRange(rowIndex + 2, reviewedAtIdx + 1).setValue(new Date().toISOString());
+          }
+          
+          results.push({ lpId, success: true });
+          successCount++;
+          
+        } catch (error) {
+          Logger.log(`Error updating ${lpId}: ${error.message}`);
+          errors.push({ lpId, error: error.message });
+        }
+      }
+      
+      Logger.log(`Batch update complete: ${successCount} success, ${errors.length} errors`);
+      
+      return _respond({
+        success: true,
+        successCount,
+        totalRequested: lessonPlanIds.length,
+        results,
+        errors
+      });
+      
+    } catch (error) {
+      Logger.log(`Error in batch update: ${error.message}`);
       return _respond({ error: error.message });
     }
   }

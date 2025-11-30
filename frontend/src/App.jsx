@@ -71,7 +71,9 @@ import {
   RefreshCw,
   LayoutGrid,
   ClipboardCheck,
-  Check
+  Check,
+  AlertTriangle,
+  XCircle
 } from 'lucide-react';
 
 // Common utility functions to avoid duplication
@@ -4213,6 +4215,10 @@ const App = () => {
     const [selectedTimetableDate, setSelectedTimetableDate] = useState('');
     const [rowSubmitting, setRowSubmitting] = useState({});
     const [refreshing, setRefreshing] = useState(false);
+    const [selectedLessons, setSelectedLessons] = useState(new Set());
+    const [batchSubmitting, setBatchSubmitting] = useState(false);
+    const [showChapterModal, setShowChapterModal] = useState(false);
+    const [selectedChapter, setSelectedChapter] = useState(null);
     const [filters, setFilters] = useState({
       teacher: '',
       class: '',
@@ -4435,11 +4441,219 @@ const App = () => {
       }
     };
 
+    // Handle selection toggle
+    const toggleSelection = (lpId) => {
+      setSelectedLessons(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(lpId)) {
+          newSet.delete(lpId);
+        } else {
+          newSet.add(lpId);
+        }
+        return newSet;
+      });
+    };
+
+    // Select all visible pending lessons
+    const selectAll = () => {
+      const pendingIds = pendingLessons
+        .filter(l => l.status === 'Pending Review')
+        .map(l => l.lpId);
+      setSelectedLessons(new Set(pendingIds));
+    };
+
+    // Clear selection
+    const clearSelection = () => {
+      setSelectedLessons(new Set());
+    };
+
+    // Handle batch approval
+    const handleBatchApprove = async (status) => {
+      if (selectedLessons.size === 0) {
+        alert('Please select lesson plans to approve');
+        return;
+      }
+
+      if (!confirm(`Are you sure you want to ${status === 'Ready' ? 'approve' : status === 'Needs Rework' ? 'send for rework' : 'reject'} ${selectedLessons.size} lesson plan(s)?`)) {
+        return;
+      }
+
+      setBatchSubmitting(true);
+      try {
+        const lessonPlanIds = Array.from(selectedLessons);
+        const response = await api.batchUpdateLessonPlanStatus(lessonPlanIds, status);
+        
+        console.log('Batch approval response:', response);
+        
+        // Handle both wrapped and direct response formats
+        const result = response.data || response;
+        const successCount = result.successCount || 0;
+        const totalRequested = result.totalRequested || lessonPlanIds.length;
+        const errors = result.errors || [];
+        
+        console.log('Parsed result:', { successCount, totalRequested, errors });
+        
+        if (errors.length > 0) {
+          // Show detailed error messages
+          const errorMessages = errors.map(e => {
+            if (e.missing && e.missing.length > 0) {
+              return `${e.chapter || 'Chapter'}: Missing sessions ${e.missing.join(', ')}`;
+            }
+            return `${e.lpId}: ${e.error}`;
+          }).join('\n');
+          
+          alert(`Batch approval completed with some errors:\n\nSuccess: ${successCount}/${totalRequested}\n\nErrors:\n${errorMessages}`);
+        } else {
+          alert(`Successfully updated ${successCount} lesson plan(s)`);
+        }
+
+        // Clear selection
+        clearSelection();
+
+        // Refresh the list
+        await refreshApprovals();
+      } catch (err) {
+        console.error('Batch approval error:', err);
+        alert(`Error: ${err.message || 'Failed to update lesson plans'}`);
+      } finally {
+        setBatchSubmitting(false);
+      }
+    };
+
+    // Group lessons by chapter to show completion status
+    const chapterGroups = useMemo(() => {
+      const groups = {};
+      pendingLessons.forEach(lesson => {
+        const key = `${lesson.schemeId || ''}_${lesson.chapter || ''}`;
+        if (!groups[key]) {
+          groups[key] = {
+            schemeId: lesson.schemeId,
+            chapter: lesson.chapter,
+            class: lesson.class,
+            subject: lesson.subject,
+            teacherName: lesson.teacherName,
+            lessons: []
+          };
+        }
+        groups[key].lessons.push(lesson);
+      });
+      return groups;
+    }, [pendingLessons]);
+
+    // Open chapter view modal
+    const viewChapterSessions = (chapterKey) => {
+      setSelectedChapter(chapterGroups[chapterKey]);
+      setShowChapterModal(true);
+    };
+
+    // Close chapter modal
+    const closeChapterModal = () => {
+      setShowChapterModal(false);
+      setSelectedChapter(null);
+    };
+
+    // Select all sessions of a chapter
+    const selectChapterSessions = (chapterKey) => {
+      const chapter = chapterGroups[chapterKey];
+      if (!chapter) return;
+      
+      const chapterLessonIds = chapter.lessons
+        .filter(l => l.status === 'Pending Review')
+        .map(l => l.lpId);
+      
+      setSelectedLessons(prev => {
+        const newSet = new Set(prev);
+        chapterLessonIds.forEach(id => newSet.add(id));
+        return newSet;
+      });
+    };
+
+    // Batch approve chapter from modal
+    const handleApproveChapterFromModal = async (status) => {
+      if (!selectedChapter) return;
+      
+      const chapterLessonIds = selectedChapter.lessons
+        .filter(l => l.status === 'Pending Review')
+        .map(l => l.lpId);
+      
+      if (chapterLessonIds.length === 0) {
+        alert('No pending sessions to approve in this chapter');
+        return;
+      }
+
+      if (!confirm(`Approve all ${chapterLessonIds.length} sessions of "${selectedChapter.chapter}"?`)) {
+        return;
+      }
+
+      setBatchSubmitting(true);
+      try {
+        const response = await api.batchUpdateLessonPlanStatus(chapterLessonIds, status);
+        
+        // Handle both wrapped and direct response formats
+        const result = response.data || response;
+        const successCount = result.successCount || 0;
+        const totalRequested = result.totalRequested || chapterLessonIds.length;
+        const errors = result.errors || [];
+        
+        if (errors.length > 0) {
+          const errorMessages = errors.map(e => {
+            if (e.missing && e.missing.length > 0) {
+              return `Missing sessions ${e.missing.join(', ')}`;
+            }
+            return e.error;
+          }).join('\n');
+          
+          alert(`Batch approval completed:\n\nSuccess: ${successCount}/${totalRequested}\n\nErrors:\n${errorMessages}`);
+        } else {
+          alert(`Successfully approved ${successCount} session(s)`);
+        }
+
+        closeChapterModal();
+        await refreshApprovals();
+      } catch (err) {
+        console.error('Chapter approval error:', err);
+        alert(`Error: ${err.message || 'Failed to approve chapter'}`);
+      } finally {
+        setBatchSubmitting(false);
+      }
+    };
+
     return (
       <div className="space-y-6 max-w-full">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">Lesson Plan Approvals</h1>
           <div className="flex space-x-3">
+            {selectedLessons.size > 0 && (
+              <>
+                <button
+                  onClick={() => handleBatchApprove('Ready')}
+                  disabled={batchSubmitting}
+                  className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Approve selected"
+                >
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  Approve {selectedLessons.size}
+                </button>
+                <button
+                  onClick={() => handleBatchApprove('Needs Rework')}
+                  disabled={batchSubmitting}
+                  className="bg-yellow-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Send selected for rework"
+                >
+                  <AlertTriangle className="h-4 w-4 mr-2" />
+                  Rework {selectedLessons.size}
+                </button>
+                <button
+                  onClick={clearSelection}
+                  disabled={batchSubmitting}
+                  className="bg-gray-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Clear selection"
+                >
+                  <XCircle className="h-4 w-4 mr-2" />
+                  Clear
+                </button>
+              </>
+            )}
             <button
               onClick={refreshApprovals}
               disabled={refreshing}
@@ -4761,11 +4975,21 @@ const App = () => {
             <table className="w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
+                  <th className="px-2 py-2 text-left w-10">
+                    <input
+                      type="checkbox"
+                      checked={pendingLessons.filter(l => l.status === 'Pending Review').length > 0 && pendingLessons.filter(l => l.status === 'Pending Review').every(l => selectedLessons.has(l.lpId))}
+                      onChange={(e) => e.target.checked ? selectAll() : clearSelection()}
+                      className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                      title="Select all pending"
+                    />
+                  </th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Teacher</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Class</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Subject</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Chapter</th>
                   <th className="px-2 py-2 text-center text-xs font-medium text-gray-600 uppercase w-10">Sess</th>
+                  <th className="px-2 py-2 text-center text-xs font-medium text-gray-600 uppercase w-16">Progress</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Submitted</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Planned</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase w-20">Status</th>
@@ -4773,15 +4997,38 @@ const App = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {pendingLessons.map((lesson) => (
-                  <tr key={lesson.lpId} className="hover:bg-gray-50">
-                    <td className="px-2 py-2 text-xs text-gray-900 truncate">{lesson.teacherName}</td>
-                    <td className="px-2 py-2 text-xs text-gray-900">{lesson.class}</td>
-                    <td className="px-2 py-2 text-xs text-gray-900 truncate">{lesson.subject}</td>
-                    <td className="px-2 py-2 text-xs text-gray-900 truncate">{lesson.chapter}</td>
-                    <td className="px-2 py-2 text-xs text-gray-900 text-center font-medium">{lesson.session}</td>
-                    <td className="px-2 py-2 text-xs text-gray-600">{lesson.submittedAt ? new Date(lesson.submittedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '-'}</td>
-                    <td className="px-2 py-2 text-xs text-gray-600"><div className="flex flex-col"><span>{lesson.selectedDate ? new Date(lesson.selectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '-'}</span><span className="text-xs text-gray-500">P{lesson.selectedPeriod || '-'}</span></div></td>
+                {pendingLessons.map((lesson) => {
+                  const chapterKey = `${lesson.schemeId || ''}_${lesson.chapter || ''}`;
+                  const chapterGroup = chapterGroups[chapterKey];
+                  const totalSessions = chapterGroup?.lessons.length || 1;
+                  const submittedSessions = chapterGroup?.lessons.filter(l => l.status === 'Pending Review' || l.status === 'Ready').length || 0;
+                  const completionPercent = Math.round((submittedSessions / totalSessions) * 100);
+                  const isComplete = completionPercent === 100;
+                  
+                  return (
+                    <tr key={lesson.lpId} className="hover:bg-gray-50">
+                      <td className="px-2 py-2">
+                        {lesson.status === 'Pending Review' && (
+                          <input
+                            type="checkbox"
+                            checked={selectedLessons.has(lesson.lpId)}
+                            onChange={() => toggleSelection(lesson.lpId)}
+                            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                          />
+                        )}
+                      </td>
+                      <td className="px-2 py-2 text-xs text-gray-900 truncate">{lesson.teacherName}</td>
+                      <td className="px-2 py-2 text-xs text-gray-900">{lesson.class}</td>
+                      <td className="px-2 py-2 text-xs text-gray-900 truncate">{lesson.subject}</td>
+                      <td className="px-2 py-2 text-xs text-gray-900 truncate">{lesson.chapter}</td>
+                      <td className="px-2 py-2 text-xs text-gray-900 text-center font-medium">{lesson.session}</td>
+                      <td className="px-2 py-2 text-center">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${isComplete ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`} title={`${submittedSessions}/${totalSessions} sessions submitted`}>
+                          {submittedSessions}/{totalSessions}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 text-xs text-gray-600">{lesson.submittedAt ? new Date(lesson.submittedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '-'}</td>
+                      <td className="px-2 py-2 text-xs text-gray-600"><div className="flex flex-col"><span>{lesson.selectedDate ? new Date(lesson.selectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '-'}</span><span className="text-xs text-gray-500">P{lesson.selectedPeriod || '-'}</span></div></td>
                     <td className="px-2 py-2">
                       {lesson.status === 'Ready' ? (
                         <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
@@ -4809,6 +5056,13 @@ const App = () => {
                           title="View lesson details"
                         >
                           <Eye className="h-4 w-4" />
+                        </button>
+                        <button type="button" 
+                          className="text-purple-600 hover:text-purple-900 p-1" 
+                          onClick={() => viewChapterSessions(chapterKey)} 
+                          title="View all chapter sessions"
+                        >
+                          <BookOpen className="h-4 w-4" />
                         </button>
                         {lesson.status === 'Pending Review' && (
                           <>
@@ -4861,7 +5115,8 @@ const App = () => {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -4872,9 +5127,130 @@ const App = () => {
           {pendingLessons.length === 0 ? (
             <p className="text-gray-700">No pending lesson plans.</p>
           ) : (
-            <p className="text-gray-700">Click the eye icon in the table to open the lesson plan details for any row.</p>
+            <p className="text-gray-700">Click the eye icon to view individual lesson, or book icon to view all chapter sessions together.</p>
           )}
         </div>
+
+        {/* Chapter Sessions Modal */}
+        {showChapterModal && selectedChapter && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={closeChapterModal}>
+            <div className="bg-white w-full max-w-5xl rounded-xl shadow-2xl p-6 mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">{selectedChapter.chapter}</h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {selectedChapter.class} • {selectedChapter.subject} • {selectedChapter.teacherName}
+                  </p>
+                </div>
+                <button onClick={closeChapterModal} className="text-gray-500 hover:text-gray-700">
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+
+              {/* Chapter Summary */}
+              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg p-4 mb-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Total Sessions</p>
+                    <p className="text-2xl font-bold text-gray-900">{selectedChapter.lessons.length}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Pending</p>
+                    <p className="text-2xl font-bold text-yellow-600">
+                      {selectedChapter.lessons.filter(l => l.status === 'Pending Review').length}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Approved</p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {selectedChapter.lessons.filter(l => l.status === 'Ready').length}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Batch Actions */}
+              {selectedChapter.lessons.filter(l => l.status === 'Pending Review').length > 0 && (
+                <div className="flex gap-3 mb-6">
+                  <button
+                    onClick={() => handleApproveChapterFromModal('Ready')}
+                    disabled={batchSubmitting}
+                    className="flex-1 bg-green-600 text-white px-6 py-3 rounded-lg flex items-center justify-center hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <CheckCircle className="h-5 w-5 mr-2" />
+                    Approve All Pending ({selectedChapter.lessons.filter(l => l.status === 'Pending Review').length})
+                  </button>
+                </div>
+              )}
+
+              {/* Sessions List */}
+              <div className="space-y-4">
+                {selectedChapter.lessons
+                  .sort((a, b) => parseInt(a.session || 0) - parseInt(b.session || 0))
+                  .map((lesson) => (
+                    <div key={lesson.lpId} className={`border rounded-lg p-4 ${
+                      lesson.status === 'Ready' ? 'border-green-300 bg-green-50' :
+                      lesson.status === 'Pending Review' ? 'border-yellow-300 bg-yellow-50' :
+                      'border-gray-300 bg-gray-50'
+                    }`}>
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h3 className="font-semibold text-gray-900">Session {lesson.session}</h3>
+                          <p className="text-sm text-gray-600">
+                            {lesson.selectedDate ? new Date(lesson.selectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Not scheduled'} 
+                            {lesson.selectedPeriod && ` • Period ${lesson.selectedPeriod}`}
+                          </p>
+                        </div>
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                          lesson.status === 'Ready' ? 'bg-green-100 text-green-800' :
+                          lesson.status === 'Pending Review' ? 'bg-yellow-100 text-yellow-800' :
+                          lesson.status === 'Needs Rework' ? 'bg-orange-100 text-orange-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {lesson.status}
+                        </span>
+                      </div>
+
+                      {/* Learning Objectives */}
+                      <div className="mb-2">
+                        <p className="text-xs font-medium text-gray-700 mb-1">Learning Objectives:</p>
+                        <p className="text-sm text-gray-900 bg-white p-2 rounded">{lesson.learningObjectives || '-'}</p>
+                      </div>
+
+                      {/* Teaching Methods */}
+                      <div className="mb-2">
+                        <p className="text-xs font-medium text-gray-700 mb-1">Teaching Methods:</p>
+                        <p className="text-sm text-gray-900 bg-white p-2 rounded">{lesson.teachingMethods || '-'}</p>
+                      </div>
+
+                      {/* Resources & Assessment in grid */}
+                      <div className="grid grid-cols-2 gap-3">
+                        {lesson.resourcesRequired && (
+                          <div>
+                            <p className="text-xs font-medium text-gray-700 mb-1">Resources:</p>
+                            <p className="text-sm text-gray-900 bg-white p-2 rounded">{lesson.resourcesRequired}</p>
+                          </div>
+                        )}
+                        {lesson.assessmentMethods && (
+                          <div>
+                            <p className="text-xs font-medium text-gray-700 mb-1">Assessment:</p>
+                            <p className="text-sm text-gray-900 bg-white p-2 rounded">{lesson.assessmentMethods}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+
+              {/* Close Button */}
+              <div className="mt-6 flex justify-end border-t border-gray-200 pt-4">
+                <button onClick={closeChapterModal} className="px-6 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -6991,6 +7367,7 @@ const App = () => {
   const DailyReportsManagementView = () => {
     const [reports, setReports] = useState([]);
     const [loadingReports, setLoadingReports] = useState(false);
+    const [deletingId, setDeletingId] = useState(null);
     const [filters, setFilters] = useState({
       teacher: '',
       class: '',
@@ -7146,6 +7523,7 @@ const App = () => {
                     if (!id) return alert('Missing report id');
                     if (!confirm('Delete this report? This cannot be undone.')) return;
                     try {
+                      setDeletingId(id);
                       const res = await api.deleteDailyReport(id, user.email);
                       if (res && res.success) {
                         setReports(prev => prev.filter(x => (x.id || x.reportId || `${(x.date||'').toString()}|${x.class||''}|${x.subject||''}|${x.period||''}|${String(x.teacherEmail||'').toLowerCase()}`) !== id));
@@ -7154,6 +7532,8 @@ const App = () => {
                       }
                     } catch (err) {
                       alert('Delete failed: ' + (err && err.message ? err.message : String(err)));
+                    } finally {
+                      setDeletingId(null);
                     }
                   };
                   return (
@@ -7168,7 +7548,12 @@ const App = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.objectives}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.activities}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
-                      <button onClick={onDelete} disabled={!id} className="px-2 py-1 border rounded text-red-600 hover:bg-red-50 disabled:opacity-40">Delete</button>
+                      <button onClick={onDelete} disabled={!id || deletingId === id} className="px-2 py-1 border rounded text-red-600 hover:bg-red-50 disabled:opacity-40 inline-flex items-center">
+                        {deletingId === id && (
+                          <span className="inline-block h-3 w-3 mr-1 border-2 border-red-600/70 border-t-transparent rounded-full animate-spin"></span>
+                        )}
+                        {deletingId === id ? 'Deleting…' : 'Delete'}
+                      </button>
                     </td>
                   </tr>
                 )})}
@@ -7198,6 +7583,7 @@ const App = () => {
   const MyDailyReportsView = () => {
     const [reports, setReports] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [deletingId, setDeletingId] = useState(null);
     const [rangeMode, setRangeMode] = useState('7d'); // 7d | month | custom
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
@@ -7412,6 +7798,7 @@ const App = () => {
                           if (!id) return alert('Missing report id');
                           if (!confirm('Delete this report? This cannot be undone.')) return;
                           try {
+                            setDeletingId(id);
                             const res = await api.deleteDailyReport(id, email);
                             if (res && res.success) {
                               setReports(prev => prev.filter(x => (x.id || x.reportId || '') !== id));
@@ -7420,10 +7807,17 @@ const App = () => {
                             }
                           } catch (err) {
                             alert('Delete failed: ' + (err && err.message ? err.message : String(err)));
+                          } finally {
+                            setDeletingId(null);
                           }
                         };
                         return (
-                          <button onClick={onDelete} disabled={!id} className="px-2 py-1 border rounded text-red-600 hover:bg-red-50 disabled:opacity-40">Delete</button>
+                          <button onClick={onDelete} disabled={!id || deletingId === id} className="px-2 py-1 border rounded text-red-600 hover:bg-red-50 disabled:opacity-40 inline-flex items-center">
+                            {deletingId === id && (
+                              <span className="inline-block h-3 w-3 mr-1 border-2 border-red-600/70 border-t-transparent rounded-full animate-spin"></span>
+                            )}
+                            {deletingId === id ? 'Deleting…' : 'Delete'}
+                          </button>
                         );
                       })()}
                     </td>

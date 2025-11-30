@@ -49,6 +49,8 @@ const HMDailyOversightEnhanced = ({ user }) => {
   const [missing, setMissing] = useState({ list: [], byTeacher: [], stats: { totalPeriods: 0, missingCount: 0, teachersImpacted: 0 } });
   const [missingLoading, setMissingLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [verifyingKey, setVerifyingKey] = useState(null);
+  const [reopeningKey, setReopeningKey] = useState(null);
   // Collapsible sections
   const [subjectPerfOpen, setSubjectPerfOpen] = useState(false);
   const [classPerfOpen, setClassPerfOpen] = useState(false);
@@ -178,6 +180,18 @@ const HMDailyOversightEnhanced = ({ user }) => {
     }
   }
 
+  // Compute a unique key for a report, preferring UUID id then composite
+  const computeReportKey = (report) => {
+    if (report.id && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(report.id)) {
+      return report.id;
+    }
+    const normalizedDate = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? date
+      : new Date(date).toISOString().split('T')[0];
+    const periodNum = String(report.period || '').replace(/^Period\s*/i, '').trim();
+    return [normalizedDate, report.class, report.subject, periodNum, String(report.teacherEmail || '').toLowerCase()].join('|');
+  };
+
   async function handleNotifyAllMissing() {
     if (!user?.email) return alert('Missing user email for notification.');
     setActionBusy(true);
@@ -199,22 +213,9 @@ const HMDailyOversightEnhanced = ({ user }) => {
   async function handleVerify(report) {
     if (!user?.email) return alert('Missing verifier email.');
     
-    // Prefer report.id if available (UUID format)
-    let key;
-    if (report.id && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(report.id)) {
-      key = report.id;
-      console.log('[handleVerify] Using report ID:', key);
-    } else {
-      // Fall back to composite key
-      // Normalize date to YYYY-MM-DD to match backend format
-      const normalizedDate = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Date(date).toISOString().split('T')[0];
-      // Strip 'Period ' prefix if present to get just the number
-      const periodNum = String(report.period || '').replace(/^Period\s*/i, '').trim();
-      key = [normalizedDate, report.class, report.subject, periodNum, String(report.teacherEmail || '').toLowerCase()].join('|');
-      console.log('[handleVerify] Using composite key:', key);
-    }
-    
-    setActionBusy(true);
+    const key = computeReportKey(report);
+    console.log('[handleVerify] Using key:', key);
+    setVerifyingKey(key);
     try {
       const res = await verifyDailyReport(key, user.email);
       const out = res?.data || res;
@@ -228,7 +229,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
     } catch (e) {
       alert(`Verify failed: ${e?.message || e}`);
     } finally {
-      setActionBusy(false);
+      setVerifyingKey(null);
     }
   }
 
@@ -237,22 +238,9 @@ const HMDailyOversightEnhanced = ({ user }) => {
     const reason = window.prompt('Enter reason to reopen this report:', 'Please add more detail');
     if (reason === null) return; // cancelled
     
-    // Prefer report.id if available (UUID format)
-    let key;
-    if (report.id && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(report.id)) {
-      key = report.id;
-      console.log('[handleReopen] Using report ID:', key);
-    } else {
-      // Fall back to composite key
-      // Normalize date to YYYY-MM-DD to match backend format
-      const normalizedDate = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Date(date).toISOString().split('T')[0];
-      // Strip 'Period ' prefix if present to get just the number
-      const periodNum = String(report.period || '').replace(/^Period\s*/i, '').trim();
-      key = [normalizedDate, report.class, report.subject, periodNum, String(report.teacherEmail || '').toLowerCase()].join('|');
-      console.log('[handleReopen] Using composite key:', key);
-    }
-    
-    setActionBusy(true);
+    const key = computeReportKey(report);
+    console.log('[handleReopen] Using key:', key);
+    setReopeningKey(key);
     try {
       const res = await reopenDailyReport(key, user.email, reason);
       const out = res?.data || res;
@@ -266,7 +254,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
     } catch (e) {
       alert(`Reopen failed: ${e?.message || e}`);
     } finally {
-      setActionBusy(false);
+      setReopeningKey(null);
     }
   }
 
@@ -1195,20 +1183,35 @@ const HMDailyOversightEnhanced = ({ user }) => {
                               </div>
                             )}
                             <div className="flex gap-2">
-                            <button
-                              disabled={actionBusy}
-                              onClick={() => handleVerify(report)}
-                              className="px-2 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-                            >
-                              Verify
-                            </button>
-                            <button
-                              disabled={actionBusy}
-                              onClick={() => handleReopen(report)}
-                              className="px-2 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
-                            >
-                              Reopen
-                            </button>
+                              {(() => {
+                                const rk = computeReportKey(report);
+                                const isVerifying = verifyingKey === rk;
+                                const isReopening = reopeningKey === rk;
+                                return (
+                                  <>
+                                    <button
+                                      disabled={isVerifying || isReopening}
+                                      onClick={() => handleVerify(report)}
+                                      className="px-2 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 inline-flex items-center"
+                                    >
+                                      {isVerifying && (
+                                        <span className="inline-block h-3 w-3 mr-1 border-2 border-white/70 border-t-transparent rounded-full animate-spin"></span>
+                                      )}
+                                      {isVerifying ? 'Verifying…' : 'Verify'}
+                                    </button>
+                                    <button
+                                      disabled={isVerifying || isReopening}
+                                      onClick={() => handleReopen(report)}
+                                      className="px-2 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 inline-flex items-center"
+                                    >
+                                      {isReopening && (
+                                        <span className="inline-block h-3 w-3 mr-1 border-2 border-white/70 border-t-transparent rounded-full animate-spin"></span>
+                                      )}
+                                      {isReopening ? 'Reopening…' : 'Reopen'}
+                                    </button>
+                                  </>
+                                );
+                              })()}
                             </div>
                           </div>
                         ) : (

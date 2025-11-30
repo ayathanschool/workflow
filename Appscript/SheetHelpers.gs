@@ -266,128 +266,7 @@ function jsonResponse(obj) {
   return _respond(obj);
 }
 
-// === ENHANCED LESSON PROGRESS TRACKING FUNCTIONS ===
-
-/**
- * Enhanced daily report submission with automatic lesson progress tracking
- */
-function submitDailyReportWithProgressTracking(reportData) {
-  try {
-    console.log(`Submitting daily report with progress tracking: ${JSON.stringify(reportData)}`);
-    
-    // Validate required fields
-    const requiredFields = ['teacherEmail', 'date', 'class', 'subject'];
-    for (let field of requiredFields) {
-      if (!reportData[field]) {
-        throw new Error(`Missing required field: ${field}`);
-      }
-    }
-    
-    // Get DailyReports sheet
-    const sheet = _getSheet('DailyReports');
-    let headers = _headers(sheet);
-    
-    // Ensure required columns exist
-    const requiredHeaders = [
-      'id', 'teacherEmail', 'teacherName', 'date', 'class', 'subject',
-      'topicsCovered', 'studentsPresent', 'studentsAbsent', 'remarks',
-      'teachingMethod', // ensure Teaching Method exists
-      'submittedAt', 'lessonProgressTracked'
-    ];
-    // Use enhanced ensure to avoid overwriting existing header orders
-    _ensureHeadersEnhanced(sheet, requiredHeaders);
-    // Refresh headers after ensuring, so indexes align with current sheet
-    headers = _headers(sheet);
-    
-    // Generate report ID and timestamp (use UUID for consistency across system)
-    const reportId = _uuid();
-    const timestamp = new Date().toISOString();
-    
-    // Prepare row data
-    // Build row aligned to current headers to avoid column mismatch
-    const rowValues = new Array(headers.length).fill('');
-    const setIfExists = (colName, value) => {
-      const idx = headers.indexOf(colName);
-      if (idx !== -1) rowValues[idx] = value;
-    };
-    setIfExists('id', reportId);
-    setIfExists('teacherEmail', reportData.teacherEmail || '');
-    setIfExists('teacherName', reportData.teacherName || '');
-    setIfExists('date', _dateToISO(reportData.date));
-    setIfExists('class', reportData.class || '');
-    setIfExists('subject', reportData.subject || '');
-    setIfExists('topicsCovered', reportData.topicsCovered || '');
-    setIfExists('studentsPresent', reportData.studentsPresent || 0);
-    setIfExists('studentsAbsent', reportData.studentsAbsent || 0);
-    setIfExists('remarks', reportData.remarks || '');
-    setIfExists('teachingMethod', reportData.teachingMethod || reportData.activities || '');
-    setIfExists('submittedAt', timestamp);
-    // Some sheets use 'createdAt'; populate when present for compatibility
-    setIfExists('createdAt', timestamp);
-    setIfExists('lessonProgressTracked', 'pending');
-    
-    sheet.appendRow(rowValues);
-    
-    // Track lesson progress automatically
-    const progressData = Object.assign({}, reportData, { id: reportId });
-    const progressResult = _trackLessonProgress(progressData, timestamp);
-    
-    // Update lesson progress tracking status
-    const rowIndex = _findRowIndex(sheet, 'id', reportId);
-    if (rowIndex > 0) {
-      _updateCell(sheet, rowIndex, 'lessonProgressTracked', 
-        progressResult.success ? 'completed' : 'failed');
-    }
-    
-    console.log(`Daily report submitted successfully: ${reportId}`);
-    
-    return {
-      success: true,
-      reportId: reportId,
-      message: 'Daily report submitted successfully',
-      progressTracked: progressResult.success
-    };
-  } catch (error) {
-    console.error(`Error submitting daily report with progress tracking: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-/**
- * Get lesson progress data for dashboard
- */
-function getLessonProgressForDashboard(teacherEmail, days = 30) {
-  try {
-    // Get recent reports
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-    
-    const reportsResult = getDailyReports(teacherEmail, startDate, endDate);
-    if (!reportsResult.success) {
-      return reportsResult;
-    }
-    
-    // Get lesson progress summary
-    const progressResult = getLessonProgressSummary(teacherEmail);
-    if (!progressResult.success) {
-      return progressResult;
-    }
-    
-    return {
-      success: true,
-      dashboard: {
-        recentReports: reportsResult.reports.slice(0, 10), // Last 10 reports
-        progressSummary: progressResult.summary,
-        progressDetails: progressResult.details.slice(0, 15), // Top 15 progress items
-        teacherStats: progressResult.teacherStats
-      }
-    };
-  } catch (error) {
-    console.error(`Error getting lesson progress for dashboard: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
+// (Removed) Enhanced lesson progress helpers archived in archive/appscript-backups/unused-helpers-2025-11-28.gs
 
 /**
  * Helper function to ensure headers exist in a sheet
@@ -626,8 +505,152 @@ function deleteDailyReport(reportId, requesterEmail) {
       }
     }
 
+    // Attempt cascade rollback for related lesson plan (if any)
+    var rollbackInfo = { updatedCount: 0, lpIds: [], warnings: [] };
+    try {
+      const reportDateISO = _isoDateString(reportObj.date || '');
+      const teacherEmailLower = String(reportObj.teacherEmail || '').toLowerCase();
+      const cls = String(reportObj.class || '');
+      const subject = String(reportObj.subject || '');
+      const chapter = String(reportObj.chapter || '');
+      const sessionNo = Number(reportObj.sessionNo || reportObj.session || 0);
+      const lessonPlanId = String(reportObj.lessonPlanId || '').trim();
+
+      const lpSh = _getSheet('LessonPlans');
+      const lpHdr = _headers(lpSh);
+      const lpRows = _rows(lpSh);
+      const lpIdx = {};
+      lpHdr.forEach((h, i) => lpIdx[h] = i);
+      const col = (name) => lpHdr.indexOf(name) + 1; // 1-based for getRange
+
+      // Find matching plan: prefer lessonPlanId, else by teacher/class/subject/chapter/session, else by originalDate+teacher
+      let targetRow = -1;
+      let targetObj = null;
+
+      if (lessonPlanId && lpIdx['lpId'] != null) {
+        for (let i = 0; i < lpRows.length; i++) {
+          if (String(lpRows[i][lpIdx['lpId']]) === lessonPlanId) {
+            targetRow = i + 2; targetObj = _indexByHeader(lpRows[i], lpHdr); break;
+          }
+        }
+      }
+      if (targetRow < 0) {
+        // try semantic match
+        const idx = {
+          teacherEmail: lpHdr.indexOf('teacherEmail'),
+          class: lpHdr.indexOf('class'),
+          subject: lpHdr.indexOf('subject'),
+          chapter: lpHdr.indexOf('chapter'),
+          session: lpHdr.indexOf('session'),
+          originalDate: lpHdr.indexOf('originalDate')
+        };
+        for (let i = 0; i < lpRows.length; i++) {
+          const r = lpRows[i];
+          const t = String(r[idx.teacherEmail] || '').toLowerCase();
+          const c = String(r[idx.class] || '');
+          const s = String(r[idx.subject] || '');
+          const ch = String(r[idx.chapter] || '');
+          const sess = Number(r[idx.session] || 0);
+          const od = _isoDateString(r[idx.originalDate] || '');
+          const chapterMatch = chapter ? (String(ch).toLowerCase() === String(chapter).toLowerCase()) : true;
+          const sessionMatch = sessionNo ? (Number(sess) === Number(sessionNo)) : true;
+          const teacherMatch = t === teacherEmailLower;
+          const csMatch = (c === cls) && (s === subject);
+          const origDateMatch = reportDateISO && od ? (od === reportDateISO) : false;
+
+          // Prefer exact chapter/session match; else allow originalDate+teacher match
+          if (teacherMatch && csMatch && chapterMatch && sessionMatch) {
+            targetRow = i + 2; targetObj = _indexByHeader(r, lpHdr); break;
+          }
+          if (targetRow < 0 && teacherMatch && csMatch && origDateMatch) {
+            targetRow = i + 2; targetObj = _indexByHeader(r, lpHdr); /* continue looking for chapter/session exact */
+          }
+        }
+      }
+
+      if (targetRow > 0 && targetObj) {
+        const selDateCol = col('selectedDate');
+        const selPeriodCol = col('selectedPeriod');
+        const origDateCol = col('originalDate');
+        const origPeriodCol = col('originalPeriod');
+        const statusCol = col('status');
+
+        // Helper to restore a single row by index with its object
+        const restoreRow = (rowIndex1Based, obj) => {
+          let changed = false;
+          if (origDateCol > 0 && selDateCol > 0 && obj.originalDate) {
+            let restoreDate = obj.originalDate;
+            if (restoreDate instanceof Date) {
+              restoreDate = Utilities.formatDate(restoreDate, 'Asia/Kolkata', 'yyyy-MM-dd');
+            } else if (typeof restoreDate === 'string') {
+              restoreDate = _isoDateString(restoreDate);
+            }
+            lpSh.getRange(rowIndex1Based, selDateCol).setValue(restoreDate || '');
+            lpSh.getRange(rowIndex1Based, origDateCol).setValue('');
+            changed = true;
+          }
+          if (origPeriodCol > 0 && selPeriodCol > 0 && (obj.originalPeriod !== undefined && obj.originalPeriod !== '')) {
+            let restorePeriod = obj.originalPeriod || '';
+            restorePeriod = String(restorePeriod).replace(/^Period\s*/i, '').trim();
+            lpSh.getRange(rowIndex1Based, selPeriodCol).setValue(restorePeriod);
+            lpSh.getRange(rowIndex1Based, origPeriodCol).setValue('');
+            changed = true;
+          }
+          if (changed && statusCol > 0) {
+            const curStatus = String(obj.status || '').trim().toLowerCase();
+            if (curStatus === 'rescheduled (cascade)'.toLowerCase()) {
+              // Use 'Ready' so the reporting form recognizes the session as available again
+              lpSh.getRange(rowIndex1Based, statusCol).setValue('Ready');
+            }
+          }
+          return changed;
+        };
+
+        // 1) Restore the specific reported session if it was cascaded
+        const changedTarget = restoreRow(targetRow, targetObj);
+        if (changedTarget) {
+          rollbackInfo.updatedCount += 1;
+          rollbackInfo.lpIds.push(String(targetObj.lpId || lessonPlanId || 'UNKNOWN'));
+        } else {
+          rollbackInfo.warnings.push('No originalDate/originalPeriod to rollback for target');
+        }
+
+        // 2) Restore any subsequently cascaded sessions for the same teacher/class/subject/chapter
+        // We detect cascaded sessions by presence of originalDate/originalPeriod.
+        const tEmail = String(targetObj.teacherEmail || '').toLowerCase();
+        const tClass = String(targetObj.class || '');
+        const tSubject = String(targetObj.subject || '');
+        const tChapter = String(targetObj.chapter || '');
+
+        for (let i = 0; i < lpRows.length; i++) {
+          const obj = _indexByHeader(lpRows[i], lpHdr);
+          const rowIdx1 = i + 2;
+          const sameTeacher = String(obj.teacherEmail || '').toLowerCase() === tEmail;
+          const sameClass = String(obj.class || '') === tClass;
+          const sameSubject = String(obj.subject || '') === tSubject;
+          const sameChapter = tChapter ? (String(obj.chapter || '').toLowerCase() === String(tChapter).toLowerCase()) : true;
+          const hadOrig = !!(obj.originalDate) || (obj.originalPeriod !== undefined && obj.originalPeriod !== '');
+          if (!sameTeacher || !sameClass || !sameSubject || !sameChapter || !hadOrig) continue;
+
+          // Skip the already restored target row
+          if (rowIdx1 === targetRow) continue;
+
+          const changed = restoreRow(rowIdx1, obj);
+          if (changed) {
+            rollbackInfo.updatedCount += 1;
+            rollbackInfo.lpIds.push(String(obj.lpId || 'UNKNOWN'));
+          }
+        }
+      } else {
+        rollbackInfo.warnings.push('Related lesson plan not found');
+      }
+    } catch (rbErr) {
+      console.error('Cascade rollback warning:', rbErr && rbErr.message ? rbErr.message : String(rbErr));
+    }
+
+    // Perform report deletion after attempted rollback
     sh.deleteRow(rowToDelete);
-    return { success: true, deletedId: reportId };
+    return { success: true, deletedId: reportId, rollback: rollbackInfo };
   } catch (err) {
     console.error('deleteDailyReport error', err);
     return { success: false, error: err && err.message ? err.message : String(err) };
@@ -779,9 +802,10 @@ function reopenDailyReport(reportId, requesterEmail, reason) {
     const idCol = idxMap['id'] != null ? idxMap['id'] : idxMap['reportId'];
 
     let rowIndex = -1;
+    let rowObj = null;
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
-      if (idCol != null && String(row[idCol]) === String(reportId)) { rowIndex = i + 2; break; }
+      if (idCol != null && String(row[idCol]) === String(reportId)) { rowIndex = i + 2; rowObj = _indexByHeader(row, headers); break; }
       if (idCol == null) {
         const composite = [
           String(row[idxMap['date']] || '').trim(),
@@ -790,7 +814,7 @@ function reopenDailyReport(reportId, requesterEmail, reason) {
           String(row[idxMap['period']] || '').trim(),
           String(row[idxMap['teacherEmail']] || '').trim().toLowerCase()
         ].join('|');
-        if (composite === String(reportId)) { rowIndex = i + 2; break; }
+        if (composite === String(reportId)) { rowIndex = i + 2; rowObj = _indexByHeader(row, headers); break; }
       }
     }
     if (rowIndex < 0) return { success: false, error: 'Report not found' };
@@ -808,6 +832,28 @@ function reopenDailyReport(reportId, requesterEmail, reason) {
     set('reopenedBy', requesterEmail);
     set('reopenedAt', new Date().toISOString());
 
+    // Add notification + optional email to teacher
+    try {
+      const teacherEmail = rowObj ? String(rowObj.teacherEmail || '').trim() : '';
+      if (teacherEmail) {
+        _addNotification(teacherEmail, 'report-reopened', 'Daily report reopened for correction', {
+          reportId: reportId,
+            reason: reason || '',
+            reopenedBy: requesterEmail,
+            reopenedAt: new Date().toISOString()
+        });
+        try {
+          if (typeof sendEmailNotification === 'function') {
+            sendEmailNotification(
+              teacherEmail,
+              'Report Reopened for Correction',
+              'Your daily report was reopened by HM/headmaster. Reason: ' + (reason || 'No reason provided.')
+            );
+          }
+        } catch (mailErr) { /* ignore email failures */ }
+      }
+    } catch (notifyErr) { console.error('Notification (reopen) error', notifyErr); }
+
     return { success: true, reopenedId: reportId };
   } catch (err) {
     console.error('reopenDailyReport error', err);
@@ -815,22 +861,7 @@ function reopenDailyReport(reportId, requesterEmail, reason) {
   }
 }
 
-// ==== SAFE STUBS to avoid missing reference errors ====
-function _trackLessonProgress(progressData, timestamp) {
-  try {
-    return { success: true, details: [] };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-}
-
-function getLessonProgressSummary(teacherEmail) {
-  try {
-    return { success: true, summary: {}, details: [], teacherStats: {} };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-}
+// (Removed) Progress stub functions archived with unused helpers
 
 /**
  * Robust role check: case-insensitive, ignores spaces and punctuation.
@@ -904,6 +935,48 @@ function debugUserRoles(email) {
     };
   } catch (e) {
     return { error: e && e.message ? e.message : String(e) };
+  }
+}
+
+// ===== In-app Notifications Helper =====
+function _addNotification(email, type, message, payloadObj) {
+  try {
+    if (!email || !type) return;
+    const sh = _getSheet('Notifications');
+    _ensureHeaders(sh, ['email','type','message','payload','createdAt','readAt']);
+    const row = [
+      email,
+      type,
+      message || '',
+      JSON.stringify(payloadObj || {}),
+      new Date().toISOString(),
+      ''
+    ];
+    sh.appendRow(row);
+  } catch (e) {
+    console.error('_addNotification error', e);
+  }
+}
+
+// ===== Email Notification Helper =====
+// Lightweight wrapper so callers can safely check typeof sendEmailNotification === 'function'
+function sendEmailNotification(toEmail, subject, body) {
+  try {
+    if (!toEmail) return false;
+    subject = subject || 'Notification';
+    body = body || '';
+    // MailApp is available in Google Apps Script runtime
+    MailApp.sendEmail({
+      to: String(toEmail),
+      subject: String(subject),
+      htmlBody: String(body),
+      name: 'EnhanceFlow'
+    });
+    return true;
+  } catch (e) {
+    // Keep silent failures from breaking flow; log for diagnostics
+    try { console.error('sendEmailNotification error', e && e.message ? e.message : String(e)); } catch (ee) {}
+    return false;
   }
 }
 
@@ -1056,5 +1129,66 @@ function applyChapterCompletionAction(params) {
     return { success: false, error: e && e.message ? e.message : String(e) };
   } finally {
     try { if (lock) lock.releaseLock(); } catch (ee) {}
+  }
+}
+
+// ===== Google Sign-In: Token Verification =====
+function _verifyGoogleIdToken(idToken, expectedClientId) {
+  try {
+    if (!idToken) return { success: false, error: 'Missing id_token' };
+    var url = 'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken);
+    var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, method: 'get' });
+    var status = res.getResponseCode();
+    if (status < 200 || status >= 300) {
+      return { success: false, error: 'Tokeninfo request failed', status: status, body: res.getContentText() };
+    }
+    var info = JSON.parse(res.getContentText() || '{}');
+    var aud = String(info.aud || '');
+    var email = String(info.email || '').toLowerCase();
+    var emailVerified = String(info.email_verified || '').toLowerCase();
+    if (expectedClientId && aud !== expectedClientId) {
+      return { success: false, error: 'Invalid audience', aud: aud };
+    }
+    if (!email) {
+      return { success: false, error: 'Email missing in token' };
+    }
+    return { success: true, tokenInfo: info, email: email, emailVerified: emailVerified === 'true' || emailVerified === '1' };
+  } catch (e) {
+    return { success: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
+function _getUserByEmail(email) {
+  try {
+    var sh = _getSheet('Users');
+    var hdr = _headers(sh);
+    var rows = _rows(sh).map(function(r){ return _indexByHeader(r, hdr); });
+    var target = String(email || '').toLowerCase().trim();
+    var u = rows.find(function(row){ return String(row.email || '').toLowerCase().trim() === target; });
+    if (!u) return null;
+    return {
+      email: String(u.email || '').toLowerCase(),
+      name: u.name || u.email || '',
+      roles: u.roles || u.role || '',
+      classes: u.classes || '',
+      subjects: u.subjects || ''
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Public helper: verify token and return user profile + roles
+function verifyGoogleLogin(idToken) {
+  try {
+    var settings = _getCachedSettings();
+    var expectedClientId = settings['GOOGLE_OAUTH_CLIENT_ID'] || '';
+    var check = _verifyGoogleIdToken(idToken, expectedClientId);
+    if (!check.success) return { success: false, error: check.error || 'Token verification failed', details: check };
+    var user = _getUserByEmail(check.email);
+    if (!user) return { success: false, error: 'User not found in directory', email: check.email };
+    return { success: true, user: user, emailVerified: check.emailVerified };
+  } catch (e) {
+    return { success: false, error: e && e.message ? e.message : String(e) };
   }
 }

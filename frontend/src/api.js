@@ -317,6 +317,11 @@ export async function updateLessonPlanDetailsStatus(lpId, status, remarks='') {
   return postJSON(`${BASE_URL}?action=updateLessonPlanDetailsStatus`, { lpId, status, remarks })
 }
 
+// Batch update lesson plan statuses (for HM approval)
+export async function batchUpdateLessonPlanStatus(lessonPlanIds, status, reviewComments='') {
+  return postJSON(`${BASE_URL}?action=batchUpdateLessonPlanStatus`, { lessonPlanIds, status, reviewComments })
+}
+
 // Get approved lesson plans for report
 export async function getApprovedLessonPlansForReport(email, cls, subject) {
   const q = new URLSearchParams({ action: "getApprovedLessonPlansForReport", email, class: cls, subject });

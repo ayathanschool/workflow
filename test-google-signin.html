@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EnhanceFlow - Google Sign-In Test</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 24px; }
+    .row { margin-bottom: 12px; }
+    input { padding: 8px; width: 480px; }
+    button { padding: 8px 12px; }
+    pre { background: #f6f8fa; padding: 12px; border-radius: 6px; max-width: 800px; overflow: auto; }
+    #gsi-container { margin: 12px 0; }
+    .ok { color: #0a860a; }
+    .err { color: #b00020; }
+  </style>
+</head>
+<body>
+  <h2>Google Sign-In → GAS auth.verify</h2>
+
+  <div class="row">
+    <label>Google Client ID</label><br/>
+    <input id="clientId" placeholder="YOUR_GOOGLE_OAUTH_CLIENT_ID" />
+  </div>
+
+  <div class="row">
+    <label>API Base URL (GAS Web App)</label><br/>
+    <input id="apiBase" placeholder="https://script.google.com/macros/s/DEPLOYMENT_ID/exec" />
+  </div>
+
+  <div id="gsi-container"></div>
+  <button id="initBtn">Load Sign-In Button</button>
+
+  <h3>Status</h3>
+  <div id="status"></div>
+
+  <h3>Result</h3>
+  <pre id="out"></pre>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const outEl = document.getElementById('out');
+
+    function logStatus(msg, ok) {
+      statusEl.innerHTML = `<span class="${ok ? 'ok' : 'err'}">${msg}</span>`;
+    }
+    function logOut(obj) {
+      outEl.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+    }
+
+    function getAuthVerify(apiBase, idToken) {
+      const url = `${apiBase}?action=auth.verify&token=${encodeURIComponent(idToken)}`;
+      return fetch(url, { method: 'GET' }).then(async (res) => {
+        const text = await res.text();
+        let json;
+        try { json = JSON.parse(text); } catch (e) { json = { raw: text }; }
+        return json;
+      });
+    }
+
+    function initButton() {
+      const clientId = document.getElementById('clientId').value.trim();
+      const apiBase = document.getElementById('apiBase').value.trim();
+      if (!clientId) { logStatus('Enter Google Client ID', false); return; }
+      if (!apiBase) { logStatus('Enter GAS API Base URL', false); return; }
+
+      if (!window.google || !google.accounts || !google.accounts.id) {
+        logStatus('GIS script not loaded yet. Wait a moment.', false);
+        return;
+      }
+      logStatus('Initializing Google Sign-In…', true);
+
+      google.accounts.id.initialize({
+        client_id: clientId,
+        callback: async ({ credential }) => {
+          logStatus('Credential received. Verifying…', true);
+          try {
+            const result = await getAuthVerify(apiBase, credential);
+            logOut(result);
+            if (result && result.data && result.data.success) {
+              logStatus('Login verified with backend.', true);
+            } else {
+              logStatus('Verification failed. See result below.', false);
+            }
+          } catch (e) {
+            logStatus('Network/verification error. See console.', false);
+            console.error(e);
+          }
+        },
+      });
+
+      const container = document.getElementById('gsi-container');
+      container.innerHTML = '';
+      google.accounts.id.renderButton(container, { theme: 'outline', size: 'large' });
+      google.accounts.id.prompt();
+      logStatus('Sign-In button ready. Click to continue.', true);
+    }
+
+    document.getElementById('initBtn').addEventListener('click', initButton);
+  </script>
+</body>
+</html>

@@ -168,7 +168,23 @@ export default function GoogleAuthProvider({ children }) {
 	const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 	if (!clientId) {
 		console.warn('VITE_GOOGLE_CLIENT_ID not set: Google login will be disabled');
-		return children;
+		// Provide a context with an error so UI can gracefully fall back to email login
+		const disabledValue = {
+			user: null,
+			roles: [],
+			idToken: null,
+			loading: false,
+			error: 'Google login disabled: VITE_GOOGLE_CLIENT_ID is not configured',
+			loginWithGoogle: () => {
+				console.warn('Google login attempted but client ID is missing. Falling back to email login.');
+			},
+			logout: () => {}
+		};
+		return (
+			<GoogleAuthContext.Provider value={disabledValue}>
+				{children}
+			</GoogleAuthContext.Provider>
+		);
 	}
 	return (
 		<GoogleOAuthProvider clientId={clientId}>
