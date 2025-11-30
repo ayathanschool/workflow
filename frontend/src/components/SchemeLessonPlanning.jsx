@@ -48,7 +48,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   const [submitting, setSubmitting] = useState(false);
   const [showLessonPlanForm, setShowLessonPlanForm] = useState(false);
   const [planningDateRange, setPlanningDateRange] = useState(null);
-  const [classFilter, setClassFilter] = useState('all'); // NEW: Class filter state
+  const [classFilter, setClassFilter] = useState('all');
   const [lessonPlanData, setLessonPlanData] = useState({
     learningObjectives: '',
     teachingMethods: '',
@@ -57,6 +57,10 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
     selectedDate: '',
     selectedPeriod: ''
   });
+  
+  // Bulk preparation state
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkPrepData, setBulkPrepData] = useState(null);
 
   useEffect(() => {
     loadApprovedSchemes();
@@ -313,6 +317,16 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
         return <Clock className="w-4 h-4 text-gray-400" />;
     }
   };
+  
+  const handleBulkPrepareClick = (scheme, chapter) => {
+    console.log('Bulk prepare clicked:', { scheme, chapter });
+    setBulkPrepData({
+      scheme,
+      chapter,
+      sessionCount: chapter.totalSessions
+    });
+    setShowBulkModal(true);
+  };
 
   const getProgressColor = (percentage) => {
     if (percentage >= 80) return 'bg-green-500';
@@ -453,9 +467,24 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   {scheme.chapters.map((chapter) => (
                     <div key={`${scheme.schemeId}-${chapter.chapterNumber}`} className="border-l-4 border-blue-200 pl-4">
                       <div className="flex items-center justify-between mb-2">
-                        <h4 className="font-medium text-gray-800">
-                          Chapter {chapter.chapterNumber}: {chapter.chapterName}
-                        </h4>
+                        <div className="flex items-center gap-3">
+                          <h4 className="font-medium text-gray-800">
+                            Chapter {chapter.chapterNumber}: {chapter.chapterName}
+                          </h4>
+                          {chapter.plannedSessions === 0 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleBulkPrepareClick(scheme, chapter);
+                              }}
+                              className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors inline-flex items-center gap-1"
+                              title="Prepare all sessions at once"
+                            >
+                              <Plus className="w-3 h-3" />
+                              Prepare All ({chapter.totalSessions})
+                            </button>
+                          )}
+                        </div>
                         <span className="text-xs bg-gray-100 px-2 py-1 rounded">
                           {chapter.plannedSessions}/{chapter.totalSessions} planned
                         </span>
@@ -611,21 +640,31 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                     <span className="text-sm text-gray-500 mt-2">Loading available periods...</span>
                   </div>
                 ) : availablePeriods.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg border border-gray-200">
-                    <AlertCircle className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-                    <p className="font-medium">No available periods found</p>
-                    <p className="text-sm mt-1">All your periods for the next 4 weeks are occupied or no timetable entries exist.</p>
+                  <div className="text-center py-8 bg-amber-50 rounded-lg border-2 border-amber-300">
+                    <AlertCircle className="w-10 h-10 mx-auto mb-3 text-amber-600" />
+                    <p className="font-semibold text-amber-900 mb-2">No Periods Found</p>
+                    <div className="text-sm text-amber-800 space-y-2 max-w-md mx-auto">
+                      <p>Your timetable doesn't have <strong>{selectedSession?.subject}</strong> for <strong>{selectedSession?.class}</strong> in the planning window.</p>
+                      <p className="text-xs mt-2">Please check:</p>
+                      <ul className="list-disc list-inside text-xs text-left inline-block">
+                        <li>Timetable has this class/subject assigned to you</li>
+                        <li>Planning window date range is correct</li>
+                      </ul>
+                    </div>
                   </div>
                 ) : availablePeriods.filter(p => p.isAvailable).length === 0 ? (
-                  <div className="text-center py-8 text-amber-600 bg-amber-50 rounded-lg border border-amber-200">
-                    <AlertCircle className="w-8 h-8 mx-auto mb-2 text-amber-500" />
-                    <p className="font-medium">All periods are occupied</p>
-                    <p className="text-sm mt-1">
-                      Found {availablePeriods.length} periods, but all are already planned. 
-                      <button onClick={() => setLoadingPeriods(true) || loadAvailablePeriods(selectedSession)} className="underline ml-1">
-                        Refresh
-                      </button>
+                  <div className="text-center py-8 text-amber-600 bg-amber-50 rounded-lg border-2 border-amber-300">
+                    <AlertCircle className="w-10 h-10 mx-auto mb-3 text-amber-500" />
+                    <p className="font-semibold text-amber-900 mb-2">All Periods Occupied</p>
+                    <p className="text-sm text-amber-800">
+                      Found {availablePeriods.length} periods for <strong>{selectedSession?.class} {selectedSession?.subject}</strong>, but all are already planned.
                     </p>
+                    <button 
+                      onClick={() => { setLoadingPeriods(true); loadAvailablePeriods(selectedSession); }}
+                      className="mt-3 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-2"
+                    >
+                      🔄 Refresh Periods
+                    </button>
                   </div>
                 ) : (
                   <div>
@@ -761,6 +800,309 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
           </div>
         </div>
       )}
+      
+      {/* Bulk Preparation Modal */}
+      {showBulkModal && bulkPrepData && (
+        <BulkPreparationModal
+          data={bulkPrepData}
+          userEmail={userEmail}
+          userName={userName}
+          onClose={() => {
+            setShowBulkModal(false);
+            setBulkPrepData(null);
+          }}
+          onSuccess={() => {
+            setShowBulkModal(false);
+            setBulkPrepData(null);
+            loadApprovedSchemes(); // Reload to show updated status
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+// Bulk Preparation Modal Component
+const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess }) => {
+  // Initialize session-specific data
+  const [sessions, setSessions] = useState(
+    Array.from({ length: data.sessionCount }, (_, idx) => ({
+      sessionNumber: idx + 1,
+      learningObjectives: '',
+      teachingMethods: '',
+      resourcesRequired: '',
+      assessmentMethods: ''
+    }))
+  );
+  const [currentSession, setCurrentSession] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
+  const loadPreview = async () => {
+    setLoadingPreview(true);
+    try {
+      const response = await api.getAvailablePeriodsForLessonPlan(
+        userEmail,
+        data.scheme.planningDateRange?.startDate || new Date().toISOString().split('T')[0],
+        data.scheme.planningDateRange?.endDate || new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0],
+        true,
+        data.scheme.class,
+        data.scheme.subject
+      );
+      
+      const actualData = response?.data || response;
+      if (actualData.success && actualData.availableSlots) {
+        const available = actualData.availableSlots.filter(p => p.isAvailable);
+        setPreview(available.slice(0, data.sessionCount));
+      }
+    } catch (error) {
+      console.error('Error loading preview:', error);
+      alert('Failed to load period preview: ' + error.message);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  useEffect(() => {
+    loadPreview();
+  }, []);
+
+  const updateSession = (field, value) => {
+    const updated = [...sessions];
+    updated[currentSession][field] = value;
+    setSessions(updated);
+  };
+
+  const handleNext = () => {
+    if (currentSession < sessions.length - 1) {
+      setCurrentSession(currentSession + 1);
+    }
+  };
+
+  const handlePrev = () => {
+    if (currentSession > 0) {
+      setCurrentSession(currentSession - 1);
+    }
+  };
+
+  const canProceed = () => {
+    const current = sessions[currentSession];
+    return current.learningObjectives.trim() && current.teachingMethods.trim();
+  };
+
+  const allSessionsComplete = () => {
+    return sessions.every(s => s.learningObjectives.trim() && s.teachingMethods.trim());
+  };
+
+  const handleSubmit = async () => {
+    if (!allSessionsComplete()) {
+      alert('Please fill in Learning Objectives and Teaching Methods for all sessions');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const bulkData = {
+        schemeId: data.scheme.schemeId,
+        chapter: data.chapter.chapterName,
+        sessionCount: data.sessionCount,
+        teacherEmail: userEmail,
+        teacherName: userName,
+        sessionObjectives: sessions.map(s => s.learningObjectives),
+        sessionMethods: sessions.map(s => s.teachingMethods),
+        sessionResources: sessions.map(s => s.resourcesRequired),
+        sessionAssessments: sessions.map(s => s.assessmentMethods),
+        // For backward compatibility, send first session's data as defaults
+        learningObjectives: sessions[0].learningObjectives,
+        teachingMethods: sessions[0].teachingMethods,
+        resourcesRequired: sessions[0].resourcesRequired,
+        assessmentMethods: sessions[0].assessmentMethods
+      };
+
+      console.log('Submitting bulk lesson plans:', bulkData);
+      const response = await api.createBulkSchemeLessonPlans(bulkData);
+      
+      const actualData = response?.data || response;
+      if (actualData && actualData.success) {
+        alert(`✅ Successfully created ${actualData.createdCount} lesson plans!`);
+        onSuccess();
+      } else {
+        const errorMsg = actualData?.error || actualData?.message || 'Unknown error occurred';
+        console.error('Bulk creation failed:', errorMsg);
+        alert('Error: ' + errorMsg);
+      }
+    } catch (err) {
+      console.error('Exception submitting bulk plans:', err);
+      alert('Error: ' + err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const session = sessions[currentSession];
+  const assignedPeriod = preview ? preview[currentSession] : null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-bold text-gray-900">
+              {data.chapter.chapterName}
+            </h3>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Progress indicator */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-gray-700">
+                Session {currentSession + 1} of {data.sessionCount}
+              </span>
+              <span className="text-xs text-gray-500">
+                {sessions.filter(s => s.learningObjectives.trim() && s.teachingMethods.trim()).length}/{data.sessionCount} completed
+              </span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div
+                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${((currentSession + 1) / data.sessionCount) * 100}%` }}
+              ></div>
+            </div>
+          </div>
+
+          <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+            <p className="text-sm text-blue-800">
+              <strong>{data.scheme.class} - {data.scheme.subject}</strong>
+            </p>
+          </div>
+
+          {/* Assigned Period for Current Session */}
+          {loadingPreview ? (
+            <div className="mb-4 p-4 bg-gray-50 rounded-lg text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+              <p className="text-sm text-gray-600">Loading available periods...</p>
+            </div>
+          ) : assignedPeriod ? (
+            <div className="mb-4 p-4 bg-green-50 rounded-lg border border-green-200">
+              <h4 className="font-medium text-green-900 mb-2">📅 Assigned Period:</h4>
+              <div className="text-sm">
+                <div className="font-medium">{assignedPeriod.dayName}, {assignedPeriod.date}</div>
+                <div className="text-gray-700">Period {assignedPeriod.period} ({assignedPeriod.startTime}-{assignedPeriod.endTime})</div>
+              </div>
+            </div>
+          ) : (
+            <div className="mb-4 p-4 bg-red-50 rounded-lg">
+              <p className="text-sm text-red-800">⚠️ Not enough available periods</p>
+            </div>
+          )}
+
+          {/* Session Form */}
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Learning Objectives * <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
+              </label>
+              <textarea
+                value={session.learningObjectives}
+                onChange={(e) => updateSession('learningObjectives', e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                rows="3"
+                placeholder="What will students learn in this specific session?"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Teaching Methods * <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
+              </label>
+              <textarea
+                value={session.teachingMethods}
+                onChange={(e) => updateSession('teachingMethods', e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                rows="3"
+                placeholder="How will you teach this session?"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Resources Required <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
+              </label>
+              <textarea
+                value={session.resourcesRequired}
+                onChange={(e) => updateSession('resourcesRequired', e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                rows="2"
+                placeholder="Materials, tools, or resources needed"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Assessment Methods <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
+              </label>
+              <textarea
+                value={session.assessmentMethods}
+                onChange={(e) => updateSession('assessmentMethods', e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                rows="2"
+                placeholder="How will you assess student learning?"
+              />
+            </div>
+          </div>
+
+          {/* Navigation & Submit */}
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            
+            <div className="flex-1 flex gap-2">
+              <button
+                onClick={handlePrev}
+                disabled={currentSession === 0}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ← Previous
+              </button>
+              
+              {currentSession < sessions.length - 1 ? (
+                <button
+                  onClick={handleNext}
+                  disabled={!canProceed()}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                >
+                  Next →
+                </button>
+              ) : (
+                <button
+                  onClick={handleSubmit}
+                  disabled={submitting || !allSessionsComplete() || !preview}
+                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center"
+                >
+                  {submitting ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Creating...
+                    </>
+                  ) : (
+                    `Create All ${data.sessionCount} Plans`
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

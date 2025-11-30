@@ -958,6 +958,14 @@ export async function createSchemeLessonPlan(lessonPlanData) {
   });
 }
 
+// Create bulk scheme-based lesson plans (all sessions at once)
+export async function createBulkSchemeLessonPlans(bulkPlanData) {
+  return postJSON(BASE_URL, {
+    action: 'createBulkSchemeLessonPlans',
+    bulkPlanData
+  });
+}
+
 // Get all teachers
 export async function getAllTeachers() {
   const q = new URLSearchParams({

@@ -692,6 +692,15 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
     }
     
     Logger.log(`Filtering periods for class: ${schemeClass}, subject: ${schemeSubject}`);
+    Logger.log(`Teacher has ${teacherTimetable.length} total timetable entries`);
+    
+    // DEBUG: Log first few timetable entries to see format
+    if (teacherTimetable.length > 0) {
+      Logger.log('Sample timetable entries:');
+      teacherTimetable.slice(0, 3).forEach(slot => {
+        Logger.log(`  class="${slot.class}" subject="${slot.subject}" day="${slot.dayOfWeek}" period="${slot.period}"`);
+      });
+    }
     
     // Generate available slots within planning window (Monday-Friday only)
     const availableSlots = [];
@@ -709,6 +718,12 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
         // ONLY show periods that match the scheme's class and subject (trim + case-insensitive)
         const classMatch = String(slot.class || '').toLowerCase().trim() === String(schemeClass || '').toLowerCase().trim();
         const subjectMatch = String(slot.subject || '').toLowerCase().trim() === String(schemeSubject || '').toLowerCase().trim();
+        
+        // DEBUG: Log comparison for first day
+        if (date.getTime() === planningStartDate.getTime()) {
+          Logger.log(`${dayName}: Slot class="${slot.class}" vs scheme="${schemeClass}" → ${classMatch ? 'MATCH' : 'NO MATCH'}`);
+          Logger.log(`${dayName}: Slot subject="${slot.subject}" vs scheme="${schemeSubject}" → ${subjectMatch ? 'MATCH' : 'NO MATCH'}`);
+        }
         
         return dayMatch && classMatch && subjectMatch;
       });
@@ -959,6 +974,175 @@ function createSchemeLessonPlan(lessonPlanData) {
     } catch (e) {
       Logger.log(`Error releasing lock: ${e.message}`);
     }
+  }
+}
+
+/**
+ * Create multiple lesson plans for all sessions of a chapter at once
+ * BULK OPERATION: Auto-assigns next N available periods
+ */
+function createBulkSchemeLessonPlans(bulkData) {
+  var lock = LockService.getDocumentLock();
+  try {
+    Logger.log(`Creating bulk lesson plans: ${JSON.stringify(bulkData)}`);
+    
+    // Validate required bulk fields
+    const requiredFields = ['schemeId', 'chapter', 'sessionCount', 'teacherEmail'];
+    const missing = requiredFields.filter(field => !String(bulkData[field] ?? '').trim());
+    if (missing.length) {
+      return { success: false, error: `Missing required fields: ${missing.join(', ')}` };
+    }
+    
+    // Validate pedagogy fields (common for all sessions)
+    if (!String(bulkData.learningObjectives || '').trim()) {
+      return { success: false, error: 'Learning objectives are required' };
+    }
+    if (!String(bulkData.teachingMethods || '').trim()) {
+      return { success: false, error: 'Teaching methods are required' };
+    }
+    
+    // Get scheme details
+    const schemeDetails = _getSchemeDetails(bulkData.schemeId);
+    if (!schemeDetails) {
+      return { success: false, error: 'Scheme not found' };
+    }
+    
+    // Get available periods for this class/subject
+    const sessionCount = parseInt(bulkData.sessionCount);
+    const dateRange = _calculateLessonPlanningDateRange();
+    
+    const periodsResult = getAvailablePeriodsForLessonPlan(
+      bulkData.teacherEmail,
+      dateRange.startDate,
+      dateRange.endDate,
+      true, // exclude existing
+      schemeDetails.class,
+      schemeDetails.subject
+    );
+    
+    if (!periodsResult.success) {
+      return { success: false, error: 'Failed to fetch available periods: ' + periodsResult.error };
+    }
+    
+    const availablePeriods = periodsResult.availableSlots.filter(p => p.isAvailable);
+    
+    if (availablePeriods.length < sessionCount) {
+      return { 
+        success: false, 
+        error: `Not enough available periods. Need ${sessionCount}, found ${availablePeriods.length}` 
+      };
+    }
+    
+    // Acquire lock before creating multiple records
+    lock.waitLock(10000);
+    
+    const lessonPlansSheet = _getSheet('LessonPlans');
+    const headers = _headers(lessonPlansSheet);
+    _ensureHeaders(lessonPlansSheet, [
+      'lpId', 'schemeId', 'teacherEmail', 'teacherName', 'class', 'subject',
+      'chapter', 'session', 'selectedDate', 'selectedPeriod',
+      'learningObjectives', 'teachingMethods', 'resourcesRequired', 'assessmentMethods',
+      'status', 'createdAt', 'submittedAt', 'isDuplicate', 'lessonType',
+      'reviewComments', 'reviewedAt', 'uniqueKey'
+    ]);
+    
+    const finalHeaders = _headers(lessonPlansSheet);
+    const timestamp = new Date().toISOString();
+    const createdPlans = [];
+    const errors = [];
+    
+    // Create lesson plans for each session
+    for (let i = 0; i < sessionCount; i++) {
+      const sessionNumber = i + 1;
+      const period = availablePeriods[i];
+      
+      try {
+        const lpId = _generateId('LP_');
+        const isoDate = _isoDateString(period.date);
+        const periodStr = String(period.period).trim();
+        const uniqueKey = `${(bulkData.teacherEmail || '').toLowerCase()}|${isoDate}|${periodStr}`;
+        
+        // Get session-specific data if provided, otherwise use common/first session data
+        const sessionObjectives = (bulkData.sessionObjectives && bulkData.sessionObjectives[i]) 
+          ? bulkData.sessionObjectives[i] 
+          : bulkData.learningObjectives;
+        
+        const sessionMethods = (bulkData.sessionMethods && bulkData.sessionMethods[i])
+          ? bulkData.sessionMethods[i]
+          : bulkData.teachingMethods;
+        
+        const sessionResources = (bulkData.sessionResources && bulkData.sessionResources[i])
+          ? bulkData.sessionResources[i]
+          : bulkData.resourcesRequired || '';
+        
+        const sessionAssessments = (bulkData.sessionAssessments && bulkData.sessionAssessments[i])
+          ? bulkData.sessionAssessments[i]
+          : bulkData.assessmentMethods || '';
+        
+        const rowObject = {
+          lpId: lpId,
+          schemeId: bulkData.schemeId,
+          teacherEmail: bulkData.teacherEmail,
+          teacherName: bulkData.teacherName || '',
+          class: schemeDetails.class,
+          subject: schemeDetails.subject,
+          chapter: bulkData.chapter,
+          session: sessionNumber,
+          selectedDate: isoDate,
+          selectedPeriod: periodStr,
+          learningObjectives: sessionObjectives,
+          teachingMethods: sessionMethods,
+          resourcesRequired: sessionResources,
+          assessmentMethods: sessionAssessments,
+          status: 'Pending Review',
+          createdAt: timestamp,
+          submittedAt: timestamp,
+          isDuplicate: false,
+          lessonType: 'scheme-based',
+          reviewComments: '',
+          reviewedAt: '',
+          uniqueKey: uniqueKey
+        };
+        
+        const rowData = finalHeaders.map(h => rowObject[h] !== undefined ? rowObject[h] : '');
+        lessonPlansSheet.appendRow(rowData);
+        
+        createdPlans.push({
+          lpId: lpId,
+          session: sessionNumber,
+          date: isoDate,
+          period: periodStr,
+          dayName: period.dayName
+        });
+        
+      } catch (sessionError) {
+        Logger.log(`Error creating session ${sessionNumber}: ${sessionError.message}`);
+        errors.push(`Session ${sessionNumber}: ${sessionError.message}`);
+      }
+    }
+    
+    if (createdPlans.length === 0) {
+      return { 
+        success: false, 
+        error: 'Failed to create any lesson plans', 
+        errors: errors 
+      };
+    }
+    
+    return {
+      success: true,
+      message: `Created ${createdPlans.length} lesson plans successfully`,
+      createdCount: createdPlans.length,
+      requestedCount: sessionCount,
+      plans: createdPlans,
+      errors: errors.length > 0 ? errors : undefined
+    };
+    
+  } catch (error) {
+    Logger.log(`Bulk lesson plan creation error: ${error.message}`);
+    return { success: false, error: error.message };
+  } finally {
+    try { if (lock) lock.releaseLock(); } catch (e) {}
   }
 }
 

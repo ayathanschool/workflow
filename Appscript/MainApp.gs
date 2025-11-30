@@ -901,6 +901,10 @@
         return _handleCreateSchemeLessonPlan(data);
       }
       
+      if (action === 'createBulkSchemeLessonPlans') {
+        return _handleCreateBulkSchemeLessonPlans(data);
+      }
+      
       // === CHAPTER COMPLETION ROUTES ===
       if (action === 'checkChapterCompletion') {
         return _handleCheckChapterCompletion(data);
@@ -1915,6 +1919,28 @@
       Logger.log(`ERROR in _handleCreateSchemeLessonPlan: ${error.message}`);
       Logger.log(`Error stack: ${error.stack}`);
       console.error('Error handling create scheme lesson plan:', error);
+      return _respond({ success: false, error: error.message || 'Unknown error occurred' });
+    }
+  }
+  
+  /**
+  * Handle POST create bulk scheme lesson plans
+  */
+  function _handleCreateBulkSchemeLessonPlans(data) {
+    try {
+      Logger.log(`_handleCreateBulkSchemeLessonPlans called with data: ${JSON.stringify(data)}`);
+      
+      if (!data.bulkPlanData) {
+        Logger.log('ERROR: No bulkPlanData in request');
+        return _respond({ success: false, error: 'No bulk plan data provided' });
+      }
+      
+      const result = createBulkSchemeLessonPlans(data.bulkPlanData);
+      return _respond(result);
+    } catch (error) {
+      Logger.log(`ERROR in _handleCreateBulkSchemeLessonPlans: ${error.message}`);
+      Logger.log(`Error stack: ${error.stack}`);
+      console.error('Error handling create bulk scheme lesson plans:', error);
       return _respond({ success: false, error: error.message || 'Unknown error occurred' });
     }
   }

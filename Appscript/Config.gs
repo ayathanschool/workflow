@@ -24,7 +24,7 @@ const SHEETS = {
   // Schemes sheet headers expanded to include approval + academic context columns
   // Must match MainApp _handleSubmitScheme headers to prevent header resets truncating columns
   Schemes: ['schemeId','teacherEmail','teacherName','class','subject','term','unit','chapter','month','noOfSessions','status','createdAt','approvedAt','academicYear','content'],
-  LessonPlans: ['lpId','schemeId','teacherEmail','teacherName','class','subject','chapter','session','selectedDate','selectedPeriod','learningObjectives','teachingMethods','resourcesRequired','assessmentMethods','status','createdAt','submittedAt','isDuplicate','lessonType','reviewerRemarks'],
+  LessonPlans: ['lpId','schemeId','teacherEmail','teacherName','class','subject','chapter','session','selectedDate','selectedPeriod','learningObjectives','teachingMethods','resourcesRequired','assessmentMethods','status','createdAt','submittedAt','isDuplicate','lessonType','reviewComments','reviewedAt','uniqueKey','originalDate','originalPeriod','cancelledAt','cancelReason','forRevision'],
   DailyReports: ['id','date','teacherEmail','teacherName','class','subject','period','planType','lessonPlanId','chapter','sessionNo','totalSessions','completionPercentage','chapterStatus','deviationReason','difficulties','nextSessionPlan','objectives','activities','completed','notes','createdAt','isSubstitution','absentTeacher','regularSubject','substituteSubject','verified','verifiedBy','verifiedAt','reopenReason','reopenedBy','reopenedAt'],
   
   // === SYLLABUS & CALENDAR (2 sheets) ===

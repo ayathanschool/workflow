@@ -96,6 +96,7 @@ function _headers(sh) {
 
 /**
  * Make sure a sheet has the correct column headers
+ * ADDITIVE APPROACH: Only adds missing columns, preserves existing headers
  */
 function _ensureHeaders(sh, cols) {
   const h = _headers(sh);
@@ -106,27 +107,20 @@ function _ensureHeaders(sh, cols) {
     return;
   }
   
-  // If sheet has data but headers are different, update them
-  let needsUpdate = false;
+  // ADDITIVE: Only add columns that are missing at the end
+  const currentLength = h.length;
+  const requiredLength = cols.length;
   
-  // Check if we need more columns
-  if (cols.length > h.length) {
-    needsUpdate = true;
+  if (requiredLength > currentLength) {
+    // Add missing columns at the end
+    const missingCols = cols.slice(currentLength);
+    const startCol = currentLength + 1;
+    sh.getRange(1, startCol, 1, missingCols.length).setValues([missingCols]);
+    Logger.log(`Added ${missingCols.length} new columns to ${sh.getName()}: ${missingCols.join(', ')}`);
   }
   
-  // Check if any headers are missing or different
-  for (let i = 0; i < cols.length; i++) {
-    if (h[i] !== cols[i]) {
-      needsUpdate = true;
-      break;
-    }
-  }
-  
-  if (needsUpdate) {
-    // Update the header row with the new headers
-    sh.getRange(1, 1, 1, cols.length).setValues([cols]);
-    Logger.log(`Updated headers for sheet ${sh.getName()}: ${cols.join(', ')}`);
-  }
+  // NOTE: If columns exist with different names, we preserve user's choice
+  // This prevents overwriting manual corrections
 }
 
 /**

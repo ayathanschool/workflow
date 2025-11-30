@@ -610,34 +610,43 @@ export default function DailyReportModern({ user }) {
               date: date
             });
             const checkResult = completionCheck.data || completionCheck;
-            if (checkResult.success && checkResult.hasRemainingPlans) {
-              const remainingPlans = checkResult.remainingPlans || [];
-              const uniqueDates = Array.from(new Set(remainingPlans.map(p => p.selectedDate))).sort();
-              const earliestDate = uniqueDates[0] || null;
-              const latestDate = uniqueDates[uniqueDates.length - 1] || null;
-              const periodsFreed = remainingPlans.length; // if cancelled
-              // Simple heuristic: if many sessions remain, recommend cancel; if only 1, recommend keep for revision
-              const recommendedAction = remainingPlans.length <= 1 ? 'keep' : 'cancel';
-              setCompletionModalData({
-                chapter: chapter,
-                class: period.class,
-                subject: period.subject,
-                remainingPlans: remainingPlans,
-                earliestDate,
-                latestDate,
-                periodsFreed,
-                recommendedAction,
-                loading: false
-              });
+            
+            if (checkResult.success) {
+              if (checkResult.hasRemainingPlans && checkResult.remainingPlans && checkResult.remainingPlans.length > 0) {
+                // Has remaining plans - show modal with options
+                const remainingPlans = checkResult.remainingPlans || [];
+                const uniqueDates = Array.from(new Set(remainingPlans.map(p => p.selectedDate))).sort();
+                const earliestDate = uniqueDates[0] || null;
+                const latestDate = uniqueDates[uniqueDates.length - 1] || null;
+                const periodsFreed = remainingPlans.length; // if cancelled
+                // Simple heuristic: if many sessions remain, recommend cancel; if only 1, recommend keep for revision
+                const recommendedAction = remainingPlans.length <= 1 ? 'keep' : 'cancel';
+                setCompletionModalData({
+                  chapter: chapter,
+                  class: period.class,
+                  subject: period.subject,
+                  remainingPlans: remainingPlans,
+                  earliestDate,
+                  latestDate,
+                  periodsFreed,
+                  recommendedAction,
+                  loading: false
+                });
+                // Keep modal open so user can choose action
+              } else {
+                // No remaining plans; close modal and show success message
+                setShowCompletionModal(false);
+                setMessage({ text: '🎉 Chapter completed – no remaining planned sessions!', type: 'success' });
+              }
             } else {
-              // No remaining plans; close modal and show toast
+              // API returned error
               setShowCompletionModal(false);
-              setMessage({ text: 'Chapter completed – no remaining planned sessions.', type: 'info' });
+              setMessage({ text: `Chapter completion check failed: ${checkResult.error || 'Unknown error'}`, type: 'error' });
             }
           } catch (checkError) {
             console.error('Error checking chapter completion:', checkError);
-            setCompletionModalData(prev => ({ ...prev, loading: false }));
-            setMessage({ text: 'Chapter completion check failed', type: 'warning' });
+            setShowCompletionModal(false);
+            setMessage({ text: `Error: ${checkError.message || 'Chapter completion check failed'}`, type: 'error' });
           }
         }
 
@@ -860,41 +869,43 @@ export default function DailyReportModern({ user }) {
       {showCompletionModal && completionModalData && (
         <ChapterCompletionModal
           data={completionModalData}
-          onClose={() => setShowCompletionModal(false)}
+          onClose={() => {
+            // Prevent closing while loading or processing
+            if (!completionModalData.loading && !completionModalData.processing) {
+              setShowCompletionModal(false);
+            }
+          }}
           onAction={async (action) => {
             try {
               const lessonPlanIds = completionModalData.remainingPlans.map(p => p.lpId);
               console.log('📤 SENDING TO BACKEND:', { userAction: action, lessonPlanIds });
-              console.log('   User Action:', action);
-              console.log('   IDs:', lessonPlanIds);
-              console.log('   Number of IDs:', lessonPlanIds.length);
               
               const result = await applyChapterCompletionAction({ userAction: action, lessonPlanIds });
               
               console.log('📥 BACKEND RESPONSE:', result);
-              console.log('   result.data:', result?.data);
-              console.log('   result.status:', result?.status);
               
               // Unwrap response if wrapped in {status, data, timestamp} structure
               const actualData = result?.data || result;
               
               console.log('📦 UNWRAPPED DATA:', actualData);
-              console.log('   Success:', actualData?.success);
-              console.log('   Updated count:', actualData?.updatedCount);
-              console.log('   Message:', actualData?.message);
               
+              if (actualData?.success === false) {
+                throw new Error(actualData?.error || actualData?.message || 'Action failed');
+              }
+              
+              // Close modal on success
               setShowCompletionModal(false);
               
               if (actualData?.updatedCount === 0) {
                 setMessage({
                   text: '⚠️ No lesson plans were updated. Please check the lesson plan IDs.',
-                  type: 'error'
+                  type: 'warning'
                 });
               } else {
                 setMessage({
                   text: action === 'cancel' 
                     ? `✅ ${actualData?.updatedCount || 0} lesson plan(s) cancelled successfully!`
-                    : '📚 Lesson plans kept for revision',
+                    : `📚 ${actualData?.updatedCount || 0} lesson plan(s) kept for revision`,
                   type: 'success'
                 });
               }
@@ -902,10 +913,9 @@ export default function DailyReportModern({ user }) {
               // No need to reload data - daily report already submitted and UI already updated
             } catch (error) {
               console.error('❌ Error applying action:', error);
-              console.error('   Error message:', error.message);
-              console.error('   Error stack:', error.stack);
+              setShowCompletionModal(false);
               setMessage({
-                text: 'Error updating lesson plans: ' + (error.message || error),
+                text: 'Error: ' + (error.message || error),
                 type: 'error'
               });
             }
@@ -1383,9 +1393,18 @@ function ChapterCompletionModal({ data, onClose, onAction }) {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const handleAction = async () => {
+    if (!selectedAction || data.loading || isProcessing) {
+      return;
+    }
+    
     setIsProcessing(true);
-    await onAction(selectedAction);
-    setIsProcessing(false);
+    try {
+      await onAction(selectedAction);
+      // onAction handler will close modal on success
+    } catch (error) {
+      console.error('Action error:', error);
+      setIsProcessing(false);
+    }
   };
 
   // Sync default selection to recommended action when modal first loads finished
@@ -1406,7 +1425,8 @@ function ChapterCompletionModal({ data, onClose, onAction }) {
             </div>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
+              disabled={data.loading || isProcessing}
+              className="text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
