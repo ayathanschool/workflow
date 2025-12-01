@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, CheckCircle, AlertCircle, BookOpen, Users, Plus } from 'lucide-react';
+import { Calendar, Clock, CheckCircle, AlertCircle, BookOpen, Users, Plus, Search } from 'lucide-react';
 import * as api from '../api.js';
 
 // Generic API request function
@@ -705,9 +705,23 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               {/* Lesson Plan Form */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Learning Objectives
-                  </label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Learning Objectives
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const query = `lesson plan learning objectives ${selectedSession?.subject || ''} class ${selectedSession?.class || ''} ${selectedSession?.chapter || ''}`.trim();
+                        window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                      title="Search for examples online"
+                    >
+                      <Search className="w-3 h-3" />
+                      Find Examples
+                    </button>
+                  </div>
                   <textarea
                     value={lessonPlanData.learningObjectives}
                     onChange={(e) => setLessonPlanData({...lessonPlanData, learningObjectives: e.target.value})}
@@ -718,9 +732,23 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Teaching Methods
-                  </label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Teaching Methods
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const query = `teaching methods ${selectedSession?.subject || ''} class ${selectedSession?.class || ''} ${selectedSession?.chapter || ''}`.trim();
+                        window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                      title="Search for teaching strategies"
+                    >
+                      <Search className="w-3 h-3" />
+                      Search Methods
+                    </button>
+                  </div>
                   <textarea
                     value={lessonPlanData.teachingMethods}
                     onChange={(e) => setLessonPlanData({...lessonPlanData, teachingMethods: e.target.value})}
@@ -731,9 +759,23 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Resources Required
-                  </label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Resources Required
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const query = `teaching resources materials ${selectedSession?.subject || ''} ${selectedSession?.chapter || ''}`.trim();
+                        window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                      title="Find teaching resources"
+                    >
+                      <Search className="w-3 h-3" />
+                      Find Resources
+                    </button>
+                  </div>
                   <textarea
                     value={lessonPlanData.resourcesRequired}
                     onChange={(e) => setLessonPlanData({...lessonPlanData, resourcesRequired: e.target.value})}
@@ -744,9 +786,23 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Assessment Methods
-                  </label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Assessment Methods
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const query = `assessment methods ${selectedSession?.subject || ''} class ${selectedSession?.class || ''}`.trim();
+                        window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                      title="Search for assessment ideas"
+                    >
+                      <Search className="w-3 h-3" />
+                      Search Ideas
+                    </button>
+                  </div>
                   <textarea
                     value={lessonPlanData.assessmentMethods}
                     onChange={(e) => setLessonPlanData({...lessonPlanData, assessmentMethods: e.target.value})}
@@ -1005,9 +1061,23 @@ const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess })
           {/* Session Form */}
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Learning Objectives * <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-gray-700">
+                  Learning Objectives * <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const query = `lesson plan learning objectives ${data.scheme.subject} class ${data.scheme.class} ${data.chapter.chapterName} session ${currentSession + 1}`.trim();
+                    window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
+                  }}
+                  className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                  title="Search for examples online"
+                >
+                  <Search className="w-3 h-3" />
+                  Examples
+                </button>
+              </div>
               <textarea
                 value={session.learningObjectives}
                 onChange={(e) => updateSession('learningObjectives', e.target.value)}
@@ -1018,9 +1088,23 @@ const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess })
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Teaching Methods * <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-gray-700">
+                  Teaching Methods * <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const query = `teaching methods ${data.scheme.subject} class ${data.scheme.class} ${data.chapter.chapterName}`.trim();
+                    window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
+                  }}
+                  className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                  title="Search teaching strategies"
+                >
+                  <Search className="w-3 h-3" />
+                  Methods
+                </button>
+              </div>
               <textarea
                 value={session.teachingMethods}
                 onChange={(e) => updateSession('teachingMethods', e.target.value)}
@@ -1031,9 +1115,23 @@ const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess })
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Resources Required <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-gray-700">
+                  Resources Required <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const query = `teaching resources materials ${data.scheme.subject} ${data.chapter.chapterName}`.trim();
+                    window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
+                  }}
+                  className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                  title="Find teaching resources"
+                >
+                  <Search className="w-3 h-3" />
+                  Resources
+                </button>
+              </div>
               <textarea
                 value={session.resourcesRequired}
                 onChange={(e) => updateSession('resourcesRequired', e.target.value)}
@@ -1044,9 +1142,23 @@ const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess })
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Assessment Methods <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-gray-700">
+                  Assessment Methods <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const query = `assessment methods ${data.scheme.subject} class ${data.scheme.class}`.trim();
+                    window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
+                  }}
+                  className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                  title="Search assessment ideas"
+                >
+                  <Search className="w-3 h-3" />
+                  Ideas
+                </button>
+              </div>
               <textarea
                 value={session.assessmentMethods}
                 onChange={(e) => updateSession('assessmentMethods', e.target.value)}
