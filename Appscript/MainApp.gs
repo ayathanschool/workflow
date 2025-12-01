@@ -905,6 +905,11 @@
         return _handleCreateBulkSchemeLessonPlans(data);
       }
       
+      // === AI LESSON PLAN SUGGESTIONS ===
+      if (action === 'getAILessonSuggestions') {
+        return _respond(getAILessonSuggestions(data.context || data));
+      }
+      
       // === CHAPTER COMPLETION ROUTES ===
       if (action === 'checkChapterCompletion') {
         return _handleCheckChapterCompletion(data);
@@ -940,6 +945,11 @@
       if (action === 'getDailySubmissionMetrics') {
         const daysBack = Number(data.daysBack || 30);
         return _respond(getDailySubmissionMetrics(daysBack));
+      }
+      
+      if (action === 'getDailyReadinessStatus') {
+        const date = data.date || _todayISO();
+        return _respond(getDailyReadinessStatus(date));
       }
       
       if (action === 'getHMAnalyticsDashboard') {

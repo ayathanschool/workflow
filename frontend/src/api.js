@@ -966,12 +966,34 @@ export async function createBulkSchemeLessonPlans(bulkPlanData) {
   });
 }
 
+// Get AI-powered lesson plan suggestions
+export async function getAILessonSuggestions(context) {
+  console.log('[api.js] Calling getAILessonSuggestions with:', context);
+  const result = await postJSON(BASE_URL, {
+    action: 'getAILessonSuggestions',
+    context
+  });
+  console.log('[api.js] getAILessonSuggestions result:', result);
+  return result;
+}
+
 // Get all teachers
 export async function getAllTeachers() {
   const q = new URLSearchParams({
     action: 'getAllTeachers'
   });
   return getJSON(`${BASE_URL}?${q.toString()}`, LONG_CACHE_DURATION);
+}
+
+// Get daily readiness status for lesson plans and reports
+export async function getDailyReadinessStatus(date = null) {
+  const q = new URLSearchParams({
+    action: 'getDailyReadinessStatus'
+  });
+  if (date) {
+    q.append('date', date);
+  }
+  return getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
 }
 
 // Get scheme submission helper (planning assistant)

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test Gemini API Key</title>
+</head>
+<body>
+  <h1>Test Gemini API Key</h1>
+  <button onclick="testAPI()">Test API Key</button>
+  <pre id="result"></pre>
+
+  <script>
+    async function testAPI() {
+      const apiKey = 'AIzaSyB-5NtZuNY5h4JfnCkO3WO7yv2_OGWmMrM';
+      // Try v1beta first (most common)
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      
+      const result = document.getElementById('result');
+      result.textContent = 'Testing v1beta with gemini-1.5-flash...';
+      
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{
+                text: 'Say hello in one word'
+              }]
+            }]
+          })
+        });
+        
+        const status = response.status;
+        const data = await response.json();
+        
+        result.textContent = `Status: ${status}\n\nURL: ${url}\n\n${JSON.stringify(data, null, 2)}`;
+        
+        if (status === 200) {
+          alert('✅ API key works!');
+        } else if (status === 404) {
+          alert('❌ 404 Error - Trying different model...');
+          tryAlternative();
+        } else if (status === 403) {
+          alert('❌ 403 Error - API key restricted or invalid');
+        }
+      } catch (error) {
+        result.textContent = `Error: ${error.message}`;
+        alert('❌ Request failed: ' + error.message);
+      }
+    }
+    
+    async function tryAlternative() {
+      const apiKey = 'AIzaSyB-5NtZuNY5h4JfnCkO3WO7yv2_OGWmMrM';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
+      
+      const result = document.getElementById('result');
+      result.textContent = 'Testing v1beta with gemini-pro...';
+      
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{
+                text: 'Say hello in one word'
+              }]
+            }]
+          })
+        });
+        
+        const status = response.status;
+        const data = await response.json();
+        
+        result.textContent = `Status: ${status}\n\nURL: ${url}\n\n${JSON.stringify(data, null, 2)}`;
+        
+        if (status === 200) {
+          alert('✅ API key works with gemini-pro!');
+        }
+      } catch (error) {
+        result.textContent = `Error: ${error.message}`;
+      }
+    }
+  </script>
+</body>
+</html>

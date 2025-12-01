@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test AI Backend</title>
+  <style>
+    body { font-family: Arial; padding: 20px; max-width: 800px; margin: 0 auto; }
+    button { padding: 10px 20px; margin: 10px 0; cursor: pointer; }
+    .success { color: green; }
+    .error { color: red; }
+    pre { background: #f4f4f4; padding: 10px; border-radius: 4px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <h1>🧪 AI Backend Test</h1>
+  
+  <h2>Step 1: Test Basic Connection</h2>
+  <button onclick="testConnection()">Test Connection</button>
+  <div id="connectionResult"></div>
+  
+  <h2>Step 2: Test AI Endpoint</h2>
+  <button onclick="testAI()">Test AI Suggestions</button>
+  <div id="aiResult"></div>
+  
+  <h2>Debug Info</h2>
+  <div id="debug"></div>
+
+  <script>
+    const API_URL = 'https://script.google.com/macros/s/AKfycbyKhbxcq-veJjMrxY7KD4A7OLoZi4o3_Tzb6rtNCRDMIHcA2qzGQDl9T7OpPJYf0MAZOQ/exec';
+    
+    async function testConnection() {
+      const result = document.getElementById('connectionResult');
+      result.innerHTML = '<p>Testing...</p>';
+      
+      try {
+        const response = await fetch(API_URL + '?action=ping');
+        const data = await response.json();
+        
+        result.innerHTML = `
+          <p class="success">✅ Connection successful!</p>
+          <pre>${JSON.stringify(data, null, 2)}</pre>
+        `;
+      } catch (error) {
+        result.innerHTML = `
+          <p class="error">❌ Connection failed</p>
+          <pre>${error.message}</pre>
+        `;
+      }
+    }
+    
+    async function testAI() {
+      const result = document.getElementById('aiResult');
+      const debug = document.getElementById('debug');
+      result.innerHTML = '<p>Testing AI endpoint...</p>';
+      
+      const testContext = {
+        class: '11th A',
+        subject: 'Physics',
+        chapter: 'Newton\'s Laws of Motion',
+        session: 1,
+        sessionName: 'Introduction to Newton\'s First Law'
+      };
+      
+      debug.innerHTML = `
+        <h3>Request:</h3>
+        <pre>${JSON.stringify({
+          action: 'getAILessonSuggestions',
+          context: testContext
+        }, null, 2)}</pre>
+      `;
+      
+      try {
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            action: 'getAILessonSuggestions',
+            context: testContext
+          })
+        });
+        
+        const data = await response.json();
+        
+        debug.innerHTML += `
+          <h3>Response:</h3>
+          <pre>${JSON.stringify(data, null, 2)}</pre>
+        `;
+        
+        if (data.success) {
+          result.innerHTML = `
+            <p class="success">✅ AI is working!</p>
+            <h4>Generated Suggestions:</h4>
+            <pre>${JSON.stringify(data.suggestions, null, 2)}</pre>
+          `;
+        } else {
+          result.innerHTML = `
+            <p class="error">❌ AI returned error:</p>
+            <pre>${data.error || 'Unknown error'}</pre>
+          `;
+        }
+      } catch (error) {
+        result.innerHTML = `
+          <p class="error">❌ Request failed</p>
+          <pre>${error.message}\n${error.stack}</pre>
+        `;
+      }
+    }
+  </script>
+</body>
+</html>

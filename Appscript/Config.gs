@@ -4,6 +4,14 @@
  */
 
 /**
+ * AI-POWERED LESSON PLAN SUGGESTIONS (Optional Feature)
+ * Set GEMINI_API_KEY to enable AI-generated lesson plan suggestions
+ * Get your free API key from: https://aistudio.google.com/app/apikey
+ */
+const GEMINI_API_KEY = 'AIzaSyB-5NtZuNY5h4JfnCkO3WO7yv2_OGWmMrM';
+const AI_SUGGESTIONS_ENABLED = true; // Set to false to disable AI features
+
+/**
  * Your Google Spreadsheet ID (staging)
  * NOTE: For production, update this in the prod Apps Script deployment.
  */

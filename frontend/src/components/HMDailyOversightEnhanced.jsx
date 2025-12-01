@@ -1,8 +1,8 @@
 // HMDailyOversightEnhanced.jsx - Enhanced HM Dashboard with Session Progress Analytics
 import React, { useState, useEffect } from 'react';
-import { getDailyReportsForDate, getLessonPlansForDate, getClassSubjectPerformance, getSyllabusPaceTracking, getMissingSubmissions, verifyDailyReport, reopenDailyReport, notifyMissingSubmissions } from '../api';
+import { getDailyReportsForDate, getLessonPlansForDate, getClassSubjectPerformance, getSyllabusPaceTracking, getMissingSubmissions, verifyDailyReport, reopenDailyReport, notifyMissingSubmissions, getDailyReadinessStatus } from '../api';
 import { todayIST, formatLocalDate } from '../utils/dateUtils';
-import { Clock, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, CheckCircle, Undo2 } from 'lucide-react';
+import { Clock, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, CheckCircle, Undo2, FileText, ClipboardCheck, ChevronUp } from 'lucide-react';
 
 const HMDailyOversightEnhanced = ({ user }) => {
   const [date, setDate] = useState(todayIST());
@@ -54,6 +54,11 @@ const HMDailyOversightEnhanced = ({ user }) => {
   // Collapsible sections
   const [subjectPerfOpen, setSubjectPerfOpen] = useState(false);
   const [classPerfOpen, setClassPerfOpen] = useState(false);
+  // Readiness tracking
+  const [readinessData, setReadinessData] = useState(null);
+  const [loadingReadiness, setLoadingReadiness] = useState(false);
+  const [showLessonPlanDetails, setShowLessonPlanDetails] = useState(false);
+  const [showReportDetails, setShowReportDetails] = useState(false);
 
   useEffect(() => {
     loadDailyReports();
@@ -61,6 +66,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
     loadClassSubjectPerformance(); // Load analytics data on mount
     loadPaceTracking(); // Load pace tracking data
     loadMissing();
+    loadReadinessStatus(); // Load readiness status
   }, [date]);
 
   // Load class/subject performance analytics
@@ -108,6 +114,28 @@ const HMDailyOversightEnhanced = ({ user }) => {
     }
   }
 
+  // Load readiness status
+  async function loadReadinessStatus() {
+    setLoadingReadiness(true);
+    try {
+      console.log('Fetching readiness status for date:', date);
+      const response = await getDailyReadinessStatus(date);
+      console.log('Readiness status response:', response);
+      console.log('Readiness data keys:', Object.keys(response));
+      console.log('Readiness data.data:', response.data);
+      
+      // Extract the actual data - API returns {status: 200, data: {...}, timestamp: ...}
+      const result = response.data || response;
+      console.log('Setting readiness data to:', result);
+      setReadinessData(result);
+    } catch (err) {
+      console.error('Failed to load readiness status:', err);
+      setReadinessData(null);
+    } finally {
+      setLoadingReadiness(false);
+    }
+  }
+
   // Auto-refresh mechanism
   useEffect(() => {
     if (!autoRefresh) return;
@@ -121,7 +149,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
 
   const handleAutoRefresh = async () => {
     setIsRefreshing(true);
-    await Promise.all([loadDailyReports(true), loadLessonPlans(true)]);
+    await Promise.all([loadDailyReports(true), loadLessonPlans(true), loadReadinessStatus()]);
     setIsRefreshing(false);
   };
 
@@ -611,6 +639,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
           onClick={() => {
             loadDailyReports();
             loadLessonPlans();
+            loadReadinessStatus();
           }}
           disabled={loading}
           className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50"
@@ -618,6 +647,123 @@ const HMDailyOversightEnhanced = ({ user }) => {
           {loading ? 'Refreshing...' : 'Refresh Data'}
         </button>
       </div>
+
+      {/* Readiness Status Cards */}
+      {readinessData && !readinessData.noClassesScheduled && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          {/* Lesson Plans Readiness Card */}
+          <div className={`border-2 rounded-lg p-4 ${readinessData.lessonPlans?.status === 'complete' ? 'bg-green-50 border-green-200' : readinessData.lessonPlans?.status === 'good' ? 'bg-blue-50 border-blue-200' : readinessData.lessonPlans?.status === 'warning' ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'} ${new Date().getHours() < 15 ? 'ring-2 ring-blue-400' : ''}`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-blue-600" />
+                <h3 className="font-semibold text-gray-900">Lesson Plans</h3>
+              </div>
+              <button
+                onClick={() => setShowLessonPlanDetails(!showLessonPlanDetails)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                {showLessonPlanDetails ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+              </button>
+            </div>
+            
+            <div className="flex items-baseline gap-2 mb-2">
+              <span className={`text-3xl font-bold ${readinessData.lessonPlans?.status === 'complete' ? 'text-green-700' : readinessData.lessonPlans?.status === 'good' ? 'text-blue-700' : readinessData.lessonPlans?.status === 'warning' ? 'text-yellow-700' : 'text-red-700'}`}>
+                {readinessData.lessonPlans?.ready}/{readinessData.lessonPlans?.total}
+              </span>
+              <span className="text-sm text-gray-600">Ready</span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <div className="flex-1 bg-gray-200 rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full ${readinessData.lessonPlans?.percentage === 100 ? 'bg-green-500' : readinessData.lessonPlans?.percentage >= 80 ? 'bg-blue-500' : readinessData.lessonPlans?.percentage >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                  style={{ width: `${readinessData.lessonPlans?.percentage || 0}%` }}
+                ></div>
+              </div>
+              <span className="text-sm font-medium text-gray-700">{readinessData.lessonPlans?.percentage}%</span>
+            </div>
+            
+            {readinessData.lessonPlans?.pending > 0 && (
+              <p className="text-sm text-gray-600 mt-2">
+                {readinessData.lessonPlans.pending} period{readinessData.lessonPlans.pending !== 1 ? 's' : ''} pending
+              </p>
+            )}
+            
+            {showLessonPlanDetails && readinessData.lessonPlans?.byTeacher && readinessData.lessonPlans.byTeacher.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                <p className="text-xs font-semibold text-gray-700 mb-2">Pending by Teacher:</p>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {readinessData.lessonPlans.byTeacher.map((teacher, idx) => (
+                    <div key={idx} className="text-xs bg-white bg-opacity-50 rounded px-2 py-1">
+                      <span className="font-medium">{teacher.teacherName}</span>
+                      <span className="text-gray-600"> - {teacher.count} period{teacher.count !== 1 ? 's' : ''}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Daily Reports Card */}
+          <div className={`border-2 rounded-lg p-4 ${readinessData.dailyReports?.status === 'complete' ? 'bg-green-50 border-green-200' : readinessData.dailyReports?.status === 'good' ? 'bg-blue-50 border-blue-200' : readinessData.dailyReports?.status === 'warning' ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'} ${new Date().getHours() >= 15 ? 'ring-2 ring-green-400' : ''}`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <ClipboardCheck className="w-5 h-5 text-green-600" />
+                <h3 className="font-semibold text-gray-900">Daily Reports</h3>
+              </div>
+              <button
+                onClick={() => setShowReportDetails(!showReportDetails)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                {showReportDetails ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+              </button>
+            </div>
+            
+            <div className="flex items-baseline gap-2 mb-2">
+              <span className={`text-3xl font-bold ${readinessData.dailyReports?.status === 'complete' ? 'text-green-700' : readinessData.dailyReports?.status === 'good' ? 'text-blue-700' : readinessData.dailyReports?.status === 'warning' ? 'text-yellow-700' : 'text-red-700'}`}>
+                {readinessData.dailyReports?.submitted}/{readinessData.dailyReports?.total}
+              </span>
+              <span className="text-sm text-gray-600">Submitted</span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <div className="flex-1 bg-gray-200 rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full ${readinessData.dailyReports?.percentage === 100 ? 'bg-green-500' : readinessData.dailyReports?.percentage >= 70 ? 'bg-blue-500' : readinessData.dailyReports?.percentage >= 40 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                  style={{ width: `${readinessData.dailyReports?.percentage || 0}%` }}
+                ></div>
+              </div>
+              <span className="text-sm font-medium text-gray-700">{readinessData.dailyReports?.percentage}%</span>
+            </div>
+            
+            {readinessData.dailyReports?.pending > 0 && (
+              <p className="text-sm text-gray-600 mt-2">
+                {readinessData.dailyReports.pending} report{readinessData.dailyReports.pending !== 1 ? 's' : ''} pending
+              </p>
+            )}
+            
+            {showReportDetails && readinessData.dailyReports?.byTeacher && readinessData.dailyReports.byTeacher.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                <p className="text-xs font-semibold text-gray-700 mb-2">Pending by Teacher:</p>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {readinessData.dailyReports.byTeacher.map((teacher, idx) => (
+                    <div key={idx} className="text-xs bg-white bg-opacity-50 rounded px-2 py-1">
+                      <span className="font-medium">{teacher.teacherName}</span>
+                      <span className="text-gray-600"> - {teacher.count} report{teacher.count !== 1 ? 's' : ''}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {readinessData?.noClassesScheduled && (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center mb-6">
+          <p className="text-gray-600">{readinessData.message}</p>
+        </div>
+      )}
 
       {/* Enhanced Statistics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

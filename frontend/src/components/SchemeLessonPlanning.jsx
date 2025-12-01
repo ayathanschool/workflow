@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, CheckCircle, AlertCircle, BookOpen, Users, Plus, Search } from 'lucide-react';
+import { Calendar, Clock, CheckCircle, AlertCircle, BookOpen, Users, Plus, Search, Sparkles } from 'lucide-react';
 import * as api from '../api.js';
 
 // Generic API request function
@@ -61,6 +61,9 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   // Bulk preparation state
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [bulkPrepData, setBulkPrepData] = useState(null);
+  
+  // AI suggestions state
+  const [loadingAI, setLoadingAI] = useState(false);
 
   useEffect(() => {
     loadApprovedSchemes();
@@ -294,6 +297,51 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
       alert('Error submitting lesson plan: ' + err.message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleAISuggestions = async () => {
+    if (!selectedSession) {
+      console.error('[AI] No session selected');
+      return;
+    }
+    
+    setLoadingAI(true);
+    try {
+      const context = {
+        class: selectedSession.class,
+        subject: selectedSession.subject,
+        chapter: selectedSession.chapter,
+        session: selectedSession.session,
+        sessionName: selectedSession.sessionName
+      };
+      
+      console.log('[AI] Requesting AI suggestions with context:', context);
+      const response = await api.getAILessonSuggestions(context);
+      
+      console.log('[AI] Full response received:', JSON.stringify(response, null, 2));
+      
+      if (response && response.data && response.data.success && response.data.suggestions) {
+        console.log('[AI] SUCCESS - Auto-filling fields');
+        setLessonPlanData(prev => ({
+          ...prev,
+          learningObjectives: response.data.suggestions.learningObjectives || prev.learningObjectives,
+          teachingMethods: response.data.suggestions.teachingMethods || prev.teachingMethods,
+          resourcesRequired: response.data.suggestions.resourcesRequired || prev.resourcesRequired,
+          assessmentMethods: response.data.suggestions.assessmentMethods || prev.assessmentMethods
+        }));
+        alert('✨ AI suggestions loaded! You can edit them before submitting.');
+      } else {
+        const errorMsg = response?.data?.error || response?.error || 'Unknown error';
+        console.error('[AI] FAILED - Error:', errorMsg);
+        console.error('[AI] Full response structure:', response);
+        alert(`AI Error: ${errorMsg}\n\nTry the search buttons instead.`);
+      }
+    } catch (err) {
+      console.error('[AI] EXCEPTION:', err.message, err.stack);
+      alert('AI service unavailable. Use search buttons to find examples online.');
+    } finally {
+      setLoadingAI(false);
     }
   };
 
@@ -700,6 +748,31 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                     Selected: {formatDate(lessonPlanData.selectedDate)} Period {lessonPlanData.selectedPeriod}
                   </div>
                 )}
+              </div>
+
+              {/* AI Suggestions Button */}
+              <div className="mb-4">
+                <button
+                  type="button"
+                  onClick={handleAISuggestions}
+                  disabled={loadingAI}
+                  className="w-full px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-lg font-medium flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loadingAI ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                      Generating AI Suggestions...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-5 h-5" />
+                      ✨ Get AI Suggestions (Auto-fill all fields)
+                    </>
+                  )}
+                </button>
+                <p className="text-xs text-gray-500 mt-1 text-center">
+                  Powered by Google Gemini AI • Free to use • Edit suggestions before submitting
+                </p>
               </div>
 
               {/* Lesson Plan Form */}

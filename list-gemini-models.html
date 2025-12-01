@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>List Available Gemini Models</title>
+</head>
+<body>
+  <h1>List Available Gemini Models</h1>
+  <button onclick="listModels()">List Models</button>
+  <pre id="result"></pre>
+
+  <script>
+    async function listModels() {
+      const apiKey = 'AIzaSyB-5NtZuNY5h4JfnCkO3WO7yv2_OGWmMrM';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+      
+      const result = document.getElementById('result');
+      result.textContent = 'Loading models...';
+      
+      try {
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (response.status === 200) {
+          result.textContent = JSON.stringify(data, null, 2);
+          
+          // Extract model names
+          if (data.models) {
+            const modelNames = data.models
+              .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+              .map(m => m.name);
+            
+            alert('Available models for generateContent:\n\n' + modelNames.join('\n'));
+          }
+        } else {
+          result.textContent = `Error ${response.status}: ${JSON.stringify(data, null, 2)}`;
+        }
+      } catch (error) {
+        result.textContent = `Error: ${error.message}`;
+      }
+    }
+  </script>
+</body>
+</html>

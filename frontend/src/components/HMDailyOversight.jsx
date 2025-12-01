@@ -1,13 +1,18 @@
 // HMDailyOversight.jsx - HM Dashboard for Daily Report Tracking
 import React, { useState, useEffect } from 'react';
-import { getDailyReportsForDate, getLessonPlansForDate } from '../api';
+import { getDailyReportsForDate, getLessonPlansForDate, getDailyReadinessStatus } from '../api';
 import { todayIST, formatLocalDate } from '../utils/dateUtils';
+import { FileText, ClipboardCheck, ChevronDown, ChevronUp } from 'lucide-react';
 
 const HMDailyOversight = ({ user }) => {
   const [date, setDate] = useState(todayIST());
   const [reports, setReports] = useState([]);
   const [lessonPlans, setLessonPlans] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [readinessData, setReadinessData] = useState(null);
+  const [loadingReadiness, setLoadingReadiness] = useState(false);
+  const [showLessonPlanDetails, setShowLessonPlanDetails] = useState(false);
+  const [showReportDetails, setShowReportDetails] = useState(false);
   const [activeTab, setActiveTab] = useState('reports'); // 'reports' or 'lessonplans'
   const [stats, setStats] = useState({
     totalPeriods: 0,
@@ -31,7 +36,35 @@ const HMDailyOversight = ({ user }) => {
   useEffect(() => {
     loadDailyReports();
     loadLessonPlans();
+    loadReadinessStatus();
   }, [date]);
+
+  // Auto-refresh readiness every 10 minutes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadReadinessStatus();
+    }, 10 * 60 * 1000); // 10 minutes
+
+    return () => clearInterval(interval);
+  }, [date]);
+
+  async function loadReadinessStatus() {
+    setLoadingReadiness(true);
+    try {
+      console.log('Fetching readiness status for date:', date);
+      const response = await getDailyReadinessStatus(date);
+      console.log('Readiness status response:', response);
+      console.log('Response type:', typeof response, 'Keys:', Object.keys(response));
+      
+      const result = response.data || response;
+      console.log('Setting readinessData to:', result);
+      setReadinessData(result);
+    } catch (err) {
+      console.error('Failed to load readiness status:', err);
+    } finally {
+      setLoadingReadiness(false);
+    }
+  }
 
   async function loadDailyReports() {
     setLoading(true);
@@ -111,6 +144,31 @@ const HMDailyOversight = ({ user }) => {
 
   const filteredReports = getFilteredReports();
 
+  // Helper to get status color
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'complete': return 'bg-green-50 border-green-200';
+      case 'good': return 'bg-blue-50 border-blue-200';
+      case 'warning': return 'bg-yellow-50 border-yellow-200';
+      case 'critical': return 'bg-red-50 border-red-200';
+      default: return 'bg-gray-50 border-gray-200';
+    }
+  };
+
+  const getStatusTextColor = (status) => {
+    switch (status) {
+      case 'complete': return 'text-green-700';
+      case 'good': return 'text-blue-700';
+      case 'warning': return 'text-yellow-700';
+      case 'critical': return 'text-red-700';
+      default: return 'text-gray-700';
+    }
+  };
+
+  // Determine current time context (morning = before 3 PM, evening = after 3 PM)
+  const currentHour = new Date().getHours();
+  const isEvening = currentHour >= 15; // 3 PM
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -129,7 +187,7 @@ const HMDailyOversight = ({ user }) => {
             className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
           <button
-            onClick={loadDailyReports}
+            onClick={() => { loadDailyReports(); loadReadinessStatus(); }}
             disabled={loading}
             className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 text-sm font-medium transition-colors"
           >
@@ -137,6 +195,123 @@ const HMDailyOversight = ({ user }) => {
           </button>
         </div>
       </div>
+
+      {/* Readiness Status Cards */}
+      {readinessData && !readinessData.noClassesScheduled && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Lesson Plans Readiness Card */}
+          <div className={`border-2 rounded-lg p-4 ${getStatusColor(readinessData.lessonPlans?.status)} ${!isEvening ? 'ring-2 ring-blue-400' : ''}`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-blue-600" />
+                <h3 className="font-semibold text-gray-900">Lesson Plans</h3>
+              </div>
+              <button
+                onClick={() => setShowLessonPlanDetails(!showLessonPlanDetails)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                {showLessonPlanDetails ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+              </button>
+            </div>
+            
+            <div className="flex items-baseline gap-2 mb-2">
+              <span className={`text-3xl font-bold ${getStatusTextColor(readinessData.lessonPlans?.status)}`}>
+                {readinessData.lessonPlans?.ready}/{readinessData.lessonPlans?.total}
+              </span>
+              <span className="text-sm text-gray-600">Ready</span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <div className="flex-1 bg-gray-200 rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full ${readinessData.lessonPlans?.percentage === 100 ? 'bg-green-500' : readinessData.lessonPlans?.percentage >= 80 ? 'bg-blue-500' : readinessData.lessonPlans?.percentage >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                  style={{ width: `${readinessData.lessonPlans?.percentage || 0}%` }}
+                ></div>
+              </div>
+              <span className="text-sm font-medium text-gray-700">{readinessData.lessonPlans?.percentage}%</span>
+            </div>
+            
+            {readinessData.lessonPlans?.pending > 0 && (
+              <p className="text-sm text-gray-600 mt-2">
+                {readinessData.lessonPlans.pending} period{readinessData.lessonPlans.pending !== 1 ? 's' : ''} pending
+              </p>
+            )}
+            
+            {showLessonPlanDetails && readinessData.lessonPlans?.byTeacher && readinessData.lessonPlans.byTeacher.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                <p className="text-xs font-semibold text-gray-700 mb-2">Pending by Teacher:</p>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {readinessData.lessonPlans.byTeacher.map((teacher, idx) => (
+                    <div key={idx} className="text-xs bg-white bg-opacity-50 rounded px-2 py-1">
+                      <span className="font-medium">{teacher.teacherName}</span>
+                      <span className="text-gray-600"> - {teacher.count} period{teacher.count !== 1 ? 's' : ''}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Daily Reports Card */}
+          <div className={`border-2 rounded-lg p-4 ${getStatusColor(readinessData.dailyReports?.status)} ${isEvening ? 'ring-2 ring-green-400' : ''}`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <ClipboardCheck className="w-5 h-5 text-green-600" />
+                <h3 className="font-semibold text-gray-900">Daily Reports</h3>
+              </div>
+              <button
+                onClick={() => setShowReportDetails(!showReportDetails)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                {showReportDetails ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+              </button>
+            </div>
+            
+            <div className="flex items-baseline gap-2 mb-2">
+              <span className={`text-3xl font-bold ${getStatusTextColor(readinessData.dailyReports?.status)}`}>
+                {readinessData.dailyReports?.submitted}/{readinessData.dailyReports?.total}
+              </span>
+              <span className="text-sm text-gray-600">Submitted</span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <div className="flex-1 bg-gray-200 rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full ${readinessData.dailyReports?.percentage === 100 ? 'bg-green-500' : readinessData.dailyReports?.percentage >= 70 ? 'bg-blue-500' : readinessData.dailyReports?.percentage >= 40 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                  style={{ width: `${readinessData.dailyReports?.percentage || 0}%` }}
+                ></div>
+              </div>
+              <span className="text-sm font-medium text-gray-700">{readinessData.dailyReports?.percentage}%</span>
+            </div>
+            
+            {readinessData.dailyReports?.pending > 0 && (
+              <p className="text-sm text-gray-600 mt-2">
+                {readinessData.dailyReports.pending} report{readinessData.dailyReports.pending !== 1 ? 's' : ''} pending
+              </p>
+            )}
+            
+            {showReportDetails && readinessData.dailyReports?.byTeacher && readinessData.dailyReports.byTeacher.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                <p className="text-xs font-semibold text-gray-700 mb-2">Pending by Teacher:</p>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {readinessData.dailyReports.byTeacher.map((teacher, idx) => (
+                    <div key={idx} className="text-xs bg-white bg-opacity-50 rounded px-2 py-1">
+                      <span className="font-medium">{teacher.teacherName}</span>
+                      <span className="text-gray-600"> - {teacher.count} report{teacher.count !== 1 ? 's' : ''}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {readinessData?.noClassesScheduled && (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
+          <p className="text-gray-600">{readinessData.message}</p>
+        </div>
+      )}
 
       {/* Tab Navigation */}
       <div className="border-b border-gray-200">
