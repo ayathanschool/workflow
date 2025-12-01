@@ -317,6 +317,11 @@ export async function updateLessonPlanDetailsStatus(lpId, status, remarks='') {
   return postJSON(`${BASE_URL}?action=updateLessonPlanDetailsStatus`, { lpId, status, remarks })
 }
 
+// Update single lesson plan status (for HM approval with validation)
+export async function updateLessonPlanStatus(lpId, status, reviewComments='') {
+  return postJSON(`${BASE_URL}?action=updateLessonPlanStatus`, { lpId, status, reviewComments })
+}
+
 // Batch update lesson plan statuses (for HM approval)
 export async function batchUpdateLessonPlanStatus(lessonPlanIds, status, reviewComments='') {
   return postJSON(`${BASE_URL}?action=batchUpdateLessonPlanStatus`, { lessonPlanIds, status, reviewComments })

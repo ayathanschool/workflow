@@ -169,22 +169,14 @@ const App = () => {
     if (!dateString) return '-';
     try {
       const date = new Date(dateString);
-      // Format as: Nov 02, 2025 (6:30 PM) or just Nov 02, 2025 depending on time
+      // Format as: Dec 01, 2025 (date only, no time)
       const options = { 
         year: 'numeric', 
         month: 'short', 
-        day: '2-digit'
+        day: '2-digit',
+        timeZone: 'Asia/Kolkata'
       };
       const formattedDate = date.toLocaleDateString('en-US', options);
-      
-      // Check if time is significant (not midnight)
-      const hasTime = date.getHours() !== 0 || date.getMinutes() !== 0;
-      if (hasTime) {
-        const timeOptions = { hour: 'numeric', minute: '2-digit', hour12: true };
-        const formattedTime = date.toLocaleTimeString('en-US', timeOptions);
-        return `${formattedDate} (${formattedTime})`;
-      }
-      
       return formattedDate;
     } catch (e) {
       return dateString; // Return original if parsing fails
@@ -267,7 +259,7 @@ const App = () => {
               <Detail label="Class" value={viewLesson.class} />
               <Detail label="Subject" value={viewLesson.subject} />
               <Detail label="Chapter" value={viewLesson.chapter} />
-              <Detail label="Session" value={viewLesson.session} />
+              <Detail label="Session" value={viewLesson.noOfSessions ? `${viewLesson.session} of ${viewLesson.noOfSessions}` : viewLesson.session} />
               <Detail label="Teacher" value={viewLesson.teacherName || viewLesson.teacher || ''} />
               <Detail label="Status" value={viewLesson.status} />
               {viewLesson.selectedDate && <Detail label="Date" value={formatDate(viewLesson.selectedDate)} />}
@@ -4329,8 +4321,24 @@ const App = () => {
 
     const handleApproveLesson = async (lpId, status) => {
       try {
+        console.log('🔵 Single approval - lpId:', lpId, 'status:', status);
         setRowSubmitting(prev => ({ ...prev, [lpId]: true }));
-        await withSubmit('Updating lesson status...', () => api.updateLessonPlanDetailsStatus(lpId, status));
+        const response = await api.updateLessonPlanStatus(lpId, status);
+        console.log('🔵 Single approval response:', response);
+        
+        // Check for error in response
+        const result = response.data || response;
+        if (result.error) {
+          // Show error to user
+          alert(result.error);
+          setRowSubmitting(prev => ({ ...prev, [lpId]: false }));
+          return;
+        }
+        
+        await withSubmit('Updating lesson status...', async () => {
+          // Already called above, just for UI feedback
+        });
+        
         setPendingLessons(prev => {
           return prev
             .map(lesson => lesson.lpId === lpId ? { ...lesson, status } : lesson)
@@ -4496,13 +4504,13 @@ const App = () => {
         if (errors.length > 0) {
           // Show detailed error messages
           const errorMessages = errors.map(e => {
-            if (e.missing && e.missing.length > 0) {
+            if (e.missing && Array.isArray(e.missing) && e.missing.length > 0) {
               return `${e.chapter || 'Chapter'}: Missing sessions ${e.missing.join(', ')}`;
             }
-            return `${e.lpId}: ${e.error}`;
+            return `${e.lpId || 'Lesson'}: ${e.error || 'Unknown error'}`;
           }).join('\n');
           
-          alert(`Batch approval completed with some errors:\n\nSuccess: ${successCount}/${totalRequested}\n\nErrors:\n${errorMessages}`);
+          alert(`Batch approval completed:\n\nSuccess: ${successCount}/${totalRequested}\n\nErrors:\n${errorMessages}`);
         } else {
           alert(`Successfully updated ${successCount} lesson plan(s)`);
         }
@@ -5000,7 +5008,8 @@ const App = () => {
                 {pendingLessons.map((lesson) => {
                   const chapterKey = `${lesson.schemeId || ''}_${lesson.chapter || ''}`;
                   const chapterGroup = chapterGroups[chapterKey];
-                  const totalSessions = chapterGroup?.lessons.length || 1;
+                  // Use noOfSessions from scheme if available, otherwise count submitted lessons
+                  const totalSessions = lesson.noOfSessions || chapterGroup?.lessons.length || 1;
                   const submittedSessions = chapterGroup?.lessons.filter(l => l.status === 'Pending Review' || l.status === 'Ready').length || 0;
                   const completionPercent = Math.round((submittedSessions / totalSessions) * 100);
                   const isComplete = completionPercent === 100;
@@ -5021,7 +5030,9 @@ const App = () => {
                       <td className="px-2 py-2 text-xs text-gray-900">{lesson.class}</td>
                       <td className="px-2 py-2 text-xs text-gray-900 truncate">{lesson.subject}</td>
                       <td className="px-2 py-2 text-xs text-gray-900 truncate">{lesson.chapter}</td>
-                      <td className="px-2 py-2 text-xs text-gray-900 text-center font-medium">{lesson.session}</td>
+                      <td className="px-2 py-2 text-xs text-gray-900 text-center font-medium">
+                        {lesson.noOfSessions ? `${lesson.session}/${lesson.noOfSessions}` : lesson.session}
+                      </td>
                       <td className="px-2 py-2 text-center">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${isComplete ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`} title={`${submittedSessions}/${totalSessions} sessions submitted`}>
                           {submittedSessions}/{totalSessions}

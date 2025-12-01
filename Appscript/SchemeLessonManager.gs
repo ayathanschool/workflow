@@ -49,6 +49,9 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         
         // Find reports for this teacher/class/subject
         const teacherReports = allReports.filter(report => {
+          // Safety check: ensure report is an object
+          if (!report || typeof report !== 'object') return false;
+          
           const matchesTeacher = String(report.teacherEmail || '').toLowerCase() === String(scheme.teacherEmail || '').toLowerCase();
           const matchesClass = String(report.class || '') === String(scheme.class || '');
           const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
@@ -209,6 +212,9 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
       Logger.log(`Total reports in sheet: ${allReports.length}`);
       
       const chapterReports = allReports.filter(report => {
+        // Safety check: ensure report is an object
+        if (!report || typeof report !== 'object') return false;
+        
         const matchesTeacher = String(report.teacherEmail || '').trim().toLowerCase() === String(scheme.teacherEmail || '').trim().toLowerCase();
         const matchesChapter = String(report.chapter || '').trim().toLowerCase() === String(chapter.name || '').trim().toLowerCase();
         const matchesClass = String(report.class || '').trim().toLowerCase() === String(scheme.class || '').trim().toLowerCase();
@@ -229,6 +235,9 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         
         // Get all reports for this teacher/class/subject
         const teacherReports = allReports.filter(report => {
+          // Safety check: ensure report is an object
+          if (!report || typeof report !== 'object') return false;
+          
           const matchesTeacher = String(report.teacherEmail || '').toLowerCase() === String(scheme.teacherEmail || '').toLowerCase();
           const matchesClass = String(report.class || '') === String(scheme.class || '');
           const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
@@ -489,18 +498,21 @@ function getApprovedSchemesForLessonPlanning(teacherEmail) {
     const lessonPlansHeaders = _headers(lessonPlansSheet);
     const existingPlans = _rows(lessonPlansSheet).map(row => _indexByHeader(row, lessonPlansHeaders));
     
-    const teacherPlans = existingPlans.filter(plan =>
-      (plan.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase()
-    );
+    const teacherPlans = existingPlans.filter(plan => {
+      if (!plan || typeof plan !== 'object') return false;
+      return String(plan.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
+    });
     
     // Get daily reports to check which sessions have been reported
     const drSheet = _getSheet('DailyReports');
     const drHeaders = _headers(drSheet);
     const allReports = _rows(drSheet).map(row => _indexByHeader(row, drHeaders));
     
-    const teacherReports = allReports.filter(report =>
-      (report.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase()
-    );
+    const teacherReports = allReports.filter(report => {
+      // Safety: ensure report is object and coerce teacherEmail
+      if (!report || typeof report !== 'object') return false;
+      return String(report.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
+    });
     
     // Process each scheme to show chapter/session breakdown
     const schemesWithProgress = approvedSchemes.map(scheme => {
@@ -1245,6 +1257,9 @@ function _generateSessionsForChapter(chapter, scheme) {
       
       // Find daily reports for this chapter by this teacher
       const chapterReports = allReports.filter(report => {
+        // Safety check: ensure report is an object
+        if (!report || typeof report !== 'object') return false;
+        
         const matchesTeacher = String(report.teacherEmail || '').toLowerCase() === String(scheme.teacherEmail || '').toLowerCase();
         const matchesChapter = String(report.chapter || '') === String(chapter.name || '');
         const matchesClass = String(report.class || '') === String(scheme.class || '');

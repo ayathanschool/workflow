@@ -347,7 +347,9 @@ function getDailyReports(teacherEmail, startDate = null, endDate = null, cls = '
     const allReports = _rows(sheet).map(row => _indexByHeader(row, headers));
     
     let filteredReports = allReports.filter(report => {
-      const emailMatch = (report.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase();
+      // Safety: ensure report is object and teacherEmail coerced to string
+      if (!report || typeof report !== 'object') return false;
+      const emailMatch = String(report.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
       const classMatch = !cls || (report.class || '') === cls;
       const subjectMatch = !subject || (report.subject || '') === subject;
       
