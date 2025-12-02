@@ -1,7 +1,7 @@
 // HMDailyOversightEnhanced.jsx - Enhanced HM Dashboard with Session Progress Analytics
 import React, { useState, useEffect } from 'react';
-import { getDailyReportsForDate, getLessonPlansForDate, getClassSubjectPerformance, getSyllabusPaceTracking, getMissingSubmissions, verifyDailyReport, reopenDailyReport, notifyMissingSubmissions, getDailyReadinessStatus } from '../api';
-import { todayIST, formatLocalDate } from '../utils/dateUtils';
+import { getDailyReportsForDate, getLessonPlansForDate, getClassSubjectPerformance, getSyllabusPaceTracking, getMissingSubmissions, verifyDailyReport, reopenDailyReport, notifyMissingSubmissions, getDailyReadinessStatus, getHMDailyOversightData } from '../api';
+import { todayIST, formatLocalDate, nowIST } from '../utils/dateUtils';
 import { Clock, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, CheckCircle, Undo2, FileText, ClipboardCheck, ChevronUp } from 'lucide-react';
 
 const HMDailyOversightEnhanced = ({ user }) => {
@@ -10,6 +10,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
   const [lessonPlans, setLessonPlans] = useState([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('reports');
+  const [merged, setMerged] = useState({ periods: [], summary: { total: 0, plannedReady: 0, reported: 0, unplannedCount: 0, avgCompletion: 0 } });
   const [stats, setStats] = useState({
     totalPeriods: 0,
     submitted: 0,
@@ -39,7 +40,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
   // Real-time features
   const [lastUpdated, setLastUpdated] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [refreshInterval, setRefreshInterval] = useState(5);
+  const [refreshInterval, setRefreshInterval] = useState(5); // minutes
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [urgentAlerts, setUrgentAlerts] = useState([]);
   const [paceTracking, setPaceTracking] = useState(null);
@@ -56,6 +57,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
   const [classPerfOpen, setClassPerfOpen] = useState(false);
   // Readiness tracking
   const [readinessData, setReadinessData] = useState(null);
+  const [readinessError, setReadinessError] = useState(null);
   const [loadingReadiness, setLoadingReadiness] = useState(false);
   const [showLessonPlanDetails, setShowLessonPlanDetails] = useState(false);
   const [showReportDetails, setShowReportDetails] = useState(false);
@@ -67,6 +69,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
     loadPaceTracking(); // Load pace tracking data
     loadMissing();
     loadReadinessStatus(); // Load readiness status
+    loadMerged(); // Load plan vs actual merged
   }, [date]);
 
   // Load class/subject performance analytics
@@ -126,11 +129,20 @@ const HMDailyOversightEnhanced = ({ user }) => {
       
       // Extract the actual data - API returns {status: 200, data: {...}, timestamp: ...}
       const result = response.data || response;
-      console.log('Setting readiness data to:', result);
-      setReadinessData(result);
+      if (result && result.success) {
+        console.log('Setting readiness data to:', result);
+        setReadinessData(result);
+        setReadinessError(null);
+      } else {
+        const msg = (result && result.error) || 'Readiness endpoint unavailable';
+        console.warn('Readiness not available:', msg);
+        setReadinessData(null);
+        setReadinessError(msg);
+      }
     } catch (err) {
       console.error('Failed to load readiness status:', err);
       setReadinessData(null);
+      setReadinessError(err?.message || String(err));
     } finally {
       setLoadingReadiness(false);
     }
@@ -142,7 +154,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
 
     const intervalId = setInterval(() => {
       handleAutoRefresh();
-    }, refreshInterval * 60 * 1000);
+    }, refreshInterval * 60 * 1000); // refreshInterval is in minutes
 
     return () => clearInterval(intervalId);
   }, [autoRefresh, refreshInterval, date]);
@@ -187,6 +199,21 @@ const HMDailyOversightEnhanced = ({ user }) => {
     } catch (err) {
       console.error('Failed to load lesson plans:', err);
       setLessonPlans([]);
+    }
+  }
+
+  // Load merged Plan vs Actual per period for the date
+  async function loadMerged() {
+    try {
+      const response = await getHMDailyOversightData(date);
+      const result = response.data || response;
+      if (result && result.success) {
+        setMerged({ periods: result.periods || [], summary: result.summary || { total: 0, plannedReady: 0, reported: 0, unplannedCount: 0, avgCompletion: 0 } });
+      } else {
+        setMerged({ periods: [], summary: { total: 0, plannedReady: 0, reported: 0, unplannedCount: 0, avgCompletion: 0 } });
+      }
+    } catch (e) {
+      setMerged({ periods: [], summary: { total: 0, plannedReady: 0, reported: 0, unplannedCount: 0, avgCompletion: 0 } });
     }
   }
 
@@ -362,18 +389,20 @@ const HMDailyOversightEnhanced = ({ user }) => {
 
   function detectUrgentAlerts(data) {
     const alerts = [];
-    const now = new Date();
+    const now = nowIST();
     const currentHour = now.getHours();
-    
+    const day = now.getDay(); // 0=Sun,1=Mon,...,6=Sat
+    const isWorkingDay = day >= 1 && day <= 5;
+    const after3pm = currentHour >= 15;
+
     // Detect pending reports for ongoing/past periods
     const pendingReports = data.filter(r => !r.submitted && !r.completionPercentage);
     
-    // Check if it's during school hours (8 AM - 4 PM)
-    if (currentHour >= 8 && currentHour <= 16) {
-      // Alert for reports that should have been submitted
+    // Only surface pending-report and low-completion alerts after 3 PM on working days
+    if (isWorkingDay && after3pm) {
       if (pendingReports.length > 0) {
         alerts.push({
-          type: 'urgent',
+          type: 'pending_reports',
           category: 'pending_reports',
           message: `${pendingReports.length} reports pending submission`,
           count: pendingReports.length,
@@ -387,7 +416,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
     const highRisk = atRisk.filter(r => r.riskLevel === 'high');
     if (highRisk.length > 0) {
       alerts.push({
-        type: 'critical',
+        type: 'cascading_risk',
         category: 'cascading_risk',
         message: `${highRisk.length} sessions at high risk of cascading delays`,
         count: highRisk.length,
@@ -399,9 +428,9 @@ const HMDailyOversightEnhanced = ({ user }) => {
     const lowCompletion = data.filter(r => 
       r.submitted && (Number(r.completionPercentage) || 0) < 50
     );
-    if (lowCompletion.length >= 3) {
+    if (isWorkingDay && after3pm && lowCompletion.length >= 3) {
       alerts.push({
-        type: 'warning',
+        type: 'low_completion',
         category: 'low_completion',
         message: `${lowCompletion.length} sessions with completion below 50%`,
         count: lowCompletion.length,
@@ -591,16 +620,16 @@ const HMDailyOversightEnhanced = ({ user }) => {
               <span className="text-gray-700">Auto-refresh</span>
             </label>
             
-            {autoRefresh && (
+              {autoRefresh && (
               <select
                 value={refreshInterval}
                 onChange={(e) => setRefreshInterval(Number(e.target.value))}
                 className="text-sm border border-gray-300 rounded px-2 py-1"
               >
-                <option value={60000}>1 min</option>
-                <option value={300000}>5 min</option>
-                <option value={600000}>10 min</option>
-                <option value={1800000}>30 min</option>
+                <option value={1}>1 min</option>
+                <option value={5}>5 min</option>
+                <option value={10}>10 min</option>
+                <option value={30}>30 min</option>
               </select>
             )}
             
@@ -649,10 +678,10 @@ const HMDailyOversightEnhanced = ({ user }) => {
       </div>
 
       {/* Readiness Status Cards */}
-      {readinessData && !readinessData.noClassesScheduled && (
+      {readinessData?.success && !readinessData.noClassesScheduled && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           {/* Lesson Plans Readiness Card */}
-          <div className={`border-2 rounded-lg p-4 ${readinessData.lessonPlans?.status === 'complete' ? 'bg-green-50 border-green-200' : readinessData.lessonPlans?.status === 'good' ? 'bg-blue-50 border-blue-200' : readinessData.lessonPlans?.status === 'warning' ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'} ${new Date().getHours() < 15 ? 'ring-2 ring-blue-400' : ''}`}>
+          <div className={`border-2 rounded-lg p-4 ${readinessData.lessonPlans?.status === 'complete' ? 'bg-green-50 border-green-200' : readinessData.lessonPlans?.status === 'good' ? 'bg-blue-50 border-blue-200' : readinessData.lessonPlans?.status === 'warning' ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'} ${nowIST().getHours() < 15 ? 'ring-2 ring-blue-400' : ''}`}>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-blue-600" />
@@ -705,7 +734,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
           </div>
 
           {/* Daily Reports Card */}
-          <div className={`border-2 rounded-lg p-4 ${readinessData.dailyReports?.status === 'complete' ? 'bg-green-50 border-green-200' : readinessData.dailyReports?.status === 'good' ? 'bg-blue-50 border-blue-200' : readinessData.dailyReports?.status === 'warning' ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'} ${new Date().getHours() >= 15 ? 'ring-2 ring-green-400' : ''}`}>
+          <div className={`border-2 rounded-lg p-4 ${readinessData.dailyReports?.status === 'complete' ? 'bg-green-50 border-green-200' : readinessData.dailyReports?.status === 'good' ? 'bg-blue-50 border-blue-200' : readinessData.dailyReports?.status === 'warning' ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'} ${nowIST().getHours() >= 15 ? 'ring-2 ring-green-400' : ''}`}>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <ClipboardCheck className="w-5 h-5 text-green-600" />
@@ -756,6 +785,13 @@ const HMDailyOversightEnhanced = ({ user }) => {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Readiness unavailable banner */}
+      {!readinessData?.success && readinessError && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-6 text-sm text-yellow-800">
+          Readiness summary is temporarily unavailable: {readinessError}
         </div>
       )}
 
@@ -1184,6 +1220,16 @@ const HMDailyOversightEnhanced = ({ user }) => {
             Session Reports ({filteredReports.length})
           </button>
           <button
+            onClick={() => setActiveTab('plan-actual')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'plan-actual'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Plan vs Actual ({merged.summary?.total || 0})
+          </button>
+          <button
             onClick={() => setActiveTab('analytics')}
             className={`py-2 px-1 border-b-2 font-medium text-sm ${
               activeTab === 'analytics'
@@ -1245,10 +1291,26 @@ const HMDailyOversightEnhanced = ({ user }) => {
               <tbody className="bg-white divide-y divide-gray-200">
                 {filteredReports.map((report, index) => {
                   const completion = Number(report.completionPercentage) || 0;
-                  const isSubmitted = report.submitted || report.completionPercentage !== undefined;
+                  // Treat report as submitted only if we have an explicit submittedAt timestamp OR a positive completion percentage OR explicit submitted flag
+                  const isSubmitted = !!(report.submittedAt || report.submitted || (report.completionPercentage != null && completion > 0));
                   const isVerified = String(report.verified ?? report.Verified ?? '').toLowerCase() === 'true';
                   const isReopened = Boolean(report.reopenedAt || report.reopenReason || (String(report.reopened ?? '').toLowerCase() === 'true'));
-                  
+                  // Determine if a matching lesson plan exists (by id first, then by fields)
+                  const matchingPlanById = Array.isArray(lessonPlans) ? lessonPlans.find(p => String(p.lpId || p.lessonPlanId || '') === String(report.lessonPlanId || '')) : null;
+                  const matchingPlanByFields = !matchingPlanById && Array.isArray(lessonPlans) ? lessonPlans.find(p =>
+                    String(p.teacherEmail || '').toLowerCase() === String(report.teacherEmail || '').toLowerCase() &&
+                    String(p.class || '') === String(report.class || '') &&
+                    String(p.subject || '') === String(report.subject || '') &&
+                    String(p.selectedPeriod || p.period || '') === String(report.period || '')
+                  ) : null;
+                  const matchingPlan = matchingPlanById || matchingPlanByFields;
+                  const hasMatchingPlan = !!matchingPlan;
+                  // Only show Unplanned warning for substitution sessions without a matching plan
+                  const showUnplanned = isSubmitted && !hasMatchingPlan && (report.isSubstitution === true || String(report.isSubstitution).toLowerCase() === 'true');
+                  // Derive display chapter/session from report, fallback to matching lesson plan
+                  const displayChapter = report.chapter || (matchingPlan && matchingPlan.chapter) || '';
+                  const displaySessionNo = report.sessionNo || report.session || (matchingPlan && (matchingPlan.session || matchingPlan.sessionNo));
+                  const displayTotalSessions = report.totalSessions || (matchingPlan && matchingPlan.totalSessions) || '';
                   return (
                     <tr key={index} className={isSubmitted ? 'bg-green-50' : 'bg-yellow-50'}>
                       <td className="px-4 py-3 text-sm">
@@ -1267,10 +1329,10 @@ const HMDailyOversightEnhanced = ({ user }) => {
                       </td>
                       
                       <td className="px-4 py-3 text-sm">
-                        <div className="font-medium text-gray-900">{report.chapter}</div>
-                        {report.sessionNo && (
+                        <div className="font-medium text-gray-900">{displayChapter || <span className="text-gray-400">—</span>}</div>
+                        {displaySessionNo && (
                           <div className="text-xs text-purple-600">
-                            Session {report.sessionNo}{report.totalSessions ? ` of ${report.totalSessions}` : ''}
+                            Session {displaySessionNo}{displayTotalSessions ? ` of ${displayTotalSessions}` : ''}
                           </div>
                         )}
                       </td>
@@ -1296,6 +1358,11 @@ const HMDailyOversightEnhanced = ({ user }) => {
                       
                       <td className="px-4 py-3 text-sm">
                         <div className="space-y-1">
+                          {showUnplanned && (
+                            <div className="text-xs text-orange-700 bg-orange-50 px-2 py-1 rounded border border-orange-200">
+                              ⚠️ Unplanned (Substitution without matching plan)
+                            </div>
+                          )}
                           {report.difficulties && (
                             <div className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded">
                               ⚠️ {report.difficulties}
@@ -1335,26 +1402,31 @@ const HMDailyOversightEnhanced = ({ user }) => {
                                 const isReopening = reopeningKey === rk;
                                 return (
                                   <>
-                                    <button
-                                      disabled={isVerifying || isReopening}
-                                      onClick={() => handleVerify(report)}
-                                      className="px-2 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 inline-flex items-center"
-                                    >
-                                      {isVerifying && (
-                                        <span className="inline-block h-3 w-3 mr-1 border-2 border-white/70 border-t-transparent rounded-full animate-spin"></span>
-                                      )}
-                                      {isVerifying ? 'Verifying…' : 'Verify'}
-                                    </button>
-                                    <button
-                                      disabled={isVerifying || isReopening}
-                                      onClick={() => handleReopen(report)}
-                                      className="px-2 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 inline-flex items-center"
-                                    >
-                                      {isReopening && (
-                                        <span className="inline-block h-3 w-3 mr-1 border-2 border-white/70 border-t-transparent rounded-full animate-spin"></span>
-                                      )}
-                                      {isReopening ? 'Reopening…' : 'Reopen'}
-                                    </button>
+                                    {/* Show Verify/Reopen only when truly submitted (not empty 0% placeholder) */}
+                                    {isSubmitted && completion > 0 && (
+                                      <>
+                                        <button
+                                          disabled={isVerifying || isReopening}
+                                          onClick={() => handleVerify(report)}
+                                          className="px-2 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 inline-flex items-center"
+                                        >
+                                          {isVerifying && (
+                                            <span className="inline-block h-3 w-3 mr-1 border-2 border-white/70 border-t-transparent rounded-full animate-spin"></span>
+                                          )}
+                                          {isVerifying ? 'Verifying…' : 'Verify'}
+                                        </button>
+                                        <button
+                                          disabled={isVerifying || isReopening}
+                                          onClick={() => handleReopen(report)}
+                                          className="px-2 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 inline-flex items-center"
+                                        >
+                                          {isReopening && (
+                                            <span className="inline-block h-3 w-3 mr-1 border-2 border-white/70 border-t-transparent rounded-full animate-spin"></span>
+                                          )}
+                                          {isReopening ? 'Reopening…' : 'Reopen'}
+                                        </button>
+                                      </>
+                                    )}
                                   </>
                                 );
                               })()}
@@ -1373,6 +1445,107 @@ const HMDailyOversightEnhanced = ({ user }) => {
                     <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                       No reports found for the selected filters.
                     </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'plan-actual' && (
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+          {/* Summary header */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 p-4 border-b border-gray-200 bg-gray-50">
+            <div>
+              <p className="text-xs text-gray-600">Scheduled</p>
+              <p className="text-lg font-semibold text-gray-900">{merged.summary?.total || 0}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-600">Planned (Ready/Approved)</p>
+              <p className="text-lg font-semibold text-blue-700">{merged.summary?.plannedReady || 0}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-600">Reports Submitted</p>
+              <p className="text-lg font-semibold text-green-700">{merged.summary?.reported || 0}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-600">Unplanned</p>
+              <p className="text-lg font-semibold text-amber-700">{merged.summary?.unplannedCount || 0}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-600">Avg Completion</p>
+              <p className="text-lg font-semibold text-indigo-700">{merged.summary?.avgCompletion || 0}%</p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Class/Subject</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Teacher</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Plan</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Report</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Flags</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {(merged.periods || []).map((row, idx) => (
+                  <tr key={idx} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm text-gray-900">P{row.period}</td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="font-medium text-gray-900">{row.class}</div>
+                      <div className="text-gray-600">{row.subject}</div>
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="font-medium text-gray-900">{row.teacherName || row.teacherEmail}</div>
+                      {row.isSubstitution && (
+                        <div className="text-xs text-amber-700">Substitution</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {row.hasPlan ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                          {row.planStatus}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-500">No Plan</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {row.hasReport ? (
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
+                            {row.completionPercentage || 0}%
+                          </span>
+                          {row.verified && (
+                            <span className="text-xs text-emerald-700">Verified</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-500">No Report</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <div className="space-y-1">
+                        {row.unplanned && (
+                          <div className="text-xs text-orange-700 bg-orange-50 px-2 py-1 rounded border border-orange-200 inline-block">Unplanned</div>
+                        )}
+                        {row.difficulties && (
+                          <div className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded inline-block">⚠️ {row.difficulties}</div>
+                        )}
+                        {row.nextSessionPlan && (
+                          <div className="text-xs text-blue-700 bg-blue-50 px-2 py-1 rounded inline-block">📝 {row.nextSessionPlan}</div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {(merged.periods || []).length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500">No data for selected date.</td>
                   </tr>
                 )}
               </tbody>

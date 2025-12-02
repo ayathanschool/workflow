@@ -348,6 +348,17 @@
         return _handleGetMissingSubmissions(e.parameter);
       }
       
+      // Daily readiness summary for HM (GET-friendly)
+      if (action === 'getDailyReadinessStatus') {
+        const date = (e.parameter.date || _todayISO()).trim();
+        return _respond(getDailyReadinessStatus(date));
+      }
+
+      // HM merged Plan vs Actual for a date (timetable + plans + reports)
+      if (action === 'getHMDailyOversightData') {
+        return _respond(_handleGetHMDailyOversightData(e.parameter));
+      }
+      
       // === HM MONITORING ROUTES (GET) ===
       if (action === 'getAllTeachersPerformance') {
         return _handleGetAllTeachersPerformance(e.parameter);
@@ -948,8 +959,8 @@
       }
       
       if (action === 'getDailyReadinessStatus') {
-        const date = data.date || _todayISO();
-        return _respond(getDailyReadinessStatus(date));
+        const date = (e && e.parameter && e.parameter.date) ? String(e.parameter.date).trim() : '';
+        return _respond(getDailyReadinessStatus(date || _todayISO()));
       }
       
       if (action === 'getHMAnalyticsDashboard') {
@@ -5009,5 +5020,110 @@
       return _respond(res);
     } catch (err) {
       return _respond({ success: false, error: err && err.message ? err.message : String(err) });
+    }
+  }
+
+  /**
+   * HM Daily Oversight merged view for a given date
+   * Combines: Timetable (with substitutions) + LessonPlans + DailyReports
+   * Returns { success, date, periods: [...], summary: {...} }
+   */
+  function _handleGetHMDailyOversightData(params) {
+    try {
+      _bootstrapSheets();
+
+      const targetDate = params && params.date ? _normalizeQueryDate(params.date) : _todayISO();
+      const dayName = _dayNameIST(targetDate);
+
+      const timetableData = _readSheet('Timetable');
+      const scheduledPeriods = timetableData.filter(row => row.dayOfWeek && String(row.dayOfWeek).toLowerCase() === String(dayName).toLowerCase());
+
+      const substitutionsData = _readSheet('Substitutions');
+      const todaysSubstitutions = substitutionsData.filter(row => _isoDateIST(row.date) === targetDate);
+
+      const finalSchedule = scheduledPeriods.map(period => {
+        const substitution = todaysSubstitutions.find(sub =>
+          String(sub.period) === String(period.period) &&
+          String(sub.class) === String(period.class) &&
+          String(sub.absentTeacher) === String(period.teacherEmail)
+        );
+        if (substitution) {
+          return {
+            ...period,
+            teacherEmail: substitution.substituteTeacher,
+            subject: substitution.substituteSubject || period.subject,
+            isSubstitution: true,
+            absentTeacher: substitution.absentTeacher
+          };
+        }
+        return { ...period, isSubstitution: false };
+      });
+
+      const lessonPlansData = _readSheet('LessonPlans')
+        .filter(row => _isoDateIST(row.selectedDate) === targetDate && row.status !== 'cancelled');
+      const dailyReportsData = _readSheet('DailyReports')
+        .filter(row => _isoDateIST(row.date) === targetDate);
+
+      function getPlanStatus(p) {
+        const found = lessonPlansData.find(lp =>
+          String(lp.teacherEmail || '').toLowerCase() === String(p.teacherEmail || '').toLowerCase() &&
+          String(lp.class || '') === String(p.class || '') &&
+          String(lp.subject || '') === String(p.subject || '') &&
+          String(lp.selectedPeriod || lp.period || '') === String(p.period || '')
+        );
+        return found ? (found.status || '') : '';
+      }
+
+      function getMatchingReport(p) {
+        return dailyReportsData.find(r =>
+          String(r.teacherEmail || '').toLowerCase() === String(p.teacherEmail || '').toLowerCase() &&
+          String(r.class || '') === String(p.class || '') &&
+          String(r.subject || '') === String(p.subject || '') &&
+          String(r.period || '') === String(p.period || '')
+        );
+      }
+
+      const periods = finalSchedule.map(p => {
+        const planStatus = getPlanStatus(p);
+        const hasPlan = (String(planStatus).toLowerCase() === 'ready' || String(planStatus).toLowerCase() === 'approved');
+        const report = getMatchingReport(p) || {};
+        const hasReport = !!report && typeof report === 'object' && (report.submitted || report.completionPercentage !== undefined || report.chapter);
+        const verified = String(report.verified || report.Verified || '').toLowerCase() === 'true';
+        const completion = Number(report.completionPercentage) || 0;
+
+        return {
+          date: targetDate,
+          dayName: dayName,
+          class: p.class,
+          subject: p.subject,
+          period: p.period,
+          teacherEmail: p.teacherEmail,
+          teacherName: p.teacherName || p.teacher || '',
+          isSubstitution: !!p.isSubstitution,
+          hasPlan: hasPlan,
+          planStatus: planStatus || '',
+          hasReport: hasReport,
+          completionPercentage: completion,
+          verified: verified,
+          difficulties: report.difficulties || '',
+          nextSessionPlan: report.nextSessionPlan || '',
+          unplanned: hasReport && !hasPlan
+        };
+      });
+
+      const summary = {
+        total: periods.length,
+        plannedReady: periods.filter(x => x.hasPlan).length,
+        reported: periods.filter(x => x.hasReport).length,
+        unplannedCount: periods.filter(x => x.unplanned).length,
+        avgCompletion: (function(){
+          const comps = periods.filter(x => x.hasReport).map(x => Number(x.completionPercentage) || 0);
+          return comps.length ? Math.round(comps.reduce((a,b)=>a+b,0)/comps.length) : 0;
+        })()
+      };
+
+      return { success: true, date: targetDate, periods: periods, summary: summary };
+    } catch (error) {
+      return { success: false, error: error.message };
     }
   }

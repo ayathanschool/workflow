@@ -260,6 +260,20 @@ function jsonResponse(obj) {
   return _respond(obj);
 }
 
+/**
+ * Read a sheet and return an array of row objects indexed by headers.
+ * Uses request-scoped caching to avoid repeated reads within the same request.
+ */
+function _readSheet(sheetName) {
+  try {
+    const cached = _getCachedSheetData(sheetName);
+    return cached && Array.isArray(cached.data) ? cached.data : [];
+  } catch (e) {
+    Logger.log('[SheetHelpers._readSheet] Error reading sheet ' + sheetName + ': ' + (e && e.message ? e.message : e));
+    return [];
+  }
+}
+
 // (Removed) Enhanced lesson progress helpers archived in archive/appscript-backups/unused-helpers-2025-11-28.gs
 
 /**
@@ -736,6 +750,22 @@ function verifyDailyReport(reportId, verifierEmail) {
     }
     } // End composite key matching block
 
+    // Fallback 2: Try match by lessonPlanId when provided
+    if (rowIndex < 0) {
+      const lpCol = idxMap['lessonPlanId'];
+      if (lpCol != null) {
+        console.log('[verifyDailyReport] Trying lessonPlanId match');
+        for (let i = 0; i < data.length; i++) {
+          if (String(data[i][lpCol] || '') === reportIdStr) {
+            rowObj = _indexByHeader(data[i], headers);
+            rowIndex = i + 2;
+            console.log('[verifyDailyReport] lessonPlanId match found at row', rowIndex);
+            break;
+          }
+        }
+      }
+    }
+
     if (rowIndex < 0) {
       console.log('[verifyDailyReport] No match found.');
       console.log('[verifyDailyReport] Searched for:', reportIdStr);
@@ -799,18 +829,34 @@ function reopenDailyReport(reportId, requesterEmail, reason) {
 
     let rowIndex = -1;
     let rowObj = null;
+    const reportIdStr = String(reportId);
+    // Try ID match first (when 'id' column exists)
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
-      if (idCol != null && String(row[idCol]) === String(reportId)) { rowIndex = i + 2; rowObj = _indexByHeader(row, headers); break; }
-      if (idCol == null) {
-        const composite = [
-          String(row[idxMap['date']] || '').trim(),
-          String(row[idxMap['class']] || '').trim(),
-          String(row[idxMap['subject']] || '').trim(),
-          String(row[idxMap['period']] || '').trim(),
-          String(row[idxMap['teacherEmail']] || '').trim().toLowerCase()
-        ].join('|');
-        if (composite === String(reportId)) { rowIndex = i + 2; rowObj = _indexByHeader(row, headers); break; }
+      if (idCol != null && String(row[idCol]) === reportIdStr) { rowIndex = i + 2; rowObj = _indexByHeader(row, headers); break; }
+    }
+    // Composite key fallback
+    if (rowIndex < 0) {
+      for (let i = 0; i < data.length; i++) {
+        const row = data[i];
+        const rowDate = _isoDateString(row[idxMap['date']] || '');
+        const rowClass = String(row[idxMap['class']] || '').trim();
+        const rowSubject = String(row[idxMap['subject']] || '').trim();
+        const rowPeriodRaw = String(row[idxMap['period']] || '').trim();
+        const rowPeriod = rowPeriodRaw.replace(/^Period\s*/i, '');
+        const rowEmail = String(row[idxMap['teacherEmail']] || '').trim().toLowerCase();
+        const composite = [rowDate, rowClass, rowSubject, rowPeriod, rowEmail].join('|');
+        if (composite === reportIdStr) { rowIndex = i + 2; rowObj = _indexByHeader(row, headers); break; }
+      }
+    }
+    // lessonPlanId fallback
+    if (rowIndex < 0) {
+      const lpCol = idxMap['lessonPlanId'];
+      if (lpCol != null) {
+        for (let i = 0; i < data.length; i++) {
+          const row = data[i];
+          if (String(row[lpCol] || '') === reportIdStr) { rowIndex = i + 2; rowObj = _indexByHeader(row, headers); break; }
+        }
       }
     }
     if (rowIndex < 0) return { success: false, error: 'Report not found' };
