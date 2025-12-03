@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { fetchJSON } from '../api'; // assuming api.js exports helper
+import { getPendingLessonPlans, batchUpdateLessonPlanStatus } from '../api';
 import LoadingSpinner from './LoadingSpinner.jsx';
 
 // HM Lesson Plan Approval (Batchwise & Chapterwise)
@@ -14,8 +14,21 @@ export default function HMLessonPlanApproval({ currentUser }) {
   const [bulkState, setBulkState] = useState({ working: false, result: null });
 
   const isHM = useMemo(() => {
-    const roles = String(currentUser?.roles || '').toLowerCase();
-    return /hm|headmaster|principal|headteacher|headmistress/.test(roles);
+    if (!currentUser) return false;
+    const rawRoles = currentUser.roles;
+    const roleArray = Array.isArray(rawRoles)
+      ? rawRoles
+      : String(rawRoles || '')
+          .split(/[,]/)
+          .map(r => r.trim())
+          .filter(Boolean);
+    if (roleArray.length === 0) return false;
+    return roleArray.some(r => {
+      const norm = String(r).toLowerCase().replace(/[^a-z]/g, '');
+      if (['hm','headmaster','headteacher','headmistress','principal'].includes(norm)) return true;
+      // Handle split variants like "h m" or "head master"
+      return norm === 'head' && roleArray.some(rr => /master|teacher|mistress/i.test(rr));
+    });
   }, [currentUser]);
 
   useEffect(() => {
@@ -26,11 +39,13 @@ export default function HMLessonPlanApproval({ currentUser }) {
   async function loadPending() {
     setLoading(true); setError('');
     try {
-      const params = { action: 'getPendingLessonPlans', ...filters };
-      const qs = Object.entries(params).filter(([k,v]) => v!=='' && v!=null).map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
-      const res = await fetchJSON('GET', qs);
-      if (res.error) setError(res.error); else setPending(Array.isArray(res) ? res : []);
-    } catch (e) { setError(e.message || 'Failed to load'); } finally { setLoading(false); }
+      const res = await getPendingLessonPlans(filters);
+      setPending(Array.isArray(res) ? res : []);
+    } catch (e) {
+      setError(e.message || 'Failed to load');
+    } finally {
+      setLoading(false);
+    }
   }
 
   function toggle(id) {
@@ -87,11 +102,11 @@ export default function HMLessonPlanApproval({ currentUser }) {
     setBulkState({ working: true, result: null });
     try {
       const ids = Array.from(selection);
-      const payload = { action: 'batchUpdateLessonPlanStatus', lessonPlanIds: ids, status: 'Ready', reviewComments: 'Approved' };
-      const res = await fetchJSON('POST', payload);
-      setBulkState({ working: false, result: res });
-      if (res && res.success) {
-        // Refresh list and clear selection
+      const res = await batchUpdateLessonPlanStatus(ids, 'Ready', 'Approved');
+      const unwrapped = res && (res.data || res);
+      const ok = !!(unwrapped && (unwrapped.success || unwrapped.ok));
+      setBulkState({ working: false, result: unwrapped });
+      if (ok) {
         await loadPending();
         clearSelection();
       }
@@ -130,7 +145,7 @@ export default function HMLessonPlanApproval({ currentUser }) {
                 <td className="p-2">{lp.teacherName || lp.teacherEmail}</td>
                 <td className="p-2">{lp.selectedDate || lp.date || ''}</td>
                 <td className="p-2">{lp.selectedPeriod || lp.period || ''}</td>
-                <td className="p-2">{lp.status}</td>
+                <td className="p-2">{lp.status === 'Ready' ? 'Approved' : lp.status}</td>
               </tr>
             );
           })}
@@ -143,8 +158,8 @@ export default function HMLessonPlanApproval({ currentUser }) {
     <div className="p-4">
       <h2 className="text-lg font-semibold mb-3">HM Lesson Plan Approval</h2>
       {!isHM && <div className="text-red-600 mb-2">HM role required for approvals (view only).</div>}
-
-      <div className="flex flex-wrap gap-2 mb-3 items-center">
+      {/* Sticky controls bar stays visible while scrolling */}
+      <div className="flex flex-wrap gap-2 mb-3 items-center sticky top-0 z-10 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b border-gray-200 py-2 px-2 -mx-2">
         <input placeholder="Teacher" className="border px-2 py-1" value={filters.teacher} onChange={e => setFilters(f => ({ ...f, teacher: e.target.value }))} />
         <input placeholder="Class" className="border px-2 py-1" value={filters.class} onChange={e => setFilters(f => ({ ...f, class: e.target.value }))} />
         <input placeholder="Subject" className="border px-2 py-1" value={filters.subject} onChange={e => setFilters(f => ({ ...f, subject: e.target.value }))} />
@@ -153,15 +168,22 @@ export default function HMLessonPlanApproval({ currentUser }) {
           <option value="Pending Review">Pending Review</option>
           <option value="All">All Statuses</option>
         </select>
-        <button onClick={loadPending} className="bg-blue-600 text-white px-3 py-1 rounded">Refresh</button>
-        {isHM && selection.size > 0 && (
-          <button disabled={bulkState.working} onClick={bulkApprove} className="bg-green-600 text-white px-3 py-1 rounded">
-            {bulkState.working ? 'Approving...' : `Approve Selected (${selection.size})`}
-          </button>
-        )}
-        {selection.size > 0 && !bulkState.working && (
-          <button onClick={clearSelection} className="bg-gray-300 px-3 py-1 rounded">Clear</button>
-        )}
+        <div className="ml-auto flex gap-2 items-center">
+          <button onClick={loadPending} className="bg-blue-600 text-white px-3 py-1 rounded">Refresh</button>
+          {isHM && (
+            <button
+              disabled={bulkState.working || selection.size === 0}
+              onClick={bulkApprove}
+              className={`px-3 py-1 rounded text-white ${selection.size>0 ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-400 cursor-not-allowed'}`}
+              title={selection.size>0 ? `Approve Selected (${selection.size})` : 'Select rows to enable approval'}
+            >
+              {bulkState.working ? 'Approving...' : `Approve (${selection.size||0})`}
+            </button>
+          )}
+          {selection.size > 0 && !bulkState.working && (
+            <button onClick={clearSelection} className="bg-gray-300 px-3 py-1 rounded">Clear</button>
+          )}
+        </div>
       </div>
 
       <div className="flex gap-2 mb-4">

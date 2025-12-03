@@ -794,6 +794,46 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
 }
 
 /**
+ * Get the next available day/period for a specific class and subject.
+ * Finds the earliest slot that is free within a rolling 30-day window starting from fromDate (default today).
+ * Returns: { success, nextSlot: { date, dayName, period, startTime, endTime, class, subject } | null, searchedRange }
+ */
+function getNextAvailablePeriodForLessonPlan(teacherEmail, schemeClass, schemeSubject, fromDate) {
+  try {
+    if (!teacherEmail) return { success: false, error: 'Missing teacherEmail' };
+    if (!schemeClass || !schemeSubject) return { success: false, error: 'Missing class or subject' };
+
+    var startISO = _normalizeQueryDate(fromDate || _todayISO());
+    var d = new Date(startISO + 'T00:00:00');
+    d.setDate(d.getDate() + 30);
+    var endISO = Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
+
+    var res = getAvailablePeriodsForLessonPlan(teacherEmail, startISO, endISO, true, schemeClass, schemeSubject);
+    if (!res || res.success === false) {
+      return { success: false, error: (res && res.error) || 'Failed to compute available periods' };
+    }
+
+    var slots = Array.isArray(res.availableSlots) ? res.availableSlots : [];
+    var next = slots.find(function(s){ return s && s.isAvailable; }) || null;
+    return {
+      success: true,
+      nextSlot: next ? {
+        date: next.date,
+        dayName: next.dayName,
+        period: next.period,
+        startTime: next.startTime,
+        endTime: next.endTime,
+        class: next.class,
+        subject: next.subject
+      } : null,
+      searchedRange: { startDate: startISO, endDate: endISO }
+    };
+  } catch (e) {
+    return { success: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
+/**
  * Create lesson plan for specific scheme chapter session
  * WITH DOCUMENT LOCK AND INTELLIGENT PREPARATION DAY CHECK
  */

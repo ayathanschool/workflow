@@ -1234,3 +1234,249 @@ function verifyGoogleLogin(idToken) {
     return { success: false, error: e && e.message ? e.message : String(e) };
   }
 }
+
+// ===== AI Lesson Plan Suggestions (Deterministic Templates) =====
+
+/**
+ * Build a deterministic lesson plan suggestion when external AI is unavailable.
+ */
+function _buildLessonSuggestion(params) {
+  var subject = String((params && params.subject) || '').trim();
+  var chapter = String((params && params.chapter) || '').trim();
+  var cls = String((params && params.class) || '').trim();
+  var sessionNo = Number((params && (params.session || params.sessionNo)) || 1);
+
+  var title = (subject && chapter) ? (subject + ' - ' + chapter + ' (Session ' + sessionNo + ')') : ('Lesson Session ' + sessionNo);
+
+  // Basic signal extraction from class for grade-level tuning
+  var grade = (function(c){
+    try {
+      var m = String(c||'').match(/\d{1,2}/);
+      return m ? Number(m[0]) : null;
+    } catch(e){ return null; }
+  })(cls);
+
+  var subj = subject.toLowerCase();
+  var ch = chapter;
+
+  function join() {
+    return Array.prototype.slice.call(arguments).filter(Boolean);
+  }
+
+  function timeBlock(label, minutes, detail) {
+    return label + ' (' + minutes + 'm): ' + detail;
+  }
+
+  // Subject-aware objectives/activities/materials/assessment
+  var objectives = [];
+  var activities = [];
+  var materials = [];
+  var assessment = [];
+
+  if (/math|arithmetic|algebra|geometry|trigonometry|statistics|probabil/i.test(subj)) {
+    objectives = join(
+      'Recall prior knowledge related to ' + (ch || 'the concept'),
+      'Apply formulae/strategies to problems from ' + (ch || 'this topic'),
+      (grade && grade >= 9 ? 'Solve word problems and justify steps clearly' : 'Solve guided problems with step-by-step reasoning')
+    );
+    activities = join(
+      timeBlock('Warm-up', 5, 'Quick recap: 2 mental-math questions linked to ' + (ch || 'today’s topic')),
+      timeBlock('Teach', 15, 'Explain the key idea with 1–2 worked examples from ' + (ch || 'the chapter')),
+      timeBlock('Guided Practice', 10, 'Students solve 2–3 questions (odd roll call numbers attempt Q1, even attempt Q2)') ,
+      timeBlock('Discuss/Misconceptions', 5, 'Review common errors; share correct methods'),
+      timeBlock('Exit Ticket', 5, 'One problem testing core idea of ' + (ch || 'the topic'))
+    );
+    materials = join('Board/Marker', 'Textbook: ' + (ch || 'relevant section'), 'Prepared problem set (3–5 items)');
+    assessment = join('Observe methods during guided practice', 'Exit ticket: 1 problem with steps', 'Homework: 4 problems from textbook');
+  } else if (/science|physics|chemistry|biology|general science/i.test(subj)) {
+    objectives = join(
+      'Describe the key concept(s) in ' + (ch || 'this lesson'),
+      (grade && grade >= 8 ? 'Relate concept to real-world application or experiment' : 'Identify examples from daily life'),
+      'Demonstrate understanding via short responses/diagram'
+    );
+    activities = join(
+      timeBlock('Engage', 5, 'Prompt/question related to ' + (ch || 'the phenomenon')),
+      timeBlock('Explain', 15, 'Concept explanation with diagram/model demonstration'),
+      timeBlock('Explore', 10, 'Mini activity: predict/observe/record (table with 2–3 observations)'),
+      timeBlock('Elaborate', 5, 'Connect to daily life or lab safety/usage'),
+      timeBlock('Evaluate', 5, '2 short questions or lab sheet checkpoint')
+    );
+    materials = join('Board/Marker', 'Textbook: ' + (ch || 'topic section'), 'Simple demo materials (as available)');
+    assessment = join('Observation notes during Explore', '2 VSAQs on concept/diagram', 'Homework: 5 lines summary with one example');
+  } else if (/english|language|literature|grammar|reading/i.test(subj)) {
+    objectives = join(
+      'Improve comprehension of the text: ' + (ch || 'selected passage'),
+      'Acquire 3–5 new vocabulary items in context',
+      (grade && grade >= 9 ? 'Analyze theme/tone with textual evidence' : 'Identify main idea and supporting details')
+    );
+    activities = join(
+      timeBlock('Activate Prior Knowledge', 5, 'Starter prompt related to ' + (ch || 'the text')),
+      timeBlock('Read/Model', 10, 'Teacher model read; annotate difficult words/phrases'),
+      timeBlock('Guided Practice', 10, 'Pair read and answer 3 comprehension questions'),
+      timeBlock('Language Focus', 10, 'Highlight grammar/vocab from passage; quick drill'),
+      timeBlock('Exit Ticket', 5, 'One inference question or 2 vocab usages')
+    );
+    materials = join('Textbook/printed passage: ' + (ch || 'selection'), 'Dictionary list (5 words)', 'Notebook');
+    assessment = join('Oral responses during reading', '3 written answers (short)', 'Vocabulary usage in 2 original sentences');
+  } else if (/social|history|geography|civics|economics/i.test(subj)) {
+    objectives = join(
+      'Identify and explain key facts/terms from ' + (ch || 'the unit'),
+      'Locate/place items on map/timeline where relevant',
+      'Compare/contrast two ideas or events briefly'
+    );
+    activities = join(
+      timeBlock('Hook', 5, 'Image/map prompt linked to ' + (ch || 'the chapter')),
+      timeBlock('Teach', 15, 'Explain concept with 2 examples; create quick mind-map on board'),
+      timeBlock('Practice', 10, 'Students fill a table (term | meaning | example)'),
+      timeBlock('Apply', 5, 'Map/timeline label activity (2 labels)'),
+      timeBlock('Exit Ticket', 5, '1 short note (3–4 lines)')
+    );
+    materials = join('Board/Marker', 'Textbook: ' + (ch || 'section'), 'Map/timeline handout (if available)');
+    assessment = join('Check table entries for accuracy', 'Map/timeline labels', 'Short note quality (key points present)');
+  } else if (/computer|ict|information technology|cs/i.test(subj)) {
+    objectives = join(
+      'Understand core idea of ' + (ch || 'the topic'),
+      'Perform basic hands-on task demonstrating the concept',
+      'Follow lab etiquette and save work properly'
+    );
+    activities = join(
+      timeBlock('Intro', 5, 'Connect prior knowledge; show quick demo'),
+      timeBlock('Explain', 10, 'Step-by-step walkthrough of commands/screens'),
+      timeBlock('Hands-on', 15, 'Students replicate task and extend with one variation'),
+      timeBlock('Share', 5, '2 students present outputs briefly'),
+      timeBlock('Exit Ticket', 5, 'Screenshot or answer 2 “how-to” questions')
+    );
+    materials = join('Lab systems/projector', 'Handout with steps', 'Sample files if needed');
+    assessment = join('Observe hands-on task completion', '2 QA items from lab handout', 'Saved file in correct folder');
+  } else {
+    // Generic (fallback)
+    objectives = join(
+      'Understand key ideas of ' + (ch || 'the topic'),
+      'Connect with real-life examples suitable for class ' + (cls || ''),
+      'Demonstrate understanding through a short task'
+    );
+    activities = join(
+      timeBlock('Warm-up', 5, 'Quick recap related to ' + (ch || 'today’s concept')),
+      timeBlock('Teach', 15, 'Explain core idea with 1–2 examples'),
+      timeBlock('Practice', 10, 'Small-group activity applying the idea'),
+      timeBlock('Discuss', 5, 'Share outputs and clarify misconceptions'),
+      timeBlock('Exit Ticket', 5, '1 question testing today’s outcome')
+    );
+    materials = join('Board/Marker', 'Textbook: ' + (ch || 'relevant section'), 'Worksheet (3–5 items)');
+    assessment = join('Observe practice task', 'Exit ticket correctness', 'Homework: 3 questions from textbook');
+  }
+
+  return {
+    title: title,
+    objectives: objectives,
+    activities: activities,
+    materials: materials,
+    assessment: assessment
+  };
+}
+
+/**
+ * Single-session suggestion for teacher (no external AI dependency).
+ * params: { teacherEmail, class, subject, chapter, session }
+ */
+function suggestLessonPlan(params) {
+  try {
+    if (!params || !params.teacherEmail) return { success: false, error: 'Missing teacherEmail' };
+    var suggestion = _buildLessonSuggestion(params);
+    return { success: true, suggestion: suggestion };
+  } catch (e) {
+    return { success: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
+/**
+ * Bulk generate suggestions and write to LessonPlans.
+ * params: { teacherEmail, class, subject, chapter, sessions: number, startSession?: number }
+ */
+function suggestLessonPlansBulk(params) {
+  var lock;
+  try {
+    var teacherEmail = params && params.teacherEmail;
+    var teacherName = params && params.teacherName;
+    var cls = params && params.class;
+    var subject = params && params.subject;
+    var chapter = params && params.chapter;
+    var sessions = Number(params && params.sessions);
+    var startSession = Number(params && params.startSession) || 1;
+    var schemeId = params && params.schemeId;
+    if (!teacherEmail || !cls || !subject || !chapter || !sessions) {
+      return { success: false, error: 'Missing required parameters (teacherEmail/class/subject/chapter/sessions)' };
+    }
+
+    lock = LockService.getDocumentLock();
+    lock.waitLock(28000);
+
+    var lpSh = _getSheet('LessonPlans');
+    // Use existing headers as-is; don't mutate schema here
+    var headers = _headers(lpSh);
+    var col = function(names) { return _getIdx(headers, Array.isArray(names) ? names : [names]); };
+
+    var idx = {
+      lpId: col(['lpId','lessonPlanId','planId','id']),
+      schemeId: col(['schemeId']),
+      teacherEmail: col(['teacherEmail','teacher']),
+      teacherName: col(['teacherName','teacher']),
+      class: col(['class','className']),
+      subject: col(['subject','subjectName']),
+      chapter: col(['chapter','topic']),
+      session: col(['session','sessionNo']),
+      selectedDate: col(['selectedDate','date']),
+      selectedPeriod: col(['selectedPeriod','period']),
+      learningObjectives: col(['learningObjectives','objectives']),
+      teachingMethods: col(['teachingMethods','methods','activities']),
+      resourcesRequired: col(['resourcesRequired','resources','materials']),
+      assessmentMethods: col(['assessmentMethods','assessment']),
+      status: col(['status']),
+      createdAt: col(['createdAt']),
+      notes: col(['notes','note'])
+    };
+
+    var created = [];
+    for (var s = 0; s < sessions; s++) {
+      var sessNo = startSession + s;
+      var sug = _buildLessonSuggestion({ class: cls, subject: subject, chapter: chapter, session: sessNo });
+      var lpId = _uuid();
+      var row = new Array(headers.length);
+      for (var i = 0; i < headers.length; i++) row[i] = '';
+
+      if (idx.lpId !== -1) row[idx.lpId] = lpId;
+      if (idx.schemeId !== -1) row[idx.schemeId] = schemeId || '';
+      if (idx.teacherEmail !== -1) row[idx.teacherEmail] = String(teacherEmail).toLowerCase();
+      if (idx.teacherName !== -1) row[idx.teacherName] = teacherName || '';
+      if (idx.class !== -1) row[idx.class] = cls;
+      if (idx.subject !== -1) row[idx.subject] = subject;
+      if (idx.chapter !== -1) row[idx.chapter] = chapter;
+      if (idx.session !== -1) row[idx.session] = sessNo;
+      if (idx.selectedDate !== -1) row[idx.selectedDate] = '';
+      if (idx.selectedPeriod !== -1) row[idx.selectedPeriod] = '';
+
+      // Map suggestion details into dedicated columns when present
+      var objectivesText = (sug && sug.objectives && sug.objectives.join) ? sug.objectives.join('\n') : '';
+      var activitiesText = (sug && sug.activities && sug.activities.join) ? sug.activities.join('\n') : '';
+      var materialsText = (sug && sug.materials && sug.materials.join) ? sug.materials.join('\n') : '';
+      var assessmentText = (sug && sug.assessment && sug.assessment.join) ? sug.assessment.join('\n') : '';
+      if (idx.learningObjectives !== -1) row[idx.learningObjectives] = objectivesText;
+      if (idx.teachingMethods !== -1) row[idx.teachingMethods] = activitiesText;
+      if (idx.resourcesRequired !== -1) row[idx.resourcesRequired] = materialsText;
+      if (idx.assessmentMethods !== -1) row[idx.assessmentMethods] = assessmentText;
+
+      if (idx.status !== -1) row[idx.status] = 'Pending Review';
+      if (idx.createdAt !== -1) row[idx.createdAt] = new Date().toISOString();
+      if (idx.notes !== -1) row[idx.notes] = JSON.stringify(sug);
+
+      lpSh.appendRow(row);
+      created.push({ lpId: lpId, session: sessNo });
+    }
+
+    return { success: true, created: created };
+  } catch (e) {
+    return { success: false, error: e && e.message ? e.message : String(e) };
+  } finally {
+    try { if (lock) lock.releaseLock(); } catch (ee) {}
+  }
+}

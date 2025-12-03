@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, CheckCircle, AlertCircle, BookOpen, Users, Plus, Search, Sparkles } from 'lucide-react';
 import * as api from '../api.js';
+import * as ai from '../api-ai.js';
 
 // Generic API request function
 const apiRequest = async (action, params = {}, method = 'GET') => {
@@ -309,32 +310,36 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
     setLoadingAI(true);
     try {
       const context = {
+        teacherEmail: userEmail,
         class: selectedSession.class,
         subject: selectedSession.subject,
         chapter: selectedSession.chapter,
-        session: selectedSession.session,
-        sessionName: selectedSession.sessionName
+        session: selectedSession.session
       };
-      
+
       console.log('[AI] Requesting AI suggestions with context:', context);
-      const response = await api.getAILessonSuggestions(context);
-      
-      console.log('[AI] Full response received:', JSON.stringify(response, null, 2));
-      
-      if (response && response.data && response.data.success && response.data.suggestions) {
-        console.log('[AI] SUCCESS - Auto-filling fields');
+      const res = await ai.suggestLessonPlan(context);
+      console.log('[AI] Response:', res);
+
+      const success = !!res?.success;
+      const suggestion = res?.suggestion;
+      if (success && suggestion) {
+        const learningObjectives = Array.isArray(suggestion.objectives) ? suggestion.objectives.join('\n') : '';
+        const teachingMethods = Array.isArray(suggestion.activities) ? suggestion.activities.join('\n') : '';
+        const resourcesRequired = Array.isArray(suggestion.materials) ? suggestion.materials.join('\n') : '';
+        const assessmentMethods = Array.isArray(suggestion.assessment) ? suggestion.assessment.join('\n') : '';
+
         setLessonPlanData(prev => ({
           ...prev,
-          learningObjectives: response.data.suggestions.learningObjectives || prev.learningObjectives,
-          teachingMethods: response.data.suggestions.teachingMethods || prev.teachingMethods,
-          resourcesRequired: response.data.suggestions.resourcesRequired || prev.resourcesRequired,
-          assessmentMethods: response.data.suggestions.assessmentMethods || prev.assessmentMethods
+          learningObjectives: learningObjectives || prev.learningObjectives,
+          teachingMethods: teachingMethods || prev.teachingMethods,
+          resourcesRequired: resourcesRequired || prev.resourcesRequired,
+          assessmentMethods: assessmentMethods || prev.assessmentMethods
         }));
         alert('✨ AI suggestions loaded! You can edit them before submitting.');
       } else {
-        const errorMsg = response?.data?.error || response?.error || 'Unknown error';
+        const errorMsg = res?.error || 'Unknown error';
         console.error('[AI] FAILED - Error:', errorMsg);
-        console.error('[AI] Full response structure:', response);
         alert(`AI Error: ${errorMsg}\n\nTry the search buttons instead.`);
       }
     } catch (err) {
@@ -429,7 +434,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
             <button
               onClick={() => {
                 setLoading(true);
-                loadSchemes();
+                loadApprovedSchemes();
               }}
               disabled={loading}
               className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1"
@@ -967,6 +972,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess })
   const [submitting, setSubmitting] = useState(false);
   const [preview, setPreview] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [aiBulkLoading, setAiBulkLoading] = useState(false);
 
   const loadPreview = async () => {
     setLoadingPreview(true);
@@ -1069,6 +1075,47 @@ const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess })
     }
   };
 
+  const handleAIPrefillAll = async () => {
+    try {
+      setAiBulkLoading(true);
+      const total = data.sessionCount;
+      const contexts = Array.from({ length: total }, (_, i) => ({
+        teacherEmail: userEmail,
+        class: data.scheme.class,
+        subject: data.scheme.subject,
+        chapter: data.chapter.chapterName,
+        session: i + 1
+      }));
+
+      console.log('[AI Prefill] Requesting suggestions for', total, 'sessions');
+      const results = await Promise.all(contexts.map(ctx => ai.suggestLessonPlan(ctx).catch(err => ({ success: false, error: err?.message }))));
+
+      const filled = sessions.map((s, idx) => {
+        const r = results[idx];
+        const suggestion = r && r.success ? r.suggestion : null;
+        const learningObjectives = suggestion && Array.isArray(suggestion.objectives) ? suggestion.objectives.join('\n') : s.learningObjectives;
+        const teachingMethods = suggestion && Array.isArray(suggestion.activities) ? suggestion.activities.join('\n') : s.teachingMethods;
+        const resourcesRequired = suggestion && Array.isArray(suggestion.materials) ? suggestion.materials.join('\n') : s.resourcesRequired;
+        const assessmentMethods = suggestion && Array.isArray(suggestion.assessment) ? suggestion.assessment.join('\n') : s.assessmentMethods;
+        return {
+          ...s,
+          learningObjectives,
+          teachingMethods,
+          resourcesRequired,
+          assessmentMethods
+        };
+      });
+
+      setSessions(filled);
+      alert('✨ AI prefilled all sessions. Review and click Create All.');
+    } catch (err) {
+      console.error('[AI Prefill] Exception:', err);
+      alert('AI prefill error: ' + err.message);
+    } finally {
+      setAiBulkLoading(false);
+    }
+  };
+
   const session = sessions[currentSession];
   const assignedPeriod = preview ? preview[currentSession] : null;
 
@@ -1084,6 +1131,20 @@ const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess })
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
+            </button>
+          </div>
+
+          {/* AI Bulk Prefill (no save) */}
+          <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg flex items-center justify-between">
+            <div className="text-sm text-purple-800">
+              ✨ Prefill all {data.sessionCount} sessions into the four fields. Review, then submit.
+            </div>
+            <button
+              onClick={handleAIPrefillAll}
+              disabled={aiBulkLoading}
+              className="px-3 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg text-sm font-medium shadow hover:shadow-md disabled:opacity-50"
+            >
+              {aiBulkLoading ? 'Prefilling…' : `AI Prefill All (${data.sessionCount})`}
             </button>
           </div>
 

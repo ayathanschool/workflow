@@ -1785,6 +1785,9 @@ const App = () => {
       activities: '',
       notes: ''
     });
+    // Grouping toggles (mutually exclusive)
+    const [groupByClass, setGroupByClass] = useState(false);
+    const [groupByChapter, setGroupByChapter] = useState(false);
     
     // Filter states for lesson plans
     const [lessonPlanFilters, setLessonPlanFilters] = useState({
@@ -2426,99 +2429,202 @@ const App = () => {
                   Clear Filters
                 </button>
               </div>
+              <div className="ml-auto flex items-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setGroupByClass(v => { const next = !v; if (next) setGroupByChapter(false); return next; }); }}
+                  className={`px-3 py-2 text-sm rounded-md border ${groupByClass ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'}`}
+                  title="Group by Class"
+                >
+                  Group by Class
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setGroupByChapter(v => { const next = !v; if (next) setGroupByClass(false); return next; }); }}
+                  className={`px-3 py-2 text-sm rounded-md border ${groupByChapter ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'}`}
+                  title="Group by Chapter"
+                >
+                  Group by Chapter
+                </button>
+              </div>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Session</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {lessonPlans
-                  .filter(plan => {
+          {(() => {
+            const filtered = lessonPlans.filter(plan => (
+              (!lessonPlanFilters.class || plan.class === lessonPlanFilters.class) &&
+              (!lessonPlanFilters.subject || plan.subject === lessonPlanFilters.subject) &&
+              (!lessonPlanFilters.status || plan.status === lessonPlanFilters.status) &&
+              (!lessonPlanFilters.chapter || plan.chapter === lessonPlanFilters.chapter)
+            ));
+
+            if (groupByClass || groupByChapter) {
+              const keyFn = (p) => groupByClass ? (p.class || 'Unknown Class') : (p.chapter || 'Unknown Chapter');
+              const groups = {};
+              for (const p of filtered) {
+                const k = keyFn(p);
+                if (!groups[k]) groups[k] = [];
+                groups[k].push(p);
+              }
+              const sortedKeys = Object.keys(groups).sort((a,b)=> a.localeCompare(b, undefined, { sensitivity: 'base' }));
+              return (
+                <div className="px-6 py-4 space-y-6">
+                  {sortedKeys.map(key => {
+                    const items = groups[key].slice().sort((a,b)=> {
+                      // sort by subject then session
+                      const s = (a.subject||'').localeCompare(b.subject||'');
+                      if (s !== 0) return s;
+                      return Number(a.session||0) - Number(b.session||0);
+                    });
                     return (
-                      (!lessonPlanFilters.class || plan.class === lessonPlanFilters.class) &&
-                      (!lessonPlanFilters.subject || plan.subject === lessonPlanFilters.subject) &&
-                      (!lessonPlanFilters.status || plan.status === lessonPlanFilters.status) &&
-                      (!lessonPlanFilters.chapter || plan.chapter === lessonPlanFilters.chapter)
+                      <div key={key} className="border rounded-xl overflow-hidden">
+                        <div className="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
+                          <div className="font-semibold text-gray-900">
+                            {groupByClass ? `Class: ${key}` : `Chapter: ${key}`}
+                          </div>
+                          <div className="text-xs text-gray-600">{items.length} plan(s)</div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-white">
+                              <tr>
+                                {!groupByClass && (<th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>)}
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
+                                {!groupByChapter && (<th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter</th>)}
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Session</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                              {items.map(plan => (
+                                <tr key={plan.lpId}>
+                                  {!groupByClass && (<td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">{plan.class}</td>)}
+                                  <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">{plan.subject}</td>
+                                  {!groupByChapter && (<td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">{plan.chapter || 'N/A'}</td>)}
+                                  <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">{plan.session}</td>
+                                  <td className="px-4 py-2 whitespace-nowrap">
+                                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                      plan.status === 'Pending Preparation' 
+                                        ? 'bg-yellow-100 text-yellow-800' 
+                                        : plan.status === 'Pending Review' 
+                                          ? 'bg-blue-100 text-blue-800'
+                                          : plan.status === 'Ready'
+                                            ? 'bg-green-100 text-green-800'
+                                            : plan.status === 'Needs Rework'
+                                              ? 'bg-orange-100 text-orange-800'
+                                              : 'bg-gray-100 text-gray-800'
+                                    }`}>
+                                      {plan.status}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
+                                    <button
+                                      onClick={() => handlePrepareLesson({
+                                        class: plan.class,
+                                        subject: plan.subject,
+                                        period: plan.session,
+                                        date: todayIST(),
+                                        day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+                                        lpId: plan.lpId
+                                      })}
+                                      className={`${
+                                        plan.status !== 'Pending Preparation' && plan.status !== 'Needs Rework'
+                                          ? 'bg-gray-300 cursor-not-allowed'
+                                          : 'bg-blue-600 hover:bg-blue-700'
+                                      } text-white px-3 py-1 rounded text-sm mr-2`}
+                                      disabled={plan.status !== 'Pending Preparation' && plan.status !== 'Needs Rework'}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button type="button" className="text-blue-600 hover:text-blue-900" onClick={() => openLessonView(plan)} title="View lesson plan">
+                                      <Eye className="h-4 w-4 inline" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
                     );
-                  })
-                  .map((plan) => {
-                  // Get scheme info if available
-                  const relatedScheme = approvedSchemes.find(s => s.schemeId === plan.schemeId);
-                  
-                  return (
-                    <tr key={plan.lpId}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{plan.class}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{plan.subject}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{plan.chapter || 'N/A'}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{plan.session}</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                          plan.status === 'Pending Preparation' 
-                            ? 'bg-yellow-100 text-yellow-800' 
-                            : plan.status === 'Pending Review' 
-                              ? 'bg-blue-100 text-blue-800'
-                              : plan.status === 'Ready'
-                                ? 'bg-green-100 text-green-800'
-                                : plan.status === 'Needs Rework'
-                                  ? 'bg-orange-100 text-orange-800'
-                                  : 'bg-gray-100 text-gray-800'
-                        }`}>
-                          {plan.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        <button
-                          onClick={() => handlePrepareLesson({
-                            class: plan.class,
-                            subject: plan.subject,
-                            period: plan.session,
-                            date: todayIST(),
-                            day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-                            lpId: plan.lpId
-                          })}
-                          className={`${
-                            plan.status !== 'Pending Preparation' && plan.status !== 'Needs Rework'
-                              ? 'bg-gray-300 cursor-not-allowed'
-                              : 'bg-blue-600 hover:bg-blue-700'
-                          } text-white px-3 py-1 rounded text-sm mr-2`}
-                          disabled={plan.status !== 'Pending Preparation' && plan.status !== 'Needs Rework'}
-                        >
-                          Edit
-                        </button>
-                        <button type="button" className="text-blue-600 hover:text-blue-900" onClick={() => openLessonView(plan)} title="View lesson plan">
-                          <Eye className="h-4 w-4 inline" />
-                        </button>
-                      </td>
+                  })}
+                </div>
+              );
+            }
+
+            // Default flat table view
+            return (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Session</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
-                  );
-                })}
-                {lessonPlans
-                  .filter(plan => {
-                    return (
-                      (!lessonPlanFilters.class || plan.class === lessonPlanFilters.class) &&
-                      (!lessonPlanFilters.subject || plan.subject === lessonPlanFilters.subject) &&
-                      (!lessonPlanFilters.status || plan.status === lessonPlanFilters.status) &&
-                      (!lessonPlanFilters.chapter || plan.chapter === lessonPlanFilters.chapter)
-                    );
-                  }).length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
-                      {lessonPlans.length === 0 ? 'No lesson plans submitted yet.' : 'No lesson plans match the selected filters.'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {filtered.map((plan) => (
+                      <tr key={plan.lpId}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{plan.class}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{plan.subject}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{plan.chapter || 'N/A'}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{plan.session}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                            plan.status === 'Pending Preparation' 
+                              ? 'bg-yellow-100 text-yellow-800' 
+                              : plan.status === 'Pending Review' 
+                                ? 'bg-blue-100 text-blue-800'
+                                : plan.status === 'Ready'
+                                  ? 'bg-green-100 text-green-800'
+                                  : plan.status === 'Needs Rework'
+                                    ? 'bg-orange-100 text-orange-800'
+                                    : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {plan.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <button
+                            onClick={() => handlePrepareLesson({
+                              class: plan.class,
+                              subject: plan.subject,
+                              period: plan.session,
+                              date: todayIST(),
+                              day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+                              lpId: plan.lpId
+                            })}
+                            className={`${
+                              plan.status !== 'Pending Preparation' && plan.status !== 'Needs Rework'
+                                ? 'bg-gray-300 cursor-not-allowed'
+                                : 'bg-blue-600 hover:bg-blue-700'
+                            } text-white px-3 py-1 rounded text-sm mr-2`}
+                            disabled={plan.status !== 'Pending Preparation' && plan.status !== 'Needs Rework'}
+                          >
+                            Edit
+                          </button>
+                          <button type="button" className="text-blue-600 hover:text-blue-900" onClick={() => openLessonView(plan)} title="View lesson plan">
+                            <Eye className="h-4 w-4 inline" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {filtered.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                          {lessonPlans.length === 0 ? 'No lesson plans submitted yet.' : 'No lesson plans match the selected filters.'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
         </div>
       </div>
     );
@@ -7508,6 +7614,8 @@ const App = () => {
     const [page, setPage] = useState(1);
     const [maxDisplay, setMaxDisplay] = useState(1000); // soft cap
     const [refreshTrigger, setRefreshTrigger] = useState(0);
+    const [groupByClass, setGroupByClass] = useState(false);
+    const [groupByChapter, setGroupByChapter] = useState(false);
     const email = user?.email || '';
 
     const computeDates = useCallback(() => {
@@ -7606,141 +7714,225 @@ const App = () => {
               </select>
             </div>
             <button onClick={exportCSV} disabled={!reports.length} className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-40">Export CSV</button>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => { setGroupByClass(v => { const next = !v; if (next) setGroupByChapter(false); return next; }); }}
+                className={`px-3 py-2 text-sm rounded-md border ${groupByClass ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'}`}
+                title="Group by Class"
+              >
+                Group by Class
+              </button>
+              <button
+                type="button"
+                onClick={() => { setGroupByChapter(v => { const next = !v; if (next) setGroupByClass(false); return next; }); }}
+                className={`px-3 py-2 text-sm rounded-md border ${groupByChapter ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'}`}
+                title="Group by Chapter"
+              >
+                Group by Chapter
+              </button>
+            </div>
           </div>
           <div className="text-xs text-gray-600">Showing reports for <strong>{email}</strong> {(() => { const {from,to}=computeDates(); return `(${from} → ${to})`; })()} • {total} total{total === maxDisplay ? ' (truncated)' : ''}</div>
         </div>
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-200 flex justify-between items-center">
-            <h2 className="text-lg font-medium text-gray-900">Reports ({total})</h2>
-            <div className="flex items-center gap-2 text-xs text-gray-600">
-              <button onClick={()=> setPage(p=> Math.max(1, p-1))} disabled={page===1} className="px-2 py-1 border rounded disabled:opacity-40">Prev</button>
-              <span>Page {page}/{totalPages}</span>
-              <button onClick={()=> setPage(p=> Math.min(totalPages, p+1))} disabled={page===totalPages} className="px-2 py-1 border rounded disabled:opacity-40">Next</button>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full divide-y divide-gray-200 text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Date</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Class</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Subject</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Period</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Chapter</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Session</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Completed</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Notes</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Status</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {loading && (
-                  <tr><td colSpan={10} className="px-4 py-6 text-center text-sm text-gray-500">Loading...</td></tr>
-                )}
-                {!loading && reports.length === 0 && (
-                  <tr><td colSpan={10} className="px-4 py-6 text-center text-sm text-gray-500">No reports in this range.</td></tr>
-                )}
-                {!loading && paginated.map(r => {
-                  const id = r.id || r.reportId || `${(r.date||'').toString()}|${r.class||''}|${r.subject||''}|${r.period||''}|${String(r.teacherEmail||'').toLowerCase()}`;
-                  const displayDate = (() => {
-                    const d = r.date;
-                    if (!d) return '-';
-                    const s = String(d);
-                    // If backend already normalized yyyy-MM-dd, show as-is
-                    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-                    // If ISO datetime, compute IST date string
-                    try {
-                      const dt = new Date(s);
-                      if (!isNaN(dt.getTime())) {
-                        // en-CA with timeZone gives YYYY-MM-DD
-                        return dt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-                      }
-                    } catch {}
-                    // Fallback: strip time part
-                    if (/^\d{4}-\d{2}-\d{2}T/.test(s)) return s.split('T')[0];
-                    return s;
-                  })();
-                  const completedVal = r.completed || r.lessonProgressTracked || r.status || '-';
-                  return (
-                  <tr key={id || `${r.date}|${r.class}|${r.subject}|${r.period}`}> 
-                    <td className="px-2 py-2 text-xs text-gray-900">{displayDate}</td>
-                    <td className="px-2 py-2 text-xs text-gray-900">{r.class}</td>
-                    <td className="px-2 py-2 text-xs text-gray-900">{r.subject}</td>
-                    <td className="px-2 py-2 text-xs text-gray-900">P{r.period}</td>
-                    <td className="px-2 py-2 text-xs text-gray-700 truncate">{r.chapter || '-'}</td>
-                    <td className="px-2 py-2 text-xs text-gray-700">{r.sessionNo || '-'}</td>
-                    <td className="px-2 py-2 text-xs">{completedVal}</td>
-                    <td className="px-2 py-2 text-xs text-gray-600 max-w-[180px] truncate" title={r.notes || ''}>{r.notes || '-'}</td>
-                    <td className="px-2 py-2 text-xs">
-                      {r.verified === 'TRUE' ? (
-                        <div className="flex flex-col gap-1">
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            ✓ Verified
-                          </span>
-                          {r.verifiedBy && (
-                            <span className="text-[10px] text-gray-500">
-                              by {r.verifiedBy.split('@')[0]}
-                            </span>
-                          )}
+          {(() => {
+            const base = reports;
+            if (groupByClass || groupByChapter) {
+              const keyFn = (r) => groupByClass ? (r.class || 'Unknown Class') : (r.chapter || 'Unknown Chapter');
+              const groups = {};
+              for (const r of base) {
+                const k = keyFn(r);
+                if (!groups[k]) groups[k] = [];
+                groups[k].push(r);
+              }
+              const keys = Object.keys(groups).sort((a,b)=> a.localeCompare(b, undefined, { sensitivity: 'base' }));
+              return (
+                <div className="divide-y divide-gray-200">
+                  {keys.map(k => {
+                    const list = groups[k].slice().sort((a,b)=> {
+                      // sort by date then period
+                      const ad = String(a.date||'');
+                      const bd = String(b.date||'');
+                      const ds = ad.localeCompare(bd);
+                      if (ds !== 0) return ds;
+                      return Number(a.period||0) - Number(b.period||0);
+                    });
+                    return (
+                      <div key={k} className="">
+                        <div className="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
+                          <div className="font-semibold text-gray-900">{groupByClass ? `Class: ${k}` : `Chapter: ${k}`}</div>
+                          <div className="text-xs text-gray-600">{list.length} report(s)</div>
                         </div>
-                      ) : r.reopenReason ? (
-                        <div className="flex flex-col gap-1">
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                            ⚠ Reopened
-                          </span>
-                          <span 
-                            className="text-[10px] text-gray-600 cursor-help max-w-[120px] truncate" 
-                            title={r.reopenReason}
-                          >
-                            {r.reopenReason}
-                          </span>
-                          {r.reopenedBy && (
-                            <span className="text-[10px] text-gray-500">
-                              by {r.reopenedBy.split('@')[0]}
-                            </span>
-                          )}
+                        <div className="overflow-x-auto">
+                          <table className="w-full divide-y divide-gray-200 text-sm">
+                            <thead className="bg-white">
+                              <tr>
+                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Date</th>
+                                {!groupByClass && (<th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Class</th>)}
+                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Subject</th>
+                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Period</th>
+                                {!groupByChapter && (<th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Chapter</th>)}
+                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Session</th>
+                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Completed</th>
+                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Notes</th>
+                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Status</th>
+                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase"></th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                              {list.map(r => {
+                                const id = r.id || r.reportId || `${(r.date||'').toString()}|${r.class||''}|${r.subject||''}|${r.period||''}|${String(r.teacherEmail||'').toLowerCase()}`;
+                                const displayDate = (() => {
+                                  const d = r.date;
+                                  if (!d) return '-';
+                                  const s = String(d);
+                                  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+                                  try { const dt = new Date(s); if (!isNaN(dt.getTime())) return dt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); } catch {}
+                                  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) return s.split('T')[0];
+                                  return s;
+                                })();
+                                const completedVal = r.completed || r.lessonProgressTracked || r.status || '-';
+                                const isOwner = String(r.teacherEmail || '').toLowerCase() === String(email || '').toLowerCase();
+                                const onDelete = async () => {
+                                  if (!id) return alert('Missing report id');
+                                  if (!confirm('Delete this report? This cannot be undone.')) return;
+                                  try {
+                                    setDeletingId(id);
+                                    const res = await api.deleteDailyReport(id, email);
+                                    if (res && res.success) {
+                                      setReports(prev => prev.filter(x => (x.id || x.reportId || '') !== id));
+                                    } else {
+                                      alert('Delete failed: ' + (res && res.error ? res.error : 'Not allowed'));
+                                    }
+                                  } catch (err) {
+                                    alert('Delete failed: ' + (err && err.message ? err.message : String(err)));
+                                  } finally {
+                                    setDeletingId(null);
+                                  }
+                                };
+                                return (
+                                  <tr key={id || `${r.date}|${r.class}|${r.subject}|${r.period}`}>
+                                    <td className="px-2 py-2 text-xs text-gray-900">{displayDate}</td>
+                                    {!groupByClass && (<td className="px-2 py-2 text-xs text-gray-900">{r.class}</td>)}
+                                    <td className="px-2 py-2 text-xs text-gray-900">{r.subject}</td>
+                                    <td className="px-2 py-2 text-xs text-gray-900">P{r.period}</td>
+                                    {!groupByChapter && (<td className="px-2 py-2 text-xs text-gray-700 truncate">{r.chapter || '-'}</td>)}
+                                    <td className="px-2 py-2 text-xs text-gray-700">{r.sessionNo || '-'}</td>
+                                    <td className="px-2 py-2 text-xs">{completedVal}</td>
+                                    <td className="px-2 py-2 text-xs text-gray-600 max-w-[180px] truncate" title={r.notes || ''}>{r.notes || '-'}</td>
+                                    <td className="px-2 py-2 text-xs">
+                                      {r.verified === 'TRUE' ? (
+                                        <div className="flex flex-col gap-1">
+                                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">✓ Verified</span>
+                                          {r.verifiedBy && (<span className="text-[10px] text-gray-500">by {r.verifiedBy.split('@')[0]}</span>)}
+                                        </div>
+                                      ) : r.reopenReason ? (
+                                        <div className="flex flex-col gap-1">
+                                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">⚠ Reopened</span>
+                                          <span className="text-[10px] text-gray-600 cursor-help max-w-[120px] truncate" title={r.reopenReason}>{r.reopenReason}</span>
+                                          {r.reopenedBy && (<span className="text-[10px] text-gray-500">by {r.reopenedBy.split('@')[0]}</span>)}
+                                        </div>
+                                      ) : (
+                                        <span className="text-xs text-gray-400">Pending</span>
+                                      )}
+                                    </td>
+                                    <td className="px-2 py-2 text-xs text-right">
+                                      {isOwner && (
+                                        <button onClick={onDelete} disabled={!id || deletingId === id} className="px-2 py-1 border rounded text-red-600 hover:bg-red-50 disabled:opacity-40 inline-flex items-center">
+                                          {deletingId === id && (<span className="inline-block h-3 w-3 mr-1 border-2 border-red-600/70 border-t-transparent rounded-full animate-spin"></span>)}
+                                          {deletingId === id ? 'Deleting…' : 'Delete'}
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
-                      ) : (
-                        <span className="text-xs text-gray-400">Pending</span>
-                      )}
-                    </td>
-                    <td className="px-2 py-2 text-xs text-right">
-                      {(() => {
-                        // Show delete for own reports; backend enforces time window
-                        const isOwner = String(r.teacherEmail || '').toLowerCase() === String(email || '').toLowerCase();
-                        if (!isOwner) return null;
-                        const onDelete = async () => {
-                          if (!id) return alert('Missing report id');
-                          if (!confirm('Delete this report? This cannot be undone.')) return;
-                          try {
-                            setDeletingId(id);
-                            const res = await api.deleteDailyReport(id, email);
-                            if (res && res.success) {
-                              setReports(prev => prev.filter(x => (x.id || x.reportId || '') !== id));
-                            } else {
-                              alert('Delete failed: ' + (res && res.error ? res.error : 'Not allowed'));
-                            }
-                          } catch (err) {
-                            alert('Delete failed: ' + (err && err.message ? err.message : String(err)));
-                          } finally {
-                            setDeletingId(null);
-                          }
-                        };
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            }
+
+            // Flat, paginated table when grouping is off
+            return (
+              <>
+                <div className="px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+                  <h2 className="text-lg font-medium text-gray-900">Reports ({total})</h2>
+                  <div className="flex items-center gap-2 text-xs text-gray-600">
+                    <button onClick={()=> setPage(p=> Math.max(1, p-1))} disabled={page===1} className="px-2 py-1 border rounded disabled:opacity-40">Prev</button>
+                    <span>Page {page}/{totalPages}</span>
+                    <button onClick={()=> setPage(p=> Math.min(totalPages, p+1))} disabled={page===totalPages} className="px-2 py-1 border rounded disabled:opacity-40">Next</button>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full divide-y divide-gray-200 text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Date</th>
+                        <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Class</th>
+                        <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Subject</th>
+                        <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Period</th>
+                        <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Chapter</th>
+                        <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Session</th>
+                        <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Completed</th>
+                        <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Notes</th>
+                        <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {loading && (<tr><td colSpan={10} className="px-4 py-6 text-center text-sm text-gray-500">Loading...</td></tr>)}
+                      {!loading && reports.length === 0 && (<tr><td colSpan={10} className="px-4 py-6 text-center text-sm text-gray-500">No reports in this range.</td></tr>)}
+                      {!loading && paginated.map(r => {
+                        const id = r.id || r.reportId || `${(r.date||'').toString()}|${r.class||''}|${r.subject||''}|${r.period||''}|${String(r.teacherEmail||'').toLowerCase()}`;
+                        const displayDate = (() => {
+                          const d = r.date;
+                          if (!d) return '-';
+                          const s = String(d);
+                          if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+                          try { const dt = new Date(s); if (!isNaN(dt.getTime())) return dt.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); } catch {}
+                          if (/^\d{4}-\d{2}-\d{2}T/.test(s)) return s.split('T')[0];
+                          return s;
+                        })();
+                        const completedVal = r.completed || r.lessonProgressTracked || r.status || '-';
                         return (
-                          <button onClick={onDelete} disabled={!id || deletingId === id} className="px-2 py-1 border rounded text-red-600 hover:bg-red-50 disabled:opacity-40 inline-flex items-center">
-                            {deletingId === id && (
-                              <span className="inline-block h-3 w-3 mr-1 border-2 border-red-600/70 border-t-transparent rounded-full animate-spin"></span>
+                        <tr key={id || `${r.date}|${r.class}|${r.subject}|${r.period}`}> 
+                          <td className="px-2 py-2 text-xs text-gray-900">{displayDate}</td>
+                          <td className="px-2 py-2 text-xs text-gray-900">{r.class}</td>
+                          <td className="px-2 py-2 text-xs text-gray-900">{r.subject}</td>
+                          <td className="px-2 py-2 text-xs text-gray-900">P{r.period}</td>
+                          <td className="px-2 py-2 text-xs text-gray-700 truncate">{r.chapter || '-'}</td>
+                          <td className="px-2 py-2 text-xs text-gray-700">{r.sessionNo || '-'}</td>
+                          <td className="px-2 py-2 text-xs">{completedVal}</td>
+                          <td className="px-2 py-2 text-xs text-gray-600 max-w-[180px] truncate" title={r.notes || ''}>{r.notes || '-'}</td>
+                          <td className="px-2 py-2 text-xs">
+                            {r.verified === 'TRUE' ? (
+                              <div className="flex flex-col gap-1">
+                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">✓ Verified</span>
+                                {r.verifiedBy && (<span className="text-[10px] text-gray-500">by {r.verifiedBy.split('@')[0]}</span>)}
+                              </div>
+                            ) : r.reopenReason ? (
+                              <div className="flex flex-col gap-1">
+                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">⚠ Reopened</span>
+                                <span className="text-[10px] text-gray-600 cursor-help max-w-[120px] truncate" title={r.reopenReason}>{r.reopenReason}</span>
+                                {r.reopenedBy && (<span className="text-[10px] text-gray-500">by {r.reopenedBy.split('@')[0]}</span>)}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-gray-400">Pending</span>
                             )}
-                            {deletingId === id ? 'Deleting…' : 'Delete'}
-                          </button>
-                        );
-                      })()}
-                    </td>
-                  </tr>
-                )})}
-              </tbody>
-            </table>
-          </div>
+                          </td>
+                        </tr>
+                      )})}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            );
+          })()}
         </div>
       </div>
     );
