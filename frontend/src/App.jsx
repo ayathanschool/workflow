@@ -7616,6 +7616,7 @@ const App = () => {
     const [refreshTrigger, setRefreshTrigger] = useState(0);
     const [groupByClass, setGroupByClass] = useState(false);
     const [groupByChapter, setGroupByChapter] = useState(false);
+    const [schemeLookup, setSchemeLookup] = useState({});
     const email = user?.email || '';
 
     const computeDates = useCallback(() => {
@@ -7656,6 +7657,36 @@ const App = () => {
       setPage(1); 
       loadMyReports(); 
     }, [rangeMode, customFrom, customTo, subjectFilter, classFilter, email, maxDisplay, refreshTrigger, loadMyReports]);
+
+    // Load teacher schemes to map total sessions by class/subject/chapter
+    useEffect(() => {
+      const loadSchemes = async () => {
+        if (!email) return;
+        try {
+          const teacherSchemes = await api.getTeacherSchemes(email);
+          const arr = Array.isArray(teacherSchemes) ? teacherSchemes : [];
+          const map = {};
+          for (const s of arr) {
+            const key = `${(s.class||'').toLowerCase()}|${(s.subject||'').toLowerCase()}|${(s.chapter||'').toLowerCase()}`;
+            const nos = Number(s.noOfSessions || s.totalSessions || 0);
+            if (key && !isNaN(nos) && nos > 0) map[key] = nos;
+          }
+          setSchemeLookup(map);
+        } catch (e) {
+          console.warn('Failed to load teacher schemes for total sessions', e);
+          setSchemeLookup({});
+        }
+      };
+      loadSchemes();
+    }, [email]);
+
+    const getTotalSessionsForReport = useCallback((r) => {
+      // Prefer value directly from report if backend provides
+      const direct = Number(r.totalSessions || r.noOfSessions || 0);
+      if (!isNaN(direct) && direct > 0) return direct;
+      const key = `${(r.class||'').toLowerCase()}|${(r.subject||'').toLowerCase()}|${(r.chapter||'').toLowerCase()}`;
+      return schemeLookup[key] || '';
+    }, [schemeLookup]);
 
     const total = reports.length;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -7774,6 +7805,7 @@ const App = () => {
                                 <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Period</th>
                                 {!groupByChapter && (<th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Chapter</th>)}
                                 <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Session</th>
+                                <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Total Sessions</th>
                                 <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Completed</th>
                                 <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Notes</th>
                                 <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Status</th>
@@ -7819,6 +7851,7 @@ const App = () => {
                                     <td className="px-2 py-2 text-xs text-gray-900">P{r.period}</td>
                                     {!groupByChapter && (<td className="px-2 py-2 text-xs text-gray-700 truncate">{r.chapter || '-'}</td>)}
                                     <td className="px-2 py-2 text-xs text-gray-700">{r.sessionNo || '-'}</td>
+                                    <td className="px-2 py-2 text-xs text-gray-700">{getTotalSessionsForReport(r) || '-'}</td>
                                     <td className="px-2 py-2 text-xs">{completedVal}</td>
                                     <td className="px-2 py-2 text-xs text-gray-600 max-w-[180px] truncate" title={r.notes || ''}>{r.notes || '-'}</td>
                                     <td className="px-2 py-2 text-xs">
@@ -7879,6 +7912,7 @@ const App = () => {
                         <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Period</th>
                         <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Chapter</th>
                         <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Session</th>
+                        <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Total Sessions</th>
                         <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Completed</th>
                         <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Notes</th>
                         <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Status</th>
@@ -7907,6 +7941,7 @@ const App = () => {
                           <td className="px-2 py-2 text-xs text-gray-900">P{r.period}</td>
                           <td className="px-2 py-2 text-xs text-gray-700 truncate">{r.chapter || '-'}</td>
                           <td className="px-2 py-2 text-xs text-gray-700">{r.sessionNo || '-'}</td>
+                          <td className="px-2 py-2 text-xs text-gray-700">{getTotalSessionsForReport(r) || '-'}</td>
                           <td className="px-2 py-2 text-xs">{completedVal}</td>
                           <td className="px-2 py-2 text-xs text-gray-600 max-w-[180px] truncate" title={r.notes || ''}>{r.notes || '-'}</td>
                           <td className="px-2 py-2 text-xs">
