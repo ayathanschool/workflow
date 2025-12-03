@@ -45,6 +45,19 @@
     return Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
   }
 
+  /** Determine if a lesson plan status should be treated as ready for teacher actions */
+  function _isPlanReadyForTeacher(status) {
+    const s = String(status || '').trim();
+    if (!s) return false;
+    // Ready or Approved
+    if (/^(Ready|Approved)$/i.test(s)) return true;
+    // Rescheduled (Cascade) treated equivalent to Ready
+    if (/rescheduled\s*\(cascade\)/i.test(s)) return true;
+    // Future-proof: allow "Rescheduled" without explicit tag
+    if (/^Rescheduled$/i.test(s)) return true;
+    return false;
+  }
+
   /**
   * ====== MAIN APPLICATION ENTRY POINT ======
   * This file is like the "reception desk" - it receives all requests
@@ -680,10 +693,7 @@
           const lpSheet = _getSheet('LessonPlans');
           const lpHeaders = _headers(lpSheet);
           const lessonPlans = _rows(lpSheet).map(row => _indexByHeader(row, lpHeaders));
-          const isFetchableStatus = (s) => {
-            const v = String(s || '').trim();
-            return v === 'Ready' || v === 'Approved' || /rescheduled\s*\(cascade\)/i.test(v);
-          };
+          const isFetchableStatus = (s) => _isPlanReadyForTeacher(s);
           const matchingPlan = lessonPlans.find(p => {
             const emailMatch = String(p.teacherEmail || '').trim().toLowerCase() === teacherEmail;
             const dateMatch = _normalizeQueryDate(p.selectedDate || p.date) === reportDate;
@@ -2002,7 +2012,7 @@
         const planDate = _isoDateIST(selectedDateVal);
         
         const statusRaw = String(plan.status || '');
-        const isFetchableStatus = statusRaw === 'Ready' || /rescheduled\s*\(cascade\)/i.test(statusRaw);
+        const isFetchableStatus = _isPlanReadyForTeacher(statusRaw);
         return isFetchableStatus && planDate === queryDate;
       });
       
@@ -2111,7 +2121,7 @@
         Logger.log(`Checking plan ${plan.lpId}: status=${plan.status}, selectedDate=${plan.selectedDate}, selectedPeriod=${plan.selectedPeriod}, planDate=${planDate}, planPeriod=${planPeriod}, class=${plan.class}, subject=${plan.subject}`);
         
         const statusRaw = String(plan.status || '');
-        const isFetchableStatus = statusRaw === 'Ready' || /rescheduled\s*\(cascade\)/i.test(statusRaw);
+        const isFetchableStatus = _isPlanReadyForTeacher(statusRaw);
         const matches = 
           isFetchableStatus &&
           planDate === queryDate &&
