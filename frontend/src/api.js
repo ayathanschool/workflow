@@ -327,6 +327,65 @@ export async function batchUpdateLessonPlanStatus(lessonPlanIds, status, reviewC
   return postJSON(`${BASE_URL}?action=batchUpdateLessonPlanStatus`, { lessonPlanIds, status, reviewComments })
 }
 
+// Chapter-scoped bulk update for lesson plan statuses (HM only)
+export async function chapterBulkUpdateLessonPlanStatus(schemeId, chapter, status, reviewComments = '', requesterEmail = '') {
+  return postJSON(`${BASE_URL}?action=chapterBulkUpdateLessonPlanStatus`, {
+    schemeId,
+    chapter,
+    status,
+    reviewComments,
+    requesterEmail
+  })
+}
+
+// Grouped lesson plans by chapter
+export async function getLessonPlansByChapter({ teacher = '', class: cls = '', subject = '', status = 'Pending Review', dateFrom = '', dateTo = '', noCache = false } = {}) {
+  const q = new URLSearchParams({ action: 'getLessonPlansByChapter' });
+  if (teacher) q.append('teacher', teacher);
+  if (cls) q.append('class', cls);
+  if (subject) q.append('subject', subject);
+  if (status && status !== 'All') q.append('status', status);
+  if (dateFrom) q.append('dateFrom', dateFrom);
+  if (dateTo) q.append('dateTo', dateTo);
+  if (noCache) q.append('_', String(Date.now()));
+  const res = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  return res?.data || res || { groups: [] };
+}
+
+// Grouped lesson plans by class with subject•chapter subgroups
+export async function getLessonPlansByClass({ teacher = '', class: cls = '', subject = '', status = 'Pending Review', dateFrom = '', dateTo = '', noCache = false } = {}) {
+  const q = new URLSearchParams({ action: 'getLessonPlansByClass' });
+  if (teacher) q.append('teacher', teacher);
+  if (cls) q.append('class', cls);
+  if (subject) q.append('subject', subject);
+  if (status && status !== 'All') q.append('status', status);
+  if (dateFrom) q.append('dateFrom', dateFrom);
+  if (dateTo) q.append('dateTo', dateTo);
+  if (noCache) q.append('_', String(Date.now()));
+  const res = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  return res?.data || res || { groups: [] };
+}
+
+// HM: Get pending lesson plans (raw lesson plans awaiting review/approval)
+// Supports filters: teacher (email fragment or name), class, subject, status.
+// When status === 'All' we omit the status param so backend returns every status.
+// Returns an array of lesson plan objects; unwraps {status,data,timestamp} wrapper.
+export async function getPendingLessonPlans({ teacher = '', class: cls = '', subject = '', status = 'Pending Review' } = {}) {
+  try {
+    const q = new URLSearchParams({ action: 'getPendingLessonPlans' });
+    if (teacher) q.append('teacher', teacher);
+    if (cls) q.append('class', cls);
+    if (subject) q.append('subject', subject);
+    if (status && status !== 'All') q.append('status', status);
+    const res = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
+    const unwrapped = res?.data || res;
+    return Array.isArray(unwrapped) ? unwrapped : (Array.isArray(unwrapped?.plans) ? unwrapped.plans : []);
+  } catch (err) {
+    console.warn('getPendingLessonPlans failed:', err?.message || err);
+    throw err;
+  }
+}
+
 // Get approved lesson plans for report
 export async function getApprovedLessonPlansForReport(email, cls, subject) {
   const q = new URLSearchParams({ action: "getApprovedLessonPlansForReport", email, class: cls, subject });

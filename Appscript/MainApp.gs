@@ -274,6 +274,14 @@
         return _handleGetPendingLessonPlans(e.parameter); // Same handler, different name for backward compatibility
       }
       
+      // Grouped lesson plan views for HM approvals
+      if (action === 'getLessonPlansByChapter') {
+        return _handleGetLessonPlansByChapter(e.parameter);
+      }
+      if (action === 'getLessonPlansByClass') {
+        return _handleGetLessonPlansByClass(e.parameter);
+      }
+      
       if (action === 'getAllPlans') {
         return _handleGetAllSchemes(e.parameter);
       }
@@ -289,6 +297,11 @@
       
       if (action === 'getAvailablePeriodsForLessonPlan') {
         return _handleGetAvailablePeriodsForLessonPlan(e.parameter);
+      }
+      
+      // Convenience: earliest free day/period for class+subject
+      if (action === 'getNextAvailablePeriod') {
+        return _handleGetNextAvailablePeriod(e.parameter);
       }
       
       if (action === 'getPlannedLessonForPeriod') {
@@ -920,6 +933,13 @@
       if (action === 'getAILessonSuggestions') {
         return _respond(getAILessonSuggestions(data.context || data));
       }
+      // Deterministic AI-like suggestion endpoints (no external keys required)
+      if (action === 'suggestLessonPlan') {
+        return _respond(suggestLessonPlan(data));
+      }
+      if (action === 'suggestLessonPlansBulk') {
+        return _respond(suggestLessonPlansBulk(data));
+      }
       
       // === CHAPTER COMPLETION ROUTES ===
       if (action === 'checkChapterCompletion') {
@@ -990,6 +1010,11 @@
       
       if (action === 'batchUpdateLessonPlanStatus') {
         return _handleBatchUpdateLessonPlanStatus(data);
+      }
+
+      // Chapter-scoped bulk lesson plan status update (HM only)
+      if (action === 'chapterBulkUpdateLessonPlanStatus') {
+        return _handleChapterBulkUpdateLessonPlanStatus(data);
       }
 
       // Simple diagnostic: reveals LessonPlans sheet headers and detects status column
@@ -1585,105 +1610,9 @@
    */
   function _handleBatchUpdateLessonPlanStatus(data) {
     try {
-      Logger.log(`=== BATCH UPDATE LESSON PLAN STATUS ===`);
-      Logger.log(`Data: ${JSON.stringify(data)}`);
-      
-      const { lessonPlanIds, status, reviewComments } = data;
-      
-      if (!lessonPlanIds || !Array.isArray(lessonPlanIds) || lessonPlanIds.length === 0) {
-        return _respond({ error: 'lessonPlanIds array is required' });
-      }
-      
-      if (!status) {
-        return _respond({ error: 'status is required' });
-      }
-      
-      Logger.log(`Updating ${lessonPlanIds.length} lesson plans to status: ${status}`);
-      
-      const sh = _getSheet('LessonPlans');
-      const headers = _headers(sh);
-      const allPlans = _rows(sh).map(row => _indexByHeader(row, headers));
-      
-      const results = [];
-      const errors = [];
-      let successCount = 0;
-      
-      // Process each lesson plan
-      for (let i = 0; i < lessonPlanIds.length; i++) {
-        const lpId = lessonPlanIds[i];
-        
-        try {
-          const rowIndex = allPlans.findIndex(row => row.lpId === lpId);
-          
-          if (rowIndex === -1) {
-            errors.push({ lpId, error: 'Lesson plan not found' });
-            continue;
-          }
-          
-          const lessonPlan = allPlans[rowIndex];
-          
-          // CRITICAL VALIDATION: When approving (status='Ready'), check if ALL sessions are submitted
-          if (status === 'Ready' && lessonPlan.schemeId && lessonPlan.chapter) {
-            const completenessCheck = _checkChapterSessionsComplete(lessonPlan.schemeId, lessonPlan.chapter);
-            
-            if (!completenessCheck.complete) {
-              errors.push({
-                lpId,
-                error: `All ${completenessCheck.total} sessions must be submitted. Missing: ${completenessCheck.missing.join(', ')}`,
-                chapter: lessonPlan.chapter,
-                missing: completenessCheck.missing
-              });
-              continue;
-            }
-          }
-          
-          // Update status
-          const normalizedHeaders = headers.map(h => String(h).trim());
-          let statusColIndex = normalizedHeaders.findIndex(h => h === 'status');
-          if (statusColIndex === -1) {
-            statusColIndex = normalizedHeaders.findIndex(h => h.toLowerCase() === 'status');
-          }
-          
-          if (statusColIndex === -1) {
-            errors.push({ lpId, error: 'Status column not found' });
-            continue;
-          }
-          
-          sh.getRange(rowIndex + 2, statusColIndex + 1).setValue(status);
-          
-          // Update review comments if provided
-          if (reviewComments) {
-            let commentsIdx = normalizedHeaders.findIndex(h => h.toLowerCase() === 'reviewcomments');
-            if (commentsIdx >= 0) {
-              sh.getRange(rowIndex + 2, commentsIdx + 1).setValue(reviewComments);
-            }
-          }
-          
-          // Update reviewedAt timestamp
-          let reviewedAtIdx = normalizedHeaders.findIndex(h => h.toLowerCase() === 'reviewedat');
-          if (reviewedAtIdx >= 0) {
-            sh.getRange(rowIndex + 2, reviewedAtIdx + 1).setValue(new Date().toISOString());
-          }
-          
-          results.push({ lpId, success: true });
-          successCount++;
-          
-        } catch (error) {
-          Logger.log(`Error updating ${lpId}: ${error.message}`);
-          errors.push({ lpId, error: error.message });
-        }
-      }
-      
-      Logger.log(`Batch update complete: ${successCount} success, ${errors.length} errors`);
-      
-      return _respond({
-        success: true,
-        successCount,
-        totalRequested: lessonPlanIds.length,
-        results,
-        errors
-      });
-      
+      // Feature disabled: batch lesson plan approval removed per requirements
+      Logger.log(`Batch lesson plan approval is disabled. Incoming payload (ignored): ${JSON.stringify(data)}`);
+      return _respond({ success: false, error: 'Batch lesson plan approvals are disabled' });
     } catch (error) {
       Logger.log(`Error in batch update: ${error.message}`);
       return _respond({ error: error.message });
@@ -5125,5 +5054,363 @@
       return { success: true, date: targetDate, periods: periods, summary: summary };
     } catch (error) {
       return { success: false, error: error.message };
+    }
+  }
+
+  /**
+  * Handle GET next available period for class/subject
+  */
+  function _handleGetNextAvailablePeriod(params) {
+    try {
+      const teacherEmail = (params.teacherEmail || '').trim();
+      const schemeClass = (params.class || '').trim();
+      const schemeSubject = (params.subject || '').trim();
+      const fromDate = (params.fromDate || params.startDate || '').trim();
+
+      if (!teacherEmail) return _respond({ success: false, error: 'Teacher email is required' });
+      if (!schemeClass || !schemeSubject) return _respond({ success: false, error: 'Class and subject are required' });
+
+      const result = getNextAvailablePeriodForLessonPlan(teacherEmail, schemeClass, schemeSubject, fromDate);
+      return _respond(result);
+    } catch (error) {
+      console.error('Error handling next available period request:', error);
+      return _respond({ success: false, error: error.message });
+    }
+  }
+
+  /**
+   * Chapter-scoped bulk update of lesson plan statuses (HM only)
+   * Accepts: { schemeId, chapter, status, reviewComments?, requesterEmail? }
+   * - Only updates lessons in the specified scheme+chapter currently in 'Pending Review'
+   * - For status 'Ready', enforces chapter completeness via _checkChapterSessionsComplete
+   * - For 'Needs Rework' or 'Rejected', requires reviewComments/remarks
+   * Returns: { success, updated, skipped, totalTargeted, lpIdsUpdated:[], missing?:[], error? }
+   */
+  function _handleChapterBulkUpdateLessonPlanStatus(data) {
+    var lock = LockService.getScriptLock();
+    try {
+      const schemeId = String(data.schemeId || '').trim();
+      const chapter = String(data.chapter || '').trim();
+      const targetStatus = String(data.status || '').trim();
+      const comments = String(data.reviewComments || data.remarks || '').trim();
+      const requesterEmail = String(data.requesterEmail || '').trim().toLowerCase();
+
+      Logger.log(`[BulkChapter] payload: schemeId=${schemeId}, chapter=${chapter}, status=${targetStatus}, by=${requesterEmail}`);
+
+      if (!schemeId || !chapter || !targetStatus) {
+        return _respond({ success: false, error: 'Missing required fields (schemeId, chapter, status)' });
+      }
+
+      const allowedStatuses = ['Ready','Needs Rework','Rejected'];
+      if (allowedStatuses.indexOf(targetStatus) === -1) {
+        return _respond({ success: false, error: 'Invalid target status' });
+      }
+
+      // Optional HM role enforcement if requesterEmail provided (robust via helper)
+      try {
+        if (requesterEmail) {
+          var isHM = false;
+          try {
+            isHM = (typeof userHasRole === 'function' && (userHasRole(requesterEmail, 'hm') || userHasRole(requesterEmail, 'headmaster')));
+          } catch (ee) { isHM = false; }
+          if (!isHM) {
+            var roleInfo = {};
+            try { roleInfo = (typeof debugUserRoles === 'function') ? debugUserRoles(requesterEmail) : {}; } catch (di) { roleInfo = { debugError: di && di.message ? di.message : String(di) }; }
+            return _respond({ success: false, error: 'Not authorized for bulk approvals (HM required)', roleInfo: roleInfo });
+          }
+        }
+      } catch (eRole) {
+        Logger.log(`[BulkChapter] role check warning: ${eRole && eRole.message}`);
+      }
+
+      // For approval to Ready, require completeness of chapter
+      if (targetStatus === 'Ready') {
+        try {
+          const completeness = _checkChapterSessionsComplete(schemeId, chapter);
+          if (!completeness || completeness.complete === false) {
+            return _respond({
+              success: false,
+              error: `Cannot approve all. Chapter incomplete. Missing sessions: ${(completeness && completeness.missing || []).join(', ')}`,
+              incomplete: true,
+              missing: completeness && completeness.missing,
+              total: completeness && completeness.total,
+              submitted: completeness && completeness.submitted
+            });
+          }
+        } catch (eComp) {
+          Logger.log(`[BulkChapter] completeness check error: ${eComp && eComp.message}`);
+          return _respond({ success: false, error: 'Approval blocked: failed to verify chapter completeness' });
+        }
+      }
+
+      // For Rework/Rejected, require comments to guide teachers
+      if ((targetStatus === 'Needs Rework' || targetStatus === 'Rejected') && !comments) {
+        return _respond({ success: false, error: 'Remarks are required for rework/rejection' });
+      }
+
+      lock.waitLock(10000);
+
+      const sh = _getSheet('LessonPlans');
+      const headers = _headers(sh);
+      const rows = _rows(sh);
+      const plans = rows.map(r => _indexByHeader(r, headers));
+
+      // Identify target rows: matching scheme + chapter + Pending Review
+      const targets = [];
+      for (let i = 0; i < plans.length; i++) {
+        const p = plans[i];
+        if (String(p.schemeId || '').trim() === schemeId &&
+            String(p.chapter || '').trim().toLowerCase() === chapter.toLowerCase() &&
+            String(p.status || '').trim() === 'Pending Review') {
+          targets.push({ idx: i, plan: p });
+        }
+      }
+
+      if (targets.length === 0) {
+        return _respond({ success: true, updated: 0, skipped: 0, totalTargeted: 0, lpIdsUpdated: [] });
+      }
+
+      // Column indices (1-based)
+      const normH = headers.map(h => String(h).trim());
+      let statusColIdx = normH.findIndex(h => h === 'status');
+      if (statusColIdx === -1) statusColIdx = normH.findIndex(h => h.toLowerCase() === 'status');
+      if (statusColIdx === -1) return _respond({ success: false, error: 'Status column not found' });
+      statusColIdx += 1;
+
+      let commentsIdx = normH.findIndex(h => h === 'reviewComments');
+      if (commentsIdx === -1) commentsIdx = normH.findIndex(h => h.toLowerCase() === 'reviewcomments');
+      commentsIdx = commentsIdx >= 0 ? (commentsIdx + 1) : -1;
+
+      let reviewedAtIdx = normH.findIndex(h => h === 'reviewedAt');
+      if (reviewedAtIdx === -1) reviewedAtIdx = normH.findIndex(h => h.toLowerCase() === 'reviewedat');
+      reviewedAtIdx = reviewedAtIdx >= 0 ? (reviewedAtIdx + 1) : -1;
+
+      const nowISO = new Date().toISOString();
+      let updated = 0;
+      const updatedIds = [];
+      for (let t of targets) {
+        const rowIndex = t.idx + 2; // header + 0-based
+        try {
+          sh.getRange(rowIndex, statusColIdx).setValue(targetStatus);
+          if (commentsIdx > 0 && comments) {
+            sh.getRange(rowIndex, commentsIdx).setValue(comments);
+          }
+          if (reviewedAtIdx > 0) {
+            sh.getRange(rowIndex, reviewedAtIdx).setValue(nowISO);
+          }
+          updated += 1;
+          updatedIds.push(String(t.plan.lpId || ''));
+        } catch (wErr) {
+          Logger.log(`[BulkChapter] write failed at row ${rowIndex}: ${wErr && wErr.message}`);
+        }
+      }
+
+      return _respond({ success: true, updated: updated, skipped: (targets.length - updated), totalTargeted: targets.length, lpIdsUpdated: updatedIds });
+    } catch (error) {
+      Logger.log(`[BulkChapter] error: ${error && error.message}`);
+      return _respond({ success: false, error: error && error.message });
+    } finally {
+      try { lock.releaseLock(); } catch (e) {}
+    }
+  }
+
+  /**
+  * Group lesson plans by chapter (schemeId+chapter preferred; fallback class+subject+chapter)
+  * Supports same filters as pending list plus optional dateFrom/dateTo (IST YYYY-MM-DD)
+  */
+  function _handleGetLessonPlansByChapter(params) {
+    try {
+      const sh = _getSheet('LessonPlans');
+      const headers = _headers(sh);
+      const allLessonPlans = _rows(sh).map(r => _indexByHeader(r, headers));
+
+      // Normalize selectedDate/selectedPeriod similar to pending handler
+      const normalized = allLessonPlans.map(function(plan){
+        var selectedDateVal = plan.selectedDate || plan.date || '';
+        if (!selectedDateVal && plan.uniqueKey) {
+          try { var parts = String(plan.uniqueKey).split('|'); if (parts.length>=2) selectedDateVal = parts[1]; } catch(e) {}
+        }
+        try {
+          if (selectedDateVal instanceof Date) {
+            plan.selectedDate = _isoDateIST(selectedDateVal);
+          } else if (typeof selectedDateVal === 'string' && selectedDateVal.indexOf('T') >= 0) {
+            plan.selectedDate = selectedDateVal.split('T')[0];
+          } else {
+            plan.selectedDate = _isoDateIST(selectedDateVal) || plan.selectedDate || '';
+          }
+        } catch (e) {}
+        plan.selectedPeriod = plan.selectedPeriod || plan.period || '';
+        return plan;
+      });
+
+      // Apply filters (same rules as _handleGetPendingLessonPlans)
+      var filtered = normalized;
+      var hasStatusParam = Object.prototype.hasOwnProperty.call(params, 'status');
+      if (!hasStatusParam) {
+        filtered = filtered.filter(function(p){ return String(p.status || '') === 'Pending Review'; });
+      } else if (params.status && params.status !== 'All') {
+        filtered = filtered.filter(function(p){ return String(p.status || '') === params.status; });
+      }
+      if (params.teacher && params.teacher !== '') {
+        const t = String(params.teacher).toLowerCase();
+        filtered = filtered.filter(p => String(p.teacherName||'').toLowerCase().includes(t) || String(p.teacherEmail||'').toLowerCase().includes(t));
+      }
+      if (params.class && params.class !== '') {
+        filtered = filtered.filter(p => String(p.class||'').toLowerCase() === String(params.class).toLowerCase());
+      }
+      if (params.subject && params.subject !== '') {
+        filtered = filtered.filter(p => String(p.subject||'').toLowerCase() === String(params.subject).toLowerCase());
+      }
+      // Optional date range filtering
+      var from = String(params.dateFrom || '').trim();
+      var to = String(params.dateTo || '').trim();
+      if (from || to) {
+        var single = from && to && from === to;
+        filtered = filtered.filter(function(p){
+          var ds = _isoDateIST(p.selectedDate || p.plannedDate || p.date || '');
+          if (!ds) return false;
+          if (single) return ds === from;
+          if (from && ds < from) return false;
+          if (to && ds > to) return false;
+          return true;
+        });
+      }
+
+      // Enrich with noOfSessions from Schemes
+      const schemesSheet = _getSheet('Schemes');
+      const schemesHeaders = _headers(schemesSheet);
+      const allSchemes = _rows(schemesSheet).map(r => _indexByHeader(r, schemesHeaders));
+      const bySchemeId = {};
+      allSchemes.forEach(function(s){ if (s && s.schemeId) bySchemeId[s.schemeId] = s; });
+      filtered = filtered.map(function(p){
+        if (p.schemeId && bySchemeId[p.schemeId] && bySchemeId[p.schemeId].noOfSessions) {
+          p.noOfSessions = bySchemeId[p.schemeId].noOfSessions;
+        }
+        return p;
+      });
+
+      // Group by schemeId+chapter, else class+subject+chapter
+      const map = {};
+      filtered.forEach(function(p){
+        var key = (p.schemeId ? (p.schemeId + '|') : (String(p.class||'') + '|' + String(p.subject||'') + '|')) + String(p.chapter||'');
+        if (!map[key]) {
+          map[key] = {
+            key: key,
+            schemeId: p.schemeId || '',
+            class: p.class,
+            subject: p.subject,
+            chapter: p.chapter,
+            teacherName: p.teacherName,
+            counts: { pending: 0, ready: 0, rework: 0, rejected: 0 },
+            lessons: []
+          };
+        }
+        var grp = map[key];
+        var st = String(p.status||'');
+        if (st === 'Pending Review') grp.counts.pending++;
+        else if (st === 'Ready') grp.counts.ready++;
+        else if (st === 'Needs Rework') grp.counts.rework++;
+        else if (st === 'Rejected') grp.counts.rejected++;
+        grp.lessons.push(p);
+      });
+      var groups = Object.keys(map).map(function(k){ return map[k]; });
+      // Sort by class, then subject, then chapter
+      groups.sort(function(a,b){
+        var c = String(a.class||'').localeCompare(String(b.class||'')); if (c) return c;
+        var s = String(a.subject||'').localeCompare(String(b.subject||'')); if (s) return s;
+        return String(a.chapter||'').localeCompare(String(b.chapter||''));
+      });
+
+      return _respond({ total: filtered.length, groupCount: groups.length, groups: groups });
+    } catch (error) {
+      Logger.log('Error grouping lesson plans by chapter: ' + error.message);
+      return _respond({ error: error.message });
+    }
+  }
+
+  /**
+  * Group lesson plans by class, then subject+chapter subgroups
+  */
+  function _handleGetLessonPlansByClass(params) {
+    try {
+      const sh = _getSheet('LessonPlans');
+      const headers = _headers(sh);
+      const allLessonPlans = _rows(sh).map(r => _indexByHeader(r, headers));
+
+      // Normalize
+      const normalized = allLessonPlans.map(function(plan){
+        var selectedDateVal = plan.selectedDate || plan.date || '';
+        if (!selectedDateVal && plan.uniqueKey) {
+          try { var parts = String(plan.uniqueKey).split('|'); if (parts.length>=2) selectedDateVal = parts[1]; } catch(e) {}
+        }
+        try {
+          if (selectedDateVal instanceof Date) plan.selectedDate = _isoDateIST(selectedDateVal);
+          else if (typeof selectedDateVal === 'string' && selectedDateVal.indexOf('T')>=0) plan.selectedDate = selectedDateVal.split('T')[0];
+          else plan.selectedDate = _isoDateIST(selectedDateVal) || plan.selectedDate || '';
+        } catch(e) {}
+        plan.selectedPeriod = plan.selectedPeriod || plan.period || '';
+        return plan;
+      });
+
+      // Filters
+      var filtered = normalized;
+      var hasStatusParam = Object.prototype.hasOwnProperty.call(params, 'status');
+      if (!hasStatusParam) filtered = filtered.filter(function(p){ return String(p.status||'') === 'Pending Review'; });
+      else if (params.status && params.status !== 'All') filtered = filtered.filter(function(p){ return String(p.status||'') === params.status; });
+      if (params.teacher && params.teacher !== '') {
+        const t = String(params.teacher).toLowerCase();
+        filtered = filtered.filter(p => String(p.teacherName||'').toLowerCase().includes(t) || String(p.teacherEmail||'').toLowerCase().includes(t));
+      }
+      if (params.class && params.class !== '') filtered = filtered.filter(p => String(p.class||'').toLowerCase() === String(params.class).toLowerCase());
+      if (params.subject && params.subject !== '') filtered = filtered.filter(p => String(p.subject||'').toLowerCase() === String(params.subject).toLowerCase());
+      var from = String(params.dateFrom || '').trim();
+      var to = String(params.dateTo || '').trim();
+      if (from || to) {
+        var single = from && to && from === to;
+        filtered = filtered.filter(function(p){
+          var ds = _isoDateIST(p.selectedDate || p.plannedDate || p.date || '');
+          if (!ds) return false;
+          if (single) return ds === from;
+          if (from && ds < from) return false;
+          if (to && ds > to) return false;
+          return true;
+        });
+      }
+
+      // Enrich noOfSessions
+      const schemesSheet = _getSheet('Schemes');
+      const schemesHeaders = _headers(schemesSheet);
+      const allSchemes = _rows(schemesSheet).map(r => _indexByHeader(r, schemesHeaders));
+      const bySchemeId = {};
+      allSchemes.forEach(function(s){ if (s && s.schemeId) bySchemeId[s.schemeId] = s; });
+      filtered = filtered.map(function(p){
+        if (p.schemeId && bySchemeId[p.schemeId] && bySchemeId[p.schemeId].noOfSessions) p.noOfSessions = bySchemeId[p.schemeId].noOfSessions;
+        return p;
+      });
+
+      // Build class-wise groups with subject+chapter subgroups
+      const classMap = {};
+      filtered.forEach(function(p){
+        var cls = String(p.class||'Unknown');
+        if (!classMap[cls]) classMap[cls] = { class: cls, counts: { pending:0, ready:0, rework:0, rejected:0 }, subgroups: {} };
+        var root = classMap[cls];
+        var st = String(p.status||'');
+        if (st==='Pending Review') root.counts.pending++; else if (st==='Ready') root.counts.ready++; else if (st==='Needs Rework') root.counts.rework++; else if (st==='Rejected') root.counts.rejected++;
+        var subKey = String(p.subject||'') + '|' + String(p.chapter||'');
+        if (!root.subgroups[subKey]) root.subgroups[subKey] = { key: subKey, subject: p.subject, chapter: p.chapter, teacherName: p.teacherName, counts: { pending:0, ready:0, rework:0, rejected:0 }, lessons: [] };
+        var sg = root.subgroups[subKey];
+        if (st==='Pending Review') sg.counts.pending++; else if (st==='Ready') sg.counts.ready++; else if (st==='Needs Rework') sg.counts.rework++; else if (st==='Rejected') sg.counts.rejected++;
+        sg.lessons.push(p);
+      });
+      var groups = Object.keys(classMap).sort(function(a,b){ return String(a).localeCompare(String(b)); }).map(function(cls){
+        var entry = classMap[cls];
+        var subs = Object.keys(entry.subgroups).sort(function(a,b){ return String(a).localeCompare(String(b)); }).map(function(k){ return entry.subgroups[k]; });
+        return { class: entry.class, counts: entry.counts, subgroups: subs };
+      });
+
+      return _respond({ total: filtered.length, classGroupCount: groups.length, groups: groups });
+    } catch (error) {
+      Logger.log('Error grouping lesson plans by class: ' + error.message);
+      return _respond({ error: error.message });
     }
   }
