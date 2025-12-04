@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
 import { 
-  Clock, CheckCircle, AlertTriangle, Users, BookOpen, 
-  Calendar, TrendingUp, Target, Activity
+  Clock, CheckCircle, AlertTriangle, BookOpen, 
+  Calendar, Target, Activity
 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 import * as api from '../api';
 
 /**

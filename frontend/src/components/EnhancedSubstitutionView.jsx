@@ -1,13 +1,12 @@
+import { Calendar, RefreshCw, UserPlus, FileText, FileSpreadsheet, Eye, EyeOff, Monitor } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Calendar, Download, Filter, RefreshCw, UserPlus, FileText, FileSpreadsheet, Eye, EyeOff, Table, CheckCircle, XCircle, Clock, Monitor } from 'lucide-react';
-import { toISTDateString, formatDateForInput, parseApiDate, formatLocalDate, periodToTimeString } from '../utils/dateUtils';
 import * as api from '../api';
-import { debounce } from '../utils/performanceUtils';
 import { useNotifications } from '../contexts/NotificationContext';
+import { formatDateForInput, formatLocalDate, periodToTimeString } from '../utils/dateUtils';
 
-const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
+const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
   // Notification system
-  const { success: notifySuccess, error: notifyError, info: notifyInfo } = useNotifications();
+  const { success: notifySuccess, error: _notifyError, info: notifyInfo } = useNotifications();
   
   // State Management
   const [selectedDate, setSelectedDate] = useState(formatDateForInput(new Date()));
@@ -17,7 +16,7 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [dataRefreshKey, setDataRefreshKey] = useState(0); // Used to force re-fetches
-  const [customPeriodTimes, setCustomPeriodTimes] = useState(periodTimes || null); // Use provided period times or fetch them
+  const [customPeriodTimes, _setCustomPeriodTimes] = useState(periodTimes || null); // Use provided period times or fetch them
   
   // Filter States
   const [teacherFilter, setTeacherFilter] = useState('');
@@ -40,7 +39,7 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
   // Debug States
   const [showDebugInfo, setShowDebugInfo] = useState(true);
   const [lastApiCall, setLastApiCall] = useState(null);
-  const [apiCallHistory, setApiCallHistory] = useState([]);
+  const [_apiCallHistory, setApiCallHistory] = useState([]);
 
   // IT Lab support states
   const [itLabAssigning, setItLabAssigning] = useState({});
@@ -1202,6 +1201,9 @@ const EnhancedSubstitutionView = React.memo(({ user, periodTimes }) => {
       )}
     </div>
   );
-});
+};
+
+const EnhancedSubstitutionView = React.memo(EnhancedSubstitutionViewInner);
+EnhancedSubstitutionView.displayName = 'EnhancedSubstitutionView';
 
 export default EnhancedSubstitutionView;

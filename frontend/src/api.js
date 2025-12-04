@@ -9,8 +9,10 @@ const BASE_URL = (import.meta && import.meta.env && (
 ) : (() => { throw new Error('Missing API base URL. Set VITE_API_BASE_URL in .env'); })();
 
 // Export BASE_URL for components that need to build direct URLs
+// Delegate to the canonical utility to avoid drift across modules
+import { getBaseUrl as getBaseUrlUtil } from './utils/apiUtils.js';
 export function getBaseUrl() {
-  return BASE_URL;
+  return getBaseUrlUtil();
 }
 
 // Lightweight logger: disabled in production build to avoid noise
@@ -222,19 +224,7 @@ export async function googleLogin(googleAuthInfo) {
       }
       throw new Error(`Google login failed. Please ensure your Apps Script Web App is deployed (doPost handler active) and that your browser allows third-party cookies/popups.`);
     }
-
-    // Improved error message for common issues
-    let errorMessage = String(err.message || '');
-    if (errorMessage.includes('Invalid Google token')) {
-      console.error('Invalid Google token error. Token might be expired or malformed.');
-      throw new Error('Authentication failed. Your Google authentication token could not be verified. Please try signing in again or check if cookies are enabled.');
-    } else if (errorMessage.includes('Email not verified') || errorMessage.includes('Token missing email')) {
-      throw new Error('Your Google account email is either not verified or not available. Please ensure you have a verified email in your Google account.');
-    } else if (errorMessage.includes('User not registered')) {
-      throw new Error('Your Google account is not registered in the system. Please contact your administrator to register your email.');
-    }
-
-    throw err;
+    // Note: inner fallback path already throws; no further action here.
   }
 }
 

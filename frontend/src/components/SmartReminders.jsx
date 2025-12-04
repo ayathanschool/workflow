@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import { formatDistanceToNow, isBefore, addDays } from 'date-fns';
 import { Clock, AlertTriangle, Calendar, CheckCircle, Bell } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 import { useNotifications } from '../contexts/NotificationContext';
-import { formatDistanceToNow, isAfter, isBefore, addDays } from 'date-fns';
 
 const SmartReminders = ({ user }) => {
   const [reminders, setReminders] = useState([]);

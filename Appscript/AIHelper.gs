@@ -63,6 +63,7 @@ function _buildLessonPlanPrompt(context) {
   const className = context.class || '';
   const subject = context.subject || '';
   const chapter = context.chapter || '';
+  const topic = context.topic || '';
   const sessionNumber = context.session || 1;
   const totalSessions = context.totalSessions || '';
   
@@ -71,8 +72,15 @@ function _buildLessonPlanPrompt(context) {
 Context:
 - Class/Grade: ${className}
 - Subject: ${subject}
-- Chapter/Topic: ${chapter}
-- Session Number: ${sessionNumber}${totalSessions ? ` of ${totalSessions}` : ''}
+- Chapter: ${chapter}
+- Syllabus/Topics for this Chapter: ${topic}
+- Current Session: ${sessionNumber} of ${totalSessions || 'unknown'}
+
+Task:
+1. Analyze the "Syllabus/Topics" provided.
+2. If multiple topics are listed, determine which specific topic corresponds to Session ${sessionNumber} (assuming topics are covered sequentially).
+3. Generate a detailed lesson plan SPECIFICALLY for that topic.
+4. Do NOT generate a generic lesson plan for the whole chapter.
 
 Please provide a detailed lesson plan with the following sections:
 

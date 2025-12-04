@@ -1055,18 +1055,25 @@ function _collectRemainingPlansForChapter(teacherEmail, cls, subject, chapter, d
   var cutoff = dateISO ? new Date(dateISO) : null;
   for (var i = 0; i < lpRows.length; i++) {
     var r = lpRows[i];
-    var tEmail = String(r[idx.teacherEmail] || '').toLowerCase();
-    if (tEmail !== String(teacherEmail || '').toLowerCase()) continue;
-    if (idx.class !== -1 && String(r[idx.class] || '') !== String(cls || '')) continue;
-    if (idx.subject !== -1 && String(r[idx.subject] || '') !== String(subject || '')) continue;
-    if (idx.chapter !== -1 && String(r[idx.chapter] || '') !== String(chapter || '')) continue;
+    var tEmail = String(r[idx.teacherEmail] || '').toLowerCase().trim();
+    if (tEmail !== String(teacherEmail || '').toLowerCase().trim()) continue;
+    // Normalize class/subject/chapter comparisons (trim + case-insensitive)
+    if (idx.class !== -1 && String(r[idx.class] || '').trim() !== String(cls || '').trim()) continue;
+    if (idx.subject !== -1 && String(r[idx.subject] || '').trim() !== String(subject || '').trim()) continue;
+    if (idx.chapter !== -1) {
+      var planChapter = String(r[idx.chapter] || '').trim().toLowerCase();
+      var targetChapter = String(chapter || '').trim().toLowerCase();
+      if (planChapter !== targetChapter) continue;
+    }
     var dtStr = idx.selectedDate !== -1 ? _isoDateString(r[idx.selectedDate] || '') : '';
     if (cutoff && dtStr) {
       var d = new Date(dtStr);
       if (!(d >= cutoff)) continue;
     }
-    var st = idx.status !== -1 ? String(r[idx.status] || '') : '';
-    var planned = !st || /ready|approved|planned|scheduled/i.test(st);
+    var st = idx.status !== -1 ? String(r[idx.status] || '').trim() : '';
+    // Consider a session remaining unless it is clearly cancelled/completed/reported
+    var notRemaining = /(cancel|completed|done|reported)/i.test(st);
+    var planned = !notRemaining; // everything else counts as remaining (Ready, Planned, Scheduled, Pending Review, Revision, etc.)
     if (!planned) continue;
     out.push({
       lpId: idx.lpId !== -1 ? String(r[idx.lpId] || '') : '',
@@ -1154,7 +1161,7 @@ function applyChapterCompletionAction(params) {
         if (idx.cancelledAt !== -1) lpSh.getRange(i+2, idx.cancelledAt+1).setValue(nowISO);
         if (idx.cancelReason !== -1) lpSh.getRange(i+2, idx.cancelReason+1).setValue('Chapter completed');
         updated++;
-      } else if (action === 'keep') {
+      } else if (action === 'keep' || action === 'keep_revision') {
         if (idx.forRevision !== -1) lpSh.getRange(i+2, idx.forRevision+1).setValue('TRUE');
         // Optionally mark status
         if (idx.status !== -1 && !String(row[idx.status] || '').toLowerCase().includes('revision')) {

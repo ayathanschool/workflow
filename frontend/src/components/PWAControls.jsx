@@ -1,7 +1,7 @@
-import React from 'react';
 import { Download, Wifi, WifiOff, RefreshCw } from 'lucide-react';
-import { usePWA } from '../hooks/usePWA';
+import React from 'react';
 import { useNotifications } from '../contexts/NotificationContext';
+import { usePWA } from '../hooks/usePWA';
 
 const PWAControls = () => {
   const { isInstallable, isOnline, isStandalone, hasUpdate, installApp, updateApp } = usePWA();

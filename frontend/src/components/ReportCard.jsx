@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { useGoogleAuth } from "../contexts/GoogleAuthContext";
 import * as api from "../api";
+import { useGoogleAuth } from "../contexts/GoogleAuthContext";
 
 /**
  * Determine if a class should have internal marks (CE/TE system)

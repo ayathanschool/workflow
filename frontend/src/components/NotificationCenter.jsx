@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Bell, X, Check, Trash2, CheckSquare } from 'lucide-react';
-import { useNotifications } from '../contexts/NotificationContext';
 import { formatDistanceToNow } from 'date-fns';
+import { Bell, X, Trash2, CheckSquare } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { useNotifications } from '../contexts/NotificationContext';
 
 const NotificationCenter = () => {
   const [isOpen, setIsOpen] = useState(false);

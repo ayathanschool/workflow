@@ -1,7 +1,7 @@
 // src/components/SubstitutionModule.jsx
+import { Plus, Calendar, User, RefreshCw, Monitor } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import * as api from '../api';
-import { Plus, Calendar, User, RefreshCw, Monitor } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
 export default function SubstitutionModule() {

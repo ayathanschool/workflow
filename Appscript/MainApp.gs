@@ -809,6 +809,29 @@
           sh.appendRow(sanitizedRowData);
           SpreadsheetApp.flush();
           appLog('INFO', 'daily report submitted', { email: teacherEmail, class: reportClass, subject: reportSubject, period: reportPeriod });
+          
+          // *** CHAPTER COMPLETION ACTION (INLINE) ***
+          // If chapter completed and has remaining sessions action, apply it
+          if (data.chapterCompleted && data.remainingSessionsAction && data.remainingSessions && data.remainingSessions.length > 0) {
+            try {
+              Logger.log(`[ChapterCompletion] Applying action: ${data.remainingSessionsAction} for ${data.remainingSessions.length} sessions`);
+              const completionResult = applyChapterCompletionAction({
+                action: data.remainingSessionsAction,
+                lessonPlanIds: data.remainingSessions,
+                requesterEmail: data.teacherEmail,
+                rationale: data.completionRationale || 'Chapter completed early'
+              });
+              
+              if (completionResult.success) {
+                Logger.log(`[ChapterCompletion] Success: ${completionResult.updatedCount} plans updated`);
+              } else {
+                Logger.log(`[ChapterCompletion] Warning: ${completionResult.error}`);
+              }
+            } catch (ccErr) {
+              Logger.log(`[ChapterCompletion] Error: ${ccErr.message}`);
+              // Don't fail report submission if chapter action fails
+            }
+          }
 
           // Optional AUTO-CASCADE: if 0% completion and a lessonPlanId provided, attempt cascade immediately
           let autoCascade = null;
@@ -1266,29 +1289,26 @@
         const totalSessions = chapters.reduce((sum, ch) => sum + ch.totalSessions, 0);
         const totalPlanned = chapters.reduce((sum, ch) => sum + ch.plannedSessions, 0);
         
+        const overallProgress = totalSessions > 0 ? Math.round((totalPlanned / totalSessions) * 100) : 0;
         return {
           schemeId: scheme.schemeId,
           class: scheme.class,
           subject: scheme.subject,
           academicYear: scheme.academicYear,
           term: scheme.term,
-          totalChapters: chapters.length,
           totalSessions: totalSessions,
           plannedSessions: totalPlanned,
-          overallProgress: totalSessions > 0 ? Math.round((totalPlanned / totalSessions) * 100) : 0,
-          chapters: chapters,
-          createdAt: scheme.createdAt,
-          approvedAt: scheme.approvedAt
+          overallProgress: overallProgress,
+          chapters: chapters
         };
       });
       
-      // Calculate basic planning date range - show till end of current month
+      // Build final response
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const startDate = new Date(today);
       const endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0); // Last day of month
       endDate.setHours(0, 0, 0, 0);
-      
       const result = {
         success: true,
         schemes: schemesWithProgress,
@@ -1761,14 +1781,19 @@
       let filteredPlans = normalizedPlans;
       
       // Status filtering rules:
-      // - If params.status is undefined (missing), default to 'Pending Review'
+      // - If params.status is undefined (missing), default to HM-friendly pending set
       // - If params.status is '' or 'All', do NOT filter by status
       // - Otherwise, filter by the provided status
       var hasStatusParam = Object.prototype.hasOwnProperty.call(params, 'status');
       if (!hasStatusParam) {
-        filteredPlans = filteredPlans.filter(function(plan){ return String(plan.status || '') === 'Pending Review'; });
+        var pendingStatuses = ['Pending Review','Submitted','Pending'];
+        filteredPlans = filteredPlans.filter(function(plan){
+          var s = String(plan.status || '').trim();
+          return pendingStatuses.indexOf(s) >= 0;
+        });
       } else if (params.status && params.status !== 'All') {
-        filteredPlans = filteredPlans.filter(function(plan){ return String(plan.status || '') === params.status; });
+        var target = String(params.status).trim();
+        filteredPlans = filteredPlans.filter(function(plan){ return String(plan.status || '').trim() === target; });
       }
       
       // Filter by teacher (can be teacherName or teacherEmail)
@@ -1988,6 +2013,66 @@
       }
       
       const queryDate = _normalizeQueryDate(date);
+
+      // Block lesson planning on non-teaching days (exams/holidays) from AcademicCalendar
+      let isNonTeachingDay = false;
+      let nonTeachingReason = '';
+      try {
+        const calendarData = _getCachedSheetData('AcademicCalendar');
+        const rows = calendarData && calendarData.data ? calendarData.data : [];
+        const qd = queryDate; // already ISO yyyy-MM-dd in IST
+
+        for (let i = 0; i < rows.length && !isNonTeachingDay; i++) {
+          const r = rows[i] || {};
+          // Range-based exams
+          const examStart = r.examStartDate ? _coerceToDate(r.examStartDate) : null;
+          const examEnd = r.examEndDate ? _coerceToDate(r.examEndDate) : null;
+          if (examStart && examEnd) {
+            const dStart = _isoDateIST(examStart);
+            const dEnd = _isoDateIST(examEnd);
+            if (qd >= dStart && qd <= dEnd) {
+              isNonTeachingDay = true;
+              nonTeachingReason = 'Exam Period';
+              break;
+            }
+          }
+          // Explicit exam dates (comma-separated)
+          const examDatesStr = String(r.examDates || '').trim();
+          if (examDatesStr) {
+            const examDates = examDatesStr.split(',').map(s => _isoDateIST(_coerceToDate(s.trim()))).filter(Boolean);
+            if (examDates.indexOf(qd) !== -1) {
+              isNonTeachingDay = true;
+              nonTeachingReason = 'Exam Day';
+              break;
+            }
+          }
+          // Holidays (comma-separated)
+          const holidaysStr = String(r.holidays || '').trim();
+          if (holidaysStr) {
+            const holidays = holidaysStr.split(',').map(s => _isoDateIST(_coerceToDate(s.trim()))).filter(Boolean);
+            if (holidays.indexOf(qd) !== -1) {
+              isNonTeachingDay = true;
+              nonTeachingReason = 'Holiday';
+              break;
+            }
+          }
+        }
+      } catch (calErr) {
+        Logger.log(`[BATCH] AcademicCalendar check failed: ${calErr && calErr.message}`);
+      }
+
+      if (isNonTeachingDay) {
+        Logger.log(`[BATCH] ${queryDate} marked as non-teaching (${nonTeachingReason}); blocking lesson plans.`);
+        return _respond({
+          success: true,
+          email: email,
+          date: queryDate,
+          isNonTeachingDay: true,
+          reason: nonTeachingReason,
+          lessonsByPeriod: {},
+          count: 0
+        });
+      }
       
       // Get all lesson plans for this date
       const sh = _getSheet('LessonPlans');
@@ -3818,29 +3903,73 @@
       const totalPeriods = periodsPerWeek * teachingWeeks;
       const periodsRemaining = periodsPerWeek * weeksRemaining;
       
-      // Parse event dates and names
-      const eventDatesStr = (termInfo.eventDates || '').trim();
-      const eventNamesStr = (termInfo.eventNames || '').trim();
-      const eventDates = eventDatesStr ? eventDatesStr.split(',').map(d => d.trim()) : [];
-      const eventNames = eventNamesStr ? eventNamesStr.split(',').map(n => n.trim()) : [];
-      
+      // Parse events (support old and new structures)
       const events = [];
-      for (let i = 0; i < Math.min(eventDates.length, eventNames.length); i++) {
-        const eventDate = _coerceToDate(eventDates[i]);
-        if (eventDate && eventDate > today) {
-          const eventDayName = _dayNameIST(eventDate);
-          // Check if this event affects teacher's subject periods
-          const affectedPeriods = teacherPeriods.filter(p => 
-            (p.dayOfWeek || '').toLowerCase() === eventDayName.toLowerCase()
-          );
-          if (affectedPeriods.length > 0) {
-            events.push({
-              date: _isoDateIST(eventDate),
-              name: eventNames[i],
-              periodsLost: affectedPeriods.length
-            });
+      const eventDatesStr = String(termInfo.eventDates || '').trim();
+      const eventNamesStr = String(termInfo.eventNames || '').trim();
+      const eventsStr = String(termInfo.events || '').trim(); // New: comma-separated "YYYY-MM-DD|Name"
+
+      if (eventsStr) {
+        const pairs = eventsStr.split(',').map(x => x.trim()).filter(Boolean);
+        pairs.forEach(pair => {
+          const parts = pair.split('|');
+          const dStr = parts[0] ? parts[0].trim() : '';
+          const name = (parts[1] || '').trim();
+          const eventDate = _coerceToDate(dStr);
+          if (eventDate && eventDate > today) {
+            const eventDayName = _dayNameIST(eventDate);
+            const affectedPeriods = teacherPeriods.filter(p => (p.dayOfWeek || '').toLowerCase() === eventDayName.toLowerCase());
+            if (affectedPeriods.length > 0) {
+              events.push({ date: _isoDateIST(eventDate), name, periodsLost: affectedPeriods.length });
+            }
+          }
+        });
+      } else {
+        // Fallback: separate eventDates + eventNames columns
+        const eventDates = eventDatesStr ? eventDatesStr.split(',').map(d => d.trim()) : [];
+        const eventNames = eventNamesStr ? eventNamesStr.split(',').map(n => n.trim()) : [];
+        for (let i = 0; i < Math.min(eventDates.length, eventNames.length); i++) {
+          const eventDate = _coerceToDate(eventDates[i]);
+          if (eventDate && eventDate > today) {
+            const eventDayName = _dayNameIST(eventDate);
+            const affectedPeriods = teacherPeriods.filter(p => (p.dayOfWeek || '').toLowerCase() === eventDayName.toLowerCase());
+            if (affectedPeriods.length > 0) {
+              events.push({ date: _isoDateIST(eventDate), name: eventNames[i], periodsLost: affectedPeriods.length });
+            }
           }
         }
+      }
+
+      // Add explicit exam days impact if provided
+      const examDatesStr = String(termInfo.examDates || '').trim(); // New: comma-separated ISO dates
+      if (examDatesStr) {
+        const examDates = examDatesStr.split(',').map(s => s.trim()).filter(Boolean);
+        examDates.forEach(dStr => {
+          const d = _coerceToDate(dStr);
+          if (d && d > today) {
+            const eventDayName = _dayNameIST(d);
+            const affectedPeriods = teacherPeriods.filter(p => (p.dayOfWeek || '').toLowerCase() === eventDayName.toLowerCase());
+            if (affectedPeriods.length > 0) {
+              events.push({ date: _isoDateIST(d), name: 'Exam Day', periodsLost: affectedPeriods.length });
+            }
+          }
+        });
+      }
+
+      // Add holiday impact if provided
+      const holidaysStr = String(termInfo.holidays || '').trim(); // New: comma-separated ISO dates
+      if (holidaysStr) {
+        const holidays = holidaysStr.split(',').map(s => s.trim()).filter(Boolean);
+        holidays.forEach(dStr => {
+          const d = _coerceToDate(dStr);
+          if (d && d > today) {
+            const eventDayName = _dayNameIST(d);
+            const affectedPeriods = teacherPeriods.filter(p => (p.dayOfWeek || '').toLowerCase() === eventDayName.toLowerCase());
+            if (affectedPeriods.length > 0) {
+              events.push({ date: _isoDateIST(d), name: 'Holiday', periodsLost: affectedPeriods.length });
+            }
+          }
+        });
       }
       
       const totalPeriodsLost = events.reduce((sum, e) => sum + e.periodsLost, 0);

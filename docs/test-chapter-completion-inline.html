@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Chapter Completion Inline Flow</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        .content {
+            padding: 30px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        .section h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #555;
+            font-size: 14px;
+        }
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+        .form-group textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+            cursor: pointer;
+        }
+        .checkbox-group label {
+            margin: 0;
+            cursor: pointer;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .btn-secondary {
+            background: #6c757d;
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .result {
+            margin-top: 15px;
+            padding: 15px;
+            border-radius: 6px;
+            font-size: 14px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .result.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .result.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .result.info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .sessions-preview {
+            margin-top: 15px;
+            padding: 15px;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+        }
+        .session-card {
+            padding: 10px;
+            margin-bottom: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 3px solid #667eea;
+            font-size: 13px;
+        }
+        .session-card:last-child {
+            margin-bottom: 0;
+        }
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .hidden {
+            display: none;
+        }
+        .api-url {
+            font-size: 12px;
+            color: #666;
+            font-family: monospace;
+            background: #f8f9fa;
+            padding: 8px;
+            border-radius: 4px;
+            margin-top: 10px;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Chapter Completion Test Suite</h1>
+            <p>Test the inline dropdown flow for chapter completion with remaining sessions</p>
+        </div>
+
+        <div class="content">
+            <!-- Configuration Section -->
+            <div class="section">
+                <h2>⚙️ Configuration</h2>
+                <div class="form-group">
+                    <label>Apps Script URL:</label>
+                    <input type="text" id="apiUrl" placeholder="https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec">
+                    <div class="api-url" id="apiUrlDisplay">Not set</div>
+                </div>
+            </div>
+
+            <!-- Test 1: Check Remaining Sessions -->
+            <div class="section">
+                <h2>📋 Test 1: Check Remaining Sessions</h2>
+                <p style="margin-bottom: 15px; color: #666; font-size: 14px;">
+                    Verify the API returns remaining sessions for a completed chapter
+                </p>
+                
+                <div class="form-group">
+                    <label>Teacher Email:</label>
+                    <input type="email" id="test1_email" placeholder="teacher@example.com" value="ayathan@gmail.com">
+                </div>
+                <div class="form-group">
+                    <label>Class:</label>
+                    <input type="text" id="test1_class" placeholder="Class 10A" value="1711 ayathan">
+                </div>
+                <div class="form-group">
+                    <label>Subject:</label>
+                    <input type="text" id="test1_subject" placeholder="Mathematics" value="Mathematics">
+                </div>
+                <div class="form-group">
+                    <label>Chapter:</label>
+                    <input type="text" id="test1_chapter" placeholder="Chapter 1: Number Systems" value="Trigonometry">
+                </div>
+                <div class="form-group">
+                    <label>Date (YYYY-MM-DD):</label>
+                    <input type="date" id="test1_date" value="2024-12-04">
+                </div>
+
+                <div class="btn-group">
+                    <button onclick="testCheckRemainingSessions()">🔍 Check Remaining Sessions</button>
+                </div>
+
+                <div id="test1_result"></div>
+            </div>
+
+            <!-- Test 2: Submit with Chapter Completion (Cancel Action) -->
+            <div class="section">
+                <h2>✅ Test 2: Submit Report with Chapter Completion (Cancel Remaining)</h2>
+                <p style="margin-bottom: 15px; color: #666; font-size: 14px;">
+                    Submit a daily report marking chapter complete and canceling remaining sessions
+                </p>
+                
+                <div class="form-group">
+                    <label>Teacher Email:</label>
+                    <input type="email" id="test2_email" placeholder="teacher@example.com" value="ayathan@gmail.com">
+                </div>
+                <div class="form-group">
+                    <label>Date (YYYY-MM-DD):</label>
+                    <input type="date" id="test2_date" value="2024-12-04">
+                </div>
+                <div class="form-group">
+                    <label>Class:</label>
+                    <input type="text" id="test2_class" placeholder="Class 10A" value="1711 ayathan">
+                </div>
+                <div class="form-group">
+                    <label>Subject:</label>
+                    <input type="text" id="test2_subject" placeholder="Mathematics" value="Mathematics">
+                </div>
+                <div class="form-group">
+                    <label>Chapter:</label>
+                    <input type="text" id="test2_chapter" placeholder="Chapter 1" value="Trigonometry">
+                </div>
+                <div class="form-group">
+                    <label>Session/Topic:</label>
+                    <input type="text" id="test2_topic" placeholder="Session 1" value="Session 1">
+                </div>
+                <div class="form-group">
+                    <label>Period:</label>
+                    <input type="number" id="test2_period" placeholder="1" value="1" min="1" max="8">
+                </div>
+                <div class="form-group">
+                    <label>Lesson Plan ID (optional):</label>
+                    <input type="text" id="test2_lpId" placeholder="Leave empty to test without">
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="test2_chapterCompleted" checked>
+                    <label for="test2_chapterCompleted">Chapter Completed</label>
+                </div>
+                <div class="form-group">
+                    <label>Action for Remaining Sessions:</label>
+                    <select id="test2_action">
+                        <option value="">-- Select Action --</option>
+                        <option value="cancel" selected>Cancel Remaining Sessions</option>
+                        <option value="keep_revision">Keep for Revision</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Completion Rationale:</label>
+                    <textarea id="test2_rationale" placeholder="Explain why chapter is complete and action chosen">Completed all essential content; remaining sessions are supplementary practice that can be canceled.</textarea>
+                </div>
+
+                <div class="btn-group">
+                    <button onclick="testSubmitWithCompletion('cancel')">📤 Submit with Cancel Action</button>
+                </div>
+
+                <div id="test2_result"></div>
+            </div>
+
+            <!-- Test 3: Submit with Keep for Revision -->
+            <div class="section">
+                <h2>🔄 Test 3: Submit Report with Keep for Revision</h2>
+                <p style="margin-bottom: 15px; color: #666; font-size: 14px;">
+                    Submit a daily report marking chapter complete but keeping sessions for revision
+                </p>
+                
+                <div class="form-group">
+                    <label>Teacher Email:</label>
+                    <input type="email" id="test3_email" placeholder="teacher@example.com" value="ayathan@gmail.com">
+                </div>
+                <div class="form-group">
+                    <label>Date (YYYY-MM-DD):</label>
+                    <input type="date" id="test3_date" value="2024-12-04">
+                </div>
+                <div class="form-group">
+                    <label>Class:</label>
+                    <input type="text" id="test3_class" placeholder="Class 10A" value="1711 ayathan">
+                </div>
+                <div class="form-group">
+                    <label>Subject:</label>
+                    <input type="text" id="test3_subject" placeholder="Mathematics" value="Mathematics">
+                </div>
+                <div class="form-group">
+                    <label>Chapter:</label>
+                    <input type="text" id="test3_chapter" placeholder="Chapter 1" value="Algebra">
+                </div>
+                <div class="form-group">
+                    <label>Session/Topic:</label>
+                    <input type="text" id="test3_topic" placeholder="Session 1" value="Session 2">
+                </div>
+                <div class="form-group">
+                    <label>Period:</label>
+                    <input type="number" id="test3_period" placeholder="1" value="2" min="1" max="8">
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="test3_chapterCompleted" checked>
+                    <label for="test3_chapterCompleted">Chapter Completed</label>
+                </div>
+                <div class="form-group">
+                    <label>Action for Remaining Sessions:</label>
+                    <select id="test3_action">
+                        <option value="">-- Select Action --</option>
+                        <option value="cancel">Cancel Remaining Sessions</option>
+                        <option value="keep_revision" selected>Keep for Revision</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Completion Rationale:</label>
+                    <textarea id="test3_rationale" placeholder="Explain why keeping for revision">Core concepts covered, but students need additional practice sessions for mastery.</textarea>
+                </div>
+
+                <div class="btn-group">
+                    <button onclick="testSubmitWithCompletion('keep_revision')">📤 Submit with Keep Revision</button>
+                </div>
+
+                <div id="test3_result"></div>
+            </div>
+
+            <!-- Test 4: Verify Lesson Plans Updated -->
+            <div class="section">
+                <h2>🔎 Test 4: Verify Lesson Plans Updated</h2>
+                <p style="margin-bottom: 15px; color: #666; font-size: 14px;">
+                    Check that lesson plans were correctly updated based on action
+                </p>
+                
+                <div class="form-group">
+                    <label>Instructions:</label>
+                    <div style="padding: 10px; background: white; border-radius: 4px; font-size: 13px; color: #666;">
+                        1. Open your Google Spreadsheet<br>
+                        2. Go to LessonPlans sheet<br>
+                        3. Filter by teacher/class/subject/chapter from tests above<br>
+                        4. Verify:<br>
+                        &nbsp;&nbsp;&nbsp;- For "cancel" action: status should be "Cancelled (Chapter Complete)"<br>
+                        &nbsp;&nbsp;&nbsp;- For "keep_revision" action: forRevision should be TRUE, status "Revision"<br>
+                        &nbsp;&nbsp;&nbsp;- Sessions with existing reports should be skipped
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // Update API URL display
+        document.getElementById('apiUrl').addEventListener('input', function(e) {
+            const display = document.getElementById('apiUrlDisplay');
+            display.textContent = e.target.value || 'Not set';
+        });
+
+        function getApiUrl() {
+            const url = document.getElementById('apiUrl').value.trim();
+            if (!url) {
+                alert('Please enter your Apps Script URL first');
+                throw new Error('API URL not configured');
+            }
+            return url;
+        }
+
+        function showResult(elementId, message, type = 'info') {
+            const resultDiv = document.getElementById(elementId);
+            resultDiv.className = `result ${type}`;
+            resultDiv.innerHTML = message;
+            resultDiv.classList.remove('hidden');
+        }
+
+        function showLoading(elementId) {
+            showResult(elementId, '<span class="loading"></span>Loading...', 'info');
+        }
+
+        async function testCheckRemainingSessions() {
+            const resultId = 'test1_result';
+            showLoading(resultId);
+
+            try {
+                const apiUrl = getApiUrl();
+                const params = {
+                    action: 'checkChapterCompletion',
+                    teacherEmail: document.getElementById('test1_email').value,
+                    class: document.getElementById('test1_class').value,
+                    subject: document.getElementById('test1_subject').value,
+                    chapter: document.getElementById('test1_chapter').value,
+                    date: document.getElementById('test1_date').value
+                };
+
+                const url = `${apiUrl}?${new URLSearchParams(params)}`;
+                const response = await fetch(url);
+                const result = await response.json();
+
+                if (result.success) {
+                    let html = '✅ <strong>Success!</strong>\n\n';
+                    html += `Has Remaining Plans: ${result.hasRemainingPlans}\n`;
+                    html += `Count: ${result.remainingPlans ? result.remainingPlans.length : 0}\n\n`;
+                    
+                    if (result.remainingPlans && result.remainingPlans.length > 0) {
+                        html += '<div class="sessions-preview">';
+                        html += '<strong>Remaining Sessions:</strong>\n';
+                        result.remainingPlans.forEach((plan, idx) => {
+                            html += `<div class="session-card">`;
+                            html += `Session ${plan.session || idx + 1}: ${plan.selectedDate || 'No date'} - Period ${plan.selectedPeriod || '?'}\n`;
+                            html += `Status: ${plan.status || 'Unknown'}\n`;
+                            html += `LP ID: ${plan.lpId || 'N/A'}`;
+                            html += `</div>`;
+                        });
+                        html += '</div>';
+                    } else {
+                        html += '📝 No remaining sessions found';
+                    }
+
+                    showResult(resultId, html, 'success');
+                } else {
+                    showResult(resultId, `❌ <strong>Error:</strong> ${result.error || 'Unknown error'}`, 'error');
+                }
+            } catch (error) {
+                showResult(resultId, `❌ <strong>Exception:</strong> ${error.message}`, 'error');
+            }
+        }
+
+        async function testSubmitWithCompletion(testAction) {
+            const testNum = testAction === 'cancel' ? '2' : '3';
+            const resultId = `test${testNum}_result`;
+            showLoading(resultId);
+
+            try {
+                const apiUrl = getApiUrl();
+                
+                // First, get remaining sessions
+                const checkParams = {
+                    action: 'checkChapterCompletion',
+                    teacherEmail: document.getElementById(`test${testNum}_email`).value,
+                    class: document.getElementById(`test${testNum}_class`).value,
+                    subject: document.getElementById(`test${testNum}_subject`).value,
+                    chapter: document.getElementById(`test${testNum}_chapter`).value,
+                    date: document.getElementById(`test${testNum}_date`).value
+                };
+
+                const checkUrl = `${apiUrl}?${new URLSearchParams(checkParams)}`;
+                const checkResponse = await fetch(checkUrl);
+                const checkResult = await checkResponse.json();
+
+                if (!checkResult.success) {
+                    showResult(resultId, `❌ Failed to check remaining sessions: ${checkResult.error}`, 'error');
+                    return;
+                }
+
+                const remainingSessions = checkResult.remainingPlans || [];
+                const remainingSessionIds = remainingSessions.map(s => s.lpId).filter(Boolean);
+
+                // Now submit the daily report with chapter completion
+                const submitData = {
+                    teacherEmail: document.getElementById(`test${testNum}_email`).value,
+                    date: document.getElementById(`test${testNum}_date`).value,
+                    class: document.getElementById(`test${testNum}_class`).value,
+                    subject: document.getElementById(`test${testNum}_subject`).value,
+                    chapter: document.getElementById(`test${testNum}_chapter`).value,
+                    topic: document.getElementById(`test${testNum}_topic`).value,
+                    period: document.getElementById(`test${testNum}_period`).value,
+                    lessonPlanId: document.getElementById(`test${testNum}_lpId`).value || undefined,
+                    chapterCompleted: document.getElementById(`test${testNum}_chapterCompleted`).checked,
+                    remainingSessionsAction: document.getElementById(`test${testNum}_action`).value,
+                    remainingSessions: remainingSessionIds,
+                    completionRationale: document.getElementById(`test${testNum}_rationale`).value,
+                    // Additional required fields
+                    studentsPresent: 30,
+                    studentsAbsent: 2,
+                    topicsCompleted: document.getElementById(`test${testNum}_topic`).value,
+                    challengesFaced: 'None',
+                    teachingMethodsUsed: 'Lecture, Discussion'
+                };
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(submitData)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    let html = '✅ <strong>Report Submitted Successfully!</strong>\n\n';
+                    html += `Report ID: ${result.reportId || 'N/A'}\n`;
+                    
+                    if (result.chapterCompletionResult) {
+                        html += '\n<div class="sessions-preview">';
+                        html += '<strong>Chapter Completion Action Result:</strong>\n';
+                        html += `Action: ${result.chapterCompletionResult.action}\n`;
+                        html += `Updated: ${result.chapterCompletionResult.updatedCount} sessions\n`;
+                        
+                        if (result.chapterCompletionResult.skipped && result.chapterCompletionResult.skipped.length > 0) {
+                            html += `\nSkipped: ${result.chapterCompletionResult.skipped.length} sessions\n`;
+                            result.chapterCompletionResult.skipped.forEach(skip => {
+                                html += `  - ${skip.lpId}: ${skip.reason}\n`;
+                            });
+                        }
+                        html += '</div>';
+                    }
+
+                    showResult(resultId, html, 'success');
+                } else {
+                    showResult(resultId, `❌ <strong>Error:</strong> ${result.error || 'Unknown error'}`, 'error');
+                }
+            } catch (error) {
+                showResult(resultId, `❌ <strong>Exception:</strong> ${error.message}`, 'error');
+            }
+        }
+
+        // Auto-set today's date
+        const today = new Date().toISOString().split('T')[0];
+        document.querySelectorAll('input[type="date"]').forEach(input => {
+            if (!input.value) input.value = today;
+        });
+    </script>
+</body>
+</html>

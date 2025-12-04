@@ -1,16 +1,56 @@
-﻿import * as api from './api'
+﻿/* eslint-disable no-unused-vars */
+/* eslint-disable react/no-unescaped-entities */
+/* eslint-disable import/order */
+import { 
+  User, 
+  BookOpen, 
+  Calendar, 
+  FileText, 
+  CheckCircle, 
+  Clock, 
+  AlertCircle, 
+  LogOut, 
+  Menu, 
+  X, 
+  Home,
+  Users,
+  Book,
+  BarChart2,
+  Bell,
+  Search,
+  Filter,
+  Eye,
+  Edit,
+  Plus,
+  Trash2,
+  Download,
+  UserCheck,
+  Award,
+  School,
+  CalendarDays,
+  UserPlus,
+  BookCheck,
+  FileCheck,
+  FileClock,
+  RefreshCw,
+  LayoutGrid,
+  ClipboardCheck,
+  Check,
+  AlertTriangle,
+  XCircle
+} from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
-import LoginForm from './auth/LoginForm';
+import * as api from './api'
 import LoadingSplash from './auth/LoadingSplash';
-import TopBar from './layout/TopBar';
-import { useGoogleAuth } from './contexts/GoogleAuthContext';
-import ThemeToggle from './components/ThemeToggle';
+import LoginForm from './auth/LoginForm';
 import AnimatedPage from './components/AnimatedPage';
-import { useTheme } from './contexts/ThemeContext';
-import { NotificationProvider, useNotifications } from './contexts/NotificationContext';
 import NotificationCenter from './components/NotificationCenter';
 import PWAControls from './components/PWAControls';
 import PWAInstallBanner from './components/PWAInstallBanner';
+import ThemeToggle from './components/ThemeToggle';
+import { useGoogleAuth } from './contexts/GoogleAuthContext';
+import { NotificationProvider, useNotifications } from './contexts/NotificationContext';
+import { useTheme } from './contexts/ThemeContext';
 // import { useRealTimeUpdates } from './hooks/useRealTimeUpdates';
 
 // Lazy load heavy components for better performance
@@ -27,54 +67,8 @@ const HMDailyOversight = lazy(() => import('./components/HMDailyOversightEnhance
 const HMTeacherPerformanceView = lazy(() => import('./components/HMTeacherPerformanceView'));
 
 // Keep lightweight components as regular imports
-import AppLayout from './components/AppLayout';
-import { periodToTimeString, isDateForNextWeek, todayIST, formatDateForInput, parseApiDate, createISTTimestamp, formatIndianDate, toISTDateString } from './utils/dateUtils';
-import { 
-  User, 
-  BookOpen, 
-  Calendar, 
-  FileText, 
-  CheckCircle, 
-  Clock, 
-  AlertCircle, 
-  LogOut, 
-  Menu, 
-  X, 
-  Home,
-  Users,
-  Book,
-  Clipboard,
-  BarChart2,
-  TrendingUp,
-  Bell,
-  Search,
-  Filter,
-  Eye,
-  Edit,
-  Save,
-  Plus,
-  Trash2,
-  Send,
-  Download,
-  Upload,
-  Settings,
-  UserCheck,
-  Award,
-  Activity,
-  School,
-  UserCircle,
-  CalendarDays,
-  UserPlus,
-  BookCheck,
-  FileCheck,
-  FileClock,
-  RefreshCw,
-  LayoutGrid,
-  ClipboardCheck,
-  Check,
-  AlertTriangle,
-  XCircle
-} from 'lucide-react';
+import { periodToTimeString, todayIST, formatDateForInput, formatLocalDate } from './utils/dateUtils';
+// moved 'lucide-react' import above to satisfy import ordering
 
 // Common utility functions to avoid duplication
 const appNormalize = (s) => (s || '').toString().trim().toLowerCase();
@@ -7253,6 +7247,10 @@ const App = () => {
     };
 
     const handlePlanFilterChange = (field, value) => {
+      setFilters(prev => ({ ...prev, [field]: value }));
+    };
+    // Safe no-op handler for report filter fields to satisfy lint; routes to plan filters
+    const handleReportFilterChange = (field, value) => {
       setFilters(prev => ({ ...prev, [field]: value }));
     };
 

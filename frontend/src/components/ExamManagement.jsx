@@ -1,12 +1,12 @@
+import { Plus, Filter, RefreshCw, Upload, Download, ChevronUp, ChevronDown } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, Bell, Search, Filter, RefreshCw, Loader, Upload, Download, ChevronUp, ChevronDown } from 'lucide-react';
 import * as api from '../api';
-import { todayIST, parseApiDate, formatShortDate } from '../utils/dateUtils';
 import { useNotifications } from '../contexts/NotificationContext';
+import { todayIST, parseApiDate, formatShortDate } from '../utils/dateUtils';
 
 const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
   // Get notification functions
-  const { success, error, warning, info } = useNotifications();
+  const { success, error: _error, warning, info: _info } = useNotifications();
   // Helper function to determine if exam has internal marks
   const examHasInternalMarks = (exam) => {
     if (!exam) return false;
@@ -93,7 +93,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
   const [showGlobalBulkUpload, setShowGlobalBulkUpload] = useState(false);
   const [globalBulkFile, setGlobalBulkFile] = useState(null);
   const [globalBulkData, setGlobalBulkData] = useState([]);
-  const [globalBulkPreview, setGlobalBulkPreview] = useState([]);
+  const [_globalBulkPreview, setGlobalBulkPreview] = useState([]);
   const [bulkUploadProgress, setBulkUploadProgress] = useState({ current: 0, total: 0 });
 
   const [viewExamMarks, setViewExamMarks] = useState(null);
@@ -874,7 +874,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       console.log('🔍 Opening marks form for exam:', exam);
       
       // Check cache first to avoid duplicate API calls
-      const cacheKey = `${exam.class}_${exam.examId}`;
+      const _cacheKey = `${exam.class}_${exam.examId}`;
       
       let students = studentsCache.get(exam.class);
       let marks = marksCache.get(exam.examId);
@@ -1250,7 +1250,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
               let examId = row.examid.trim();
               
               // Remove any UUID part if present (e.g., "TermTest1_Std5A_Math (uuid)" becomes "TermTest1_Std5A_Math")
-              const uuidMatch = examId.match(/^(.+?)\s*\([a-f0-9\-]{36}\)$/i);
+              const uuidMatch = examId.match(/^(.+?)\s*\([a-f0-9-]{36}\)$/i);
               if (uuidMatch) {
                 examId = uuidMatch[1].trim(); // Use the human-readable part only
               }

@@ -1,13 +1,13 @@
+import { Clock, CheckCircle, AlertCircle, BookOpen, Users, Plus, Search, Sparkles } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, CheckCircle, AlertCircle, BookOpen, Users, Plus, Search, Sparkles } from 'lucide-react';
-import * as api from '../api.js';
 import * as ai from '../api-ai.js';
+import * as api from '../api.js';
 
 // Generic API request function
 const apiRequest = async (action, params = {}, method = 'GET') => {
   try {
     console.log(`Making API request: ${action}`, params);
-    
+
     if (method === 'GET') {
       switch (action) {
         case 'getApprovedSchemesForLessonPlanning':
@@ -15,9 +15,9 @@ const apiRequest = async (action, params = {}, method = 'GET') => {
           return await api.getApprovedSchemesForLessonPlanning(params.teacherEmail);
         case 'getAvailablePeriodsForLessonPlan':
           return await api.getAvailablePeriodsForLessonPlan(
-            params.teacherEmail, 
-            params.startDate, 
-            params.endDate, 
+            params.teacherEmail,
+            params.startDate,
+            params.endDate,
             params.excludeExisting !== 'false',
             params.class || '',        // ✅ Pass class parameter
             params.subject || ''       // ✅ Pass subject parameter
@@ -46,6 +46,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   const [selectedSession, setSelectedSession] = useState(null);
   const [availablePeriods, setAvailablePeriods] = useState([]);
   const [loadingPeriods, setLoadingPeriods] = useState(false);
+  const [examIndex, setExamIndex] = useState({ byDate: new Set(), byDatePeriod: new Set(), meta: [] });
   const [submitting, setSubmitting] = useState(false);
   const [showLessonPlanForm, setShowLessonPlanForm] = useState(false);
   const [planningDateRange, setPlanningDateRange] = useState(null);
@@ -58,11 +59,11 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
     selectedDate: '',
     selectedPeriod: ''
   });
-  
+
   // Bulk preparation state
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [bulkPrepData, setBulkPrepData] = useState(null);
-  
+
   // AI suggestions state
   const [loadingAI, setLoadingAI] = useState(false);
 
@@ -73,15 +74,15 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   const loadApprovedSchemes = async () => {
     try {
       setLoading(true);
-      
+
       // Debug logging
       console.log('Loading schemes for user:', userEmail);
-      
+
       if (!userEmail) {
         setError('No user email provided');
         return;
       }
-      
+
       const response = await apiRequest('getApprovedSchemesForLessonPlanning', {
         teacherEmail: userEmail
       });
@@ -112,10 +113,10 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   const loadAvailablePeriods = async (session) => {
     try {
       setLoadingPeriods(true);
-      
+
       // Use date range from backend (calculated based on Settings)
       let startDate, endDate;
-      
+
       if (planningDateRange) {
         startDate = planningDateRange.startDate;
         endDate = planningDateRange.endDate;
@@ -124,7 +125,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
         // Fallback: Calculate next week (Monday to Friday) if date range not available
         const today = new Date();
         const dayOfWeek = today.getDay();
-        
+
         let daysUntilNextMonday;
         if (dayOfWeek === 0) { // Sunday
           daysUntilNextMonday = 1;
@@ -133,13 +134,13 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
         } else {
           daysUntilNextMonday = 8 - dayOfWeek;
         }
-        
+
         const nextMonday = new Date(today);
         nextMonday.setDate(today.getDate() + daysUntilNextMonday);
-        
+
         const nextFriday = new Date(nextMonday);
         nextFriday.setDate(nextMonday.getDate() + 4);
-        
+
         startDate = nextMonday.toISOString().split('T')[0];
         endDate = nextFriday.toISOString().split('T')[0];
         console.log('Using fallback date range:', { startDate, endDate });
@@ -183,6 +184,30 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
         console.log('Occupied periods:', periods.filter(p => p.isOccupied).length);
         console.log('First 3 periods:', periods.slice(0, 3));
         setAvailablePeriods(periods);
+
+        // Also load exams for the class/subject and mark conflict dates/periods
+        try {
+          const allExams = await api.getExams({ class: session.class, subject: session.subject });
+          const idxByDate = new Set();
+          const idxByDatePeriod = new Set();
+          const meta = [];
+          if (Array.isArray(allExams)) {
+            for (const ex of allExams) {
+              const d = (ex.date || ex.examDate || '').toString().split('T')[0];
+              if (d) {
+                idxByDate.add(d);
+                // If exam period known, index date|period
+                const p = ex.period || ex.examPeriod || '';
+                if (p) idxByDatePeriod.add(`${d}|${p}`);
+                meta.push({ date: d, period: p, name: ex.examName || ex.examType || 'Exam', class: ex.class, subject: ex.subject });
+              }
+            }
+          }
+          setExamIndex({ byDate: idxByDate, byDatePeriod: idxByDatePeriod, meta });
+        } catch (e) {
+          console.warn('Failed to load exams for conflict highlighting', e);
+          setExamIndex({ byDate: new Set(), byDatePeriod: new Set(), meta: [] });
+        }
       } else {
         const errorMsg = actualData?.error || 'Unknown error loading periods';
         console.error('Period loading error:', errorMsg);
@@ -204,7 +229,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
   const handleSessionClick = async (scheme, chapter, session) => {
     console.log('Session clicked:', { scheme, chapter, session });
-    
+
     if (session.status === 'planned') {
       // Show existing lesson plan details with formatted date
       const formattedDate = session.plannedDate ? formatDate(session.plannedDate) : session.plannedDate;
@@ -219,15 +244,16 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
       subject: scheme.subject,
       chapter: chapter.chapterName,
       session: session.sessionNumber,
-      sessionName: session.sessionName
+      sessionName: session.sessionName,
+      content: scheme.content, totalSessions: chapter.totalSessions
     };
-    
+
     console.log('Setting selected session:', sessionData);
     console.log('Opening lesson plan form modal');
-    
+
     setSelectedSession(sessionData);
     setShowLessonPlanForm(true);
-    
+
     console.log('Loading available periods...');
     await loadAvailablePeriods(sessionData);
   };
@@ -252,7 +278,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
       const submitData = {
         schemeId: selectedSession.schemeId,
         chapter: selectedSession.chapter,
-        session: selectedSession.session,
+        session: selectedSession.session, topic: selectedSession.content, totalSessions: selectedSession.totalSessions,
         teacherEmail: userEmail,
         teacherName: userName,
         selectedDate: lessonPlanData.selectedDate,
@@ -306,7 +332,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
       console.error('[AI] No session selected');
       return;
     }
-    
+
     setLoadingAI(true);
     try {
       const context = {
@@ -314,7 +340,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
         class: selectedSession.class,
         subject: selectedSession.subject,
         chapter: selectedSession.chapter,
-        session: selectedSession.session
+        session: selectedSession.session, topic: selectedSession.content, totalSessions: selectedSession.totalSessions
       };
 
       console.log('[AI] Requesting AI suggestions with context:', context);
@@ -370,7 +396,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
         return <Clock className="w-4 h-4 text-gray-400" />;
     }
   };
-  
+
   const handleBulkPrepareClick = (scheme, chapter) => {
     console.log('Bulk prepare clicked:', { scheme, chapter });
     setBulkPrepData({
@@ -389,10 +415,10 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-      weekday: 'short', 
-      month: 'short', 
-      day: 'numeric' 
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric'
     });
   };
 
@@ -461,7 +487,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               </select>
             </div>
             <div className="text-sm text-gray-500">
-              Schemes: {schemes.filter(s => classFilter === 'all' || s.class === classFilter).length} | 
+              Schemes: {schemes.filter(s => classFilter === 'all' || s.class === classFilter).length} |
               Total Sessions: {schemes.filter(s => classFilter === 'all' || s.class === classFilter).reduce((sum, s) => sum + s.totalSessions, 0)} |
               Planned: {schemes.filter(s => classFilter === 'all' || s.class === classFilter).reduce((sum, s) => sum + s.plannedSessions, 0)}
             </div>
@@ -490,165 +516,164 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               schemes
                 .filter(scheme => classFilter === 'all' || scheme.class === classFilter)
                 .map((scheme) => (
-              <div key={scheme.schemeId} className="border border-gray-200 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-lg font-medium text-gray-900">
-                      {scheme.class} - {scheme.subject}
-                    </h3>
-                    <p className="text-sm text-gray-500">
-                      {scheme.academicYear} | Term: {scheme.term}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm text-gray-600">
-                      Progress: {scheme.plannedSessions}/{scheme.totalSessions} sessions
-                    </div>
-                    <div className="w-32 bg-gray-200 rounded-full h-2 mt-1">
-                      <div
-                        className={`h-2 rounded-full ${getProgressColor(scheme.overallProgress)}`}
-                        style={{ width: `${scheme.overallProgress}%` }}
-                      ></div>
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      {scheme.overallProgress}% complete
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  {scheme.chapters.map((chapter) => (
-                    <div key={`${scheme.schemeId}-${chapter.chapterNumber}`} className="border-l-4 border-blue-200 pl-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-3">
-                          <h4 className="font-medium text-gray-800">
-                            Chapter {chapter.chapterNumber}: {chapter.chapterName}
-                          </h4>
-                          {chapter.plannedSessions === 0 && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleBulkPrepareClick(scheme, chapter);
-                              }}
-                              className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors inline-flex items-center gap-1"
-                              title="Prepare all sessions at once"
-                            >
-                              <Plus className="w-3 h-3" />
-                              Prepare All ({chapter.totalSessions})
-                            </button>
-                          )}
+                  <div key={scheme.schemeId} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="text-lg font-medium text-gray-900">
+                          {scheme.class} - {scheme.subject}
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          {scheme.academicYear} | Term: {scheme.term}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm text-gray-600">
+                          Progress: {scheme.plannedSessions}/{scheme.totalSessions} sessions
                         </div>
-                        <span className="text-xs bg-gray-100 px-2 py-1 rounded">
-                          {chapter.plannedSessions}/{chapter.totalSessions} planned
-                        </span>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                        {chapter.sessions.map((session) => (
+                        <div className="w-32 bg-gray-200 rounded-full h-2 mt-1">
                           <div
-                            key={`${scheme.schemeId}-${chapter.chapterNumber}-${session.sessionNumber}`}
-                            onClick={() => {
-                              const normalizedStatus = String(session.status || '').toLowerCase();
-                              if (!['cancelled', 'reported'].includes(normalizedStatus)) {
-                                handleSessionClick(scheme, chapter, session);
-                              }
-                            }}
-                            className={`p-3 rounded transition-colors ${
-                              String(session.status || '').toLowerCase() === 'reported'
-                                ? 'bg-purple-50 border-2 border-purple-300 opacity-90 cursor-default'
-                                : String(session.status || '').toLowerCase() === 'cascaded'
-                                ? 'bg-orange-50 border-2 border-orange-300 hover:bg-orange-100 cursor-default'
-                                : String(session.status || '').toLowerCase() === 'ready'
-                                ? 'bg-blue-50 border-2 border-blue-300 hover:bg-blue-100 cursor-pointer'
-                                : ['planned', 'pending review'].includes(String(session.status || '').toLowerCase())
-                                ? 'bg-green-50 border-2 border-green-300 hover:bg-green-100 cursor-pointer'
-                                : String(session.status || '').toLowerCase() === 'cancelled'
-                                ? 'bg-gray-50 border-2 border-gray-300 opacity-60 cursor-not-allowed'
-                                : 'bg-red-50 border-2 border-red-300 hover:bg-red-100 cursor-pointer'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="text-sm font-medium">
-                                Session {session.sessionNumber}
-                              </span>
-                              {getStatusIcon(session.status)}
-                            </div>
-                            <div className="text-xs text-gray-600 mb-1">
-                              {session.sessionName}
-                            </div>
-                            {String(session.status || '').toLowerCase() === 'reported' && (
-                              <div className="space-y-1">
-                                <div className="text-xs text-purple-700 font-semibold bg-purple-100 rounded px-2 py-1 inline-block">
-                                  ✓ Reported
-                                </div>
-                                <div className="text-xs text-purple-700">
-                                  {formatDate(session.plannedDate)} P{session.plannedPeriod}
-                                </div>
-                              </div>
-                            )}
-                            {String(session.status || '').toLowerCase() === 'cascaded' && (
-                              <div className="space-y-1" title={`Moved from ${session.originalDate ? formatDate(session.originalDate) : 'original date unavailable'}${session.originalPeriod ? ` P${session.originalPeriod}` : ''} → ${session.plannedDate ? formatDate(session.plannedDate) : ''}${session.plannedPeriod ? ` P${session.plannedPeriod}` : ''}`}>
-                                <div className="text-xs text-orange-700 font-semibold bg-orange-100 rounded px-2 py-1 inline-block">
-                                  ↻ Cascaded
-                                </div>
-                                <div className="text-xs text-orange-700">
-                                  {session.originalDate ? (
-                                    <>
-                                      <span className="opacity-80">from</span> {formatDate(session.originalDate)}{session.originalPeriod ? ` P${session.originalPeriod}` : ''}
-                                      <span className="opacity-80"> to</span> {session.plannedDate ? formatDate(session.plannedDate) : ''}{session.plannedPeriod ? ` P${session.plannedPeriod}` : ''}
-                                    </>
-                                  ) : (
-                                    <>
-                                      Rescheduled via cascade{session.plannedDate && session.plannedPeriod ? `: ${formatDate(session.plannedDate)} P${session.plannedPeriod}` : ''}
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                            {String(session.status || '').toLowerCase() === 'ready' && (
-                              <div className="space-y-1">
-                                <div className="text-xs text-blue-700 font-semibold bg-blue-100 rounded px-2 py-1 inline-block">
-                                  ✓ Approved
-                                </div>
-                                <div className="text-xs text-blue-700">
-                                  {formatDate(session.plannedDate)} P{session.plannedPeriod}
-                                </div>
-                              </div>
-                            )}
-                            {['planned', 'pending review'].includes(String(session.status || '').toLowerCase()) && (
-                              <div className="space-y-1">
-                                <div className="text-xs text-green-700 font-semibold bg-green-100 rounded px-2 py-1 inline-block">
-                                  ⏳ Pending Review
-                                </div>
-                                <div className="text-xs text-green-700">
-                                  {formatDate(session.plannedDate)} P{session.plannedPeriod}
-                                </div>
-                              </div>
-                            )}
-                            {String(session.status || '').toLowerCase() === 'cancelled' && (
-                              <div className="space-y-1">
-                                <div className="text-xs text-gray-700 font-semibold bg-gray-200 rounded px-2 py-1 inline-block">
-                                  ❌ Cancelled
-                                </div>
-                                <div className="text-xs text-gray-600">
-                                  {session.plannedDate && session.plannedPeriod ? `${formatDate(session.plannedDate)} P${session.plannedPeriod}` : 'No longer needed'}
-                                </div>
-                              </div>
-                            )}
-                            {session.status === 'not-planned' && (
-                              <div className="text-xs text-red-600 flex items-center">
-                                <Plus className="w-3 h-3 mr-1" />
-                                Click to plan
-                              </div>
-                            )}
-                          </div>
-                        ))}
+                            className={`h-2 rounded-full ${getProgressColor(scheme.overallProgress)}`}
+                            style={{ width: `${scheme.overallProgress}%` }}
+                          ></div>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          {scheme.overallProgress}% complete
+                        </div>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            ))
+
+                    <div className="space-y-4">
+                      {scheme.chapters.map((chapter) => (
+                        <div key={`${scheme.schemeId}-${chapter.chapterNumber}`} className="border-l-4 border-blue-200 pl-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-3">
+                              <h4 className="font-medium text-gray-800">
+                                Chapter {chapter.chapterNumber}: {chapter.chapterName}
+                              </h4>
+                              {chapter.plannedSessions === 0 && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleBulkPrepareClick(scheme, chapter);
+                                  }}
+                                  className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors inline-flex items-center gap-1"
+                                  title="Prepare all sessions at once"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  Prepare All ({chapter.totalSessions})
+                                </button>
+                              )}
+                            </div>
+                            <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                              {chapter.plannedSessions}/{chapter.totalSessions} planned
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                            {chapter.sessions.map((session) => (
+                              <div
+                                key={`${scheme.schemeId}-${chapter.chapterNumber}-${session.sessionNumber}`}
+                                onClick={() => {
+                                  const normalizedStatus = String(session.status || '').toLowerCase();
+                                  if (!['cancelled', 'reported'].includes(normalizedStatus)) {
+                                    handleSessionClick(scheme, chapter, session);
+                                  }
+                                }}
+                                className={`p-3 rounded transition-colors ${String(session.status || '').toLowerCase() === 'reported'
+                                  ? 'bg-purple-50 border-2 border-purple-300 opacity-90 cursor-default'
+                                  : String(session.status || '').toLowerCase() === 'cascaded'
+                                    ? 'bg-orange-50 border-2 border-orange-300 hover:bg-orange-100 cursor-default'
+                                    : String(session.status || '').toLowerCase() === 'ready'
+                                      ? 'bg-blue-50 border-2 border-blue-300 hover:bg-blue-100 cursor-pointer'
+                                      : ['planned', 'pending review'].includes(String(session.status || '').toLowerCase())
+                                        ? 'bg-green-50 border-2 border-green-300 hover:bg-green-100 cursor-pointer'
+                                        : String(session.status || '').toLowerCase() === 'cancelled'
+                                          ? 'bg-gray-50 border-2 border-gray-300 opacity-60 cursor-not-allowed'
+                                          : 'bg-red-50 border-2 border-red-300 hover:bg-red-100 cursor-pointer'
+                                  }`}
+                              >
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-sm font-medium">
+                                    Session {session.sessionNumber}
+                                  </span>
+                                  {getStatusIcon(session.status)}
+                                </div>
+                                <div className="text-xs text-gray-600 mb-1">
+                                  {session.sessionName}
+                                </div>
+                                {String(session.status || '').toLowerCase() === 'reported' && (
+                                  <div className="space-y-1">
+                                    <div className="text-xs text-purple-700 font-semibold bg-purple-100 rounded px-2 py-1 inline-block">
+                                      ✓ Reported
+                                    </div>
+                                    <div className="text-xs text-purple-700">
+                                      {formatDate(session.plannedDate)} P{session.plannedPeriod}
+                                    </div>
+                                  </div>
+                                )}
+                                {String(session.status || '').toLowerCase() === 'cascaded' && (
+                                  <div className="space-y-1" title={`Moved from ${session.originalDate ? formatDate(session.originalDate) : 'original date unavailable'}${session.originalPeriod ? ` P${session.originalPeriod}` : ''} → ${session.plannedDate ? formatDate(session.plannedDate) : ''}${session.plannedPeriod ? ` P${session.plannedPeriod}` : ''}`}>
+                                    <div className="text-xs text-orange-700 font-semibold bg-orange-100 rounded px-2 py-1 inline-block">
+                                      ↻ Cascaded
+                                    </div>
+                                    <div className="text-xs text-orange-700">
+                                      {session.originalDate ? (
+                                        <>
+                                          <span className="opacity-80">from</span> {formatDate(session.originalDate)}{session.originalPeriod ? ` P${session.originalPeriod}` : ''}
+                                          <span className="opacity-80"> to</span> {session.plannedDate ? formatDate(session.plannedDate) : ''}{session.plannedPeriod ? ` P${session.plannedPeriod}` : ''}
+                                        </>
+                                      ) : (
+                                        <>
+                                          Rescheduled via cascade{session.plannedDate && session.plannedPeriod ? `: ${formatDate(session.plannedDate)} P${session.plannedPeriod}` : ''}
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                                {String(session.status || '').toLowerCase() === 'ready' && (
+                                  <div className="space-y-1">
+                                    <div className="text-xs text-blue-700 font-semibold bg-blue-100 rounded px-2 py-1 inline-block">
+                                      ✓ Approved
+                                    </div>
+                                    <div className="text-xs text-blue-700">
+                                      {formatDate(session.plannedDate)} P{session.plannedPeriod}
+                                    </div>
+                                  </div>
+                                )}
+                                {['planned', 'pending review'].includes(String(session.status || '').toLowerCase()) && (
+                                  <div className="space-y-1">
+                                    <div className="text-xs text-green-700 font-semibold bg-green-100 rounded px-2 py-1 inline-block">
+                                      ⏳ Pending Review
+                                    </div>
+                                    <div className="text-xs text-green-700">
+                                      {formatDate(session.plannedDate)} P{session.plannedPeriod}
+                                    </div>
+                                  </div>
+                                )}
+                                {String(session.status || '').toLowerCase() === 'cancelled' && (
+                                  <div className="space-y-1">
+                                    <div className="text-xs text-gray-700 font-semibold bg-gray-200 rounded px-2 py-1 inline-block">
+                                      ❌ Cancelled
+                                    </div>
+                                    <div className="text-xs text-gray-600">
+                                      {session.plannedDate && session.plannedPeriod ? `${formatDate(session.plannedDate)} P${session.plannedPeriod}` : 'No longer needed'}
+                                    </div>
+                                  </div>
+                                )}
+                                {session.status === 'not-planned' && (
+                                  <div className="text-xs text-red-600 flex items-center">
+                                    <Plus className="w-3 h-3 mr-1" />
+                                    Click to plan
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
             )}
           </div>
         )}
@@ -675,7 +700,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   <div>
                     <p className="font-medium text-amber-900">Submission restricted</p>
                     <p className="text-sm text-amber-700 mt-1">
-                      Lesson plans can only be submitted on <strong>{planningDateRange.preparationDay}</strong>. 
+                      Lesson plans can only be submitted on <strong>{planningDateRange.preparationDay}</strong>.
                       You can view and select periods, but submission will be disabled.
                     </p>
                   </div>
@@ -712,7 +737,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                     <p className="text-sm text-amber-800">
                       Found {availablePeriods.length} periods for <strong>{selectedSession?.class} {selectedSession?.subject}</strong>, but all are already planned.
                     </p>
-                    <button 
+                    <button
                       onClick={() => { setLoadingPeriods(true); loadAvailablePeriods(selectedSession); }}
                       className="mt-3 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-2"
                     >
@@ -722,7 +747,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                 ) : (
                   <div>
                     <div className="text-xs text-gray-500 mb-2">
-                      Showing {availablePeriods.filter(p => p.isAvailable).length} available periods 
+                      Showing {availablePeriods.filter(p => p.isAvailable).length} available periods
                       (Total: {availablePeriods.length}, Occupied: {availablePeriods.filter(p => p.isOccupied).length})
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-64 overflow-y-auto border border-gray-200 rounded p-2">
@@ -730,11 +755,10 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                         <div
                           key={`${period.date}-${period.period}`}
                           onClick={() => handlePeriodSelect(period)}
-                          className={`p-3 border rounded cursor-pointer transition-colors ${
-                            lessonPlanData.selectedDate === period.date && lessonPlanData.selectedPeriod === period.period
-                              ? 'bg-blue-50 border-blue-300'
-                              : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
-                          }`}
+                          className={`p-3 border rounded cursor-pointer transition-colors ${lessonPlanData.selectedDate === period.date && lessonPlanData.selectedPeriod === period.period
+                            ? 'bg-blue-50 border-blue-300'
+                            : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
+                            }`}
                         >
                           <div className="text-sm font-medium">{formatDate(period.date)}</div>
                           <div className="text-xs text-gray-600">
@@ -743,6 +767,19 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                           <div className="text-xs text-gray-500">
                             {period.class} {period.subject}
                           </div>
+                          {(() => {
+                            const dkey = (period.date || '').toString().split('T')[0];
+                            const pkey = `${dkey}|${period.period}`;
+                            const hasExamDay = examIndex.byDate.has(dkey);
+                            const hasExamPeriod = examIndex.byDatePeriod.has(pkey);
+                            if (!hasExamDay && !hasExamPeriod) return null;
+                            return (
+                              <div className={`mt-2 text-xs ${hasExamPeriod ? 'text-red-700' : 'text-amber-700'} flex items-center gap-1`}>
+                                <AlertCircle className={`w-4 h-4 ${hasExamPeriod ? 'text-red-600' : 'text-amber-600'}`} />
+                                {hasExamPeriod ? 'Exam scheduled in this period' : 'Exam day in academic calendar'}
+                              </div>
+                            );
+                          })()}
                         </div>
                       ))}
                     </div>
@@ -751,6 +788,18 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                 {lessonPlanData.selectedDate && lessonPlanData.selectedPeriod && (
                   <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-sm">
                     Selected: {formatDate(lessonPlanData.selectedDate)} Period {lessonPlanData.selectedPeriod}
+                    {(() => {
+                      const dkey = (lessonPlanData.selectedDate || '').toString().split('T')[0];
+                      const pkey = `${dkey}|${lessonPlanData.selectedPeriod}`;
+                      const hasExamDay = examIndex.byDate.has(dkey);
+                      const hasExamPeriod = examIndex.byDatePeriod.has(pkey);
+                      if (!hasExamDay && !hasExamPeriod) return null;
+                      return (
+                        <span className={`ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${hasExamPeriod ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {hasExamPeriod ? '⚠ Exam scheduled in this period' : '⚠ Exam day in calendar'}
+                        </span>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -802,7 +851,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   </div>
                   <textarea
                     value={lessonPlanData.learningObjectives}
-                    onChange={(e) => setLessonPlanData({...lessonPlanData, learningObjectives: e.target.value})}
+                    onChange={(e) => setLessonPlanData({ ...lessonPlanData, learningObjectives: e.target.value })}
                     className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     rows="4"
                     placeholder="What will students learn in this session?"
@@ -829,7 +878,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   </div>
                   <textarea
                     value={lessonPlanData.teachingMethods}
-                    onChange={(e) => setLessonPlanData({...lessonPlanData, teachingMethods: e.target.value})}
+                    onChange={(e) => setLessonPlanData({ ...lessonPlanData, teachingMethods: e.target.value })}
                     className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     rows="4"
                     placeholder="How will you teach this session?"
@@ -856,7 +905,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   </div>
                   <textarea
                     value={lessonPlanData.resourcesRequired}
-                    onChange={(e) => setLessonPlanData({...lessonPlanData, resourcesRequired: e.target.value})}
+                    onChange={(e) => setLessonPlanData({ ...lessonPlanData, resourcesRequired: e.target.value })}
                     className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     rows="4"
                     placeholder="What materials, tools, or resources do you need?"
@@ -883,7 +932,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   </div>
                   <textarea
                     value={lessonPlanData.assessmentMethods}
-                    onChange={(e) => setLessonPlanData({...lessonPlanData, assessmentMethods: e.target.value})}
+                    onChange={(e) => setLessonPlanData({ ...lessonPlanData, assessmentMethods: e.target.value })}
                     className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     rows="4"
                     placeholder="How will you assess student understanding?"
@@ -914,8 +963,8 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                 onClick={handleSubmitLessonPlan}
                 disabled={
                   submitting ||
-                  !lessonPlanData.selectedDate || 
-                  !lessonPlanData.selectedPeriod || 
+                  !lessonPlanData.selectedDate ||
+                  !lessonPlanData.selectedPeriod ||
                   (planningDateRange && !planningDateRange.canSubmit)
                 }
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center"
@@ -934,7 +983,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
           </div>
         </div>
       )}
-      
+
       {/* Bulk Preparation Modal */}
       {showBulkModal && bulkPrepData && (
         <BulkPreparationModal
@@ -980,12 +1029,12 @@ const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess })
       const response = await api.getAvailablePeriodsForLessonPlan(
         userEmail,
         data.scheme.planningDateRange?.startDate || new Date().toISOString().split('T')[0],
-        data.scheme.planningDateRange?.endDate || new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0],
+        data.scheme.planningDateRange?.endDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         true,
         data.scheme.class,
         data.scheme.subject
       );
-      
+
       const actualData = response?.data || response;
       if (actualData.success && actualData.availableSlots) {
         const available = actualData.availableSlots.filter(p => p.isAvailable);
@@ -1057,7 +1106,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess })
 
       console.log('Submitting bulk lesson plans:', bulkData);
       const response = await api.createBulkSchemeLessonPlans(bulkData);
-      
+
       const actualData = response?.data || response;
       if (actualData && actualData.success) {
         alert(`✅ Successfully created ${actualData.createdCount} lesson plans!`);
@@ -1084,10 +1133,10 @@ const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess })
         class: data.scheme.class,
         subject: data.scheme.subject,
         chapter: data.chapter.chapterName,
-        session: i + 1
+        session: i + 1,
+        topic: data.scheme.content,
+        totalSessions: total
       }));
-
-      console.log('[AI Prefill] Requesting suggestions for', total, 'sessions');
       const results = await Promise.all(contexts.map(ctx => ai.suggestLessonPlan(ctx).catch(err => ({ success: false, error: err?.message }))));
 
       const filled = sessions.map((s, idx) => {
@@ -1311,7 +1360,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess })
             >
               Cancel
             </button>
-            
+
             <div className="flex-1 flex gap-2">
               <button
                 onClick={handlePrev}
@@ -1320,7 +1369,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess })
               >
                 ← Previous
               </button>
-              
+
               {currentSession < sessions.length - 1 ? (
                 <button
                   onClick={handleNext}

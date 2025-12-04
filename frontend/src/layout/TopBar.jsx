@@ -1,5 +1,5 @@
-import React from 'react';
 import { LogOut } from 'lucide-react';
+import React from 'react';
 import { useGoogleAuth } from '../contexts/GoogleAuthContext';
 
 export default function TopBar({ user, onLogout }) {

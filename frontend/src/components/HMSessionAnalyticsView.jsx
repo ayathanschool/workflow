@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  BarChart3, PieChart, TrendingUp, Calendar, AlertTriangle, CheckCircle,
-  BookOpen, Clock, Users, Target, Activity, Filter, Download, RefreshCw
+import { AlertTriangle, CheckCircle,
+  BookOpen, Clock, Target, Activity, Download, RefreshCw
 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 import * as api from '../api';
 
 /**

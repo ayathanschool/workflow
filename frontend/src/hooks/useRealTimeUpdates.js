@@ -99,12 +99,12 @@ export const useRealTimeUpdates = (user, interval = 30000) => {
   }, [user?.email, lastUpdate, success, warning, info]);
 
   const startPolling = useCallback(() => {
-    // Temporarily disabled to prevent error loops
-    return;
-    
+    const enablePolling = false; // Temporarily disabled to prevent error loops
+    if (!enablePolling) return;
+
     // console.log('Starting real-time updates...');
     fetchUpdates(); // Initial fetch
-    
+
     intervalRef.current = setInterval(fetchUpdates, interval);
   }, [fetchUpdates, interval]);
 

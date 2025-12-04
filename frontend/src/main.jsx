@@ -3,9 +3,9 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
 import './theme.css'
-import { ThemeProvider } from './contexts/ThemeContext'
-import GoogleAuthProvider from './contexts/GoogleAuthProvider'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
+import GoogleAuthProvider from './contexts/GoogleAuthProvider'
+import { ThemeProvider } from './contexts/ThemeContext'
 
 // Mute info/debug logs in production unless DEBUG_LOGS is set
 if (import.meta.env.PROD) {

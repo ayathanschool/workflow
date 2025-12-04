@@ -5,13 +5,11 @@ import {
   getTeacherDailyReportsForDate,
   submitDailyReport,
   checkChapterCompletion,
-  applyChapterCompletionAction,
   getPlannedLessonsForDate,
-  getAppSettings,
   getSubstitutionsForDate,
   getTeacherWeeklyTimetable
 } from "./api";
-import { todayIST, formatLocalDate } from "./utils/dateUtils";
+import { todayIST } from "./utils/dateUtils";
 
 const COMPLETION_LEVELS = [
   { value: 0, label: '0% - Not Started', icon: '⭕', color: 'bg-gray-50 border-gray-200' },
@@ -51,9 +49,12 @@ export default function DailyReportModern({ user }) {
   // Fallback tracking
   const [fallbackInfo, setFallbackInfo] = useState({ used: false, weeklyCount: 0, matchedCount: 0, dayName: '' });
   
-  // Chapter completion modal
-  const [showCompletionModal, setShowCompletionModal] = useState(false);
-  const [completionModalData, setCompletionModalData] = useState(null);
+  // Chapter completion - inline dropdown approach
+  const [remainingSessions, setRemainingSessions] = useState({});
+  const [remainingSessionsLoading, setRemainingSessionsLoading] = useState({});
+  // Debounce + cooldown to prevent frequent refresh on global re-renders (e.g., theme toggle)
+  const lastRemainingFetchAtRef = useRef(0);
+  const pendingRemainingFetchRef = useRef(null);
   
   // Prevent infinite reload loops
   const loadingRef = useRef(false);
@@ -289,13 +290,35 @@ export default function DailyReportModern({ user }) {
   }, [drafts, email, date]);
 
   const updateDraft = useCallback((key, field, value) => {
-    setDrafts(prev => ({
-      ...prev,
-      [key]: {
-        ...prev[key],
-        [field]: value
+    let currentDraft = null;
+    setDrafts(prev => {
+      const updated = {
+        ...prev,
+        [key]: {
+          ...prev[key],
+          [field]: value
+        }
+      };
+      currentDraft = updated[key];
+      return updated;
+    });
+    
+    // When chapter completed checkbox is toggled ON, fetch remaining sessions
+    if (field === 'chapterCompleted' && value === true) {
+      const period = periods.find(p => periodKey(p) === key);
+      const plan = lessonPlans[key];
+      if (period) {
+        // Enrich draft with chapter from plan if not already present
+        const enrichedDraft = {
+          ...currentDraft,
+          chapter: (currentDraft?.chapter) || plan?.chapter || period?.chapter || ''
+        };
+        safeFetchRemainingSessions(key, period, enrichedDraft);
       }
-    }));
+    } else if (field === 'chapterCompleted' && value === false) {
+      // Clear remaining sessions when unchecked
+      setRemainingSessions(prev => ({ ...prev, [key]: null }));
+    }
     
     // When cascade option is selected, fetch preview
     if (field === 'cascadeOption' && value === 'cascade') {
@@ -358,6 +381,94 @@ export default function DailyReportModern({ user }) {
       setCascadeLoading(prev => ({ ...prev, [key]: false }));
     }
   };
+  
+  const fetchRemainingSessions = useCallback(async (key, period, currentDraft = null) => {
+    // Use passed draft if provided (for immediate state), else get from state
+    const draft = currentDraft || drafts[key] || {};
+    const plan = lessonPlans[key] || null;
+    
+    console.log('[RemainingSessions] Debug data:', {
+      key,
+      draftChapter: draft.chapter,
+      planChapter: plan?.chapter,
+      periodClass: period.class,
+      periodSubject: period.subject,
+      currentDraft: currentDraft ? 'provided' : 'from state',
+      allDraftKeys: Object.keys(draft),
+      allPlanKeys: plan ? Object.keys(plan) : 'no plan'
+    });
+    
+    const chapter = draft.chapter || plan?.chapter || '';
+    
+    if (!chapter) {
+      console.log('[RemainingSessions] No chapter available (draft/plan), cannot check. Draft:', draft, 'Plan:', plan);
+      // Ensure UI shows a definitive state rather than an empty box
+      setRemainingSessions(prev => ({ ...prev, [key]: [] }));
+      return;
+    }
+    
+    console.log('[RemainingSessions] Using chapter:', chapter);
+    
+    setRemainingSessionsLoading(prev => ({ ...prev, [key]: true }));
+    try {
+      const result = await checkChapterCompletion({
+        teacherEmail: email,
+        class: period.class,
+        subject: period.subject,
+        chapter: chapter,
+        date: date
+      });
+      
+      console.log('[RemainingSessions] Backend response:', { result, chapter, class: period.class, subject: period.subject });
+      
+      const checkResult = result.data || result;
+      console.log('[RemainingSessions] Processed result:', { 
+        success: checkResult.success, 
+        hasRemainingPlans: checkResult.hasRemainingPlans, 
+        remainingPlans: checkResult.remainingPlans,
+        count: checkResult.remainingPlans?.length || 0
+      });
+      
+      if (checkResult.success && checkResult.hasRemainingPlans) {
+        const plans = Array.isArray(checkResult.remainingPlans) ? checkResult.remainingPlans : [];
+        // Exclude the current session being reported (same date and period)
+        const filtered = plans.filter(p => {
+          const pDate = p.selectedDate || p.date || p.scheduledDate || p.proposedDate || p.targetDate || p.sessionDate;
+          const pPeriod = Number(p.selectedPeriod || p.period || p.scheduledPeriod || p.proposedPeriod || p.targetPeriod || p.sessionPeriod);
+          const isSameDate = pDate && String(pDate).slice(0, 10) === String(date);
+          const isSamePeriod = Number(period.period) === pPeriod;
+          return !(isSameDate && isSamePeriod);
+        });
+        setRemainingSessions(prev => ({
+          ...prev,
+          [key]: filtered
+        }));
+      } else {
+        setRemainingSessions(prev => ({ ...prev, [key]: [] }));
+      }
+    } catch (error) {
+      console.error('Error fetching remaining sessions:', error);
+      setRemainingSessions(prev => ({ ...prev, [key]: [] }));
+    } finally {
+      setRemainingSessionsLoading(prev => ({ ...prev, [key]: false }));
+    }
+  }, [drafts, email, date]);
+
+  const safeFetchRemainingSessions = useCallback((key, period, currentDraft = null) => {
+    const now = Date.now();
+    const cooldownMs = 2500; // ignore triggers within 2.5s
+    const debounceMs = 800; // batch rapid triggers
+    if (now - lastRemainingFetchAtRef.current < cooldownMs) {
+      return; // suppress frequent refresh
+    }
+    if (pendingRemainingFetchRef.current) {
+      clearTimeout(pendingRemainingFetchRef.current);
+    }
+    pendingRemainingFetchRef.current = setTimeout(() => {
+      lastRemainingFetchAtRef.current = Date.now();
+      fetchRemainingSessions(key, period, currentDraft);
+    }, debounceMs);
+  }, [fetchRemainingSessions]);
 
   const getDraft = useCallback((key) => drafts[key] || {}, [drafts]);
   const getReport = useCallback((key) => reports[key], [reports]);
@@ -437,6 +548,13 @@ export default function DailyReportModern({ user }) {
       setMessage({ text: "❌ Chapter/Topic is required", type: "error" });
       return;
     }
+    
+    // Validate remaining sessions action if chapter completed and has remaining sessions
+    if (draft.chapterCompleted && remainingSessions[key] && remainingSessions[key].length > 0 && !draft.remainingSessionsAction) {
+      setMessage({ text: "Please choose what to do with remaining sessions", type: "error" });
+      setSubmitting(prev => ({ ...prev, [key]: false }));
+      return;
+    }
 
     if (completionPercentage === 0 && !deviationReason) {
       setMessage({ text: "❌ For 0% completion, please select a reason", type: "error" });
@@ -480,6 +598,9 @@ export default function DailyReportModern({ user }) {
         activities: draft.activities || "",
         notes: draft.notes || "",
         chapterCompleted: draft.chapterCompleted || false,
+        remainingSessionsAction: draft.chapterCompleted && draft.remainingSessionsAction ? draft.remainingSessionsAction : null,
+        remainingSessions: draft.chapterCompleted && remainingSessions[key] ? remainingSessions[key].map(s => s.lpId) : [],
+        completionRationale: draft.completionRationale || ''
       };
 
       console.log('📝 SUBMITTING DAILY REPORT:', payload);
@@ -588,67 +709,15 @@ export default function DailyReportModern({ user }) {
           setExpandedPeriod(null);
         }
 
-        setMessage({ text: `✅ Period ${period.period} submitted successfully!`, type: "success" });
-
-        // Check chapter completion (show immediate loading modal to avoid UX lag)
-        if (draft.chapterCompleted) {
-          // Show a loading modal instantly so teacher knows a check is happening
-          setCompletionModalData({
-            chapter: chapter,
-            class: period.class,
-            subject: period.subject,
-            remainingPlans: [],
-            loading: true
-          });
-          setShowCompletionModal(true);
-          try {
-            const completionCheck = await checkChapterCompletion({
-              teacherEmail: email,
-              class: period.class,
-              subject: period.subject,
-              chapter: chapter,
-              date: date
-            });
-            const checkResult = completionCheck.data || completionCheck;
-            
-            if (checkResult.success) {
-              if (checkResult.hasRemainingPlans && checkResult.remainingPlans && checkResult.remainingPlans.length > 0) {
-                // Has remaining plans - show modal with options
-                const remainingPlans = checkResult.remainingPlans || [];
-                const uniqueDates = Array.from(new Set(remainingPlans.map(p => p.selectedDate))).sort();
-                const earliestDate = uniqueDates[0] || null;
-                const latestDate = uniqueDates[uniqueDates.length - 1] || null;
-                const periodsFreed = remainingPlans.length; // if cancelled
-                // Simple heuristic: if many sessions remain, recommend cancel; if only 1, recommend keep for revision
-                const recommendedAction = remainingPlans.length <= 1 ? 'keep' : 'cancel';
-                setCompletionModalData({
-                  chapter: chapter,
-                  class: period.class,
-                  subject: period.subject,
-                  remainingPlans: remainingPlans,
-                  earliestDate,
-                  latestDate,
-                  periodsFreed,
-                  recommendedAction,
-                  loading: false
-                });
-                // Keep modal open so user can choose action
-              } else {
-                // No remaining plans; close modal and show success message
-                setShowCompletionModal(false);
-                setMessage({ text: '🎉 Chapter completed – no remaining planned sessions!', type: 'success' });
-              }
-            } else {
-              // API returned error
-              setShowCompletionModal(false);
-              setMessage({ text: `Chapter completion check failed: ${checkResult.error || 'Unknown error'}`, type: 'error' });
-            }
-          } catch (checkError) {
-            console.error('Error checking chapter completion:', checkError);
-            setShowCompletionModal(false);
-            setMessage({ text: `Error: ${checkError.message || 'Chapter completion check failed'}`, type: 'error' });
-          }
-        }
+        // Clear remaining sessions state after successful submit
+        setRemainingSessions(prev => ({ ...prev, [key]: null }));
+        
+        setMessage({ 
+          text: draft.chapterCompleted && draft.remainingSessionsAction
+            ? `✅ Period ${period.period} submitted! ${draft.remainingSessionsAction === 'cancel' ? 'Remaining sessions cancelled.' : 'Sessions kept for revision.'}`
+            : `✅ Period ${period.period} submitted successfully!`, 
+          type: "success" 
+        });
 
       } else if (result && result.error === 'duplicate') {
         setReports(prev => ({ ...prev, [key]: payload }));
@@ -855,6 +924,8 @@ export default function DailyReportModern({ user }) {
                   cascadeLoading={!!cascadeLoading[key]}
                   cascadeMoves={cascadeMoves}
                   periodKey={key}
+                  remainingSessions={remainingSessions}
+                  remainingSessionsLoading={remainingSessionsLoading}
                   onToggle={() => setExpandedPeriod(isExpanded ? null : key)}
                   onUpdate={(field, value) => updateDraft(key, field, value)}
                   onSubmit={() => handleSubmit(period)}
@@ -865,63 +936,7 @@ export default function DailyReportModern({ user }) {
         );
       })()}
 
-      {/* Chapter Completion Modal */}
-      {showCompletionModal && completionModalData && (
-        <ChapterCompletionModal
-          data={completionModalData}
-          onClose={() => {
-            // Prevent closing while loading or processing
-            if (!completionModalData.loading && !completionModalData.processing) {
-              setShowCompletionModal(false);
-            }
-          }}
-          onAction={async (action) => {
-            try {
-              const lessonPlanIds = completionModalData.remainingPlans.map(p => p.lpId);
-              console.log('📤 SENDING TO BACKEND:', { userAction: action, lessonPlanIds });
-              
-              const result = await applyChapterCompletionAction({ userAction: action, lessonPlanIds });
-              
-              console.log('📥 BACKEND RESPONSE:', result);
-              
-              // Unwrap response if wrapped in {status, data, timestamp} structure
-              const actualData = result?.data || result;
-              
-              console.log('📦 UNWRAPPED DATA:', actualData);
-              
-              if (actualData?.success === false) {
-                throw new Error(actualData?.error || actualData?.message || 'Action failed');
-              }
-              
-              // Close modal on success
-              setShowCompletionModal(false);
-              
-              if (actualData?.updatedCount === 0) {
-                setMessage({
-                  text: '⚠️ No lesson plans were updated. Please check the lesson plan IDs.',
-                  type: 'warning'
-                });
-              } else {
-                setMessage({
-                  text: action === 'cancel' 
-                    ? `✅ ${actualData?.updatedCount || 0} lesson plan(s) cancelled successfully!`
-                    : `📚 ${actualData?.updatedCount || 0} lesson plan(s) kept for revision`,
-                  type: 'success'
-                });
-              }
-              
-              // No need to reload data - daily report already submitted and UI already updated
-            } catch (error) {
-              console.error('❌ Error applying action:', error);
-              setShowCompletionModal(false);
-              setMessage({
-                text: 'Error: ' + (error.message || error),
-                type: 'error'
-              });
-            }
-          }}
-        />
-      )}
+      {/* Chapter completion modal removed - now handled inline */}
     </div>
   );
 }
@@ -940,6 +955,8 @@ function PeriodCard({
   cascadeLoading = false,
   cascadeMoves = {},
   periodKey = '',
+  remainingSessions = {},
+  remainingSessionsLoading = {},
   onToggle, 
   onUpdate, 
   onSubmit 
@@ -948,7 +965,7 @@ function PeriodCard({
   const chapter = data.chapter || plan?.chapter || "";
   const objectives = data.objectives || plan?.learningObjectives || "";
   const teachingMethods = data.activities || plan?.teachingMethods || "";
-  const resources = data.resources || plan?.resourcesRequired || "";
+  const _resources = data.resources || plan?.resourcesRequired || "";
   const sessionNo = data.sessionNo || plan?.sessionNo || 1;
   const totalSessions = data.totalSessions || plan?.totalSessions || 1;
   const completionPercentage = data.completionPercentage || 0;
@@ -1027,7 +1044,7 @@ function PeriodCard({
 
       {/* Expanded Form */}
       {isExpanded && !isSubmitted && (
-        <div className="p-6 border-t border-gray-100 space-y-6">
+        <div className="p-6 border-t border-gray-100 space-y-6 max-h-[calc(100vh-200px)] overflow-y-auto">
           {/* Substitution banner */}
           {isSub && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
@@ -1339,19 +1356,84 @@ function PeriodCard({
             />
           </div>
 
-          {/* Chapter Complete Checkbox */}
+          {/* Chapter Completion with Inline Dropdown */}
           {!isSub && completionPercentage === 100 && (
-            <div className="flex items-center gap-3 p-4 bg-green-50 border-2 border-green-200 rounded-lg">
-              <input
-                type="checkbox"
-                id={`chapterComplete_${period.period}`}
-                checked={data.chapterCompleted || false}
-                onChange={(e) => onUpdate('chapterCompleted', e.target.checked)}
-                className="w-5 h-5 text-green-600 rounded focus:ring-green-500"
-              />
-              <label htmlFor={`chapterComplete_${period.period}`} className="flex-1 text-sm font-medium text-green-900">
-                🎉 Mark chapter as fully completed
-              </label>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 p-4 bg-green-50 border-2 border-green-200 rounded-lg">
+                <input
+                  type="checkbox"
+                  id={`chapterComplete_${period.period}`}
+                  checked={data.chapterCompleted || false}
+                  onChange={(e) => onUpdate('chapterCompleted', e.target.checked)}
+                  className="w-5 h-5 text-green-600 rounded focus:ring-green-500"
+                />
+                <label htmlFor={`chapterComplete_${period.period}`} className="flex-1 text-sm font-medium text-green-900">
+                  🎉 Mark chapter as fully completed
+                </label>
+              </div>
+              
+              {/* Remaining Sessions Decision */}
+              {data.chapterCompleted && (
+                <div className="p-4 bg-blue-50 border-2 border-blue-200 rounded-lg space-y-3">
+                  {remainingSessionsLoading[periodKey] ? (
+                    <div className="flex items-center gap-2 text-sm text-blue-700">
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent"></div>
+                      <span>Checking remaining sessions...</span>
+                    </div>
+                  ) : remainingSessions[periodKey] && remainingSessions[periodKey].length > 0 ? (
+                    <>
+                      <div className="text-sm font-medium text-blue-900">
+                        📋 {remainingSessions[periodKey].length} remaining session(s) found
+                      </div>
+                      
+                      {/* Preview of remaining sessions */}
+                      <div className="max-h-32 overflow-y-auto space-y-1 mb-3">
+                        {remainingSessions[periodKey].map((session, idx) => (
+                          <div key={idx} className="text-xs bg-white p-2 rounded border border-blue-200 flex justify-between items-center">
+                            <span className="font-medium">Session {session.sessionNo || session.session}</span>
+                            <span className="text-gray-600">{session.selectedDate || session.date} • Period {session.selectedPeriod || session.period}</span>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      {/* Action dropdown */}
+                      <div>
+                        <label className="block text-sm font-medium text-blue-900 mb-2">
+                          What to do with remaining sessions? <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          value={data.remainingSessionsAction || ''}
+                          onChange={(e) => onUpdate('remainingSessionsAction', e.target.value)}
+                          className="w-full px-3 py-2 border-2 border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                        >
+                          <option value="">-- Choose Action --</option>
+                          <option value="cancel">❌ Cancel All Remaining Sessions</option>
+                          <option value="keep_revision">📚 Keep for Revision</option>
+                        </select>
+                      </div>
+                      
+                      {/* Optional rationale */}
+                      <div>
+                        <label className="block text-xs text-blue-700 mb-1">
+                          Reason (optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={data.completionRationale || ''}
+                          onChange={(e) => onUpdate('completionRationale', e.target.value)}
+                          placeholder="Why completed early?"
+                          className="w-full px-3 py-1.5 text-sm border border-blue-200 rounded focus:ring-1 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+                    </>
+                  ) : remainingSessions[periodKey] && remainingSessions[periodKey].length === 0 ? (
+                    <div className="text-sm text-green-700 flex items-center gap-2">
+                      <span>✅</span>
+                      <span>No remaining sessions to manage</span>
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </div>
           )}
 
@@ -1388,7 +1470,7 @@ function PeriodCard({
 }
 
 // Chapter Completion Modal
-function ChapterCompletionModal({ data, onClose, onAction }) {
+function _ChapterCompletionModal({ data, onClose, onAction }) {
   const [selectedAction, setSelectedAction] = useState('cancel');
   const [isProcessing, setIsProcessing] = useState(false);
 

@@ -37,7 +37,8 @@ const SHEETS = {
   
   // === SYLLABUS & CALENDAR (2 sheets) ===
   Syllabus: ['standard','subject','term','chapterNo','chapterName','minSessions','topics','sequence'],
-  AcademicCalendar: ['term','startDate','endDate','examStartDate','examEndDate','eventDates','eventNames','teachingWeeks'],
+  // AcademicCalendar supports both legacy and new columns for flexibility
+  AcademicCalendar: ['term','startDate','endDate','examStartDate','examEndDate','eventDates','eventNames','teachingWeeks','examDates','holidays','events'],
   
   // === SUBSTITUTION SYSTEM (2 sheets) ===  
   Substitutions: ['date','period','class','absentTeacher','regularSubject','substituteTeacher','substituteSubject','note','acknowledged','acknowledgedBy','acknowledgedAt','createdAt'],

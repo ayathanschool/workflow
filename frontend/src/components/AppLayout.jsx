@@ -1,8 +1,8 @@
 // src/components/AppLayout.jsx
 import React from 'react';
-import UserHeader from './UserHeader';
-import { useTheme } from '../contexts/ThemeContext';
 import { useGoogleAuth } from '../contexts/GoogleAuthContext';
+import { useTheme } from '../contexts/ThemeContext';
+import UserHeader from './UserHeader';
 
 // This component provides a consistent layout wrapper for all screens in the app
 function AppLayout({ user, children, activeView, navigationItems }) {

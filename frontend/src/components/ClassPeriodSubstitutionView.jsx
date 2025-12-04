@@ -1,7 +1,7 @@
 // ClassPeriodSubstitutionView.jsx - Shows classes as rows and periods as columns
+import { Calendar, RefreshCw, Check, X, Filter, Eye, EyeOff } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import * as api from '../api';
-import { Calendar, User, RefreshCw, Check, X, Filter, Eye, EyeOff } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { formatLocalDate, periodToTimeString, formatDateForInput } from '../utils/dateUtils';
 

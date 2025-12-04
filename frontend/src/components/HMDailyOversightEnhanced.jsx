@@ -1,8 +1,8 @@
 // HMDailyOversightEnhanced.jsx - Enhanced HM Dashboard with Session Progress Analytics
+import { Clock, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, CheckCircle, Undo2, FileText, ClipboardCheck, ChevronUp } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { getDailyReportsForDate, getLessonPlansForDate, getClassSubjectPerformance, getSyllabusPaceTracking, getMissingSubmissions, verifyDailyReport, reopenDailyReport, notifyMissingSubmissions, getDailyReadinessStatus, getHMDailyOversightData } from '../api';
 import { todayIST, formatLocalDate, nowIST } from '../utils/dateUtils';
-import { Clock, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, CheckCircle, Undo2, FileText, ClipboardCheck, ChevronUp } from 'lucide-react';
 
 const HMDailyOversightEnhanced = ({ user }) => {
   const [date, setDate] = useState(todayIST());

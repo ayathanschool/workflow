@@ -1,9 +1,9 @@
 // src/components/UserHeader.jsx
-import React from 'react';
-import ThemeToggle from './ThemeToggle';
-import { useTheme } from '../contexts/ThemeContext';
-import { useGoogleAuth } from '../contexts/GoogleAuthContext';
 import { LogOut } from 'lucide-react';
+import React from 'react';
+import { useGoogleAuth } from '../contexts/GoogleAuthContext';
+import { useTheme } from '../contexts/ThemeContext';
+import ThemeToggle from './ThemeToggle';
 
 // This component shows the user's information in the header
 function UserHeader({ user }) {
