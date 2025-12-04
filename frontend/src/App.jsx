@@ -782,7 +782,7 @@ const App = () => {
                             aboveAverage,
                             needFocus,
                             avgPercentage: Math.round(avgPercentage),
-                            totalStudents: studentMarks.length
+                            totalStudents: classStudentCounts[className] || studentMarks.length
                           };
                           
                           totalAboveAverage += aboveAverage;
