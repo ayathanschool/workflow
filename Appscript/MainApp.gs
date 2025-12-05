@@ -3683,19 +3683,36 @@
    * @private
    */
   function _calculateLessonPlanReadiness(scheduledPeriods, lessonPlans) {
-    const total = scheduledPeriods.length;
+    // Remove duplicate periods from timetable (same teacher+class+subject+period)
+    const uniquePeriods = [];
+    const seen = new Set();
+    
+    scheduledPeriods.forEach(period => {
+      const key = `${period.teacherEmail}|${period.class}|${period.subject}|${period.period}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniquePeriods.push(period);
+      } else {
+        Logger.log(`[_calculateLessonPlanReadiness] Duplicate period found: ${key}`);
+      }
+    });
+    
+    const total = uniquePeriods.length;
     const pendingDetails = [];
     
     let readyCount = 0;
     
-    scheduledPeriods.forEach(period => {
-      const hasPlan = lessonPlans.some(plan =>
-        plan.teacherEmail === period.teacherEmail &&
-        plan.class === period.class &&
-        plan.subject === period.subject &&
-        plan.selectedPeriod === period.period &&
-        (plan.status === 'Ready' || plan.status === 'Approved')
-      );
+    uniquePeriods.forEach(period => {
+      const hasPlan = lessonPlans.some(plan => {
+        // Normalize values for comparison (trim whitespace, case-insensitive status)
+        const emailMatch = String(plan.teacherEmail || '').trim() === String(period.teacherEmail || '').trim();
+        const classMatch = String(plan.class || '').trim() === String(period.class || '').trim();
+        const subjectMatch = String(plan.subject || '').trim() === String(period.subject || '').trim();
+        const periodMatch = String(plan.selectedPeriod || '') === String(period.period || '');
+        const statusMatch = ['ready', 'approved'].includes(String(plan.status || '').toLowerCase());
+        
+        return emailMatch && classMatch && subjectMatch && periodMatch && statusMatch;
+      });
       
       if (hasPlan) {
         readyCount++;
@@ -3717,6 +3734,8 @@
     // Group pending by teacher for easier follow-up
     const byTeacher = _groupPendingByTeacher(pendingDetails);
     
+    Logger.log(`[_calculateLessonPlanReadiness] Total: ${total}, Ready: ${readyCount}, Pending: ${pendingCount}`);
+    
     return {
       ready: readyCount,
       pending: pendingCount,
@@ -3733,18 +3752,35 @@
    * @private
    */
   function _calculateDailyReportStatus(scheduledPeriods, dailyReports) {
-    const total = scheduledPeriods.length;
+    // Remove duplicate periods from timetable (same teacher+class+subject+period)
+    const uniquePeriods = [];
+    const seen = new Set();
+    
+    scheduledPeriods.forEach(period => {
+      const key = `${period.teacherEmail}|${period.class}|${period.subject}|${period.period}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniquePeriods.push(period);
+      } else {
+        Logger.log(`[_calculateDailyReportStatus] Duplicate period found: ${key}`);
+      }
+    });
+    
+    const total = uniquePeriods.length;
     const pendingDetails = [];
     
     let submittedCount = 0;
     
-    scheduledPeriods.forEach(period => {
-      const hasReport = dailyReports.some(report =>
-        report.teacherEmail === period.teacherEmail &&
-        report.class === period.class &&
-        report.subject === period.subject &&
-        report.period === period.period
-      );
+    uniquePeriods.forEach(period => {
+      const hasReport = dailyReports.some(report => {
+        // Normalize values for comparison (trim whitespace)
+        const emailMatch = String(report.teacherEmail || '').trim() === String(period.teacherEmail || '').trim();
+        const classMatch = String(report.class || '').trim() === String(period.class || '').trim();
+        const subjectMatch = String(report.subject || '').trim() === String(period.subject || '').trim();
+        const periodMatch = String(report.period || '') === String(period.period || '');
+        
+        return emailMatch && classMatch && subjectMatch && periodMatch;
+      });
       
       if (hasReport) {
         submittedCount++;
@@ -3765,6 +3801,8 @@
     
     // Group pending by teacher
     const byTeacher = _groupPendingByTeacher(pendingDetails);
+    
+    Logger.log(`[_calculateDailyReportStatus] Total: ${total}, Submitted: ${submittedCount}, Pending: ${pendingCount}`);
     
     return {
       submitted: submittedCount,

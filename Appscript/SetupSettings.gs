@@ -26,6 +26,11 @@ function setupLessonPlanSettings() {
         key: 'lessonplan_days_ahead',
         value: '7',
         description: 'Total days to show in period selection'
+      },
+      {
+        key: 'lessonplan_bulk_only',
+        value: 'false',
+        description: 'If true, disable single session prep - only allow bulk chapter preparation (all sessions together)'
       }
     ];
     

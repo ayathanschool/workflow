@@ -64,8 +64,15 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [bulkPrepData, setBulkPrepData] = useState(null);
 
+  // View session details modal (for bulk-only mode)
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [viewSessionData, setViewSessionData] = useState(null);
+
   // AI suggestions state
   const [loadingAI, setLoadingAI] = useState(false);
+  
+  // Bulk-only mode setting
+  const [isBulkOnlyMode, setIsBulkOnlyMode] = useState(false);
 
   useEffect(() => {
     loadApprovedSchemes();
@@ -96,6 +103,15 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
       if (response.data && response.data.success) {
         setSchemes(response.data.schemes || []);
         setPlanningDateRange(response.data.planningDateRange || null);
+        
+        // Check if bulk-only mode is enabled
+        if (response.data.settings && response.data.settings.bulkOnly) {
+          setIsBulkOnlyMode(true);
+          console.log('Bulk-only mode is ENABLED - single session preparation disabled');
+        } else {
+          setIsBulkOnlyMode(false);
+        }
+        
         setError(null);
       } else {
         const errorMsg = response.data?.error || response.error || 'Failed to load schemes';
@@ -574,6 +590,32 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                               <div
                                 key={`${scheme.schemeId}-${chapter.chapterNumber}-${session.sessionNumber}`}
                                 onClick={() => {
+                                  // In bulk-only mode, handle session clicks
+                                  if (isBulkOnlyMode) {
+                                    const normalizedStatus = String(session.status || '').toLowerCase();
+                                    if (['planned', 'pending review', 'ready', 'cascaded', 'reported'].includes(normalizedStatus)) {
+                                      // Show view-only modal with session details
+                                      setViewSessionData({ scheme, chapter, session });
+                                      setShowViewModal(true);
+                                    } else {
+                                      // Check if this is an extended session (auto-generated)
+                                      // Extended sessions have sessionName starting with "Extended Session" or isExtended flag
+                                      const isExtendedSession = session.sessionName?.includes('Extended') || 
+                                                               session.isExtended === true ||
+                                                               session.sessionNumber > chapter.numberOfSessions;
+                                      
+                                      // Allow single session preparation ONLY for extended sessions
+                                      if (isExtendedSession) {
+                                        handleSessionClick(scheme, chapter, session);
+                                      } else {
+                                        // For regular sessions, redirect to bulk preparation
+                                        setSelectedForBulkPrep({ scheme, chapter });
+                                        setShowBulkPrepModal(true);
+                                      }
+                                    }
+                                    return;
+                                  }
+                                  
                                   const normalizedStatus = String(session.status || '').toLowerCase();
                                   if (!['cancelled', 'reported'].includes(normalizedStatus)) {
                                     handleSessionClick(scheme, chapter, session);
@@ -1001,6 +1043,159 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
           }}
         />
       )}
+
+      {/* View Session Details Modal (Read-Only) */}
+      {showViewModal && viewSessionData && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-blue-700 text-white p-6 rounded-t-xl">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h2 className="text-2xl font-bold mb-2">
+                    Session {viewSessionData.session.sessionNumber} Details
+                  </h2>
+                  <p className="text-blue-100">
+                    {viewSessionData.chapter.chapterName}
+                  </p>
+                  <p className="text-sm text-blue-200 mt-1">
+                    {viewSessionData.scheme.class} • {viewSessionData.scheme.subject}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowViewModal(false)}
+                  className="text-white hover:bg-blue-800 rounded-full p-2 transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* Session Info */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h3 className="font-semibold text-blue-900 mb-3">📅 Session Information</h3>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-gray-600">Session Name:</span>
+                    <p className="font-medium text-gray-900">{viewSessionData.session.sessionName || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Session Number:</span>
+                    <p className="font-medium text-gray-900">{viewSessionData.session.sessionNumber}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Date:</span>
+                    <p className="font-medium text-gray-900">
+                      {viewSessionData.session.plannedDate
+                        ? formatDate(viewSessionData.session.plannedDate)
+                        : (viewSessionData.session.date ? formatDate(viewSessionData.session.date) : 'Not scheduled')}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Period:</span>
+                    <p className="font-medium text-gray-900">
+                      {viewSessionData.session.plannedPeriod
+                        ? `Period ${viewSessionData.session.plannedPeriod}`
+                        : (viewSessionData.session.period ? `Period ${viewSessionData.session.period}` : 'N/A')}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Learning Objectives */}
+              {viewSessionData.session.learningObjectives && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-green-900 mb-2">🎯 Learning Objectives</h3>
+                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.learningObjectives}</p>
+                </div>
+              )}
+
+              {/* Teaching Methods */}
+              {viewSessionData.session.teachingMethods && (
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-purple-900 mb-2">👨‍🏫 Teaching Methods</h3>
+                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.teachingMethods}</p>
+                </div>
+              )}
+
+              {/* Learning Resources */}
+              {viewSessionData.session.resourcesRequired && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-yellow-900 mb-2">📚 Learning Resources</h3>
+                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.resourcesRequired}</p>
+                </div>
+              )}
+
+              {/* Assessment Methods */}
+              {viewSessionData.session.assessmentMethods && (
+                <div className="bg-pink-50 border border-pink-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-pink-900 mb-2">📝 Assessment Methods</h3>
+                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.assessmentMethods}</p>
+                </div>
+              )}
+
+              {/* Activities */}
+              {viewSessionData.session.activities && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-indigo-900 mb-2">🎨 Activities</h3>
+                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.activities}</p>
+                </div>
+              )}
+
+              {/* Homework */}
+              {viewSessionData.session.homework && (
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-orange-900 mb-2">📖 Homework</h3>
+                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.homework}</p>
+                </div>
+              )}
+
+              {/* Differentiation */}
+              {viewSessionData.session.differentiation && (
+                <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-teal-900 mb-2">🎭 Differentiation Strategies</h3>
+                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.differentiation}</p>
+                </div>
+              )}
+
+              {/* ICT Integration */}
+              {viewSessionData.session.ictIntegration && (
+                <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-cyan-900 mb-2">💻 ICT Integration</h3>
+                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.ictIntegration}</p>
+                </div>
+              )}
+
+              {/* Cross-curricular Links */}
+              {viewSessionData.session.crossCurricularLinks && (
+                <div className="bg-violet-50 border border-violet-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-violet-900 mb-2">🔗 Cross-curricular Links</h3>
+                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.crossCurricularLinks}</p>
+                </div>
+              )}
+
+              {/* Notes */}
+              {viewSessionData.session.notes && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <h3 className="font-semibold text-gray-900 mb-2">📋 Notes</h3>
+                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.notes}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="sticky bottom-0 bg-gray-50 px-6 py-4 border-t flex justify-end">
+              <button
+                onClick={() => setShowViewModal(false)}
+                className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1399,6 +1594,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess })
         </div>
       </div>
     </div>
+  
   );
 };
 

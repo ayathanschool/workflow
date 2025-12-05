@@ -1,6 +1,6 @@
 // HMDailyOversight.jsx - HM Dashboard for Daily Report Tracking
 import { FileText, ClipboardCheck, ChevronDown, ChevronUp } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { getDailyReportsForDate, getLessonPlansForDate, getDailyReadinessStatus } from '../api';
 import { todayIST, formatLocalDate } from '../utils/dateUtils';
 
@@ -169,6 +169,109 @@ const HMDailyOversight = ({ user }) => {
   const currentHour = new Date().getHours();
   const isEvening = currentHour >= 15; // 3 PM
 
+  // Recompute pending by teacher from pendingDetails to avoid duplicates and normalize
+  const pendingByTeacher = useMemo(() => {
+    const pendingDetails = readinessData?.lessonPlans?.pendingDetails || [];
+    if (!pendingDetails || pendingDetails.length === 0) return [];
+
+    console.log('[HM] Raw pendingDetails:', pendingDetails.length, 'entries');
+
+    const normalized = pendingDetails.map(p => ({
+      teacherEmail: String(p.teacherEmail || '').trim().toLowerCase(),
+      teacherName: String(p.teacherName || '').trim(),
+      class: p.class,
+      subject: p.subject,
+      period: String(p.period || '').trim(),
+      isSubstitution: !!p.isSubstitution
+    }));
+
+    // Deduplicate same teacher+class+subject+period entries
+    const seen = new Set();
+    const unique = [];
+    normalized.forEach(p => {
+      const key = `${p.teacherEmail}|${p.class}|${p.subject}|${p.period}`;
+      if (!seen.has(key)) { 
+        seen.add(key); 
+        unique.push(p); 
+      } else {
+        console.log('[HM] Duplicate period removed:', key);
+      }
+    });
+
+    console.log('[HM] After dedup:', unique.length, 'unique periods');
+
+    // Group by teacher name (normalized) instead of email to avoid duplicate names
+    const grouped = unique.reduce((acc, p) => {
+      const nameKey = p.teacherName.toLowerCase();
+      if (!acc[nameKey]) {
+        acc[nameKey] = { 
+          teacherName: p.teacherName, 
+          teacherEmail: p.teacherEmail, 
+          count: 0, 
+          periods: [] 
+        };
+      }
+      acc[nameKey].count++;
+      acc[nameKey].periods.push({ 
+        class: p.class, 
+        subject: p.subject, 
+        period: p.period, 
+        isSubstitution: p.isSubstitution 
+      });
+      return acc;
+    }, {});
+
+    const result = Object.values(grouped).sort((a, b) => b.count - a.count);
+    console.log('[HM] Final grouped teachers:', result.length, result.map(t => `${t.teacherName}: ${t.count}`));
+    return result;
+  }, [readinessData?.lessonPlans?.pendingDetails]);
+
+  // Recompute pending reports by teacher
+  const pendingReportsByTeacher = useMemo(() => {
+    const pendingDetails = readinessData?.dailyReports?.pendingDetails || [];
+    if (!pendingDetails || pendingDetails.length === 0) return [];
+
+    const normalized = pendingDetails.map(p => ({
+      teacherEmail: String(p.teacherEmail || '').trim().toLowerCase(),
+      teacherName: String(p.teacherName || '').trim(),
+      class: p.class,
+      subject: p.subject,
+      period: String(p.period || '').trim(),
+      isSubstitution: !!p.isSubstitution
+    }));
+
+    // Deduplicate same teacher+class+subject+period entries
+    const seen = new Set();
+    const unique = [];
+    normalized.forEach(p => {
+      const key = `${p.teacherEmail}|${p.class}|${p.subject}|${p.period}`;
+      if (!seen.has(key)) { seen.add(key); unique.push(p); }
+    });
+
+    // Group by teacher name (normalized) instead of email to avoid duplicate names
+    const grouped = unique.reduce((acc, p) => {
+      const nameKey = p.teacherName.toLowerCase();
+      if (!acc[nameKey]) {
+        acc[nameKey] = { 
+          teacherName: p.teacherName, 
+          teacherEmail: p.teacherEmail, 
+          count: 0, 
+          periods: [] 
+        };
+      }
+      acc[nameKey].count++;
+      acc[nameKey].periods.push({ 
+        class: p.class, 
+        subject: p.subject, 
+        period: p.period, 
+        isSubstitution: p.isSubstitution 
+      });
+      return acc;
+    }, {});
+
+    return Object.values(grouped).sort((a, b) => b.count - a.count);
+  }, [readinessData?.dailyReports?.pendingDetails]);
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -237,11 +340,11 @@ const HMDailyOversight = ({ user }) => {
               </p>
             )}
             
-            {showLessonPlanDetails && readinessData.lessonPlans?.byTeacher && readinessData.lessonPlans.byTeacher.length > 0 && (
+            {showLessonPlanDetails && (
               <div className="mt-3 pt-3 border-t border-gray-200">
                 <p className="text-xs font-semibold text-gray-700 mb-2">Pending by Teacher:</p>
                 <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {readinessData.lessonPlans.byTeacher.map((teacher, idx) => (
+                  {(pendingByTeacher || []).map((teacher, idx) => (
                     <div key={idx} className="text-xs bg-white bg-opacity-50 rounded px-2 py-1">
                       <span className="font-medium">{teacher.teacherName}</span>
                       <span className="text-gray-600"> - {teacher.count} period{teacher.count !== 1 ? 's' : ''}</span>
@@ -290,11 +393,11 @@ const HMDailyOversight = ({ user }) => {
               </p>
             )}
             
-            {showReportDetails && readinessData.dailyReports?.byTeacher && readinessData.dailyReports.byTeacher.length > 0 && (
+            {showReportDetails && (
               <div className="mt-3 pt-3 border-t border-gray-200">
                 <p className="text-xs font-semibold text-gray-700 mb-2">Pending by Teacher:</p>
                 <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {readinessData.dailyReports.byTeacher.map((teacher, idx) => (
+                  {(pendingReportsByTeacher || []).map((teacher, idx) => (
                     <div key={idx} className="text-xs bg-white bg-opacity-50 rounded px-2 py-1">
                       <span className="font-medium">{teacher.teacherName}</span>
                       <span className="text-gray-600"> - {teacher.count} report{teacher.count !== 1 ? 's' : ''}</span>

@@ -627,10 +627,14 @@ function getApprovedSchemesForLessonPlanning(teacherEmail) {
       planningDateRange = null;
     }
     
+    // Get lesson plan settings to include bulk-only mode status
+    const settings = _getLessonPlanSettings();
+    
     return {
       success: true,
       schemes: schemesWithProgress,
       planningDateRange: planningDateRange,
+      settings: settings,  // Include settings for frontend to check bulk-only mode
       summary: {
         totalSchemes: schemesWithProgress.length,
         totalSessions: schemesWithProgress.reduce((sum, s) => sum + s.totalSessions, 0),
@@ -771,9 +775,15 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
       return parseInt(a.period) - parseInt(b.period);
     });
     
+    // Get lesson planning settings including bulkOnly flag
+    const settings = _getLessonPlanSettings();
+    
     return {
       success: true,
       availableSlots: availableSlots,
+      settings: {
+        bulkOnly: settings.bulkOnly || false
+      },
       summary: {
         totalSlots: availableSlots.length,
         availableSlots: availableSlots.filter(s => s.isAvailable).length,
@@ -842,6 +852,37 @@ function createSchemeLessonPlan(lessonPlanData) {
   try {
     Logger.log(`Creating scheme-based lesson plan: ${JSON.stringify(lessonPlanData)}`);
     
+    // Get scheme details first to check if this is an extended session
+    const schemeDetails = _getSchemeDetails(lessonPlanData.schemeId);
+    if (!schemeDetails) {
+      return { success: false, error: 'Scheme not found' };
+    }
+    
+    // Parse scheme chapters to get chapter info
+    const schemeChapters = _parseSchemeChapters(schemeDetails);
+    const chapter = schemeChapters.find(ch => 
+      String(ch.name || '').toLowerCase() === String(lessonPlanData.chapter || '').toLowerCase()
+    );
+    
+    if (!chapter) {
+      return { success: false, error: 'Chapter not found in scheme' };
+    }
+    
+    // Check if this is an extended session (session number > numberOfSessions)
+    const sessionNumber = parseInt(lessonPlanData.session) || 0;
+    const isExtendedSession = sessionNumber > (chapter.numberOfSessions || 0);
+    
+    // Check if single session preparation is restricted (but allow extended sessions)
+    const settings = _getLessonPlanSettings();
+    if (settings.bulkOnly && !isExtendedSession) {
+      Logger.log(`ERROR: Single session preparation is disabled. Use bulk chapter preparation instead.`);
+      return { 
+        success: false, 
+        error: 'Single session preparation is disabled. Please use "Prepare All Sessions Together" for the entire chapter.',
+        reason: 'bulk_only_mode'
+      };
+    }
+    
     // Validate required fields first
     const requiredFields = ['schemeId', 'chapter', 'session', 'teacherEmail', 'selectedDate', 'selectedPeriod'];
     const missing = requiredFields.filter(field => !String(lessonPlanData[field] ?? '').trim());
@@ -859,22 +900,6 @@ function createSchemeLessonPlan(lessonPlanData) {
       const errorMsg = `Missing required field(s): ${pedagogyMissing.join(', ')}`;
       Logger.log(`ERROR: ${errorMsg}`);
       return { success: false, error: errorMsg };
-    }
-    
-    // Get scheme details to check session type
-    const schemeDetails = _getSchemeDetails(lessonPlanData.schemeId);
-    if (!schemeDetails) {
-      return { success: false, error: 'Scheme not found' };
-    }
-    
-    // Parse scheme chapters to get chapter info
-    const schemeChapters = _parseSchemeChapters(schemeDetails);
-    const chapter = schemeChapters.find(ch => 
-      String(ch.name || '').toLowerCase() === String(lessonPlanData.chapter || '').toLowerCase()
-    );
-    
-    if (!chapter) {
-      return { success: false, error: 'Chapter not found in scheme' };
     }
     
     // NEW: Check if preparation is allowed for this specific session
@@ -1551,15 +1576,25 @@ function _getLessonPlanSettings() {
       (row.key || '').toLowerCase() === 'lessonplan_weeks_ahead'
     );
     
+    const bulkOnlySetting = settingsData.find(row =>
+      (row.key || '').toLowerCase() === 'lessonplan_bulk_only'
+    );
+    
+    // Parse bulk only setting (true/yes/1 = enabled)
+    const bulkOnlyValue = bulkOnlySetting ? String(bulkOnlySetting.value).toLowerCase() : 'false';
+    const bulkOnly = bulkOnlyValue === 'true' || bulkOnlyValue === 'yes' || bulkOnlyValue === '1';
+    
     return {
       preparationDay: preparationDaySetting ? preparationDaySetting.value : 'Friday',
-      weeksAhead: weeksAheadSetting ? parseInt(weeksAheadSetting.value) : 1
+      weeksAhead: weeksAheadSetting ? parseInt(weeksAheadSetting.value) : 1,
+      bulkOnly: bulkOnly
     };
   } catch (error) {
     Logger.log(`Error reading lesson plan settings: ${error.message}`);
     return {
       preparationDay: 'Friday',
-      weeksAhead: 1
+      weeksAhead: 1,
+      bulkOnly: false
     };
   }
 }

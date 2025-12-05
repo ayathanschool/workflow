@@ -88,7 +88,9 @@ const App = () => {
   const [appSettings, setAppSettings] = useState({
     lessonPlanningDay: '',       // No restriction until settings define it
     allowNextWeekOnly: false,    // Next-week-only restriction disabled
-    periodTimes: null            // Will store custom period times if available
+    periodTimes: null,           // Will store custom period times if available
+    periodTimesWeekday: null,    // Monday-Thursday period times
+    periodTimesFriday: null      // Friday period times
   });
   
   // Create a memoized version of appSettings to avoid unnecessary re-renders
@@ -96,7 +98,9 @@ const App = () => {
     return appSettings || {
       lessonPlanningDay: '',
       allowNextWeekOnly: false,
-      periodTimes: null
+      periodTimes: null,
+      periodTimesWeekday: null,
+      periodTimesFriday: null
     };
   }, [appSettings]);
 
@@ -112,14 +116,14 @@ const App = () => {
   useEffect(() => {
     async function fetchAppSettings() {
       try {
-        // Temporarily disabled to prevent errors
-        // const settings = await api.getAppSettings();
-        const settings = null; // Use default settings
+        const settings = await api.getAppSettings();
         if (settings) {
           setAppSettings({
             lessonPlanningDay: settings.lessonPlanningDay || '',
             allowNextWeekOnly: false, // Ignore sheet value; do not restrict to next week
-            periodTimes: settings.periodTimes || null
+            periodTimes: settings.periodTimes || settings.periodTimesWeekday || null,
+            periodTimesWeekday: settings.periodTimesWeekday || null,
+            periodTimesFriday: settings.periodTimesFriday || null
           });
         }
       } catch (err) {
@@ -751,8 +755,23 @@ const App = () => {
                       
                       if (Array.isArray(marks) && marks.length > 0) {
                         const studentMarks = [];
+                        let skippedMarks = 0;
                         
+                        // Debug: Log first few marks to see their structure
+                        if (className === 'STD 1A' && marks.length > 0) {
+                          console.log(`[${className}] Total marks fetched:`, marks.length);
+                          console.log(`[${className}] First mark sample:`, marks[0]);
+                          console.log(`[${className}] Exam class:`, className);
+                        }
+                        
+                        // Filter marks to only include students from this specific class
                         marks.forEach(mark => {
+                          // Skip marks that don't match this class
+                          if (mark.class && mark.class !== className) {
+                            skippedMarks++;
+                            return;
+                          }
+                          
                           if (mark && (mark.total != null || mark.ce != null || mark.te != null)) {
                             // Calculate total from ce + te if total not present
                             const total = parseFloat(mark.total) || 
@@ -769,6 +788,11 @@ const App = () => {
                           }
                         });
                         
+                        if (className === 'STD 1A') {
+                          console.log(`[${className}] Marks after filtering:`, studentMarks.length);
+                          console.log(`[${className}] Skipped marks (wrong class):`, skippedMarks);
+                        }
+                        
                         if (studentMarks.length > 0) {
                           // Calculate class average
                           const percentages = studentMarks.map(m => m.percentage);
@@ -778,11 +802,15 @@ const App = () => {
                           const aboveAverage = percentages.filter(p => p >= avgPercentage).length;
                           const needFocus = percentages.filter(p => p < 50).length;
                           
+                          // Use actual roster count if available, otherwise exam marks count
+                          const actualTotal = classStudentCounts[className] || studentMarks.length;
+                          
                           classPerformance[className] = {
                             aboveAverage,
                             needFocus,
                             avgPercentage: Math.round(avgPercentage),
-                            totalStudents: classStudentCounts[className] || studentMarks.length
+                            totalStudents: actualTotal,
+                            studentsWithMarks: studentMarks.length
                           };
                           
                           totalAboveAverage += aboveAverage;
@@ -994,6 +1022,12 @@ const App = () => {
                           <span className="text-sm text-gray-600">Total Students:</span>
                           <span className="text-sm font-semibold">{perf.totalStudents}</span>
                         </div>
+                        {perf.studentsWithMarks && perf.studentsWithMarks !== perf.totalStudents && (
+                          <div className="flex justify-between items-center text-amber-600">
+                            <span className="text-xs">Students with marks:</span>
+                            <span className="text-xs font-semibold">{perf.studentsWithMarks}</span>
+                          </div>
+                        )}
                         <div className="border-t pt-2 mt-2">
                           <div className="flex justify-between items-center mb-1">
                             <span className="text-xs text-emerald-600 flex items-center gap-1">
@@ -3233,9 +3267,23 @@ const App = () => {
     const minute = currentTime.getMinutes();
     const time = hour * 60 + minute;
 
+    // Check if today is Friday (0 = Sunday, 5 = Friday)
+    const today = new Date();
+    const isFriday = today.getDay() === 5;
+
+    // Use Friday-specific period times if available and today is Friday
+    let selectedPeriodTimes = null;
+    if (isFriday && memoizedSettings?.periodTimesFriday && Array.isArray(memoizedSettings.periodTimesFriday) && memoizedSettings.periodTimesFriday.length) {
+      selectedPeriodTimes = memoizedSettings.periodTimesFriday;
+    } else if (memoizedSettings?.periodTimesWeekday && Array.isArray(memoizedSettings.periodTimesWeekday) && memoizedSettings.periodTimesWeekday.length) {
+      selectedPeriodTimes = memoizedSettings.periodTimesWeekday;
+    } else if (memoizedSettings?.periodTimes && Array.isArray(memoizedSettings.periodTimes) && memoizedSettings.periodTimes.length) {
+      selectedPeriodTimes = memoizedSettings.periodTimes;
+    }
+
     // Prefer dynamic period times from settings if available
-    const dynamicTimes = (memoizedSettings?.periodTimes && Array.isArray(memoizedSettings.periodTimes) && memoizedSettings.periodTimes.length)
-      ? memoizedSettings.periodTimes.map(p => {
+    const dynamicTimes = selectedPeriodTimes
+      ? selectedPeriodTimes.map(p => {
           if (!p.start || !p.end) return null;
           const [sh, sm] = p.start.split(':').map(Number);
           const [eh, em] = p.end.split(':').map(Number);

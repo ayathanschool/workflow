@@ -1,6 +1,6 @@
 // HMDailyOversightEnhanced.jsx - Enhanced HM Dashboard with Session Progress Analytics
 import { Clock, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, CheckCircle, Undo2, FileText, ClipboardCheck, ChevronUp } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { getDailyReportsForDate, getLessonPlansForDate, getClassSubjectPerformance, getSyllabusPaceTracking, getMissingSubmissions, verifyDailyReport, reopenDailyReport, notifyMissingSubmissions, getDailyReadinessStatus, getHMDailyOversightData } from '../api';
 import { todayIST, formatLocalDate, nowIST } from '../utils/dateUtils';
 
@@ -718,19 +718,50 @@ const HMDailyOversightEnhanced = ({ user }) => {
               </p>
             )}
             
-            {showLessonPlanDetails && readinessData.lessonPlans?.byTeacher && readinessData.lessonPlans.byTeacher.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-gray-200">
-                <p className="text-xs font-semibold text-gray-700 mb-2">Pending by Teacher:</p>
-                <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {readinessData.lessonPlans.byTeacher.map((teacher, idx) => (
-                    <div key={idx} className="text-xs bg-white bg-opacity-50 rounded px-2 py-1">
-                      <span className="font-medium">{teacher.teacherName}</span>
-                      <span className="text-gray-600"> - {teacher.count} period{teacher.count !== 1 ? 's' : ''}</span>
-                    </div>
-                  ))}
+            {showLessonPlanDetails && (() => {
+              const pendingDetails = readinessData?.lessonPlans?.pendingDetails || [];
+              if (pendingDetails.length === 0) return null;
+              
+              const normalized = pendingDetails.map(p => ({
+                teacherEmail: String(p.teacherEmail || '').trim().toLowerCase(),
+                teacherName: String(p.teacherName || '').trim(),
+                class: p.class,
+                subject: p.subject,
+                period: String(p.period || '').trim()
+              }));
+              
+              const seen = new Set();
+              const unique = [];
+              normalized.forEach(p => {
+                const key = `${p.teacherEmail}|${p.class}|${p.subject}|${p.period}`;
+                if (!seen.has(key)) { seen.add(key); unique.push(p); }
+              });
+              
+              const grouped = unique.reduce((acc, p) => {
+                const nameKey = p.teacherName.toLowerCase();
+                if (!acc[nameKey]) {
+                  acc[nameKey] = { teacherName: p.teacherName, count: 0 };
+                }
+                acc[nameKey].count++;
+                return acc;
+              }, {});
+              
+              const byTeacher = Object.values(grouped).sort((a, b) => b.count - a.count);
+              
+              return (
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <p className="text-xs font-semibold text-gray-700 mb-2">Pending by Teacher:</p>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {byTeacher.map((teacher, idx) => (
+                      <div key={idx} className="text-xs bg-white bg-opacity-50 rounded px-2 py-1">
+                        <span className="font-medium">{teacher.teacherName}</span>
+                        <span className="text-gray-600"> - {teacher.count} period{teacher.count !== 1 ? 's' : ''}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
 
           {/* Daily Reports Card */}
@@ -771,19 +802,50 @@ const HMDailyOversightEnhanced = ({ user }) => {
               </p>
             )}
             
-            {showReportDetails && readinessData.dailyReports?.byTeacher && readinessData.dailyReports.byTeacher.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-gray-200">
-                <p className="text-xs font-semibold text-gray-700 mb-2">Pending by Teacher:</p>
-                <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {readinessData.dailyReports.byTeacher.map((teacher, idx) => (
-                    <div key={idx} className="text-xs bg-white bg-opacity-50 rounded px-2 py-1">
-                      <span className="font-medium">{teacher.teacherName}</span>
-                      <span className="text-gray-600"> - {teacher.count} report{teacher.count !== 1 ? 's' : ''}</span>
-                    </div>
-                  ))}
+            {showReportDetails && (() => {
+              const pendingDetails = readinessData?.dailyReports?.pendingDetails || [];
+              if (pendingDetails.length === 0) return null;
+              
+              const normalized = pendingDetails.map(p => ({
+                teacherEmail: String(p.teacherEmail || '').trim().toLowerCase(),
+                teacherName: String(p.teacherName || '').trim(),
+                class: p.class,
+                subject: p.subject,
+                period: String(p.period || '').trim()
+              }));
+              
+              const seen = new Set();
+              const unique = [];
+              normalized.forEach(p => {
+                const key = `${p.teacherEmail}|${p.class}|${p.subject}|${p.period}`;
+                if (!seen.has(key)) { seen.add(key); unique.push(p); }
+              });
+              
+              const grouped = unique.reduce((acc, p) => {
+                const nameKey = p.teacherName.toLowerCase();
+                if (!acc[nameKey]) {
+                  acc[nameKey] = { teacherName: p.teacherName, count: 0 };
+                }
+                acc[nameKey].count++;
+                return acc;
+              }, {});
+              
+              const byTeacher = Object.values(grouped).sort((a, b) => b.count - a.count);
+              
+              return (
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <p className="text-xs font-semibold text-gray-700 mb-2">Pending by Teacher:</p>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {byTeacher.map((teacher, idx) => (
+                      <div key={idx} className="text-xs bg-white bg-opacity-50 rounded px-2 py-1">
+                        <span className="font-medium">{teacher.teacherName}</span>
+                        <span className="text-gray-600"> - {teacher.count} report{teacher.count !== 1 ? 's' : ''}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </div>
       )}
