@@ -57,17 +57,22 @@ export default function MissingLessonPlansAlert({ user, onPrepareClick }) {
         return;
       }
       
+      console.log('📡 Fetching real missing lesson plans for:', user.email);
       const result = await api.getMissingLessonPlans(user.email, 7); // 7 days ahead
+      console.log('📊 API Response:', result);
       
       if (result.success) {
+        console.log('✅ Missing plans found:', result.missingCount);
         setMissingData(result);
         // Auto-expand if there are critical or high priority items
         if (result.byCriticality.critical > 0 || result.byCriticality.high > 0) {
           setIsExpanded(true);
         }
+      } else {
+        console.error('❌ API returned success=false:', result.error);
       }
     } catch (error) {
-      console.error('Error loading missing lesson plans:', error);
+      console.error('💥 Error loading missing lesson plans:', error);
     } finally {
       setLoading(false);
     }

@@ -5633,13 +5633,45 @@
         };
       }
       
-      // Get date range (today to daysAhead days from now)
-      const today = new Date();
-      const startDate = _todayISO();
-      const endDate = new Date(today.getTime() + (daysAhead * 24 * 60 * 60 * 1000));
-      const endDateISO = _isoDateIST(endDate);
+      // Get holidays from Academic Calendar
+      const calendarSheet = _getSheet('AcademicCalendar');
+      const calendarHeaders = _headers(calendarSheet);
+      const calendarData = _rows(calendarSheet).map(row => _indexByHeader(row, calendarHeaders));
       
-      Logger.log(`Date range: ${startDate} to ${endDateISO}`);
+      const holidays = calendarData
+        .filter(row => String(row.type || '').toLowerCase() === 'holiday')
+        .map(row => _isoDateIST(row.date));
+      
+      // Generate list of NEXT N SCHOOL DAYS (not calendar days)
+      const schoolDays = [];
+      let currentDate = new Date();
+      let schoolDaysCount = 0;
+      
+      // Keep looping until we have N school days
+      while (schoolDaysCount < daysAhead) {
+        const dayName = _dayNameIST(currentDate);
+        const dateISO = _isoDateIST(currentDate);
+        
+        // Include only weekdays that are not holidays
+        if (dayName !== 'Saturday' && dayName !== 'Sunday' && !holidays.includes(dateISO)) {
+          schoolDays.push({ date: dateISO, dayName: dayName });
+          schoolDaysCount++;
+        }
+        
+        // Move to next day
+        currentDate = new Date(currentDate.getTime() + (24 * 60 * 60 * 1000));
+        
+        // Safety check: don't loop more than 60 days
+        if (schoolDays.length === 0 && currentDate > new Date(Date.now() + (60 * 24 * 60 * 60 * 1000))) {
+          break;
+        }
+      }
+      
+      const today = new Date();
+      const startDate = schoolDays.length > 0 ? schoolDays[0].date : _todayISO();
+      const endDateISO = schoolDays.length > 0 ? schoolDays[schoolDays.length - 1].date : _todayISO();
+      
+      Logger.log(`Date range: ${startDate} to ${endDateISO} (${schoolDays.length} school days)`);
       
       // Get existing lesson plans
       const lessonPlansSheet = _getSheet('LessonPlans');
@@ -5651,40 +5683,18 @@
       const substitutionsHeaders = _headers(substitutionsSheet);
       const substitutions = _rows(substitutionsSheet).map(row => _indexByHeader(row, substitutionsHeaders));
       
-      // Get holidays from Academic Calendar
-      const calendarSheet = _getSheet('AcademicCalendar');
-      const calendarHeaders = _headers(calendarSheet);
-      const calendarData = _rows(calendarSheet).map(row => _indexByHeader(row, calendarHeaders));
-      
-      const holidays = calendarData
-        .filter(row => String(row.type || '').toLowerCase() === 'holiday')
-        .map(row => _isoDateIST(row.date));
-      
-      // Generate list of school days in range
-      const schoolDays = [];
-      let currentDate = new Date(startDate);
-      const endDateObj = new Date(endDateISO);
-      
-      while (currentDate <= endDateObj) {
-        const dayName = _dayNameIST(currentDate);
-        const dateISO = _isoDateIST(currentDate);
-        
-        // Skip weekends and holidays
-        if (dayName !== 'Saturday' && dayName !== 'Sunday' && !holidays.includes(dateISO)) {
-          schoolDays.push({ date: dateISO, dayName: dayName });
-        }
-        
-        currentDate = new Date(currentDate.getTime() + (24 * 60 * 60 * 1000));
-      }
-      
       // Find missing lesson plans
       const missing = [];
+      
+      Logger.log(`Checking ${schoolDays.length} school days for ${teacherEmail}`);
       
       schoolDays.forEach(day => {
         // Get periods for this teacher on this day
         const dayPeriods = teacherTimetable.filter(slot =>
-          String(slot.day || '').toLowerCase() === day.dayName.toLowerCase()
+          String(slot.dayOfWeek || slot.day || '').toLowerCase() === day.dayName.toLowerCase()
         );
+        
+        Logger.log(`${day.date} (${day.dayName}): ${dayPeriods.length} periods scheduled`);
         
         dayPeriods.forEach(period => {
           // Check if period is substituted (teacher is absent)
@@ -5695,6 +5705,7 @@
           );
           
           if (isSubstituted) {
+            Logger.log(`  Period ${period.period} (${period.class} ${period.subject}): SUBSTITUTED - skipping`);
             return; // Skip substituted periods
           }
           
@@ -5706,6 +5717,8 @@
             String(plan.class || '').toLowerCase() === String(period.class || '').toLowerCase() &&
             String(plan.subject || '').toLowerCase() === String(period.subject || '').toLowerCase()
           );
+          
+          Logger.log(`  Period ${period.period} (${period.class} ${period.subject}): ${hasLessonPlan ? 'HAS PLAN ✓' : 'MISSING ✗'}`);
           
           if (!hasLessonPlan) {
             // Calculate urgency (days until period)

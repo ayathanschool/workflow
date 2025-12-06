@@ -899,7 +899,7 @@ const App = () => {
             <Suspense fallback={<div className="animate-pulse bg-gray-100 h-32 rounded-lg"></div>}>
               <MissingLessonPlansAlert 
                 user={user} 
-                onPrepareClick={() => setCurrentView('lesson-planning')}
+                onPrepareClick={() => setActiveView('lesson-planning')}
               />
             </Suspense>
 
