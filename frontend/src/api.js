@@ -1197,3 +1197,23 @@ export async function notifyMissingSubmissions(date, requesterEmail) {
   return res?.data || res;
 }
 
+// ====== MISSING LESSON PLAN NOTIFICATIONS ======
+export async function getMissingLessonPlans(teacherEmail, daysAhead = 7) {
+  const q = new URLSearchParams({
+    action: 'getMissingLessonPlans',
+    teacherEmail,
+    daysAhead
+  });
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
+  return result?.data || result;
+}
+
+export async function getAllMissingLessonPlans(daysAhead = 7) {
+  const q = new URLSearchParams({
+    action: 'getAllMissingLessonPlans',
+    daysAhead
+  });
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
+  return result?.data || result;
+}
+

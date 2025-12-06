@@ -58,6 +58,8 @@ const SmartReminders = lazy(() => import('./components/SmartReminders'));
 const SubstitutionModule = lazy(() => import('./components/SubstitutionModule'));
 const EnhancedSubstitutionView = lazy(() => import('./components/EnhancedSubstitutionView'));
 const DailyReportModern = lazy(() => import('./DailyReportModern'));
+const MissingLessonPlansAlert = lazy(() => import('./components/MissingLessonPlansAlert'));
+const HMMissingLessonPlansOverview = lazy(() => import('./components/HMMissingLessonPlansOverview'));
 const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodSubstitutionView'));
 const ExamManagement = lazy(() => import('./components/ExamManagement'));
 const ReportCard = lazy(() => import('./components/ReportCard'));
@@ -893,6 +895,14 @@ const App = () => {
           <HMDashboardView insights={insights} />
   ) : user && hasAnyRole(['teacher','class teacher','daily reporting teachers']) ? (
           <>
+            {/* Missing Lesson Plans Alert - Teacher View */}
+            <Suspense fallback={<div className="animate-pulse bg-gray-100 h-32 rounded-lg"></div>}>
+              <MissingLessonPlansAlert 
+                user={user} 
+                onPrepareClick={() => setCurrentView('lesson-planning')}
+              />
+            </Suspense>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
               {/* Classes Teaching */}
               <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
@@ -3179,6 +3189,25 @@ const App = () => {
     const [loadingPaceTracking, setLoadingPaceTracking] = useState(false);
     const [selectedPeriod, setSelectedPeriod] = useState(null);
 
+    // Missing lesson plans overview
+    const [missingPlans, setMissingPlans] = useState(null);
+    const [loadingMissingPlans, setLoadingMissingPlans] = useState(false);
+
+    useEffect(() => {
+      async function loadMissingPlans() {
+        try {
+          setLoadingMissingPlans(true);
+          const result = await api.getAllMissingLessonPlans(7);
+          setMissingPlans(result?.data || result);
+        } catch (err) {
+          console.error('Failed to load missing lesson plans:', err);
+        } finally {
+          setLoadingMissingPlans(false);
+        }
+      }
+      loadMissingPlans();
+    }, []);
+
   // Update current time every minute
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
@@ -3376,6 +3405,11 @@ const App = () => {
           </button>
         </div>
       </div>
+
+      {/* Missing Lesson Plans Overview */}
+      <Suspense fallback={<div className="animate-pulse bg-gray-100 h-24 rounded-lg"></div>}>
+        <HMMissingLessonPlansOverview />
+      </Suspense>
 
       {/* Critical Alerts Banner */}
       {criticalAlerts.length > 0 && (
