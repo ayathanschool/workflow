@@ -4062,15 +4062,12 @@ const App = () => {
   // Scheme Approvals View
   const SchemeApprovalsView = () => {
     const [allSchemes, setAllSchemes] = useState([]); // Store all schemes loaded once
-    const [showFilters, setShowFilters] = useState(false);
+    const [loading, setLoading] = useState(true); // Add loading state
     const [selectedSchemes, setSelectedSchemes] = useState(new Set()); // For bulk selection
-    const [filters, setFilters] = useState({
-      teacher: '',
-      class: '',
-      subject: '',
-      chapter: '', // Add chapter filter
-      status: 'Pending' // Default to pending for approvals
-    });
+    const [selectedTeacher, setSelectedTeacher] = useState('');
+    const [groupByClass, setGroupByClass] = useState(false);
+    const [groupByChapter, setGroupByChapter] = useState(false);
+    const [statusFilter, setStatusFilter] = useState('Pending'); // Default to pending
 
     // Auto-hide sidebar when viewing approvals
     useEffect(() => {
@@ -4080,6 +4077,7 @@ const App = () => {
     // Load all schemes ONCE on component mount
     useEffect(() => {
       async function fetchAllSchemes() {
+        setLoading(true);
         try {
           const data = await api.getAllSchemes(1, 1000, '', '', '', '', ''); // Get all schemes
           const schemes = Array.isArray(data) ? data : (Array.isArray(data?.plans) ? data.plans : []);
@@ -4095,50 +4093,43 @@ const App = () => {
         } catch (err) {
           console.error('Error fetching schemes:', err);
           setAllSchemes([]);
+        } finally {
+          setLoading(false);
         }
       }
       fetchAllSchemes();
     }, []); // Empty dependency - load only once
 
-    // CLIENT-SIDE FILTERING - no API calls
+    // CLIENT-SIDE FILTERING
     const filteredSchemes = useMemo(() => {
-      return allSchemes.filter(scheme => {
-        // Filter by teacher
-        if (filters.teacher && scheme.teacherName !== filters.teacher) return false;
-        
-        // Filter by class
-        if (filters.class && scheme.class !== filters.class) return false;
-        
-        // Filter by subject
-        if (filters.subject && scheme.subject !== filters.subject) return false;
-        
-        // Filter by chapter
-        if (filters.chapter && scheme.chapter !== filters.chapter) return false;
-        
-        // Filter by status
-        if (filters.status && filters.status !== 'All') {
-          if (scheme.status !== filters.status) return false;
-        }
-        
-        return true;
-      });
-    }, [allSchemes, filters]);
+      let result = allSchemes;
+      
+      // Filter by status
+      if (statusFilter && statusFilter !== 'All') {
+        result = result.filter(s => s.status === statusFilter);
+      }
+      
+      // Filter by teacher
+      if (selectedTeacher) {
+        result = result.filter(s => s.teacherName === selectedTeacher);
+      }
+      
+      // Group by class if enabled
+      if (groupByClass) {
+        result = [...result].sort((a, b) => (a.class || '').localeCompare(b.class || ''));
+      }
+      
+      // Group by chapter if enabled
+      if (groupByChapter) {
+        result = [...result].sort((a, b) => (a.chapter || '').localeCompare(b.chapter || ''));
+      }
+      
+      return result;
+    }, [allSchemes, statusFilter, selectedTeacher, groupByClass, groupByChapter]);
 
     // Get unique values for dropdowns - optimized with useMemo
     const uniqueTeachers = useMemo(() => {
       return [...new Set(allSchemes.map(s => s.teacherName).filter(Boolean))].sort();
-    }, [allSchemes]);
-    
-    const uniqueClasses = useMemo(() => {
-      return [...new Set(allSchemes.map(s => s.class).filter(Boolean))].sort();
-    }, [allSchemes]);
-    
-    const uniqueSubjects = useMemo(() => {
-      return [...new Set(allSchemes.map(s => s.subject).filter(Boolean))].sort();
-    }, [allSchemes]);
-    
-    const uniqueChapters = useMemo(() => {
-      return [...new Set(allSchemes.map(s => s.chapter).filter(Boolean))].sort();
     }, [allSchemes]);
 
     const handleApproveScheme = async (schemeId) => {
@@ -4229,28 +4220,10 @@ const App = () => {
       );
       
       if (selectedSchemes.size === pendingOnly.length) {
-        // Deselect all
         setSelectedSchemes(new Set());
       } else {
-        // Select all pending
         setSelectedSchemes(new Set(pendingOnly.map(s => s.schemeId)));
       }
-    };
-
-    const handleSelectByClass = (className) => {
-      const classSchemes = filteredSchemes.filter(s => 
-        s.class === className && 
-        (s.status === 'Pending' || s.status === 'Pending - Validation Override' || s.status === 'Pending - No Timetable')
-      );
-      setSelectedSchemes(new Set(classSchemes.map(s => s.schemeId)));
-    };
-
-    const handleSelectByTeacher = (teacherName) => {
-      const teacherSchemes = filteredSchemes.filter(s => 
-        s.teacherName === teacherName && 
-        (s.status === 'Pending' || s.status === 'Pending - Validation Override' || s.status === 'Pending - No Timetable')
-      );
-      setSelectedSchemes(new Set(teacherSchemes.map(s => s.schemeId)));
     };
 
     const toggleSchemeSelection = (schemeId) => {
@@ -4265,13 +4238,25 @@ const App = () => {
       });
     };
 
+    // Show loading spinner while fetching data
+    if (loading) {
+      return (
+        <div className="flex items-center justify-center h-96">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+            <p className="text-gray-600">Loading schemes...</p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="space-y-6 max-w-full">
-        <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-900">Scheme Approvals</h1>
-          <div className="flex space-x-3">
+        <div className="flex flex-col gap-4">
+          <div className="flex justify-between items-center">
+            <h1 className="text-2xl font-bold text-gray-900">Scheme Approvals</h1>
             {selectedSchemes.size > 0 && (
-              <>
+              <div className="flex space-x-3">
                 <button 
                   onClick={handleBulkApprove}
                   className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-green-700"
@@ -4286,185 +4271,105 @@ const App = () => {
                   <X className="h-4 w-4 mr-2" />
                   Reject ({selectedSchemes.size})
                 </button>
-              </>
+              </div>
             )}
-            <button 
-              onClick={() => setShowFilters(!showFilters)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700"
-            >
-              <Filter className="h-4 w-4 mr-2" />
-              {showFilters ? 'Hide Filters' : 'Show Filters'}
-            </button>
           </div>
-        </div>
 
-        {/* Filter Panel */}
-        {showFilters && (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Filter Schemes</h3>
-            <div className="space-y-4">
-              {/* Bulk Selection Buttons */}
-              {(filters.status === 'Pending' || filters.status === 'Pending - Validation Override' || filters.status === 'Pending - No Timetable') && filteredSchemes.length > 0 && (
-                <div className="border-b border-gray-200 pb-4 mb-4">
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">Quick Select</h4>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      onClick={handleSelectAll}
-                      className="px-3 py-1 text-sm bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
-                    >
-                      {selectedSchemes.size === filteredSchemes.filter(s => s.status?.includes('Pending')).length ? 'Deselect All' : 'Select All Pending'}
-                    </button>
-                    {filters.class && (
-                      <button
-                        onClick={() => handleSelectByClass(filters.class)}
-                        className="px-3 py-1 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200"
-                      >
-                        Select All {filters.class}
-                      </button>
-                    )}
-                    {filters.teacher && (
-                      <button
-                        onClick={() => handleSelectByTeacher(filters.teacher)}
-                        className="px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                      >
-                        Select All by {filters.teacher}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-              {/* Quick Filter Buttons */}
-              <div className="flex flex-wrap gap-2 mb-4">
-                <button
-                  onClick={() => setFilters({ teacher: '', class: '', subject: '', chapter: '', status: 'Pending' })}
-                  className={`px-3 py-1 text-sm rounded-full transition-all ${
-                    filters.status === 'Pending' && !filters.teacher && !filters.class && !filters.subject && !filters.chapter
-                      ? 'bg-yellow-500 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  ⏳ Pending Only
-                </button>
-                <button
-                  onClick={() => setFilters({ teacher: '', class: '', subject: '', chapter: '', status: 'Approved' })}
-                  className={`px-3 py-1 text-sm rounded-full transition-all ${
-                    filters.status === 'Approved' && !filters.teacher && !filters.class && !filters.subject && !filters.chapter
-                      ? 'bg-green-500 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  ✓ Approved Only
-                </button>
-                <button
-                  onClick={() => setFilters({ teacher: '', class: '', subject: '', chapter: '', status: '' })}
-                  className={`px-3 py-1 text-sm rounded-full transition-all ${
-                    !filters.status && !filters.teacher && !filters.class && !filters.subject && !filters.chapter
-                      ? 'bg-blue-500 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  All Schemes
-                </button>
-              </div>
-              {/* Advanced Filters */}
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Teacher</label>
-                  <select
-                    value={filters.teacher}
-                    onChange={(e) => setFilters({ ...filters, teacher: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">All</option>
-                    {uniqueTeachers.map(teacher => (
-                      <option key={teacher} value={teacher}>{teacher}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Class</label>
-                  <select
-                    value={filters.class}
-                    onChange={(e) => setFilters({ ...filters, class: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">All</option>
-                    {uniqueClasses.map(cls => (
-                      <option key={cls} value={cls}>{cls}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Subject</label>
-                  <select
-                    value={filters.subject}
-                    onChange={(e) => setFilters({ ...filters, subject: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">All</option>
-                    {uniqueSubjects.map(subject => (
-                      <option key={subject} value={subject}>{subject}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Chapter</label>
-                  <select
-                    value={filters.chapter}
-                    onChange={(e) => setFilters({ ...filters, chapter: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">All</option>
-                    {uniqueChapters.map(chapter => (
-                      <option key={chapter} value={chapter}>{chapter}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Status</label>
-                  <select
-                    value={filters.status}
-                    onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="Pending">Pending</option>
-                    <option value="Pending - Validation Override">Pending - Override</option>
-                    <option value="Pending - No Timetable">Pending - No TT</option>
-                    <option value="Approved">Approved</option>
-                    <option value="Rejected">Rejected</option>
-                    <option value="">All Statuses</option>
-                  </select>
-                </div>
-              </div>
+          {/* Simple Filter Bar - Always Visible */}
+          <div className="flex flex-wrap items-center gap-3 bg-white rounded-xl shadow-sm p-4">
+            {/* Teacher Dropdown */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Teacher:</label>
+              <select
+                value={selectedTeacher}
+                onChange={(e) => setSelectedTeacher(e.target.value)}
+                className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[180px]"
+              >
+                <option value="">All Teachers</option>
+                {uniqueTeachers.map(teacher => (
+                  <option key={teacher} value={teacher}>{teacher}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Class-wise Toggle Button */}
+            <button
+              onClick={() => setGroupByClass(!groupByClass)}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                groupByClass
+                  ? 'bg-green-600 text-white hover:bg-green-700'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
+              }`}
+            >
+              {groupByClass ? '✓ ' : ''}Class-wise
+            </button>
+
+            {/* Chapter-wise Toggle Button */}
+            <button
+              onClick={() => setGroupByChapter(!groupByChapter)}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                groupByChapter
+                  ? 'bg-purple-600 text-white hover:bg-purple-700'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
+              }`}
+            >
+              {groupByChapter ? '✓ ' : ''}Chapter-wise
+            </button>
+
+            {/* Status Quick Filters */}
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={() => setStatusFilter('Pending')}
+                className={`px-3 py-1.5 text-sm rounded-full transition-all ${
+                  statusFilter === 'Pending'
+                    ? 'bg-yellow-500 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                ⏳ Pending
+              </button>
+              <button
+                onClick={() => setStatusFilter('Approved')}
+                className={`px-3 py-1.5 text-sm rounded-full transition-all ${
+                  statusFilter === 'Approved'
+                    ? 'bg-green-500 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                ✓ Approved
+              </button>
+              <button
+                onClick={() => setStatusFilter('')}
+                className={`px-3 py-1.5 text-sm rounded-full transition-all ${
+                  !statusFilter
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                All
+              </button>
             </div>
           </div>
-        )}
-
+        </div>
+        {/* Table Section */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-200">
-            <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
               <h2 className="text-lg font-medium text-gray-900">
-                {filters.status === 'Approved' ? 'Approved Schemes' : 
-                 filters.status === 'Pending' ? 'Pending Schemes' : 'All Schemes'} 
+                {statusFilter === 'Approved' ? 'Approved Schemes' : 
+                 statusFilter === 'Pending' ? 'Pending Schemes' : 'All Schemes'} 
                 ({filteredSchemes.length})
               </h2>
-              {/* Active Filter Status Display */}
-              {(filters.teacher || filters.class || filters.subject || filters.chapter || (filters.status && filters.status !== 'Pending')) && (
+              {(selectedTeacher || groupByClass || groupByChapter) && (
                 <div className="flex flex-wrap gap-1 text-xs">
-                  {filters.teacher && (
-                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded">Teacher: {filters.teacher}</span>
+                  {selectedTeacher && (
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded">Teacher: {selectedTeacher}</span>
                   )}
-                  {filters.class && (
-                    <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded">Class: {filters.class}</span>
+                  {groupByClass && (
+                    <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded">Grouped by Class</span>
                   )}
-                  {filters.subject && (
-                    <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded">Subject: {filters.subject}</span>
-                  )}
-                  {filters.chapter && (
-                    <span className="px-2 py-0.5 bg-pink-100 text-pink-800 rounded">Chapter: {filters.chapter}</span>
-                  )}
-                  {filters.status && filters.status !== 'Pending' && (
-                    <span className="px-2 py-0.5 bg-orange-100 text-orange-800 rounded">Status: {filters.status}</span>
+                  {groupByChapter && (
+                    <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded">Grouped by Chapter</span>
                   )}
                 </div>
               )}
@@ -4474,7 +4379,7 @@ const App = () => {
             <table className="w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  {(filters.status === 'Pending' || filters.status === 'Pending - Validation Override' || filters.status === 'Pending - No Timetable' || !filters.status) && (
+                  {(statusFilter === 'Pending' || !statusFilter) && (
                     <th className="px-1 py-2 w-8">
                       <input
                         type="checkbox"
@@ -4499,7 +4404,7 @@ const App = () => {
                   const isPending = scheme.status === 'Pending' || scheme.status === 'Pending - Validation Override' || scheme.status === 'Pending - No Timetable';
                   return (
                     <tr key={scheme.schemeId} className={`hover:bg-gray-50 ${selectedSchemes.has(scheme.schemeId) ? 'bg-blue-50' : ''}`}>
-                      {(filters.status === 'Pending' || filters.status === 'Pending - Validation Override' || filters.status === 'Pending - No Timetable' || !filters.status) && (
+                      {(statusFilter === 'Pending' || !statusFilter) && (
                         <td className="px-1 py-2">
                           {isPending && (
                             <input
@@ -4582,19 +4487,17 @@ const App = () => {
 
   // Lesson Approvals View
   const LessonApprovalsView = () => {
-    const [pendingLessons, setPendingLessons] = useState([]);
-    const [allLessons, setAllLessons] = useState([]); // Store all lessons for filter options
+    const [allLessons, setAllLessons] = useState([]); // Store all lessons loaded once
+    const [loading, setLoading] = useState(true); // Add loading state
     const [showFilters, setShowFilters] = useState(false);
+    const [selectedTeacher, setSelectedTeacher] = useState('');
+    const [groupByClass, setGroupByClass] = useState(false);
+    const [groupByChapter, setGroupByChapter] = useState(false);
     // Removed: timetable date view UI
     const [rowSubmitting, setRowSubmitting] = useState({});
     const [refreshing, setRefreshing] = useState(false);
     const [showChapterModal, setShowChapterModal] = useState(false);
     const [selectedChapter, setSelectedChapter] = useState(null);
-    const [groupByChapter, setGroupByChapter] = useState(false);
-    const [groupByClass, setGroupByClass] = useState(false);
-    const [chapterGroups, setChapterGroups] = useState([]);
-    const [classGroups, setClassGroups] = useState([]);
-    const [groupsLoading, setGroupsLoading] = useState(false);
     const [filters, setFilters] = useState({
       teacher: '',
       class: '',
@@ -4610,7 +4513,7 @@ const App = () => {
       const keyScheme = baseLesson.schemeId || '';
       const keyChapter = baseLesson.chapter || '';
       // Prefer schemeId + chapter; fallback to class+subject+chapter
-      const lessons = pendingLessons.filter(l => {
+      const lessons = filteredLessons.filter(l => {
         const sameScheme = keyScheme && String(l.schemeId || '') === String(keyScheme);
         const sameChapter = String(l.chapter || '') === String(keyChapter);
         const fallbackMatch = !keyScheme && sameChapter && String(l.class||'')===String(baseLesson.class||'') && String(l.subject||'')===String(baseLesson.subject||'');
@@ -4690,63 +4593,118 @@ const App = () => {
       return [...new Set(allLessons.map(l => l.subject).filter(Boolean))].sort();
     }, [allLessons]);
 
-    // Load all lessons once for reference
+    // Load all lessons ONCE on component mount
     useEffect(() => {
       async function fetchAllLessons() {
+        setLoading(true);
         try {
-          const data = await api.getPendingLessonReviews('', '', '', ''); // Get all for reference
-          const lessons = Array.isArray(data) ? data : [];
+          const data = await api.getPendingLessonReviews('', '', '', ''); // Get all lessons
+          let lessons = Array.isArray(data) ? data : [];
+          
+          // Sort by selectedDate in descending order (latest first)
+          lessons.sort((a, b) => new Date(b.selectedDate || 0) - new Date(a.selectedDate || 0));
+          
           setAllLessons(lessons);
         } catch (err) {
-          console.error('Error fetching lessons for filters:', err);
-          // Set empty array as fallback to prevent filter UI from breaking
+          console.error('Error fetching lessons:', err);
           setAllLessons([]);
+        } finally {
+          setLoading(false);
         }
       }
       fetchAllLessons();
-    }, []);
+    }, []); // Empty dependency - load only once
 
-    // Load lessons or grouped data based on toggles and filters
-    useEffect(() => {
-      async function fetchData() {
-        try {
-          const teacherFilter = filters.teacher === '' ? '' : filters.teacher;
-          const classFilter = filters.class === '' ? '' : filters.class;
-          const subjectFilter = filters.subject === '' ? '' : filters.subject;
-          const statusFilter = filters.status === '' || filters.status === 'All' ? '' : filters.status;
-          const dateFrom = filters.dateFrom || '';
-          const dateTo = filters.dateTo || '';
-
-          if (groupByChapter) {
-            setGroupsLoading(true);
-            const res = await api.getLessonPlansByChapter({ teacher: teacherFilter, class: classFilter, subject: subjectFilter, status: statusFilter || 'Pending Review', dateFrom, dateTo });
-            const groups = (res?.groups) || (Array.isArray(res) ? res : []);
-            setChapterGroups(groups);
-            setGroupsLoading(false);
-            return;
-          }
-          if (groupByClass) {
-            setGroupsLoading(true);
-            const res = await api.getLessonPlansByClass({ teacher: teacherFilter, class: classFilter, subject: subjectFilter, status: statusFilter || 'Pending Review', dateFrom, dateTo });
-            const groups = (res?.groups) || (Array.isArray(res) ? res : []);
-            setClassGroups(groups);
-            setGroupsLoading(false);
-            return;
-          }
-
-          // Default flat list
-          const data = await api.getPendingLessonReviews(teacherFilter, classFilter, subjectFilter, statusFilter);
-          let lessons = Array.isArray(data) ? data : [];
-          // Sort by selectedDate in descending order
-          lessons.sort((a, b) => new Date(b.selectedDate || 0) - new Date(a.selectedDate || 0));
-          setPendingLessons(lessons);
-        } catch (err) {
-          console.error('Error fetching approvals data:', err);
-          setGroupsLoading(false);
+    // CLIENT-SIDE FILTERING - no API calls
+    const filteredLessons = useMemo(() => {
+      return allLessons.filter(lesson => {
+        // Filter by teacher (from simple dropdown)
+        if (selectedTeacher && lesson.teacherName !== selectedTeacher) return false;
+        
+        // Filter by advanced filters (when showFilters is true)
+        if (filters.teacher && lesson.teacherName !== filters.teacher) return false;
+        if (filters.class && lesson.class !== filters.class) return false;
+        if (filters.subject && lesson.subject !== filters.subject) return false;
+        if (filters.status && filters.status !== 'All') {
+          if (lesson.status !== filters.status) return false;
         }
-      }
-      fetchData();
-    }, [filters, groupByChapter, groupByClass]);
+        if (filters.dateFrom && lesson.selectedDate < filters.dateFrom) return false;
+        if (filters.dateTo && lesson.selectedDate > filters.dateTo) return false;
+        
+        return true;
+      });
+    }, [allLessons, selectedTeacher, filters]);
+
+    // CLIENT-SIDE GROUPING - Compute groups from filteredLessons
+    const computedChapterGroups = useMemo(() => {
+      const groupMap = {};
+      filteredLessons.forEach(lesson => {
+        const key = `${lesson.class}|${lesson.subject}|${lesson.chapter}|${lesson.teacherName}`;
+        if (!groupMap[key]) {
+          groupMap[key] = {
+            key,
+            class: lesson.class,
+            subject: lesson.subject,
+            chapter: lesson.chapter,
+            teacherName: lesson.teacherName,
+            schemeId: lesson.schemeId,
+            lessons: [],
+            counts: { pending: 0, ready: 0, needsRework: 0, rejected: 0 }
+          };
+        }
+        groupMap[key].lessons.push(lesson);
+        if (lesson.status === 'Pending Review') groupMap[key].counts.pending++;
+        if (lesson.status === 'Ready') groupMap[key].counts.ready++;
+        if (lesson.status === 'Needs Rework') groupMap[key].counts.needsRework++;
+        if (lesson.status === 'Rejected') groupMap[key].counts.rejected++;
+      });
+      return Object.values(groupMap).sort((a, b) => a.chapter.localeCompare(b.chapter));
+    }, [filteredLessons]);
+
+    const computedClassGroups = useMemo(() => {
+      const classMap = {};
+      filteredLessons.forEach(lesson => {
+        const cls = lesson.class;
+        if (!classMap[cls]) {
+          classMap[cls] = {
+            class: cls,
+            subgroups: [],
+            counts: { pending: 0, ready: 0, needsRework: 0, rejected: 0 }
+          };
+        }
+        const subKey = `${lesson.subject}|${lesson.chapter}|${lesson.teacherName}`;
+        let subgroup = classMap[cls].subgroups.find(sg => sg.key === subKey);
+        if (!subgroup) {
+          subgroup = {
+            key: subKey,
+            subject: lesson.subject,
+            chapter: lesson.chapter,
+            teacherName: lesson.teacherName,
+            lessons: [],
+            counts: { pending: 0, ready: 0, needsRework: 0, rejected: 0 }
+          };
+          classMap[cls].subgroups.push(subgroup);
+        }
+        subgroup.lessons.push(lesson);
+        if (lesson.status === 'Pending Review') {
+          subgroup.counts.pending++;
+          classMap[cls].counts.pending++;
+        }
+        if (lesson.status === 'Ready') {
+          subgroup.counts.ready++;
+          classMap[cls].counts.ready++;
+        }
+        if (lesson.status === 'Needs Rework') {
+          subgroup.counts.needsRework++;
+          classMap[cls].counts.needsRework++;
+        }
+        if (lesson.status === 'Rejected') {
+          subgroup.counts.rejected++;
+          classMap[cls].counts.rejected++;
+        }
+      });
+      return Object.values(classMap).sort((a, b) => a.class.localeCompare(b.class));
+    }, [filteredLessons]);
 
     const handleApproveLesson = async (lpId, status) => {
       try {
@@ -4839,29 +4797,11 @@ const App = () => {
     const refreshApprovals = async () => {
       setRefreshing(true);
       try {
-        const teacherFilter = filters.teacher === '' ? '' : filters.teacher;
-        const classFilter = filters.class === '' ? '' : filters.class;
-        const subjectFilter = filters.subject === '' ? '' : filters.subject;
-        const statusFilter = filters.status === '' || filters.status === 'All' ? '' : filters.status;
-        const dateFrom = filters.dateFrom || '';
-        const dateTo = filters.dateTo || '';
-
-        if (groupByChapter) {
-          api.clearCache('getLessonPlansByChapter');
-          const res = await api.getLessonPlansByChapter({ teacher: teacherFilter, class: classFilter, subject: subjectFilter, status: statusFilter || 'Pending Review', dateFrom, dateTo, noCache: true });
-          setChapterGroups(res?.groups || []);
-        } else if (groupByClass) {
-          api.clearCache('getLessonPlansByClass');
-          const res = await api.getLessonPlansByClass({ teacher: teacherFilter, class: classFilter, subject: subjectFilter, status: statusFilter || 'Pending Review', dateFrom, dateTo, noCache: true });
-          setClassGroups(res?.groups || []);
-        } else {
-          api.clearCache('getPendingLessonReviews');
-          let lessons = await api.getPendingLessonReviews(teacherFilter, classFilter, subjectFilter, statusFilter, { noCache: true });
-          lessons = Array.isArray(lessons) ? lessons : [];
-          lessons.sort((a,b) => new Date(b.selectedDate || 0) - new Date(a.selectedDate || 0));
-          if (filters.status === 'Pending Review') lessons = lessons.filter(l => l.status === 'Pending Review');
-          setPendingLessons(lessons);
-        }
+        api.clearCache('getPendingLessonReviews');
+        const data = await api.getPendingLessonReviews('', '', '', '', { noCache: true });
+        let lessons = Array.isArray(data) ? data : [];
+        lessons.sort((a, b) => new Date(b.selectedDate || 0) - new Date(a.selectedDate || 0));
+        setAllLessons(lessons);
       } catch (e) {
         console.warn('Manual refresh failed:', e);
       } finally {
@@ -4870,6 +4810,18 @@ const App = () => {
     };
 
     // Batch selection, chapter grouping, and modal approval removed per request
+
+    // Show loading spinner while fetching data
+    if (loading) {
+      return (
+        <div className="flex items-center justify-center h-96">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+            <p className="text-gray-600">Loading lesson plans...</p>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="space-y-6 max-w-full">
@@ -4885,22 +4837,6 @@ const App = () => {
               <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
               {refreshing ? 'Refreshing…' : 'Refresh'}
             </button>
-            <button
-              onClick={() => setGroupByChapter(v => { const nv = !v; if (nv) setGroupByClass(false); return nv; })}
-              className={`px-4 py-2 rounded-lg flex items-center ${groupByChapter ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-100 text-gray-900 hover:bg-gray-200'}`}
-              title="Toggle chapter-wise view"
-            >
-              <BookOpen className="h-4 w-4 mr-2" />
-              {groupByChapter ? 'Grouped by Chapter' : 'Group by Chapter'}
-            </button>
-            <button
-              onClick={() => setGroupByClass(v => { const nv = !v; if (nv) setGroupByChapter(false); return nv; })}
-              className={`px-4 py-2 rounded-lg flex items-center ${groupByClass ? 'bg-teal-600 text-white hover:bg-teal-700' : 'bg-gray-100 text-gray-900 hover:bg-gray-200'}`}
-              title="Toggle class-wise view"
-            >
-              <LayoutGrid className="h-4 w-4 mr-2" />
-              {groupByClass ? 'Grouped by Class' : 'Group by Class'}
-            </button>
             <button 
               onClick={() => {
                 setShowFilters(!showFilters);
@@ -4913,8 +4849,79 @@ const App = () => {
           </div>
         </div>
 
+        {/* Simple Filter Bar - Always Visible */}
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow-sm p-4 border border-blue-100">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Teacher Dropdown */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Teacher:</label>
+              <select
+                value={selectedTeacher}
+                onChange={(e) => setSelectedTeacher(e.target.value)}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white min-w-[150px]"
+              >
+                <option value="">All Teachers</option>
+                {uniqueTeachers.map(teacher => (
+                  <option key={teacher} value={teacher}>{teacher}</option>
+                ))}
+              </select>
+            </div>
 
-        {/* Filter Panel */}
+            {/* Group Toggle Buttons */}
+            <div className="flex gap-2 ml-4">
+              <button
+                onClick={() => {
+                  const newValue = !groupByClass;
+                  setGroupByClass(newValue);
+                  if (newValue) setGroupByChapter(false);
+                }}
+                className={`px-3 py-1.5 text-sm rounded-lg transition-all ${
+                  groupByClass
+                    ? 'bg-teal-600 text-white shadow-md'
+                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                <LayoutGrid className="h-4 w-4 inline mr-1" />
+                Class-wise
+              </button>
+              <button
+                onClick={() => {
+                  const newValue = !groupByChapter;
+                  setGroupByChapter(newValue);
+                  if (newValue) setGroupByClass(false);
+                }}
+                className={`px-3 py-1.5 text-sm rounded-lg transition-all ${
+                  groupByChapter
+                    ? 'bg-purple-600 text-white shadow-md'
+                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                <BookOpen className="h-4 w-4 inline mr-1" />
+                Chapter-wise
+              </button>
+            </div>
+
+            {/* Active Filter Badge */}
+            {selectedTeacher && (
+              <span className="px-3 py-1 text-xs bg-blue-100 text-blue-800 rounded-full font-medium">
+                Teacher: {selectedTeacher}
+              </span>
+            )}
+            {groupByClass && (
+              <span className="px-3 py-1 text-xs bg-teal-100 text-teal-800 rounded-full font-medium">
+                Grouped by Class
+              </span>
+            )}
+            {groupByChapter && (
+              <span className="px-3 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
+                Grouped by Chapter
+              </span>
+            )}
+          </div>
+        </div>
+
+
+        {/* Advanced Filter Panel */}
         {showFilters && (
           <div className="bg-white rounded-xl shadow-sm p-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Filter Lesson Plans</h3>
@@ -5074,7 +5081,7 @@ const App = () => {
               <h2 className="text-lg font-medium text-gray-900">
                 {filters.status === 'Ready' ? 'Approved Lesson Plans' : 
                  filters.status === 'Pending Review' ? 'Pending Lesson Plans' : 'All Lesson Plans'} 
-                ({pendingLessons.length})
+                ({filteredLessons.length})
               </h2>
               {/* Active Filter Status Display */}
               {(filters.teacher || filters.class || filters.subject || (filters.status && filters.status !== 'Pending Review') || filters.dateFrom || filters.dateTo) && (
@@ -5105,64 +5112,69 @@ const App = () => {
             <table className="w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Teacher</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Class</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Subject</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Chapter</th>
-                  <th className="px-2 py-2 text-center text-xs font-medium text-gray-600 uppercase w-10">Sess</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Submitted</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Planned</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase w-20">Status</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Actions</th>
+                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase max-w-[80px]">Teacher</th>
+                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Class</th>
+                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase max-w-[100px]">Subject</th>
+                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase max-w-[150px]">Chapter</th>
+                  <th className="px-1 py-2 text-center text-xs font-medium text-gray-600 uppercase w-10">Sess</th>
+                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Submit</th>
+                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Plan</th>
+                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase w-20">Status</th>
+                  <th className="px-1 py-2 text-center text-xs font-medium text-gray-600 uppercase w-24">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {pendingLessons.map((lesson) => {
+                {filteredLessons.map((lesson) => {
                   return (
                     <tr key={lesson.lpId} className="hover:bg-gray-50">
-                      <td className="px-2 py-2 text-xs text-gray-900 truncate">{lesson.teacherName}</td>
-                      <td className="px-2 py-2 text-xs text-gray-900">{lesson.class}</td>
-                      <td className="px-2 py-2 text-xs text-gray-900 truncate">{lesson.subject}</td>
-                      <td className="px-2 py-2 text-xs text-gray-900 truncate">{lesson.chapter}</td>
-                      <td className="px-2 py-2 text-xs text-gray-900 text-center font-medium">
+                      <td className="px-1 py-2 text-xs text-gray-900 max-w-[80px] truncate" title={lesson.teacherName}>{lesson.teacherName}</td>
+                      <td className="px-1 py-2 text-xs text-gray-900 w-16">{lesson.class}</td>
+                      <td className="px-1 py-2 text-xs text-gray-900 max-w-[100px] truncate" title={lesson.subject}>{lesson.subject}</td>
+                      <td className="px-1 py-2 text-xs text-gray-900 max-w-[150px] truncate" title={lesson.chapter}>{lesson.chapter}</td>
+                      <td className="px-1 py-2 text-xs text-gray-900 text-center font-medium w-10">
                         {lesson.noOfSessions ? `${lesson.session}/${lesson.noOfSessions}` : lesson.session}
                       </td>
-                      <td className="px-2 py-2 text-xs text-gray-600">{lesson.submittedAt ? new Date(lesson.submittedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '-'}</td>
-                      <td className="px-2 py-2 text-xs text-gray-600"><div className="flex flex-col"><span>{lesson.selectedDate ? new Date(lesson.selectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '-'}</span><span className="text-xs text-gray-500">P{lesson.selectedPeriod || '-'}</span></div></td>
-                    <td className="px-2 py-2">
+                      <td className="px-1 py-2 text-xs text-gray-600 w-16">{lesson.submittedAt ? new Date(lesson.submittedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}</td>
+                      <td className="px-1 py-2 text-xs text-gray-600 w-16">
+                        <div className="flex flex-col">
+                          <span>{lesson.selectedDate ? new Date(lesson.selectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}</span>
+                          <span className="text-xs text-gray-500">P{lesson.selectedPeriod || '-'}</span>
+                        </div>
+                      </td>
+                    <td className="px-1 py-2 w-20">
                       {lesson.status === 'Ready' ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          ✓ Ready
+                        <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                          ✓
                         </span>
                       ) : lesson.status === 'Needs Rework' ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                          Rework
+                        <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                          Rwk
                         </span>
                       ) : lesson.status === 'Rejected' ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                          ✗ Rejected
+                        <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                          ✗
                         </span>
                       ) : (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                          Pending
+                        <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                          Pend
                         </span>
                       )}
                     </td>
-                    <td className="px-2 py-2 text-xs text-gray-500">
-                      <div className="flex items-center gap-1 whitespace-nowrap">
+                    <td className="px-1 py-2 text-xs text-gray-500 w-24">
+                      <div className="flex items-center justify-center gap-1 whitespace-nowrap">
                         <button type="button" 
                           className="text-blue-600 hover:text-blue-900 p-1" 
                           onClick={() => openLessonView(lesson)} 
                           title="View lesson details"
                         >
-                          <Eye className="h-4 w-4" />
+                          <Eye className="h-3.5 w-3.5" />
                         </button>
                           <button type="button" 
                             className="text-purple-600 hover:text-purple-900 p-1" 
                             onClick={() => viewChapterSessions(lesson)} 
                             title="View all chapter sessions"
                           >
-                            <BookOpen className="h-4 w-4" />
+                            <BookOpen className="h-3.5 w-3.5" />
                           </button>
                         {lesson.status === 'Pending Review' && (
                           <>
@@ -5225,13 +5237,11 @@ const App = () => {
 
         {groupByChapter && (
           <div className="bg-white rounded-xl shadow-sm p-4">
-            {groupsLoading ? (
-              <p className="text-gray-700">Loading chapter groups…</p>
-            ) : chapterGroups.length === 0 ? (
+            {computedChapterGroups.length === 0 ? (
               <p className="text-gray-700">No lesson plans match the current filters.</p>
             ) : (
               <div className="space-y-4">
-                {chapterGroups.map(g => {
+                {computedChapterGroups.map(g => {
                   const pending = g.counts?.pending || 0;
                   const approved = g.counts?.ready || 0;
                   return (
@@ -5298,13 +5308,11 @@ const App = () => {
         {groupByClass && (
           <div className="bg-white rounded-xl shadow-sm p-4">
             <h2 className="text-lg font-medium text-gray-900 mb-3">Lesson Plans (Class-wise)</h2>
-            {groupsLoading ? (
-              <p className="text-gray-700">Loading class groups…</p>
-            ) : classGroups.length === 0 ? (
+            {computedClassGroups.length === 0 ? (
               <p className="text-gray-700">No lesson plans match the current filters.</p>
             ) : (
               <div className="space-y-4">
-                {classGroups.map(clsGroup => {
+                {computedClassGroups.map(clsGroup => {
                   const totalPending = clsGroup.counts?.pending || 0;
                   const totalApproved = clsGroup.counts?.ready || 0;
                   return (
@@ -5390,7 +5398,7 @@ const App = () => {
 
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h2 className="text-lg font-medium text-gray-900 mb-4">Lesson Plan Details</h2>
-          {pendingLessons.length === 0 ? (
+          {filteredLessons.length === 0 ? (
             <p className="text-gray-700">No pending lesson plans.</p>
           ) : (
             <p className="text-gray-700">Click the eye icon to view individual lesson, or book icon to view all chapter sessions together.</p>
