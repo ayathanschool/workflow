@@ -159,8 +159,8 @@ const App = () => {
   // tiny helper for field rows inside the modal
   const Detail = ({ label, value }) => (
     <div>
-      <div className="text-xs text-gray-500">{label}</div>
-      <div className="text-gray-900">{value ?? '-'}</div>
+      <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
+      <div className="text-gray-900 dark:text-gray-100">{value ?? '-'}</div>
     </div>
   );
 
@@ -205,25 +205,25 @@ const App = () => {
   const ViewModal = () => (
     viewModal ? (
       <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/40">
-        <div className="bg-white w-full max-w-2xl rounded-xl shadow-lg p-6 mx-4">
+        <div className="bg-white dark:bg-gray-800 w-full max-w-2xl rounded-xl shadow-lg p-6 mx-4">
           <div className="flex justify-between items-start">
-            <h3 className="text-lg font-semibold text-gray-900">{viewModal.title || 'Lesson Details'}</h3>
-            <button onClick={() => setViewModal(null)} className="text-gray-500 hover:text-gray-700">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{viewModal.title || 'Lesson Details'}</h3>
+            <button onClick={() => setViewModal(null)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
               <X className="h-5 w-5" />
             </button>
           </div>
           <div className="mt-4 space-y-4">
             <div>
-              <h4 className="text-sm font-medium text-gray-700">Objectives</h4>
-              <div className="mt-1 text-sm text-gray-800 whitespace-pre-wrap">{viewModal.objectives || '-'}</div>
+              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Objectives</h4>
+              <div className="mt-1 text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{viewModal.objectives || '-'}</div>
             </div>
             <div>
-              <h4 className="text-sm font-medium text-gray-700">Activities</h4>
-              <div className="mt-1 text-sm text-gray-800 whitespace-pre-wrap">{viewModal.activities || '-'}</div>
+              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Activities</h4>
+              <div className="mt-1 text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{viewModal.activities || '-'}</div>
             </div>
           </div>
           <div className="mt-6 flex justify-end">
-            <button onClick={() => setViewModal(null)} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">Close</button>
+            <button onClick={() => setViewModal(null)} className="px-4 py-2 bg-gray-200 dark:bg-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-600">Close</button>
           </div>
         </div>
       </div>
@@ -246,16 +246,16 @@ const App = () => {
   const LessonModal = () => (
     showLessonModal && viewLesson ? (
       <div className="fixed inset-0 z-[1250] flex items-center justify-center bg-black/40">
-        <div className="bg-white w-full max-w-2xl rounded-xl shadow-lg p-6 mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="bg-white dark:bg-gray-800 w-full max-w-2xl rounded-xl shadow-lg p-4 md:p-6 mx-4 max-h-[90vh] overflow-y-auto">
           <div className="flex justify-between items-start mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">{viewLesson.title || viewLesson.chapter || viewLesson.lpId || viewLesson.schemeId || viewLesson.class || 'Details'}</h3>
-            <button onClick={closeLessonView} className="text-gray-500 hover:text-gray-700">
+            <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100">{viewLesson.title || viewLesson.chapter || viewLesson.lpId || viewLesson.schemeId || viewLesson.class || 'Details'}</h3>
+            <button onClick={closeLessonView} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
               <X className="h-5 w-5" />
             </button>
           </div>
           <div className="space-y-4">
             {/* Basic Info Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4 border-b border-gray-200">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4 border-b border-gray-200 dark:border-gray-700">
               <Detail label="Class" value={viewLesson.class} />
               <Detail label="Subject" value={viewLesson.subject} />
               <Detail label="Chapter" value={viewLesson.chapter} />
@@ -268,16 +268,16 @@ const App = () => {
             
             {/* Learning Objectives */}
             <div>
-              <h4 className="text-sm font-medium text-gray-700 mb-2">Learning Objectives</h4>
-              <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded">
+              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Learning Objectives</h4>
+              <div className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap bg-gray-50 dark:bg-gray-700 p-3 rounded">
                 {viewLesson.learningObjectives || viewLesson.objectives || '-'}
               </div>
             </div>
             
             {/* Teaching Methods */}
             <div>
-              <h4 className="text-sm font-medium text-gray-700 mb-2">Teaching Methods</h4>
-              <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded">
+              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Teaching Methods</h4>
+              <div className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap bg-gray-50 dark:bg-gray-700 p-3 rounded">
                 {viewLesson.teachingMethods || viewLesson.activities || '-'}
               </div>
             </div>
@@ -4243,30 +4243,30 @@ const App = () => {
       return (
         <div className="flex items-center justify-center h-96">
           <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-            <p className="text-gray-600">Loading schemes...</p>
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 dark:border-blue-400 mb-4"></div>
+            <p className="text-gray-600 dark:text-gray-400">Loading schemes...</p>
           </div>
         </div>
       );
     }
 
     return (
-      <div className="space-y-6 max-w-full">
-        <div className="flex flex-col gap-4">
-          <div className="flex justify-between items-center">
-            <h1 className="text-2xl font-bold text-gray-900">Scheme Approvals</h1>
+      <div className="space-y-4 md:space-y-6 max-w-full">
+        <div className="flex flex-col gap-3 md:gap-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">Scheme Approvals</h1>
             {selectedSchemes.size > 0 && (
-              <div className="flex space-x-3">
+              <div className="flex flex-wrap gap-2 md:gap-3 w-full sm:w-auto">
                 <button 
                   onClick={handleBulkApprove}
-                  className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-green-700"
+                  className="flex-1 sm:flex-initial bg-green-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center justify-center hover:bg-green-700 text-sm"
                 >
                   <Check className="h-4 w-4 mr-2" />
                   Approve ({selectedSchemes.size})
                 </button>
                 <button 
                   onClick={handleBulkReject}
-                  className="bg-red-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-red-700"
+                  className="flex-1 sm:flex-initial bg-red-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center justify-center hover:bg-red-700 text-sm"
                 >
                   <X className="h-4 w-4 mr-2" />
                   Reject ({selectedSchemes.size})
@@ -4276,10 +4276,10 @@ const App = () => {
           </div>
 
           {/* Simple Filter Bar - Always Visible */}
-          <div className="flex flex-wrap items-center gap-3 bg-white rounded-xl shadow-sm p-4">
+          <div className="flex flex-col md:flex-row md:flex-wrap items-stretch md:items-center gap-2 md:gap-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm p-3 md:p-4">
             {/* Teacher Dropdown */}
             <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Teacher:</label>
+              <label className="text-xs md:text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">Teacher:</label>
               <select
                 value={selectedTeacher}
                 onChange={(e) => setSelectedTeacher(e.target.value)}
