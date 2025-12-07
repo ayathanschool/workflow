@@ -1764,10 +1764,10 @@ const App = () => {
               <div className="divide-y divide-gray-200 dark:divide-gray-700">
                 {schemes.map((scheme) => (
                   <div key={scheme.schemeId || scheme.id} className="p-4 hover:bg-gray-50 dark:hover:bg-gray-700">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="flex-1 min-w-0">
                         <div className="font-medium text-gray-900 dark:text-gray-100">{scheme.class} - {scheme.subject}</div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">{scheme.chapter}</div>
+                        <div className="text-sm text-gray-600 dark:text-gray-400 mt-1 break-words">{scheme.chapter}</div>
                       </div>
                       <span className={`ml-2 px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
                         scheme.status === 'Pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
@@ -2659,10 +2659,10 @@ const App = () => {
                     <div className="divide-y divide-gray-200 dark:divide-gray-700">
                       {filtered.map((plan) => (
                         <div key={plan.lpId} className="p-4 hover:bg-gray-50 dark:hover:bg-gray-700">
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex-1">
+                          <div className="flex items-start justify-between gap-3 mb-3">
+                            <div className="flex-1 min-w-0">
                               <div className="font-medium text-gray-900 dark:text-gray-100">{plan.class} - {plan.subject}</div>
-                              <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">{plan.chapter || 'N/A'}</div>
+                              <div className="text-sm text-gray-600 dark:text-gray-400 mt-1 break-words">{plan.chapter || 'N/A'}</div>
                             </div>
                             <span className={`ml-2 px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
                               plan.status === 'Pending Preparation' 
@@ -3179,8 +3179,8 @@ const App = () => {
                     
                     return (
                       <div key={index} className={`p-4 rounded-lg border ${acknowledged ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'}`}>
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex-1">
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div className="flex-1 min-w-0">
                             <div className="font-medium text-gray-900 dark:text-gray-100">
                               {new Date(sub.date).toLocaleDateString('en-GB', { 
                                 day: '2-digit', 
@@ -5770,10 +5770,10 @@ const App = () => {
           {/* Chapter Sessions Modal (view-only) */}
           {showChapterModal && selectedChapter && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={closeChapterModal}>
-              <div className="bg-white w-full max-w-5xl rounded-xl shadow-2xl p-6 mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                <div className="flex justify-between items-start mb-6">
-                  <div>
-                    <h2 className="text-2xl font-bold text-gray-900">{selectedChapter.chapter}</h2>
+              <div className="bg-white w-full max-w-5xl rounded-xl shadow-2xl p-4 md:p-6 mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                <div className="flex justify-between items-start gap-4 mb-6">
+                  <div className="flex-1 min-w-0">
+                    <h2 className="text-xl md:text-2xl font-bold text-gray-900 break-words">{selectedChapter.chapter}</h2>
                     <p className="text-sm text-gray-600 mt-1">
                       {selectedChapter.class} • {selectedChapter.subject} • {selectedChapter.teacherName}
                     </p>
@@ -5784,7 +5784,7 @@ const App = () => {
                 </div>
 
                 <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg p-4 mb-6">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:justify-between">
                     <div>
                       <p className="text-sm text-gray-600">Total Sessions</p>
                       <p className="text-2xl font-bold text-gray-900">{selectedChapter.lessons.length}</p>
@@ -5801,49 +5801,49 @@ const App = () => {
                         {selectedChapter.lessons.filter(l => l.status === 'Ready').length}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {(() => { const pc = selectedChapter.lessons.filter(l => l.status === 'Pending Review').length; return (
-                        <span className="text-xs text-gray-600 mr-2">Pending: {pc}</span>
+                        <span className="text-xs text-gray-600 w-full sm:w-auto">Pending: {pc}</span>
                       ); })()}
                       <button
                         disabled={bulkSubmitting || selectedChapter.lessons.filter(l => l.status === 'Pending Review').length === 0}
                         onClick={() => bulkUpdateChapter('Ready')}
-                        className={`px-3 py-2 rounded-lg text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50`}
+                        className={`px-2 sm:px-3 py-2 rounded-lg text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 flex-1 sm:flex-initial whitespace-nowrap`}
                         title="Approve all pending in this chapter"
-                      >{bulkSubmitting ? 'Working…' : 'Approve All Pending'}</button>
+                      >{bulkSubmitting ? 'Working…' : 'Approve All'}</button>
                       <button
                         disabled={bulkSubmitting || selectedChapter.lessons.filter(l => l.status === 'Pending Review').length === 0}
                         onClick={() => bulkUpdateChapter('Needs Rework')}
-                        className={`px-3 py-2 rounded-lg text-xs font-medium bg-yellow-500 text-white hover:bg-yellow-600 disabled:opacity-50`}
+                        className={`px-2 sm:px-3 py-2 rounded-lg text-xs font-medium bg-yellow-500 text-white hover:bg-yellow-600 disabled:opacity-50 flex-1 sm:flex-initial whitespace-nowrap`}
                         title="Send all pending for rework"
-                      >Rework All Pending</button>
+                      >Rework All</button>
                       <button
                         disabled={bulkSubmitting || selectedChapter.lessons.filter(l => l.status === 'Pending Review').length === 0}
                         onClick={() => bulkUpdateChapter('Rejected')}
-                        className={`px-3 py-2 rounded-lg text-xs font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50`}
+                        className={`px-2 sm:px-3 py-2 rounded-lg text-xs font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 flex-1 sm:flex-initial whitespace-nowrap`}
                         title="Reject all pending in this chapter"
-                      >Reject All Pending</button>
+                      >Reject All</button>
                     </div>
                   </div>
                 </div>
 
                 <div className="space-y-4">
                   {selectedChapter.lessons.map((l) => (
-                    <div key={l.lpId} className={`border rounded-lg p-4 ${
+                    <div key={l.lpId} className={`border rounded-lg p-3 md:p-4 ${
                       l.status === 'Ready' ? 'border-green-300 bg-green-50' :
                       l.status === 'Pending Review' ? 'border-yellow-300 bg-yellow-50' :
                       'border-gray-300 bg-gray-50'
                     }`}>
-                      <div className="flex justify-between items-start mb-3">
-                        <div>
+                      <div className="flex justify-between items-start gap-3 mb-3">
+                        <div className="flex-1 min-w-0">
                           <h3 className="font-semibold text-gray-900">Session {l.session}</h3>
                           <p className="text-sm text-gray-600">
                             {l.selectedDate ? new Date(l.selectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Not scheduled'} 
                             {l.selectedPeriod && ` • Period ${l.selectedPeriod}`}
                           </p>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className={`inline-flex items-center px-2 sm:px-3 py-1 rounded-full text-xs font-medium ${
                             l.status === 'Ready' ? 'bg-green-100 text-green-800' :
                             l.status === 'Pending Review' ? 'bg-yellow-100 text-yellow-800' :
                             l.status === 'Needs Rework' ? 'bg-orange-100 text-orange-800' :
@@ -5852,7 +5852,7 @@ const App = () => {
                             {l.status}
                           </span>
                           {(l.status === 'Pending Review' || l.status === 'Needs Rework') && (
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1 flex-shrink-0">
                               <button 
                                 onClick={async () => { await handleApproveLesson(l.lpId, 'Ready'); setSelectedChapter(prev => prev ? ({...prev, lessons: prev.lessons.map(x => x.lpId===l.lpId ? {...x, status: 'Ready'} : x)}) : prev); }}
                                 disabled={!!rowSubmitting[l.lpId]}
