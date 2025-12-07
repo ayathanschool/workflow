@@ -4061,14 +4061,14 @@ const App = () => {
   };
   // Scheme Approvals View
   const SchemeApprovalsView = () => {
-    const [pendingSchemes, setPendingSchemes] = useState([]);
-    const [allSchemes, setAllSchemes] = useState([]); // Store all schemes for filter options
+    const [allSchemes, setAllSchemes] = useState([]); // Store all schemes loaded once
     const [showFilters, setShowFilters] = useState(false);
     const [selectedSchemes, setSelectedSchemes] = useState(new Set()); // For bulk selection
     const [filters, setFilters] = useState({
       teacher: '',
       class: '',
       subject: '',
+      chapter: '', // Add chapter filter
       status: 'Pending' // Default to pending for approvals
     });
 
@@ -4076,6 +4076,53 @@ const App = () => {
     useEffect(() => {
       setSidebarOpen(false);
     }, []);
+
+    // Load all schemes ONCE on component mount
+    useEffect(() => {
+      async function fetchAllSchemes() {
+        try {
+          const data = await api.getAllSchemes(1, 1000, '', '', '', '', ''); // Get all schemes
+          const schemes = Array.isArray(data) ? data : (Array.isArray(data?.plans) ? data.plans : []);
+          
+          // Sort by createdAt in descending order (latest first)
+          schemes.sort((a, b) => {
+            const dateA = new Date(a.createdAt || 0);
+            const dateB = new Date(b.createdAt || 0);
+            return dateB - dateA;
+          });
+          
+          setAllSchemes(schemes);
+        } catch (err) {
+          console.error('Error fetching schemes:', err);
+          setAllSchemes([]);
+        }
+      }
+      fetchAllSchemes();
+    }, []); // Empty dependency - load only once
+
+    // CLIENT-SIDE FILTERING - no API calls
+    const filteredSchemes = useMemo(() => {
+      return allSchemes.filter(scheme => {
+        // Filter by teacher
+        if (filters.teacher && scheme.teacherName !== filters.teacher) return false;
+        
+        // Filter by class
+        if (filters.class && scheme.class !== filters.class) return false;
+        
+        // Filter by subject
+        if (filters.subject && scheme.subject !== filters.subject) return false;
+        
+        // Filter by chapter
+        if (filters.chapter && scheme.chapter !== filters.chapter) return false;
+        
+        // Filter by status
+        if (filters.status && filters.status !== 'All') {
+          if (scheme.status !== filters.status) return false;
+        }
+        
+        return true;
+      });
+    }, [allSchemes, filters]);
 
     // Get unique values for dropdowns - optimized with useMemo
     const uniqueTeachers = useMemo(() => {
@@ -4089,59 +4136,16 @@ const App = () => {
     const uniqueSubjects = useMemo(() => {
       return [...new Set(allSchemes.map(s => s.subject).filter(Boolean))].sort();
     }, [allSchemes]);
-
-    // Load all schemes once for filter options
-    useEffect(() => {
-      async function fetchAllSchemes() {
-        try {
-          const data = await api.getAllSchemes(1, 1000, '', '', '', '', ''); // Get all schemes regardless of status
-          // Backend returns array directly, not wrapped in .plans
-          const schemes = Array.isArray(data) ? data : (Array.isArray(data?.plans) ? data.plans : []);
-          setAllSchemes(schemes);
-        } catch (err) {
-          console.error('Error fetching schemes for filters:', err);
-          // Set empty array as fallback to prevent filter UI from breaking
-          setAllSchemes([]);
-        }
-      }
-      fetchAllSchemes();
-    }, []);
-
-    // Load filtered schemes
-    useEffect(() => {
-      async function fetchPendingSchemes() {
-        try {
-          // Ensure empty strings for "All" selections  
-          const teacherFilter = filters.teacher === '' ? '' : filters.teacher;
-          const classFilter = filters.class === '' ? '' : filters.class;
-          const subjectFilter = filters.subject === '' ? '' : filters.subject;
-          const statusFilter = filters.status === '' || filters.status === 'All' ? '' : filters.status;
-          
-          // Use getAllSchemes API with status filter directly - backend handles exact matching
-          const data = await api.getAllSchemes(1, 200, teacherFilter, classFilter, subjectFilter, statusFilter, '');
-          
-          // Backend returns array directly, not wrapped in .plans  
-          let schemes = Array.isArray(data) ? data : (Array.isArray(data?.plans) ? data.plans : []);
-          // Sort by createdAt in descending order (latest first)
-          schemes.sort((a, b) => {
-            const dateA = new Date(a.createdAt || 0);
-            const dateB = new Date(b.createdAt || 0);
-            return dateB - dateA; // Latest first
-          });
-          setPendingSchemes(schemes);
-        } catch (err) {
-          console.error('Error fetching filtered schemes:', err);
-          setPendingSchemes([]); // Set empty array on error to prevent UI breaking
-        }
-      }
-      fetchPendingSchemes();
-    }, [filters]);
+    
+    const uniqueChapters = useMemo(() => {
+      return [...new Set(allSchemes.map(s => s.chapter).filter(Boolean))].sort();
+    }, [allSchemes]);
 
     const handleApproveScheme = async (schemeId) => {
       try {
         await withSubmit('Approving scheme...', () => api.updatePlanStatus(schemeId, 'Approved'));
-        // Remove from current list and maintain filters
-        setPendingSchemes(prev => prev.filter(scheme => scheme.schemeId !== schemeId));
+        // Remove from allSchemes and maintain filters
+        setAllSchemes(prev => prev.filter(scheme => scheme.schemeId !== schemeId));
         setSelectedSchemes(prev => {
           const newSet = new Set(prev);
           newSet.delete(schemeId);
@@ -4155,8 +4159,8 @@ const App = () => {
     const handleRejectScheme = async (schemeId) => {
       try {
         await withSubmit('Rejecting scheme...', () => api.updatePlanStatus(schemeId, 'Rejected'));
-        // Remove from current list and maintain filters
-        setPendingSchemes(prev => prev.filter(scheme => scheme.schemeId !== schemeId));
+        // Remove from allSchemes and maintain filters
+        setAllSchemes(prev => prev.filter(scheme => scheme.schemeId !== schemeId));
         setSelectedSchemes(prev => {
           const newSet = new Set(prev);
           newSet.delete(schemeId);
@@ -4183,8 +4187,8 @@ const App = () => {
         );
         await withSubmit(`Approving ${selectedSchemes.size} schemes...`, () => Promise.all(promises));
         
-        // Remove approved schemes from list
-        setPendingSchemes(prev => prev.filter(scheme => !selectedSchemes.has(scheme.schemeId)));
+        // Remove approved schemes from allSchemes
+        setAllSchemes(prev => prev.filter(scheme => !selectedSchemes.has(scheme.schemeId)));
         setSelectedSchemes(new Set());
       } catch (err) {
         console.error('Bulk approve error:', err);
@@ -4208,8 +4212,8 @@ const App = () => {
         );
         await withSubmit(`Rejecting ${selectedSchemes.size} schemes...`, () => Promise.all(promises));
         
-        // Remove rejected schemes from list
-        setPendingSchemes(prev => prev.filter(scheme => !selectedSchemes.has(scheme.schemeId)));
+        // Remove rejected schemes from allSchemes
+        setAllSchemes(prev => prev.filter(scheme => !selectedSchemes.has(scheme.schemeId)));
         setSelectedSchemes(new Set());
       } catch (err) {
         console.error('Bulk reject error:', err);
@@ -4218,7 +4222,7 @@ const App = () => {
     };
 
     const handleSelectAll = () => {
-      const pendingOnly = pendingSchemes.filter(s => 
+      const pendingOnly = filteredSchemes.filter(s => 
         s.status === 'Pending' || 
         s.status === 'Pending - Validation Override' || 
         s.status === 'Pending - No Timetable'
@@ -4234,7 +4238,7 @@ const App = () => {
     };
 
     const handleSelectByClass = (className) => {
-      const classSchemes = pendingSchemes.filter(s => 
+      const classSchemes = filteredSchemes.filter(s => 
         s.class === className && 
         (s.status === 'Pending' || s.status === 'Pending - Validation Override' || s.status === 'Pending - No Timetable')
       );
@@ -4242,7 +4246,7 @@ const App = () => {
     };
 
     const handleSelectByTeacher = (teacherName) => {
-      const teacherSchemes = pendingSchemes.filter(s => 
+      const teacherSchemes = filteredSchemes.filter(s => 
         s.teacherName === teacherName && 
         (s.status === 'Pending' || s.status === 'Pending - Validation Override' || s.status === 'Pending - No Timetable')
       );
@@ -4300,7 +4304,7 @@ const App = () => {
             <h3 className="text-lg font-medium text-gray-900 mb-4">Filter Schemes</h3>
             <div className="space-y-4">
               {/* Bulk Selection Buttons */}
-              {(filters.status === 'Pending' || filters.status === 'Pending - Validation Override' || filters.status === 'Pending - No Timetable') && pendingSchemes.length > 0 && (
+              {(filters.status === 'Pending' || filters.status === 'Pending - Validation Override' || filters.status === 'Pending - No Timetable') && filteredSchemes.length > 0 && (
                 <div className="border-b border-gray-200 pb-4 mb-4">
                   <h4 className="text-sm font-medium text-gray-700 mb-2">Quick Select</h4>
                   <div className="flex flex-wrap gap-2">
@@ -4308,7 +4312,7 @@ const App = () => {
                       onClick={handleSelectAll}
                       className="px-3 py-1 text-sm bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
                     >
-                      {selectedSchemes.size === pendingSchemes.filter(s => s.status?.includes('Pending')).length ? 'Deselect All' : 'Select All Pending'}
+                      {selectedSchemes.size === filteredSchemes.filter(s => s.status?.includes('Pending')).length ? 'Deselect All' : 'Select All Pending'}
                     </button>
                     {filters.class && (
                       <button
@@ -4332,9 +4336,9 @@ const App = () => {
               {/* Quick Filter Buttons */}
               <div className="flex flex-wrap gap-2 mb-4">
                 <button
-                  onClick={() => setFilters({ teacher: '', class: '', subject: '', status: 'Pending' })}
+                  onClick={() => setFilters({ teacher: '', class: '', subject: '', chapter: '', status: 'Pending' })}
                   className={`px-3 py-1 text-sm rounded-full transition-all ${
-                    filters.status === 'Pending' && !filters.teacher && !filters.class && !filters.subject
+                    filters.status === 'Pending' && !filters.teacher && !filters.class && !filters.subject && !filters.chapter
                       ? 'bg-yellow-500 text-white'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
@@ -4342,9 +4346,9 @@ const App = () => {
                   ⏳ Pending Only
                 </button>
                 <button
-                  onClick={() => setFilters({ teacher: '', class: '', subject: '', status: 'Approved' })}
+                  onClick={() => setFilters({ teacher: '', class: '', subject: '', chapter: '', status: 'Approved' })}
                   className={`px-3 py-1 text-sm rounded-full transition-all ${
-                    filters.status === 'Approved' && !filters.teacher && !filters.class && !filters.subject
+                    filters.status === 'Approved' && !filters.teacher && !filters.class && !filters.subject && !filters.chapter
                       ? 'bg-green-500 text-white'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
@@ -4352,9 +4356,9 @@ const App = () => {
                   ✓ Approved Only
                 </button>
                 <button
-                  onClick={() => setFilters({ teacher: '', class: '', subject: '', status: '' })}
+                  onClick={() => setFilters({ teacher: '', class: '', subject: '', chapter: '', status: '' })}
                   className={`px-3 py-1 text-sm rounded-full transition-all ${
-                    !filters.status && !filters.teacher && !filters.class && !filters.subject
+                    !filters.status && !filters.teacher && !filters.class && !filters.subject && !filters.chapter
                       ? 'bg-blue-500 text-white'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
@@ -4363,7 +4367,7 @@ const App = () => {
                 </button>
               </div>
               {/* Advanced Filters */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Teacher</label>
                   <select
@@ -4404,6 +4408,19 @@ const App = () => {
                   </select>
                 </div>
                 <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Chapter</label>
+                  <select
+                    value={filters.chapter}
+                    onChange={(e) => setFilters({ ...filters, chapter: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">All</option>
+                    {uniqueChapters.map(chapter => (
+                      <option key={chapter} value={chapter}>{chapter}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Status</label>
                   <select
                     value={filters.status}
@@ -4429,10 +4446,10 @@ const App = () => {
               <h2 className="text-lg font-medium text-gray-900">
                 {filters.status === 'Approved' ? 'Approved Schemes' : 
                  filters.status === 'Pending' ? 'Pending Schemes' : 'All Schemes'} 
-                ({pendingSchemes.length})
+                ({filteredSchemes.length})
               </h2>
               {/* Active Filter Status Display */}
-              {(filters.teacher || filters.class || filters.subject || (filters.status && filters.status !== 'Pending')) && (
+              {(filters.teacher || filters.class || filters.subject || filters.chapter || (filters.status && filters.status !== 'Pending')) && (
                 <div className="flex flex-wrap gap-1 text-xs">
                   {filters.teacher && (
                     <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded">Teacher: {filters.teacher}</span>
@@ -4442,6 +4459,9 @@ const App = () => {
                   )}
                   {filters.subject && (
                     <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded">Subject: {filters.subject}</span>
+                  )}
+                  {filters.chapter && (
+                    <span className="px-2 py-0.5 bg-pink-100 text-pink-800 rounded">Chapter: {filters.chapter}</span>
                   )}
                   {filters.status && filters.status !== 'Pending' && (
                     <span className="px-2 py-0.5 bg-orange-100 text-orange-800 rounded">Status: {filters.status}</span>
@@ -4458,7 +4478,7 @@ const App = () => {
                     <th className="px-1 py-2 w-8">
                       <input
                         type="checkbox"
-                        checked={selectedSchemes.size > 0 && selectedSchemes.size === pendingSchemes.filter(s => s.status?.includes('Pending')).length}
+                        checked={selectedSchemes.size > 0 && selectedSchemes.size === filteredSchemes.filter(s => s.status?.includes('Pending')).length}
                         onChange={handleSelectAll}
                         className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                       />
@@ -4475,7 +4495,7 @@ const App = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {pendingSchemes.map((scheme) => {
+                {filteredSchemes.map((scheme) => {
                   const isPending = scheme.status === 'Pending' || scheme.status === 'Pending - Validation Override' || scheme.status === 'Pending - No Timetable';
                   return (
                     <tr key={scheme.schemeId} className={`hover:bg-gray-50 ${selectedSchemes.has(scheme.schemeId) ? 'bg-blue-50' : ''}`}>
