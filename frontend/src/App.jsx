@@ -4064,6 +4064,7 @@ const App = () => {
     const [pendingSchemes, setPendingSchemes] = useState([]);
     const [allSchemes, setAllSchemes] = useState([]); // Store all schemes for filter options
     const [showFilters, setShowFilters] = useState(false);
+    const [selectedSchemes, setSelectedSchemes] = useState(new Set()); // For bulk selection
     const [filters, setFilters] = useState({
       teacher: '',
       class: '',
@@ -4139,7 +4140,13 @@ const App = () => {
     const handleApproveScheme = async (schemeId) => {
       try {
         await withSubmit('Approving scheme...', () => api.updatePlanStatus(schemeId, 'Approved'));
-        setPendingSchemes(pendingSchemes.filter(scheme => scheme.schemeId !== schemeId));
+        // Remove from current list and maintain filters
+        setPendingSchemes(prev => prev.filter(scheme => scheme.schemeId !== schemeId));
+        setSelectedSchemes(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(schemeId);
+          return newSet;
+        });
       } catch (err) {
         console.error(err);
       }
@@ -4148,10 +4155,110 @@ const App = () => {
     const handleRejectScheme = async (schemeId) => {
       try {
         await withSubmit('Rejecting scheme...', () => api.updatePlanStatus(schemeId, 'Rejected'));
-        setPendingSchemes(pendingSchemes.filter(scheme => scheme.schemeId !== schemeId));
+        // Remove from current list and maintain filters
+        setPendingSchemes(prev => prev.filter(scheme => scheme.schemeId !== schemeId));
+        setSelectedSchemes(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(schemeId);
+          return newSet;
+        });
       } catch (err) {
         console.error(err);
       }
+    };
+
+    const handleBulkApprove = async () => {
+      if (selectedSchemes.size === 0) {
+        alert('Please select schemes to approve');
+        return;
+      }
+      
+      if (!confirm(`Approve ${selectedSchemes.size} selected scheme(s)?`)) {
+        return;
+      }
+
+      try {
+        const promises = Array.from(selectedSchemes).map(schemeId => 
+          api.updatePlanStatus(schemeId, 'Approved')
+        );
+        await withSubmit(`Approving ${selectedSchemes.size} schemes...`, () => Promise.all(promises));
+        
+        // Remove approved schemes from list
+        setPendingSchemes(prev => prev.filter(scheme => !selectedSchemes.has(scheme.schemeId)));
+        setSelectedSchemes(new Set());
+      } catch (err) {
+        console.error('Bulk approve error:', err);
+        alert('Some approvals may have failed. Please refresh to see current status.');
+      }
+    };
+
+    const handleBulkReject = async () => {
+      if (selectedSchemes.size === 0) {
+        alert('Please select schemes to reject');
+        return;
+      }
+      
+      if (!confirm(`Reject ${selectedSchemes.size} selected scheme(s)?`)) {
+        return;
+      }
+
+      try {
+        const promises = Array.from(selectedSchemes).map(schemeId => 
+          api.updatePlanStatus(schemeId, 'Rejected')
+        );
+        await withSubmit(`Rejecting ${selectedSchemes.size} schemes...`, () => Promise.all(promises));
+        
+        // Remove rejected schemes from list
+        setPendingSchemes(prev => prev.filter(scheme => !selectedSchemes.has(scheme.schemeId)));
+        setSelectedSchemes(new Set());
+      } catch (err) {
+        console.error('Bulk reject error:', err);
+        alert('Some rejections may have failed. Please refresh to see current status.');
+      }
+    };
+
+    const handleSelectAll = () => {
+      const pendingOnly = pendingSchemes.filter(s => 
+        s.status === 'Pending' || 
+        s.status === 'Pending - Validation Override' || 
+        s.status === 'Pending - No Timetable'
+      );
+      
+      if (selectedSchemes.size === pendingOnly.length) {
+        // Deselect all
+        setSelectedSchemes(new Set());
+      } else {
+        // Select all pending
+        setSelectedSchemes(new Set(pendingOnly.map(s => s.schemeId)));
+      }
+    };
+
+    const handleSelectByClass = (className) => {
+      const classSchemes = pendingSchemes.filter(s => 
+        s.class === className && 
+        (s.status === 'Pending' || s.status === 'Pending - Validation Override' || s.status === 'Pending - No Timetable')
+      );
+      setSelectedSchemes(new Set(classSchemes.map(s => s.schemeId)));
+    };
+
+    const handleSelectByTeacher = (teacherName) => {
+      const teacherSchemes = pendingSchemes.filter(s => 
+        s.teacherName === teacherName && 
+        (s.status === 'Pending' || s.status === 'Pending - Validation Override' || s.status === 'Pending - No Timetable')
+      );
+      setSelectedSchemes(new Set(teacherSchemes.map(s => s.schemeId)));
+    };
+
+    const toggleSchemeSelection = (schemeId) => {
+      setSelectedSchemes(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(schemeId)) {
+          newSet.delete(schemeId);
+        } else {
+          newSet.add(schemeId);
+        }
+        return newSet;
+      });
     };
 
     return (
@@ -4159,6 +4266,24 @@ const App = () => {
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">Scheme Approvals</h1>
           <div className="flex space-x-3">
+            {selectedSchemes.size > 0 && (
+              <>
+                <button 
+                  onClick={handleBulkApprove}
+                  className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-green-700"
+                >
+                  <Check className="h-4 w-4 mr-2" />
+                  Approve ({selectedSchemes.size})
+                </button>
+                <button 
+                  onClick={handleBulkReject}
+                  className="bg-red-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-red-700"
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Reject ({selectedSchemes.size})
+                </button>
+              </>
+            )}
             <button 
               onClick={() => setShowFilters(!showFilters)}
               className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700"
@@ -4174,6 +4299,36 @@ const App = () => {
           <div className="bg-white rounded-xl shadow-sm p-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Filter Schemes</h3>
             <div className="space-y-4">
+              {/* Bulk Selection Buttons */}
+              {(filters.status === 'Pending' || filters.status === 'Pending - Validation Override' || filters.status === 'Pending - No Timetable') && pendingSchemes.length > 0 && (
+                <div className="border-b border-gray-200 pb-4 mb-4">
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">Quick Select</h4>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={handleSelectAll}
+                      className="px-3 py-1 text-sm bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
+                    >
+                      {selectedSchemes.size === pendingSchemes.filter(s => s.status?.includes('Pending')).length ? 'Deselect All' : 'Select All Pending'}
+                    </button>
+                    {filters.class && (
+                      <button
+                        onClick={() => handleSelectByClass(filters.class)}
+                        className="px-3 py-1 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200"
+                      >
+                        Select All {filters.class}
+                      </button>
+                    )}
+                    {filters.teacher && (
+                      <button
+                        onClick={() => handleSelectByTeacher(filters.teacher)}
+                        className="px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                      >
+                        Select All by {filters.teacher}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
               {/* Quick Filter Buttons */}
               <div className="flex flex-wrap gap-2 mb-4">
                 <button
@@ -4299,69 +4454,93 @@ const App = () => {
             <table className="w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Teacher</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Class</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Subject</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Chapter</th>
-                  <th className="px-2 py-2 text-center text-xs font-medium text-gray-600 uppercase w-12">Sess</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Submitted</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase w-20">Status</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-600 uppercase">Actions</th>
+                  {(filters.status === 'Pending' || filters.status === 'Pending - Validation Override' || filters.status === 'Pending - No Timetable' || !filters.status) && (
+                    <th className="px-1 py-2 w-8">
+                      <input
+                        type="checkbox"
+                        checked={selectedSchemes.size > 0 && selectedSchemes.size === pendingSchemes.filter(s => s.status?.includes('Pending')).length}
+                        onChange={handleSelectAll}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                    </th>
+                  )}
+                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase max-w-[80px]">Teacher</th>
+                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Class</th>
+                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase max-w-[100px]">Subject</th>
+                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase max-w-[150px]">Chapter</th>
+                  <th className="px-1 py-2 text-center text-xs font-medium text-gray-600 uppercase w-10">Sess</th>
+                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Date</th>
+                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase w-20">Status</th>
+                  <th className="px-1 py-2 text-center text-xs font-medium text-gray-600 uppercase w-24">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {pendingSchemes.map((scheme) => (
-                  <tr key={scheme.schemeId} className="hover:bg-gray-50">
-                    <td className="px-2 py-2 text-xs text-gray-900 truncate">{scheme.teacherName}</td>
-                    <td className="px-2 py-2 text-xs text-gray-900">{scheme.class}</td>
-                    <td className="px-2 py-2 text-xs text-gray-900 truncate">{scheme.subject}</td>
-                    <td className="px-2 py-2 text-xs text-gray-900 truncate">{scheme.chapter}</td>
-                    <td className="px-2 py-2 text-xs text-gray-900 text-center font-medium">{scheme.noOfSessions}</td>
-                    <td className="px-2 py-2 text-xs text-gray-600">{scheme.createdAt ? new Date(scheme.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '-'}</td>
-                    <td className="px-2 py-2">
+                {pendingSchemes.map((scheme) => {
+                  const isPending = scheme.status === 'Pending' || scheme.status === 'Pending - Validation Override' || scheme.status === 'Pending - No Timetable';
+                  return (
+                    <tr key={scheme.schemeId} className={`hover:bg-gray-50 ${selectedSchemes.has(scheme.schemeId) ? 'bg-blue-50' : ''}`}>
+                      {(filters.status === 'Pending' || filters.status === 'Pending - Validation Override' || filters.status === 'Pending - No Timetable' || !filters.status) && (
+                        <td className="px-1 py-2">
+                          {isPending && (
+                            <input
+                              type="checkbox"
+                              checked={selectedSchemes.has(scheme.schemeId)}
+                              onChange={() => toggleSchemeSelection(scheme.schemeId)}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                          )}
+                        </td>
+                      )}
+                      <td className="px-1 py-2 text-xs text-gray-900 max-w-[80px] truncate" title={scheme.teacherName}>{scheme.teacherName}</td>
+                      <td className="px-1 py-2 text-xs text-gray-900 w-16">{scheme.class}</td>
+                      <td className="px-1 py-2 text-xs text-gray-900 max-w-[100px] truncate" title={scheme.subject}>{scheme.subject}</td>
+                      <td className="px-1 py-2 text-xs text-gray-900 max-w-[150px] truncate" title={scheme.chapter}>{scheme.chapter}</td>
+                      <td className="px-1 py-2 text-xs text-gray-900 text-center font-medium w-10">{scheme.noOfSessions}</td>
+                      <td className="px-1 py-2 text-xs text-gray-600 w-16">{scheme.createdAt ? new Date(scheme.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}</td>
+                      <td className="px-1 py-2 w-20">
                       {scheme.status === 'Approved' ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          ✓ Approved
+                        <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                          ✓
                         </span>
                       ) : scheme.status === 'Rejected' ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                          ✗ Rejected
+                        <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                          ✗
                         </span>
                       ) : scheme.status === 'Pending - Validation Override' ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
-                          Override
+                        <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">
+                          Ovr
                         </span>
                       ) : scheme.status === 'Pending - No Timetable' ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                          No TT
+                        <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                          NoTT
                         </span>
                       ) : (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                          Pending
+                        <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                          Pend
                         </span>
                       )}
                     </td>
-                    <td className="px-2 py-2 text-xs text-gray-500">
-                      <div className="flex items-center gap-2 whitespace-nowrap">
+                    <td className="px-1 py-2 text-xs text-gray-500 w-24">
+                      <div className="flex items-center justify-center gap-1 whitespace-nowrap">
                         <button type="button"
                           onClick={() => openLessonView(scheme)}
                           className="text-blue-600 hover:text-blue-900 p-1"
                           title="View scheme details"
                         >
-                          <Eye className="h-4 w-4" />
+                          <Eye className="h-3.5 w-3.5" />
                         </button>
-                        {(scheme.status === 'Pending' || scheme.status === 'Pending - Validation Override' || scheme.status === 'Pending - No Timetable') && (
+                        {isPending && (
                           <>
                             <button 
                               onClick={() => handleApproveScheme(scheme.schemeId)}
-                              className="text-green-600 hover:text-green-900 px-2 py-1 bg-green-100 rounded text-xs"
+                              className="text-green-600 hover:text-green-900 px-1.5 py-0.5 bg-green-100 rounded text-xs"
                               title="Approve scheme"
                             >
                               ✓
                             </button>
                             <button 
                               onClick={() => handleRejectScheme(scheme.schemeId)}
-                              className="text-red-600 hover:text-red-900 px-2 py-1 bg-red-100 rounded text-xs"
+                              className="text-red-600 hover:text-red-900 px-1.5 py-0.5 bg-red-100 rounded text-xs"
                               title="Reject scheme"
                             >
                               ✗
@@ -4371,7 +4550,8 @@ const App = () => {
                       </div>
                     </td>
                   </tr>
-                ))}
+                );
+                })}
               </tbody>
             </table>
           </div>
