@@ -873,9 +873,9 @@ const App = () => {
     }, [user?.email]);
 
     return (
-      <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+      <div className="space-y-4 md:space-y-6">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
           <div className="flex items-center space-x-4">
             {/* Send Notification Button - HM Only */}
             {user && hasRole('h m') && (
@@ -903,56 +903,56 @@ const App = () => {
               />
             </Suspense>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4">
               {/* Classes Teaching */}
-              <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
                 <div className="flex items-center">
-                  <div className="p-3 bg-blue-100 rounded-lg">
-                    <School className="w-6 h-6 text-blue-600" />
+                  <div className="p-2 md:p-3 bg-blue-100 dark:bg-blue-900 rounded-lg">
+                    <School className="w-5 h-5 md:w-6 md:h-6 text-blue-600 dark:text-blue-400" />
                   </div>
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">Classes</p>
-                    <p className="text-2xl font-bold text-gray-900">{insights.classCount}</p>
+                  <div className="ml-3 md:ml-4">
+                    <p className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-400">Classes</p>
+                    <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.classCount}</p>
                   </div>
                 </div>
               </div>
               
               {/* Subjects */}
-              <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
                 <div className="flex items-center">
-                  <div className="p-3 bg-green-100 rounded-lg">
-                    <Book className="w-6 h-6 text-green-600" />
+                  <div className="p-2 md:p-3 bg-green-100 dark:bg-green-900 rounded-lg">
+                    <Book className="w-5 h-5 md:w-6 md:h-6 text-green-600 dark:text-green-400" />
                   </div>
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">Subjects</p>
-                    <p className="text-2xl font-bold text-gray-900">{insights.subjectCount}</p>
+                  <div className="ml-3 md:ml-4">
+                    <p className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-400">Subjects</p>
+                    <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.subjectCount}</p>
                   </div>
                 </div>
               </div>
               
               {/* Pending Reports */}
-              <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
                 <div className="flex items-center">
-                  <div className="p-3 bg-purple-100 rounded-lg">
-                    <FileText className="w-6 h-6 text-purple-600" />
+                  <div className="p-2 md:p-3 bg-purple-100 dark:bg-purple-900 rounded-lg">
+                    <FileText className="w-5 h-5 md:w-6 md:h-6 text-purple-600 dark:text-purple-400" />
                   </div>
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">Pending Reports</p>
-                    <p className="text-2xl font-bold text-gray-900">{insights.pendingReports}</p>
+                  <div className="ml-3 md:ml-4">
+                    <p className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-400">Pending Reports</p>
+                    <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.pendingReports}</p>
                   </div>
                 </div>
               </div>
               
               {/* Students Above Average - Only for class teachers with performance data */}
               {hasRole('class teacher') && (
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
                   <div className="flex items-center">
-                    <div className="p-3 bg-emerald-100 rounded-lg">
-                      <Award className="w-6 h-6 text-emerald-600" />
+                    <div className="p-2 md:p-3 bg-emerald-100 dark:bg-emerald-900 rounded-lg">
+                      <Award className="w-5 h-5 md:w-6 md:h-6 text-emerald-600 dark:text-emerald-400" />
                     </div>
-                    <div className="ml-4">
-                      <p className="text-sm font-medium text-gray-600">Above Average</p>
-                      <p className="text-2xl font-bold text-gray-900">{insights.studentsAboveAverage}</p>
+                    <div className="ml-3 md:ml-4">
+                      <p className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-400">Above Average</p>
+                      <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.studentsAboveAverage}</p>
                     </div>
                   </div>
                 </div>
@@ -960,14 +960,14 @@ const App = () => {
               
               {/* Students Need Focus - Only for class teachers with performance data */}
               {hasRole('class teacher') && (
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
                   <div className="flex items-center">
-                    <div className="p-3 bg-amber-100 rounded-lg">
-                      <AlertCircle className="w-6 h-6 text-amber-600" />
+                    <div className="p-2 md:p-3 bg-amber-100 dark:bg-amber-900 rounded-lg">
+                      <AlertCircle className="w-5 h-5 md:w-6 md:h-6 text-amber-600 dark:text-amber-400" />
                     </div>
-                    <div className="ml-4">
-                      <p className="text-sm font-medium text-gray-600">Need Focus</p>
-                      <p className="text-2xl font-bold text-gray-900">{insights.studentsNeedFocus}</p>
+                    <div className="ml-3 md:ml-4">
+                      <p className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-400">Need Focus</p>
+                      <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.studentsNeedFocus}</p>
                     </div>
                   </div>
                 </div>
@@ -976,12 +976,12 @@ const App = () => {
             
             {/* Detailed Teaching Assignment - Shows specific classes and subjects */}
             {(insights.teachingClasses.length > 0 || insights.teachingSubjects.length > 0) && (
-              <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Teaching Assignment</h3>
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
+                <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Teaching Assignment</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {insights.teachingClasses.length > 0 && (
                     <div>
-                      <p className="text-sm font-medium text-gray-600 mb-2">Classes</p>
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">Classes</p>
                       <div className="flex flex-wrap gap-2">
                         {insights.teachingClasses.map((cls, idx) => {
                           const studentCount = insights.classStudentCounts[cls];
@@ -1017,15 +1017,15 @@ const App = () => {
             
             {/* Class-wise Performance Breakdown - Only for class teachers */}
             {hasRole('class teacher') && insights.classPerformance && Object.keys(insights.classPerformance).length > 0 && (
-              <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Class-wise Performance</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
+                <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Class-wise Performance</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
                   {Object.entries(insights.classPerformance).map(([className, perf]) => (
-                    <div key={className} className="border border-gray-200 rounded-lg p-4">
-                      <h4 className="font-semibold text-gray-900 mb-3">{className}</h4>
+                    <div key={className} className="border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-lg p-3 md:p-4">
+                      <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">{className}</h4>
                       <div className="space-y-2">
                         <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-600">Class Average:</span>
+                          <span className="text-sm text-gray-600 dark:text-gray-400">Class Average:</span>
                           <span className="text-sm font-semibold text-blue-600">{perf.avgPercentage}%</span>
                         </div>
                         <div className="flex justify-between items-center">
@@ -1060,9 +1060,9 @@ const App = () => {
             )}
           </>
         ) : (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Welcome, {user?.name}</h2>
-            <p className="text-gray-600">Use the navigation menu to access your school workflow tools.</p>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6">
+            <h2 className="text-lg md:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Welcome, {user?.name}</h2>
+            <p className="text-gray-600 dark:text-gray-400">Use the navigation menu to access your school workflow tools.</p>
           </div>
         )}
       </div>
