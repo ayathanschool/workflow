@@ -21,6 +21,7 @@ import {
   Filter,
   Eye,
   Edit,
+  Edit2,
   Plus,
   Trash2,
   Download,
@@ -1334,6 +1335,8 @@ const App = () => {
   const SchemesView = () => {
     const [schemes, setSchemes] = useState([]);
     const [showForm, setShowForm] = useState(false);
+    const [editingScheme, setEditingScheme] = useState(null);
+    const [deletingScheme, setDeletingScheme] = useState(null);
     const [formData, setFormData] = useState({
       class: '',
       subject: '',
@@ -1345,6 +1348,66 @@ const App = () => {
     });
     const [planningHelper, setPlanningHelper] = useState(null);
     const [loadingHelper, setLoadingHelper] = useState(false);
+
+    // Handle delete scheme
+    const handleDeleteScheme = async (scheme) => {
+      if (!window.confirm(`Delete scheme "${scheme.chapter}"? This cannot be undone.`)) {
+        return;
+      }
+
+      setDeletingScheme(scheme.schemeId);
+      try {
+        const result = await api.deleteScheme(scheme.schemeId, user.email);
+        if (result.success) {
+          success('Deleted', 'Scheme deleted successfully');
+          // Refresh the list
+          const list = await api.getTeacherSchemes(user.email);
+          const sorted = Array.isArray(list) ? list.sort((a, b) => {
+            const dateA = new Date(a.createdAt || 0);
+            const dateB = new Date(b.createdAt || 0);
+            return dateB - dateA;
+          }) : [];
+          setSchemes(sorted);
+        } else {
+          error('Delete Failed', result.error || 'Failed to delete scheme');
+        }
+      } catch (err) {
+        console.error('Failed to delete scheme:', err);
+        error('Delete Failed', err.message || 'Failed to delete scheme');
+      } finally {
+        setDeletingScheme(null);
+      }
+    };
+
+    // Handle edit scheme - open form with existing data
+    const handleEditScheme = (scheme) => {
+      setEditingScheme(scheme);
+      setFormData({
+        class: scheme.class || '',
+        subject: scheme.subject || '',
+        term: scheme.term || '',
+        unit: scheme.unit || '',
+        chapter: scheme.chapter || '',
+        month: scheme.month || '',
+        noOfSessions: scheme.noOfSessions || ''
+      });
+      setShowForm(true);
+    };
+
+    // Cancel edit
+    const cancelEdit = () => {
+      setEditingScheme(null);
+      setShowForm(false);
+      setFormData({
+        class: '',
+        subject: '',
+        term: '',
+        unit: '',
+        chapter: '',
+        month: '',
+        noOfSessions: ''
+      });
+    };
 
     // Load planning helper when class, subject, and term are selected
     useEffect(() => {
@@ -1384,7 +1447,7 @@ const App = () => {
       if (!user) return;
       
       try {
-        setSubmitting({ active: true, message: 'Submitting scheme...' });
+        setSubmitting({ active: true, message: editingScheme ? 'Updating scheme...' : 'Submitting scheme...' });
         
         // Submit the scheme with timetable validation
         const schemeData = {
@@ -1398,13 +1461,28 @@ const App = () => {
           noOfSessions: formData.noOfSessions
         };
         
-        const response = await api.submitPlan(user.email, schemeData);
+        let result;
         
-        // Unwrap the response (backend wraps in {status, data, timestamp})
-        const result = response.data || response;
+        if (editingScheme) {
+          // Update existing scheme
+          const response = await api.updateScheme(editingScheme.schemeId, user.email, schemeData);
+          result = response.data || response;
+          
+          if (result.success) {
+            success('Updated', 'Scheme updated successfully');
+          } else {
+            throw new Error(result.error || 'Update failed');
+          }
+        } else {
+          // Submit new scheme
+          const response = await api.submitPlan(user.email, schemeData);
+          
+          // Unwrap the response (backend wraps in {status, data, timestamp})
+          result = response.data || response;
+        }
         
-        // Check if validation failed
-        if (!result.ok && result.error === 'Session count mismatch') {
+        // Check if validation failed (only for new submissions)
+        if (!editingScheme && !result.ok && result.error === 'Session count mismatch') {
           const validation = result.validation;
           
           let confirmMessage = `${validation.message}\n\n`;
@@ -1458,7 +1536,12 @@ const App = () => {
         
         // Refresh schemes list
         const list = await api.getTeacherSchemes(user.email);
-        setSchemes(Array.isArray(list) ? list : []);
+        const sorted = Array.isArray(list) ? list.sort((a, b) => {
+          const dateA = new Date(a.createdAt || 0);
+          const dateB = new Date(b.createdAt || 0);
+          return dateB - dateA;
+        }) : [];
+        setSchemes(sorted);
         
       } catch (err) {
         console.error('Failed to submit scheme:', err);
@@ -1470,6 +1553,7 @@ const App = () => {
         error('Submission Failed', `Failed to submit scheme: ${err.message}`);
       } finally {
         setSubmitting({ active: false, message: '' });
+        setEditingScheme(null);
         setShowForm(false);
         setFormData({
           class: '',
@@ -1491,7 +1575,13 @@ const App = () => {
         try {
           if (!user) return;
           const list = await api.getTeacherSchemes(user.email);
-          setSchemes(Array.isArray(list) ? list : []);
+          // Sort by createdAt descending (latest first)
+          const sorted = Array.isArray(list) ? list.sort((a, b) => {
+            const dateA = new Date(a.createdAt || 0);
+            const dateB = new Date(b.createdAt || 0);
+            return dateB - dateA; // Descending order
+          }) : [];
+          setSchemes(sorted);
         } catch (err) {
           console.error(err);
         }
@@ -1514,7 +1604,12 @@ const App = () => {
 
         {showForm && (
           <div className="bg-white rounded-xl shadow-sm p-6">
-            <h2 className="text-lg font-semibold mb-4">Submit New Scheme of Work</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-semibold">{editingScheme ? 'Edit Scheme of Work' : 'Submit New Scheme of Work'}</h2>
+              <button onClick={cancelEdit} className="text-gray-500 hover:text-gray-700">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
             
             {/* Planning Assistant Panel */}
             {planningHelper && planningHelper.success && (
@@ -1798,9 +1893,25 @@ const App = () => {
                         <Eye className="h-4 w-4 mr-1" />
                         View
                       </button>
-                      <button className="bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-600 dark:text-red-200 px-3 py-2 rounded-lg">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {scheme.status === 'Pending' && (
+                        <>
+                          <button
+                            onClick={() => handleEditScheme(scheme)}
+                            className="bg-yellow-100 hover:bg-yellow-200 dark:bg-yellow-900 dark:hover:bg-yellow-800 text-yellow-700 dark:text-yellow-200 px-3 py-2 rounded-lg"
+                            title="Edit scheme"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteScheme(scheme)}
+                            disabled={deletingScheme === scheme.schemeId}
+                            className="bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-600 dark:text-red-200 px-3 py-2 rounded-lg disabled:opacity-50"
+                            title="Delete scheme"
+                          >
+                            {deletingScheme === scheme.schemeId ? '...' : <Trash2 className="h-4 w-4" />}
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1844,9 +1955,25 @@ const App = () => {
                       <button type="button" className="text-blue-600 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-300 mr-3" onClick={() => openLessonView(scheme)} title="View scheme">
                         <Eye className="h-4 w-4" />
                       </button>
-                      <button className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {scheme.status === 'Pending' && (
+                        <>
+                          <button
+                            onClick={() => handleEditScheme(scheme)}
+                            className="text-yellow-600 dark:text-yellow-400 hover:text-yellow-900 dark:hover:text-yellow-300 mr-3"
+                            title="Edit scheme"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteScheme(scheme)}
+                            disabled={deletingScheme === scheme.schemeId}
+                            className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 disabled:opacity-50"
+                            title="Delete scheme"
+                          >
+                            {deletingScheme === scheme.schemeId ? '...' : <Trash2 className="h-4 w-4" />}
+                          </button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -1872,6 +1999,7 @@ const App = () => {
     const [approvedSchemes, setApprovedSchemes] = useState([]);
     const [selectedSlot, setSelectedSlot] = useState(null);
     const [showPreparationForm, setShowPreparationForm] = useState(false);
+    const [deletingPlan, setDeletingPlan] = useState(null);
     const [preparationData, setPreparationData] = useState({
       schemeId: '',
       session: '1',
@@ -1890,6 +2018,32 @@ const App = () => {
       status: '',
       chapter: ''
     });
+
+    // Handle delete lesson plan
+    const handleDeleteLessonPlan = async (plan) => {
+      if (!window.confirm(`Delete lesson plan for "${plan.chapter}" Session ${plan.session}? This cannot be undone.`)) {
+        return;
+      }
+
+      setDeletingPlan(plan.lpId);
+      try {
+        const result = await api.deleteLessonPlan(plan.lpId, user.email);
+        if (result.success) {
+          success('Deleted', 'Lesson plan deleted successfully');
+          // Refresh the list
+          const plans = await api.getTeacherLessonPlans(user.email);
+          setLessonPlans(Array.isArray(plans) ? plans : []);
+        } else {
+          error('Delete Failed', result.error || 'Failed to delete lesson plan');
+        }
+      } catch (err) {
+        console.error('Failed to delete lesson plan:', err);
+        error('Delete Failed', err.message || 'Failed to delete lesson plan');
+      } finally {
+        setDeletingPlan(null);
+      }
+    };
+
     // Helper: normalize weekday names (tolerates typos like "Wedbnesday")
     const normalizeDayNameClient = (input) => {
       if (!input && input !== 0) return '';
@@ -2630,9 +2784,19 @@ const App = () => {
                                     >
                                       Edit
                                     </button>
-                                    <button type="button" className="text-blue-600 hover:text-blue-900" onClick={() => openLessonView(plan)} title="View lesson plan">
+                                    <button type="button" className="text-blue-600 hover:text-blue-900 mr-2" onClick={() => openLessonView(plan)} title="View lesson plan">
                                       <Eye className="h-4 w-4 inline" />
                                     </button>
+                                    {(plan.status === 'Pending Preparation' || plan.status === 'Pending Review' || plan.status === 'Needs Rework') && (
+                                      <button
+                                        onClick={() => handleDeleteLessonPlan(plan)}
+                                        disabled={deletingPlan === plan.lpId}
+                                        className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                                        title="Delete lesson plan"
+                                      >
+                                        {deletingPlan === plan.lpId ? '...' : <Trash2 className="h-4 w-4 inline" />}
+                                      </button>
+                                    )}
                                   </td>
                                 </tr>
                               ))}
@@ -2710,6 +2874,16 @@ const App = () => {
                             >
                               <Eye className="h-4 w-4" />
                             </button>
+                            {(plan.status === 'Pending Preparation' || plan.status === 'Pending Review' || plan.status === 'Needs Rework') && (
+                              <button
+                                onClick={() => handleDeleteLessonPlan(plan)}
+                                disabled={deletingPlan === plan.lpId}
+                                className="bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-600 dark:text-red-200 px-3 py-2 rounded-lg disabled:opacity-50"
+                                title="Delete lesson plan"
+                              >
+                                {deletingPlan === plan.lpId ? '...' : <Trash2 className="h-4 w-4" />}
+                              </button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -2768,16 +2942,26 @@ const App = () => {
                                   : 'bg-blue-600 hover:bg-blue-700'
                               } text-white px-3 py-1 rounded text-sm mr-2`}
                               disabled={plan.status !== 'Pending Preparation' && plan.status !== 'Needs Rework'}
-                          >
-                            Edit
-                          </button>
-                          <button type="button" className="text-blue-600 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-300" onClick={() => openLessonView(plan)} title="View lesson plan">
-                            <Eye className="h-4 w-4 inline" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {filtered.length === 0 && (
+                            >
+                              Edit
+                            </button>
+                            <button type="button" className="text-blue-600 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-300 mr-2" onClick={() => openLessonView(plan)} title="View lesson plan">
+                              <Eye className="h-4 w-4 inline" />
+                            </button>
+                            {(plan.status === 'Pending Preparation' || plan.status === 'Pending Review' || plan.status === 'Needs Rework') && (
+                              <button
+                                onClick={() => handleDeleteLessonPlan(plan)}
+                                disabled={deletingPlan === plan.lpId}
+                                className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 disabled:opacity-50"
+                                title="Delete lesson plan"
+                              >
+                                {deletingPlan === plan.lpId ? '...' : <Trash2 className="h-4 w-4 inline" />}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {filtered.length === 0 && (
                       <tr>
                         <td colSpan={6} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 text-center">
                           {lessonPlans.length === 0 ? 'No lesson plans submitted yet.' : 'No lesson plans match the selected filters.'}
@@ -2788,11 +2972,6 @@ const App = () => {
                 </table>
               </div>
             </>
-            );
-                    )}
-                  </tbody>
-                </table>
-              </div>
             );
           })()}
         </div>

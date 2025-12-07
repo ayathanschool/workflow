@@ -658,6 +658,18 @@
         return _handleUpdateSchemeStatus(data);
       }
       
+      if (action === 'deleteScheme') {
+        return _handleDeleteScheme(data);
+      }
+      
+      if (action === 'updateScheme') {
+        return _handleUpdateScheme(data);
+      }
+      
+      if (action === 'deleteLessonPlan') {
+        return _handleDeleteLessonPlan(data);
+      }
+      
       // === CASCADE ROUTES ===
       if (action === 'executeCascade') {
         return _respond(executeCascade(data));
@@ -1472,6 +1484,136 @@
     } catch (error) {
       Logger.log('Error updating scheme status: ' + error.message);
       return _respond({ error: error.message });
+    }
+  }
+
+  /**
+  * Handle DELETE scheme (only allowed for Pending status)
+  */
+  function _handleDeleteScheme(data) {
+    try {
+      const { schemeId, teacherEmail } = data;
+      const sh = _getSheet('Schemes');
+      const headers = _headers(sh);
+      const allRows = _rows(sh);
+      const schemes = allRows.map(row => _indexByHeader(row, headers));
+      
+      const rowIndex = schemes.findIndex(row => row.schemeId === schemeId);
+      
+      if (rowIndex === -1) {
+        return _respond({ success: false, error: 'Scheme not found' });
+      }
+      
+      const scheme = schemes[rowIndex];
+      
+      // Verify ownership
+      if (String(scheme.teacherEmail || '').toLowerCase() !== String(teacherEmail || '').toLowerCase()) {
+        return _respond({ success: false, error: 'Not authorized to delete this scheme' });
+      }
+      
+      // Only allow deletion of Pending schemes
+      if (String(scheme.status || '').toLowerCase() !== 'pending') {
+        return _respond({ success: false, error: 'Can only delete schemes with Pending status' });
+      }
+      
+      // Delete the row (rowIndex + 2: 1 for header, 1 for 0-based to 1-based)
+      sh.deleteRow(rowIndex + 2);
+      
+      return _respond({ success: true, message: 'Scheme deleted successfully' });
+    } catch (error) {
+      Logger.log('Error deleting scheme: ' + error.message);
+      return _respond({ success: false, error: error.message });
+    }
+  }
+
+  /**
+  * Handle UPDATE scheme (edit existing scheme, only for Pending status)
+  */
+  function _handleUpdateScheme(data) {
+    try {
+      const { schemeId, teacherEmail, class: className, subject, term, unit, chapter, month, noOfSessions, content } = data;
+      const sh = _getSheet('Schemes');
+      const headers = _headers(sh);
+      const allRows = _rows(sh);
+      const schemes = allRows.map(row => _indexByHeader(row, headers));
+      
+      const rowIndex = schemes.findIndex(row => row.schemeId === schemeId);
+      
+      if (rowIndex === -1) {
+        return _respond({ success: false, error: 'Scheme not found' });
+      }
+      
+      const scheme = schemes[rowIndex];
+      
+      // Verify ownership
+      if (String(scheme.teacherEmail || '').toLowerCase() !== String(teacherEmail || '').toLowerCase()) {
+        return _respond({ success: false, error: 'Not authorized to update this scheme' });
+      }
+      
+      // Only allow editing of Pending schemes
+      if (String(scheme.status || '').toLowerCase() !== 'pending') {
+        return _respond({ success: false, error: 'Can only edit schemes with Pending status' });
+      }
+      
+      // Update the row (rowIndex + 2 for actual sheet row)
+      const actualRow = rowIndex + 2;
+      
+      // Update only the editable fields: class, subject, term, unit, chapter, month, noOfSessions, content
+      if (className !== undefined) sh.getRange(actualRow, headers.indexOf('class') + 1).setValue(className);
+      if (subject !== undefined) sh.getRange(actualRow, headers.indexOf('subject') + 1).setValue(subject);
+      if (term !== undefined) sh.getRange(actualRow, headers.indexOf('term') + 1).setValue(Number(term));
+      if (unit !== undefined) sh.getRange(actualRow, headers.indexOf('unit') + 1).setValue(Number(unit));
+      if (chapter !== undefined) sh.getRange(actualRow, headers.indexOf('chapter') + 1).setValue(chapter);
+      if (month !== undefined) sh.getRange(actualRow, headers.indexOf('month') + 1).setValue(month);
+      if (noOfSessions !== undefined) sh.getRange(actualRow, headers.indexOf('noOfSessions') + 1).setValue(Number(noOfSessions));
+      if (content !== undefined) sh.getRange(actualRow, headers.indexOf('content') + 1).setValue(content);
+      
+      return _respond({ success: true, message: 'Scheme updated successfully' });
+    } catch (error) {
+      Logger.log('Error updating scheme: ' + error.message);
+      return _respond({ success: false, error: error.message });
+    }
+  }
+
+  /**
+  * Handle DELETE lesson plan (only allowed for certain statuses)
+  */
+  function _handleDeleteLessonPlan(data) {
+    try {
+      const { lpId, teacherEmail } = data;
+      const sh = _getSheet('LessonPlans');
+      const headers = _headers(sh);
+      const allRows = _rows(sh);
+      const lessonPlans = allRows.map(row => _indexByHeader(row, headers));
+      
+      const rowIndex = lessonPlans.findIndex(row => row.lpId === lpId);
+      
+      if (rowIndex === -1) {
+        return _respond({ success: false, error: 'Lesson plan not found' });
+      }
+      
+      const lessonPlan = lessonPlans[rowIndex];
+      
+      // Verify ownership
+      if (String(lessonPlan.teacherEmail || '').toLowerCase() !== String(teacherEmail || '').toLowerCase()) {
+        return _respond({ success: false, error: 'Not authorized to delete this lesson plan' });
+      }
+      
+      // Allow deletion only for specific statuses
+      const status = String(lessonPlan.status || '').toLowerCase();
+      const allowedStatuses = ['pending preparation', 'pending review', 'needs rework'];
+      
+      if (!allowedStatuses.includes(status)) {
+        return _respond({ success: false, error: 'Can only delete lesson plans that are Pending Preparation, Pending Review, or Needs Rework' });
+      }
+      
+      // Delete the row (rowIndex + 2: 1 for header, 1 for 0-based to 1-based)
+      sh.deleteRow(rowIndex + 2);
+      
+      return _respond({ success: true, message: 'Lesson plan deleted successfully' });
+    } catch (error) {
+      Logger.log('Error deleting lesson plan: ' + error.message);
+      return _respond({ success: false, error: error.message });
     }
   }
 

@@ -255,6 +255,21 @@ export async function submitPlan(email, planData) {
   return postJSON(`${BASE_URL}?action=submitPlan`, { email, ...planData })
 }
 
+export async function deleteScheme(schemeId, teacherEmail) {
+  clearCache('getTeacherSchemes');
+  return postJSON(`${BASE_URL}?action=deleteScheme`, { schemeId, teacherEmail })
+}
+
+export async function updateScheme(schemeId, teacherEmail, planData) {
+  clearCache('getTeacherSchemes');
+  return postJSON(`${BASE_URL}?action=updateScheme`, { schemeId, teacherEmail, ...planData })
+}
+
+export async function deleteLessonPlan(lpId, teacherEmail) {
+  clearCache('getTeacherLessonPlans');
+  return postJSON(`${BASE_URL}?action=deleteLessonPlan`, { lpId, teacherEmail })
+}
+
 export async function getPendingPlans(page = 1, pageSize = 10, teacher = '', cls = '', subject = '', month = '') {
   const q = new URLSearchParams({ action: 'getPendingPlans', page, pageSize, teacher, class: cls, subject, month })
   const result = await getJSON(`${BASE_URL}?${q.toString()}`)
