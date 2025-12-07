@@ -4825,40 +4825,42 @@ const App = () => {
 
     return (
       <div className="space-y-6 max-w-full">
-        <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-900">Lesson Plan Approvals</h1>
-          <div className="flex space-x-3">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900">Lesson Plan Approvals</h1>
+          <div className="flex flex-wrap gap-2 md:gap-3 w-full sm:w-auto">
             <button
               onClick={refreshApprovals}
               disabled={refreshing}
-              className={`bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed`}
+              className={`flex-1 sm:flex-initial bg-indigo-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center justify-center hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm`}
               title="Force refresh (bypass cache)"
             >
               <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-              {refreshing ? 'Refreshing…' : 'Refresh'}
+              <span className="hidden sm:inline">{refreshing ? 'Refreshing…' : 'Refresh'}</span>
+              <span className="sm:hidden">{refreshing ? '...' : 'Refresh'}</span>
             </button>
             <button 
               onClick={() => {
                 setShowFilters(!showFilters);
               }}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700"
+              className="flex-1 sm:flex-initial bg-blue-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center justify-center hover:bg-blue-700 text-sm"
             >
               <Filter className="h-4 w-4 mr-2" />
-              {showFilters ? 'Hide Filters' : 'Show Filters'}
+              <span className="hidden sm:inline">{showFilters ? 'Hide Filters' : 'Show Filters'}</span>
+              <span className="sm:hidden">{showFilters ? 'Hide' : 'Filters'}</span>
             </button>
           </div>
         </div>
 
         {/* Simple Filter Bar - Always Visible */}
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow-sm p-4 border border-blue-100">
-          <div className="flex flex-wrap items-center gap-3">
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow-sm p-3 md:p-4 border border-blue-100">
+          <div className="flex flex-col md:flex-row md:flex-wrap md:items-center gap-2 md:gap-3">
             {/* Teacher Dropdown */}
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Teacher:</label>
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Teacher:</label>
               <select
                 value={selectedTeacher}
                 onChange={(e) => setSelectedTeacher(e.target.value)}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white min-w-[150px]"
+                className="flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white md:min-w-[150px]"
               >
                 <option value="">All Teachers</option>
                 {uniqueTeachers.map(teacher => (
@@ -4868,21 +4870,22 @@ const App = () => {
             </div>
 
             {/* Group Toggle Buttons */}
-            <div className="flex gap-2 ml-4">
+            <div className="flex gap-2 w-full md:w-auto md:ml-4">
               <button
                 onClick={() => {
                   const newValue = !groupByClass;
                   setGroupByClass(newValue);
                   if (newValue) setGroupByChapter(false);
                 }}
-                className={`px-3 py-1.5 text-sm rounded-lg transition-all ${
+                className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-lg transition-all ${
                   groupByClass
                     ? 'bg-teal-600 text-white shadow-md'
                     : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
                 }`}
               >
-                <LayoutGrid className="h-4 w-4 inline mr-1" />
-                Class-wise
+                <LayoutGrid className="h-3 w-3 md:h-4 md:w-4 inline mr-1" />
+                <span className="hidden sm:inline">Class-wise</span>
+                <span className="sm:hidden">Class</span>
               </button>
               <button
                 onClick={() => {
@@ -4890,30 +4893,31 @@ const App = () => {
                   setGroupByChapter(newValue);
                   if (newValue) setGroupByClass(false);
                 }}
-                className={`px-3 py-1.5 text-sm rounded-lg transition-all ${
+                className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-lg transition-all ${
                   groupByChapter
                     ? 'bg-purple-600 text-white shadow-md'
                     : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
                 }`}
               >
-                <BookOpen className="h-4 w-4 inline mr-1" />
-                Chapter-wise
+                <BookOpen className="h-3 w-3 md:h-4 md:w-4 inline mr-1" />
+                <span className="hidden sm:inline">Chapter-wise</span>
+                <span className="sm:hidden">Chapter</span>
               </button>
             </div>
 
             {/* Active Filter Badge */}
             {selectedTeacher && (
-              <span className="px-3 py-1 text-xs bg-blue-100 text-blue-800 rounded-full font-medium">
+              <span className="px-2 md:px-3 py-1 text-xs bg-blue-100 text-blue-800 rounded-full font-medium">
                 Teacher: {selectedTeacher}
               </span>
             )}
             {groupByClass && (
-              <span className="px-3 py-1 text-xs bg-teal-100 text-teal-800 rounded-full font-medium">
+              <span className="px-2 md:px-3 py-1 text-xs bg-teal-100 text-teal-800 rounded-full font-medium">
                 Grouped by Class
               </span>
             )}
             {groupByChapter && (
-              <span className="px-3 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
+              <span className="px-2 md:px-3 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
                 Grouped by Chapter
               </span>
             )}
@@ -5108,7 +5112,119 @@ const App = () => {
               )}
             </div>
           </div>
-          <div className="overflow-x-auto">
+          
+          {/* Mobile Card View */}
+          <div className="block md:hidden">
+            {filteredLessons.map((lesson) => (
+              <div key={lesson.lpId} className="border-b border-gray-200 p-4 hover:bg-gray-50">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1">
+                    <div className="font-medium text-sm text-gray-900">{lesson.teacherName}</div>
+                    <div className="text-xs text-gray-600 mt-0.5">
+                      {lesson.class} • {lesson.subject}
+                    </div>
+                  </div>
+                  <div>
+                    {lesson.status === 'Ready' ? (
+                      <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800">
+                        ✓ Ready
+                      </span>
+                    ) : lesson.status === 'Needs Rework' ? (
+                      <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                        ⚠ Rework
+                      </span>
+                    ) : lesson.status === 'Rejected' ? (
+                      <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800">
+                        ✗ Rejected
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                        ⏳ Pending
+                      </span>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="text-sm text-gray-900 font-medium mb-2 line-clamp-1">{lesson.chapter}</div>
+                
+                <div className="flex items-center gap-4 text-xs text-gray-600 mb-3">
+                  <span>Session {lesson.noOfSessions ? `${lesson.session}/${lesson.noOfSessions}` : lesson.session}</span>
+                  <span>•</span>
+                  <span>{lesson.selectedDate ? new Date(lesson.selectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}</span>
+                  <span>•</span>
+                  <span>P{lesson.selectedPeriod || '-'}</span>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <button 
+                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100" 
+                    onClick={() => openLessonView(lesson)}
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    View
+                  </button>
+                  <button 
+                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100" 
+                    onClick={() => viewChapterSessions(lesson)}
+                  >
+                    <BookOpen className="h-3.5 w-3.5" />
+                    Chapter
+                  </button>
+                  {lesson.status === 'Pending Review' && (
+                    <>
+                      <button 
+                        onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
+                        disabled={!!rowSubmitting[lesson.lpId]}
+                        className="px-3 py-2 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                      >
+                        {rowSubmitting[lesson.lpId] ? '...' : '✓'}
+                      </button>
+                      <button 
+                        onClick={() => handleApproveLesson(lesson.lpId, 'Needs Rework')}
+                        disabled={!!rowSubmitting[lesson.lpId]}
+                        className="px-3 py-2 text-xs bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50"
+                      >
+                        {rowSubmitting[lesson.lpId] ? '...' : '⚠'}
+                      </button>
+                      <button 
+                        onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
+                        disabled={!!rowSubmitting[lesson.lpId]}
+                        className="px-3 py-2 text-xs bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                      >
+                        {rowSubmitting[lesson.lpId] ? '...' : '✗'}
+                      </button>
+                    </>
+                  )}
+                  {lesson.status === 'Needs Rework' && (
+                    <>
+                      <button 
+                        onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
+                        disabled={!!rowSubmitting[lesson.lpId]}
+                        className="px-3 py-2 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                      >
+                        {rowSubmitting[lesson.lpId] ? '...' : '✓'}
+                      </button>
+                      <button 
+                        onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
+                        disabled={!!rowSubmitting[lesson.lpId]}
+                        className="px-3 py-2 text-xs bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                      >
+                        {rowSubmitting[lesson.lpId] ? '...' : '✗'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+            {filteredLessons.length === 0 && (
+              <div className="p-8 text-center text-gray-500">
+                No lesson plans found
+              </div>
+            )}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
