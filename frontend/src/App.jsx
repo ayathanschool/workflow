@@ -4685,39 +4685,39 @@ const App = () => {
     }
 
     return (
-      <div className="space-y-4 md:space-y-6 max-w-full">
-        <div className="flex flex-col gap-3 md:gap-4">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-            <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">Scheme Approvals</h1>
-            {selectedSchemes.size > 0 && (
-              <div className="flex flex-wrap gap-2 md:gap-3 w-full sm:w-auto">
-                <button 
-                  onClick={handleBulkApprove}
-                  className="flex-1 sm:flex-initial bg-green-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center justify-center hover:bg-green-700 text-sm"
-                >
-                  <Check className="h-4 w-4 mr-2" />
-                  Approve ({selectedSchemes.size})
-                </button>
-                <button 
-                  onClick={handleBulkReject}
-                  className="flex-1 sm:flex-initial bg-red-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center justify-center hover:bg-red-700 text-sm"
-                >
-                  <X className="h-4 w-4 mr-2" />
-                  Reject ({selectedSchemes.size})
-                </button>
-              </div>
-            )}
-          </div>
+      <div className="space-y-6 max-w-full">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900">Scheme Approvals</h1>
+          {selectedSchemes.size > 0 ? (
+            <div className="flex flex-wrap gap-2 md:gap-3 w-full sm:w-auto">
+              <button 
+                onClick={handleBulkApprove}
+                className="flex-1 sm:flex-initial bg-green-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center justify-center hover:bg-green-700 text-sm"
+              >
+                <Check className="h-4 w-4 mr-2" />
+                Approve ({selectedSchemes.size})
+              </button>
+              <button 
+                onClick={handleBulkReject}
+                className="flex-1 sm:flex-initial bg-red-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center justify-center hover:bg-red-700 text-sm"
+              >
+                <X className="h-4 w-4 mr-2" />
+                Reject ({selectedSchemes.size})
+              </button>
+            </div>
+          ) : null}
+        </div>
 
-          {/* Simple Filter Bar - Always Visible */}
-          <div className="flex flex-col md:flex-row md:flex-wrap items-stretch md:items-center gap-2 md:gap-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm p-3 md:p-4">
+        {/* Simple Filter Bar - Always Visible */}
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow-sm p-3 md:p-4 border border-blue-100">
+          <div className="flex flex-col md:flex-row md:flex-wrap md:items-center gap-2 md:gap-3">
             {/* Teacher Dropdown */}
-            <div className="flex items-center gap-2">
-              <label className="text-xs md:text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">Teacher:</label>
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Teacher:</label>
               <select
                 value={selectedTeacher}
                 onChange={(e) => setSelectedTeacher(e.target.value)}
-                className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[180px]"
+                className="flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white md:min-w-[150px]"
               >
                 <option value="">All Teachers</option>
                 {uniqueTeachers.map(teacher => (
@@ -4726,69 +4726,99 @@ const App = () => {
               </select>
             </div>
 
-            {/* Class-wise Toggle Button */}
-            <button
-              onClick={() => setGroupByClass(!groupByClass)}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
-                groupByClass
-                  ? 'bg-green-600 text-white hover:bg-green-700'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
-              }`}
-            >
-              {groupByClass ? '✓ ' : ''}Class-wise
-            </button>
-
-            {/* Chapter-wise Toggle Button */}
-            <button
-              onClick={() => setGroupByChapter(!groupByChapter)}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
-                groupByChapter
-                  ? 'bg-purple-600 text-white hover:bg-purple-700'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
-              }`}
-            >
-              {groupByChapter ? '✓ ' : ''}Chapter-wise
-            </button>
+            {/* Group Toggle Buttons */}
+            <div className="flex gap-2 w-full md:w-auto md:ml-4">
+              <button
+                onClick={() => {
+                  const newValue = !groupByClass;
+                  setGroupByClass(newValue);
+                  if (newValue) setGroupByChapter(false);
+                }}
+                className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-lg transition-all ${
+                  groupByClass
+                    ? 'bg-teal-600 text-white shadow-md'
+                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                <LayoutGrid className="h-3 w-3 md:h-4 md:w-4 inline mr-1" />
+                <span className="hidden sm:inline">Class-wise</span>
+                <span className="sm:hidden">Class</span>
+              </button>
+              <button
+                onClick={() => {
+                  const newValue = !groupByChapter;
+                  setGroupByChapter(newValue);
+                  if (newValue) setGroupByClass(false);
+                }}
+                className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-lg transition-all ${
+                  groupByChapter
+                    ? 'bg-purple-600 text-white shadow-md'
+                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                <BookOpen className="h-3 w-3 md:h-4 md:w-4 inline mr-1" />
+                <span className="hidden sm:inline">Chapter-wise</span>
+                <span className="sm:hidden">Chapter</span>
+              </button>
+            </div>
 
             {/* Status Quick Filters */}
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="flex gap-2 w-full md:w-auto md:ml-auto">
               <button
                 onClick={() => setStatusFilter('Pending')}
-                className={`px-3 py-1.5 text-sm rounded-full transition-all ${
+                className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-full transition-all ${
                   statusFilter === 'Pending'
                     ? 'bg-yellow-500 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
                 }`}
               >
                 ⏳ Pending
               </button>
               <button
                 onClick={() => setStatusFilter('Approved')}
-                className={`px-3 py-1.5 text-sm rounded-full transition-all ${
+                className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-full transition-all ${
                   statusFilter === 'Approved'
                     ? 'bg-green-500 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
                 }`}
               >
                 ✓ Approved
               </button>
               <button
                 onClick={() => setStatusFilter('')}
-                className={`px-3 py-1.5 text-sm rounded-full transition-all ${
+                className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-full transition-all ${
                   !statusFilter
                     ? 'bg-blue-500 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
                 }`}
               >
                 All
               </button>
             </div>
+
+            {/* Active Filter Badge */}
+            {selectedTeacher && (
+              <span className="px-2 md:px-3 py-1 text-xs bg-blue-100 text-blue-800 rounded-full font-medium">
+                Teacher: {selectedTeacher}
+              </span>
+            )}
+            {groupByClass && (
+              <span className="px-2 md:px-3 py-1 text-xs bg-teal-100 text-teal-800 rounded-full font-medium">
+                Grouped by Class
+              </span>
+            )}
+            {groupByChapter && (
+              <span className="px-2 md:px-3 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
+                Grouped by Chapter
+              </span>
+            )}
           </div>
         </div>
+
         {/* Table Section */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-200">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-2">
               <h2 className="text-lg font-medium text-gray-900">
                 {statusFilter === 'Approved' ? 'Approved Schemes' : 
                  statusFilter === 'Pending' ? 'Pending Schemes' : 'All Schemes'} 
@@ -4809,7 +4839,96 @@ const App = () => {
               )}
             </div>
           </div>
-          <div className="overflow-x-auto">
+
+          {/* Mobile Card View */}
+          <div className="block md:hidden">
+            {filteredSchemes.map((scheme) => {
+              const isPending = scheme.status === 'Pending' || scheme.status === 'Pending - Validation Override' || scheme.status === 'Pending - No Timetable';
+              return (
+                <div key={scheme.schemeId} className="border-b border-gray-200 p-3 hover:bg-gray-50">
+                  {/* Header: Teacher & Status */}
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="font-medium text-sm text-gray-900">{scheme.teacherName}</div>
+                    {scheme.status === 'Approved' ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                        ✓ Approved
+                      </span>
+                    ) : scheme.status === 'Rejected' ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                        ✗ Rejected
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                        ⏳ Pending
+                      </span>
+                    )}
+                  </div>
+                  
+                  {/* Class & Subject */}
+                  <div className="text-xs text-gray-600 mb-1.5">
+                    {scheme.class} • {scheme.subject}
+                  </div>
+                  
+                  {/* Chapter */}
+                  <div className="text-sm text-gray-900 font-medium mb-1.5 line-clamp-2 break-words">{scheme.chapter}</div>
+                  
+                  {/* Sessions & Date - Compact */}
+                  <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-xs text-gray-600 mb-3">
+                    <span>{scheme.noOfSessions} Sessions</span>
+                    <span>{scheme.createdAt ? new Date(scheme.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}</span>
+                  </div>
+                  
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {(statusFilter === 'Pending' || !statusFilter) && isPending && (
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedSchemes.has(scheme.schemeId)}
+                          onChange={() => toggleSchemeSelection(scheme.schemeId)}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-xs text-gray-600">Select</span>
+                      </label>
+                    )}
+                    <button 
+                      className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100" 
+                      onClick={() => openLessonView(scheme)}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      View
+                    </button>
+                    {isPending && (
+                      <>
+                        <button 
+                          onClick={() => handleApproveScheme(scheme.schemeId)}
+                          className="px-2.5 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
+                          title="Approve"
+                        >
+                          ✓
+                        </button>
+                        <button 
+                          onClick={() => handleRejectScheme(scheme.schemeId)}
+                          className="px-2.5 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
+                          title="Reject"
+                        >
+                          ✗
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {filteredSchemes.length === 0 && (
+              <div className="p-8 text-center text-gray-500">
+                No schemes found
+              </div>
+            )}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
                 <tr>
