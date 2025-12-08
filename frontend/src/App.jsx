@@ -5600,26 +5600,26 @@ const App = () => {
                       <button 
                         onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
                         disabled={!!rowSubmitting[lesson.lpId]}
-                        className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                        className="px-2.5 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                         title="Approve"
                       >
-                        {rowSubmitting[lesson.lpId] ? '...' : '✓ Approve'}
+                        {rowSubmitting[lesson.lpId] ? '...' : '✓'}
                       </button>
                       <button 
                         onClick={() => handleApproveLesson(lesson.lpId, 'Needs Rework')}
                         disabled={!!rowSubmitting[lesson.lpId]}
-                        className="px-3 py-1.5 text-xs bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50"
+                        className="px-2.5 py-1.5 text-sm bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50"
                         title="Needs Rework"
                       >
-                        {rowSubmitting[lesson.lpId] ? '...' : '⚠ Rework'}
+                        {rowSubmitting[lesson.lpId] ? '...' : '⚠'}
                       </button>
                       <button 
                         onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
                         disabled={!!rowSubmitting[lesson.lpId]}
-                        className="px-3 py-1.5 text-xs bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                        className="px-2.5 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
                         title="Reject"
                       >
-                        {rowSubmitting[lesson.lpId] ? '...' : '✗ Reject'}
+                        {rowSubmitting[lesson.lpId] ? '...' : '✗'}
                       </button>
                     </>
                   )}
@@ -5628,18 +5628,18 @@ const App = () => {
                       <button 
                         onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
                         disabled={!!rowSubmitting[lesson.lpId]}
-                        className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                        className="px-2.5 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                         title="Approve"
                       >
-                        {rowSubmitting[lesson.lpId] ? '...' : '✓ Approve'}
+                        {rowSubmitting[lesson.lpId] ? '...' : '✓'}
                       </button>
                       <button 
                         onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
                         disabled={!!rowSubmitting[lesson.lpId]}
-                        className="px-3 py-1.5 text-xs bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                        className="px-2.5 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
                         title="Reject"
                       >
-                        {rowSubmitting[lesson.lpId] ? '...' : '✗ Reject'}
+                        {rowSubmitting[lesson.lpId] ? '...' : '✗'}
                       </button>
                     </>
                   )}
