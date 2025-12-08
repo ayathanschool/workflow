@@ -5541,55 +5541,55 @@ const App = () => {
           {/* Mobile Card View */}
           <div className="block md:hidden">
             {filteredLessons.map((lesson) => (
-              <div key={lesson.lpId} className="border-b border-gray-200 p-4 hover:bg-gray-50">
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex-1">
-                    <div className="font-medium text-sm text-gray-900">{lesson.teacherName}</div>
-                    <div className="text-xs text-gray-600 mt-0.5">
-                      {lesson.class} • {lesson.subject}
-                    </div>
-                  </div>
-                  <div>
-                    {lesson.status === 'Ready' ? (
-                      <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800">
-                        ✓ Ready
-                      </span>
-                    ) : lesson.status === 'Needs Rework' ? (
-                      <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
-                        ⚠ Rework
-                      </span>
-                    ) : lesson.status === 'Rejected' ? (
-                      <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800">
-                        ✗ Rejected
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                        ⏳ Pending
-                      </span>
-                    )}
-                  </div>
+              <div key={lesson.lpId} className="border-b border-gray-200 p-3 hover:bg-gray-50">
+                {/* Header: Teacher & Status */}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="font-medium text-sm text-gray-900">{lesson.teacherName}</div>
+                  {lesson.status === 'Ready' ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                      ✓ Ready
+                    </span>
+                  ) : lesson.status === 'Needs Rework' ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                      ⚠ Rework
+                    </span>
+                  ) : lesson.status === 'Rejected' ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                      ✗ Rejected
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                      ⏳ Pending
+                    </span>
+                  )}
                 </div>
                 
-                <div className="text-sm text-gray-900 font-medium mb-2 line-clamp-1">{lesson.chapter}</div>
+                {/* Class & Subject */}
+                <div className="text-xs text-gray-600 mb-1.5">
+                  {lesson.class} • {lesson.subject}
+                </div>
                 
-                <div className="flex items-center gap-4 text-xs text-gray-600 mb-3">
+                {/* Chapter */}
+                <div className="text-sm text-gray-900 font-medium mb-1.5 line-clamp-2 break-words">{lesson.chapter}</div>
+                
+                {/* Session, Date, Period - Compact */}
+                <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-xs text-gray-600 mb-3">
                   <span>Session {lesson.noOfSessions ? `${lesson.session}/${lesson.noOfSessions}` : lesson.session}</span>
-                  <span>•</span>
                   <span>{lesson.selectedDate ? new Date(lesson.selectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}</span>
-                  <span>•</span>
                   <span>P{lesson.selectedPeriod || '-'}</span>
                 </div>
                 
-                <div className="flex items-center gap-2">
+                {/* Action Buttons */}
+                <div className="flex items-center gap-2 flex-wrap">
                   <button 
-                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100" 
+                    className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100" 
                     onClick={() => openLessonView(lesson)}
                   >
                     <Eye className="h-3.5 w-3.5" />
                     View
                   </button>
                   <button 
-                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100" 
+                    className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100" 
                     onClick={() => viewChapterSessions(lesson)}
                   >
                     <BookOpen className="h-3.5 w-3.5" />
@@ -5600,23 +5600,26 @@ const App = () => {
                       <button 
                         onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
                         disabled={!!rowSubmitting[lesson.lpId]}
-                        className="px-3 py-2 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                        className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                        title="Approve"
                       >
-                        {rowSubmitting[lesson.lpId] ? '...' : '✓'}
+                        {rowSubmitting[lesson.lpId] ? '...' : '✓ Approve'}
                       </button>
                       <button 
                         onClick={() => handleApproveLesson(lesson.lpId, 'Needs Rework')}
                         disabled={!!rowSubmitting[lesson.lpId]}
-                        className="px-3 py-2 text-xs bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50"
+                        className="px-3 py-1.5 text-xs bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50"
+                        title="Needs Rework"
                       >
-                        {rowSubmitting[lesson.lpId] ? '...' : '⚠'}
+                        {rowSubmitting[lesson.lpId] ? '...' : '⚠ Rework'}
                       </button>
                       <button 
                         onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
                         disabled={!!rowSubmitting[lesson.lpId]}
-                        className="px-3 py-2 text-xs bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                        className="px-3 py-1.5 text-xs bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                        title="Reject"
                       >
-                        {rowSubmitting[lesson.lpId] ? '...' : '✗'}
+                        {rowSubmitting[lesson.lpId] ? '...' : '✗ Reject'}
                       </button>
                     </>
                   )}
@@ -5625,16 +5628,18 @@ const App = () => {
                       <button 
                         onClick={() => handleApproveLesson(lesson.lpId, 'Ready')}
                         disabled={!!rowSubmitting[lesson.lpId]}
-                        className="px-3 py-2 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                        className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                        title="Approve"
                       >
-                        {rowSubmitting[lesson.lpId] ? '...' : '✓'}
+                        {rowSubmitting[lesson.lpId] ? '...' : '✓ Approve'}
                       </button>
                       <button 
                         onClick={() => handleApproveLesson(lesson.lpId, 'Rejected')}
                         disabled={!!rowSubmitting[lesson.lpId]}
-                        className="px-3 py-2 text-xs bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                        className="px-3 py-1.5 text-xs bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                        title="Reject"
                       >
-                        {rowSubmitting[lesson.lpId] ? '...' : '✗'}
+                        {rowSubmitting[lesson.lpId] ? '...' : '✗ Reject'}
                       </button>
                     </>
                   )}
@@ -5807,33 +5812,45 @@ const App = () => {
                       </div>
                       <div className="divide-y">
                         {(g.lessons || []).slice().sort((a,b) => Number(a.session||0) - Number(b.session||0)).map(l => (
-                          <div key={l.lpId} className="px-4 py-3 flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                              <div className="text-xs text-gray-600">Session {l.session}</div>
-                              <div className="text-xs text-gray-600">{l.selectedDate ? new Date(l.selectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</div>
-                              <div className="text-xs text-gray-500">P{l.selectedPeriod || '-'}</div>
-                              <div className="text-xs text-gray-700 truncate max-w-[28rem]">{l.learningObjectives || '-'}</div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ${l.status==='Ready'?'bg-green-100 text-green-800': l.status==='Pending Review'?'bg-yellow-100 text-yellow-800': l.status==='Needs Rework'?'bg-orange-100 text-orange-800':'bg-gray-100 text-gray-800'}`}>{l.status}</span>
-                              {(l.status === 'Pending Review' || l.status === 'Needs Rework') && (
-                                <>
-                                  <button 
-                                    onClick={() => handleApproveLesson(l.lpId, 'Ready')}
-                                    disabled={!!rowSubmitting[l.lpId]}
-                                    className={`text-green-600 px-1.5 py-0.5 bg-green-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-green-900'}`}>✓</button>
-                                  {l.status === 'Pending Review' && (
+                          <div key={l.lpId} className="px-3 py-2 md:px-4 md:py-3">
+                            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                              {/* Mobile: Stack info vertically */}
+                              <div className="flex flex-col gap-1 md:flex-row md:items-center md:gap-4 flex-1">
+                                <div className="flex items-center gap-3 text-xs text-gray-600">
+                                  <span className="font-medium">Session {l.session}</span>
+                                  <span>{l.selectedDate ? new Date(l.selectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}</span>
+                                  <span>P{l.selectedPeriod || '-'}</span>
+                                </div>
+                                <div className="text-xs text-gray-700 line-clamp-2 md:line-clamp-1 md:truncate md:max-w-[28rem] break-words">{l.learningObjectives || '-'}</div>
+                              </div>
+                              {/* Status and Actions */}
+                              <div className="flex items-center gap-2 self-start md:self-center">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs whitespace-nowrap ${l.status==='Ready'?'bg-green-100 text-green-800': l.status==='Pending Review'?'bg-yellow-100 text-yellow-800': l.status==='Needs Rework'?'bg-orange-100 text-orange-800':'bg-gray-100 text-gray-800'}`}>{l.status}</span>
+                                {(l.status === 'Pending Review' || l.status === 'Needs Rework') && (
+                                  <>
                                     <button 
-                                      onClick={() => handleApproveLesson(l.lpId, 'Needs Rework')}
+                                      onClick={() => handleApproveLesson(l.lpId, 'Ready')}
                                       disabled={!!rowSubmitting[l.lpId]}
-                                      className={`text-yellow-600 px-1.5 py-0.5 bg-yellow-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-yellow-900'}`}>⚠</button>
-                                  )}
-                                  <button 
-                                    onClick={() => handleApproveLesson(l.lpId, 'Rejected')}
-                                    disabled={!!rowSubmitting[l.lpId]}
-                                    className={`text-red-600 px-1.5 py-0.5 bg-red-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-red-900'}`}>✗</button>
-                                </>
-                              )}
+                                      className={`text-green-600 px-1.5 py-0.5 bg-green-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-green-900'}`}
+                                      title="Approve"
+                                    >✓</button>
+                                    {l.status === 'Pending Review' && (
+                                      <button 
+                                        onClick={() => handleApproveLesson(l.lpId, 'Needs Rework')}
+                                        disabled={!!rowSubmitting[l.lpId]}
+                                        className={`text-yellow-600 px-1.5 py-0.5 bg-yellow-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-yellow-900'}`}
+                                        title="Needs Rework"
+                                      >⚠</button>
+                                    )}
+                                    <button 
+                                      onClick={() => handleApproveLesson(l.lpId, 'Rejected')}
+                                      disabled={!!rowSubmitting[l.lpId]}
+                                      className={`text-red-600 px-1.5 py-0.5 bg-red-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-red-900'}`}
+                                      title="Reject"
+                                    >✗</button>
+                                  </>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -5894,31 +5911,39 @@ const App = () => {
                               </div>
                               <div className="space-y-2">
                                 {(sub.lessons || []).slice().sort((a,b) => Number(a.session||0) - Number(b.session||0)).map(l => (
-                                  <div key={l.lpId} className="flex items-center justify-between">
-                                    <div className="flex items-center gap-4">
-                                      <div className="text-xs text-gray-600">Session {l.session}</div>
-                                      <div className="text-xs text-gray-600">{l.selectedDate ? new Date(l.selectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</div>
-                                      <div className="text-xs text-gray-500">P{l.selectedPeriod || '-'}</div>
-                                      <div className="text-xs text-gray-700 truncate max-w-[28rem]">{l.learningObjectives || '-'}</div>
+                                  <div key={l.lpId} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 py-1">
+                                    <div className="flex flex-col gap-1 md:flex-row md:items-center md:gap-4 flex-1">
+                                      <div className="flex items-center gap-3 text-xs text-gray-600">
+                                        <span className="font-medium">Session {l.session}</span>
+                                        <span>{l.selectedDate ? new Date(l.selectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}</span>
+                                        <span>P{l.selectedPeriod || '-'}</span>
+                                      </div>
+                                      <div className="text-xs text-gray-700 line-clamp-2 md:line-clamp-1 md:truncate md:max-w-[28rem] break-words">{l.learningObjectives || '-'}</div>
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ${l.status==='Ready'?'bg-green-100 text-green-800': l.status==='Pending Review'?'bg-yellow-100 text-yellow-800': l.status==='Needs Rework'?'bg-orange-100 text-orange-800':'bg-gray-100 text-gray-800'}`}>{l.status}</span>
+                                    <div className="flex items-center gap-2 self-start md:self-center">
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs whitespace-nowrap ${l.status==='Ready'?'bg-green-100 text-green-800': l.status==='Pending Review'?'bg-yellow-100 text-yellow-800': l.status==='Needs Rework'?'bg-orange-100 text-orange-800':'bg-gray-100 text-gray-800'}`}>{l.status}</span>
                                       {(l.status === 'Pending Review' || l.status === 'Needs Rework') && (
                                         <>
                                           <button 
                                             onClick={() => handleApproveLesson(l.lpId, 'Ready')}
                                             disabled={!!rowSubmitting[l.lpId]}
-                                            className={`text-green-600 px-1.5 py-0.5 bg-green-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-green-900'}`}>✓</button>
+                                            className={`text-green-600 px-1.5 py-0.5 bg-green-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-green-900'}`}
+                                            title="Approve"
+                                          >✓</button>
                                           {l.status === 'Pending Review' && (
                                             <button 
                                               onClick={() => handleApproveLesson(l.lpId, 'Needs Rework')}
                                               disabled={!!rowSubmitting[l.lpId]}
-                                              className={`text-yellow-600 px-1.5 py-0.5 bg-yellow-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-yellow-900'}`}>⚠</button>
+                                              className={`text-yellow-600 px-1.5 py-0.5 bg-yellow-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-yellow-900'}`}
+                                              title="Needs Rework"
+                                            >⚠</button>
                                           )}
                                           <button 
                                             onClick={() => handleApproveLesson(l.lpId, 'Rejected')}
                                             disabled={!!rowSubmitting[l.lpId]}
-                                            className={`text-red-600 px-1.5 py-0.5 bg-red-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-red-900'}`}>✗</button>
+                                            className={`text-red-600 px-1.5 py-0.5 bg-red-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-red-900'}`}
+                                            title="Reject"
+                                          >✗</button>
                                         </>
                                       )}
                                     </div>
