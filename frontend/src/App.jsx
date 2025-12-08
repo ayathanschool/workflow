@@ -5792,22 +5792,23 @@ const App = () => {
                   const approved = g.counts?.ready || 0;
                   return (
                     <div key={g.key} className="border rounded-lg">
-                      <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b">
-                        <div>
-                          <div className="text-sm text-gray-600">{g.class} • {g.subject} • {g.teacherName}</div>
-                          <div className="text-base font-semibold text-gray-900">{g.chapter}</div>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between px-3 py-2 sm:px-4 sm:py-3 bg-gray-50 border-b gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs sm:text-sm text-gray-600 truncate">{g.class} • {g.subject} • {g.teacherName}</div>
+                          <div className="text-sm sm:text-base font-semibold text-gray-900 break-words line-clamp-2">{g.chapter}</div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-800">Pending: {pending}</span>
-                          <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-800">Approved: {approved}</span>
+                        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+                          <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800 font-medium">P: {pending}</span>
+                          <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-medium">A: {approved}</span>
                           <button
                             onClick={() => {
                               const lessons = (g.lessons || []).slice().sort((a,b) => Number(a.session||0) - Number(b.session||0));
                               setSelectedChapter({ schemeId: g.schemeId || '', chapter: g.chapter, class: g.class, subject: g.subject, teacherName: g.teacherName, lessons });
                               setShowChapterModal(true);
                             }}
-                            className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700"
-                          >Open Chapter</button>
+                            className="p-1.5 text-purple-600 hover:text-purple-700 bg-purple-100 rounded-lg hover:bg-purple-200"
+                            title="Open Chapter"
+                          ><BookOpen className="h-4 w-4" /></button>
                         </div>
                       </div>
                       <div className="divide-y">
@@ -5875,14 +5876,14 @@ const App = () => {
                   const totalApproved = clsGroup.counts?.ready || 0;
                   return (
                     <div key={clsGroup.class} className="border rounded-lg">
-                      <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b">
+                      <div className="flex items-center justify-between px-3 py-2 sm:px-4 sm:py-3 bg-gray-50 border-b">
                         <div>
                           <div className="text-base font-semibold text-gray-900">{clsGroup.class}</div>
-                          <div className="text-sm text-gray-600">Subject • Chapter groups</div>
+                          <div className="text-xs sm:text-sm text-gray-600">Subject • Chapter groups</div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-800">Pending: {totalPending}</span>
-                          <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-800">Approved: {totalApproved}</span>
+                        <div className="flex items-center gap-1.5 sm:gap-2">
+                          <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800 font-medium">P: {totalPending}</span>
+                          <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-medium">A: {totalApproved}</span>
                         </div>
                       </div>
                       <div className="divide-y">
@@ -5890,23 +5891,24 @@ const App = () => {
                           const pending = sub.counts?.pending || 0;
                           const approved = sub.counts?.ready || 0;
                           return (
-                            <div key={sub.key} className="px-4 py-3">
-                              <div className="flex items-center justify-between mb-2">
-                                <div>
-                                  <div className="text-sm text-gray-600">{sub.subject}</div>
-                                  <div className="text-base font-semibold text-gray-900">{sub.chapter}</div>
+                            <div key={sub.key} className="px-3 py-2 sm:px-4 sm:py-3">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-2 gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-xs sm:text-sm text-gray-600">{sub.subject}</div>
+                                  <div className="text-sm sm:text-base font-semibold text-gray-900 break-words line-clamp-2">{sub.chapter}</div>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-800">Pending: {pending}</span>
-                                  <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-800">Approved: {approved}</span>
+                                <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+                                  <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800 font-medium">P: {pending}</span>
+                                  <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-medium">A: {approved}</span>
                                   <button
                                     onClick={() => {
                                       const lessons = (sub.lessons || []).slice().sort((a,b) => Number(a.session||0) - Number(b.session||0));
                                       setSelectedChapter({ schemeId: lessons[0]?.schemeId || '', chapter: sub.chapter, class: clsGroup.class, subject: sub.subject, teacherName: sub.teacherName, lessons });
                                       setShowChapterModal(true);
                                     }}
-                                    className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700"
-                                  >Open Chapter</button>
+                                    className="p-1.5 text-purple-600 hover:text-purple-700 bg-purple-100 rounded-lg hover:bg-purple-200"
+                                    title="Open Chapter"
+                                  ><BookOpen className="h-4 w-4" /></button>
                                 </div>
                               </div>
                               <div className="space-y-2">
