@@ -121,8 +121,8 @@ const PWAInstallBanner = () => {
   if (isStandalone || !showBanner) return null;
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4 shadow-lg">
-      <div className="max-w-4xl mx-auto flex items-center justify-between">
+    <div className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4 shadow-lg pointer-events-none">
+      <div className="max-w-4xl mx-auto flex items-center justify-between pointer-events-auto">
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
             <Smartphone className="w-6 h-6" />

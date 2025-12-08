@@ -23,9 +23,9 @@ const PWAControls = () => {
   if (isStandalone) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 space-y-2">
+    <div className="fixed bottom-4 right-4 z-50 space-y-2 pointer-events-none">
       {/* Connection Status */}
-      <div className={`px-3 py-2 rounded-lg text-sm flex items-center space-x-2 ${
+      <div className={`px-3 py-2 rounded-lg text-sm flex items-center space-x-2 pointer-events-auto ${
         isOnline 
           ? 'bg-green-100 text-green-700 border border-green-200' 
           : 'bg-red-100 text-red-700 border border-red-200'
@@ -38,7 +38,7 @@ const PWAControls = () => {
       {isInstallable && (
         <button
           onClick={handleInstall}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-blue-700 transition-colors shadow-lg"
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-blue-700 transition-colors shadow-lg pointer-events-auto"
         >
           <Download className="w-4 h-4" />
           <span>Install App</span>
@@ -49,7 +49,7 @@ const PWAControls = () => {
       {hasUpdate && (
         <button
           onClick={handleUpdate}
-          className="bg-orange-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-orange-700 transition-colors shadow-lg animate-pulse"
+          className="bg-orange-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-orange-700 transition-colors shadow-lg animate-pulse pointer-events-auto"
         >
           <RefreshCw className="w-4 h-4" />
           <span>Update Available</span>
