@@ -325,6 +325,7 @@ const App = () => {
   const [loading, setLoading] = useState(true);
   const [activeView, setActiveView] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpenedAt, setSidebarOpenedAt] = useState(0);
   const [notifications, setNotifications] = useState([]);
 
   // Google Auth integration
@@ -1121,9 +1122,18 @@ const App = () => {
       <>
         {/* Mobile sidebar */}
         {sidebarOpen && (
-          <div className="fixed inset-0 z-40 lg:hidden">
-            <div className="fixed inset-0 bg-gray-600 bg-opacity-75 transition-opacity" onClick={() => setSidebarOpen(false)} />
-            <div className={`fixed inset-y-0 left-0 flex flex-col max-w-xs w-full ${theme === 'dark' ? 'bg-gray-800' : 'bg-white'} z-50 shadow-xl`}>
+          <div className="fixed inset-0 z-[60] lg:hidden">
+            <div
+              className="fixed inset-0 bg-gray-600 bg-opacity-75 transition-opacity z-[65]"
+              onClick={() => {
+                if (Date.now() - sidebarOpenedAt < 300) return;
+                setSidebarOpen(false);
+              }}
+            />
+            <div 
+              className={`fixed inset-y-0 left-0 flex flex-col max-w-xs w-full ${theme === 'dark' ? 'bg-gray-800' : 'bg-white'} z-[70] shadow-xl`}
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="absolute top-0 right-0 -mr-12 pt-2">
                 <button
                   onClick={() => setSidebarOpen(false)}
@@ -1143,7 +1153,9 @@ const App = () => {
                     return (
                       <button
                         key={item.id}
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
                           setActiveView(item.id);
                           setSidebarOpen(false);
                         }}
@@ -1211,7 +1223,7 @@ const App = () => {
       <div className={`flex items-center justify-between p-4 ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} border-b transition-colors duration-300`}>
         <div className="flex items-center">
           <button
-            onClick={() => setSidebarOpen(true)}
+            onClick={() => { setSidebarOpen(true); setSidebarOpenedAt(Date.now()); }}
             className={`lg:hidden mr-3 p-2 rounded-md transition-colors duration-200 ${theme === 'dark' ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-500 hover:bg-gray-100'}`}
           >
             <Menu className="h-6 w-6" />
@@ -4494,10 +4506,7 @@ const App = () => {
     const [groupByChapter, setGroupByChapter] = useState(false);
     const [statusFilter, setStatusFilter] = useState('Pending'); // Default to pending
 
-    // Auto-hide sidebar when viewing approvals
-    useEffect(() => {
-      setSidebarOpen(false);
-    }, []);
+    // Ensure sidebar state doesn't auto-toggle here to avoid flicker on mobile
 
     // Load all schemes ONCE on component mount
     useEffect(() => {
@@ -5000,10 +5009,7 @@ const App = () => {
       }
     };
 
-    // Auto-hide sidebar when viewing approvals
-    useEffect(() => {
-      setSidebarOpen(false);
-    }, []);
+    // Ensure sidebar state doesn't auto-toggle here to avoid flicker on mobile
 
     // Get unique values for dropdowns - optimized with useMemo
     const uniqueTeachers = useMemo(() => {
