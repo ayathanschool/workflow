@@ -514,15 +514,15 @@ const HMDailyOversight = ({ user }) => {
 
       {/* Filters - Only show for Daily Reports */}
       {activeTab === 'reports' && (
-        <div>
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">Filters</h3>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Teacher</label>
               <select
                 value={filters.teacher}
                 onChange={e => setFilters({ ...filters, teacher: e.target.value })}
-                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
               >
                 <option value="">All Teachers</option>
                 {teachers.map(t => <option key={t} value={t}>{t}</option>)}
@@ -533,7 +533,7 @@ const HMDailyOversight = ({ user }) => {
               <select
                 value={filters.class}
                 onChange={e => setFilters({ ...filters, class: e.target.value })}
-                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
               >
                 <option value="">All Classes</option>
                 {classes.map(c => <option key={c} value={c}>{c}</option>)}
@@ -544,7 +544,7 @@ const HMDailyOversight = ({ user }) => {
               <select
                 value={filters.subject}
                 onChange={e => setFilters({ ...filters, subject: e.target.value })}
-                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
               >
                 <option value="">All Subjects</option>
                 {subjects.map(s => <option key={s} value={s}>{s}</option>)}
@@ -555,7 +555,7 @@ const HMDailyOversight = ({ user }) => {
               <select
                 value={filters.status}
                 onChange={e => setFilters({ ...filters, status: e.target.value })}
-                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
               >
                 <option value="all">All</option>
                 <option value="submitted">Submitted Only</option>
@@ -566,7 +566,7 @@ const HMDailyOversight = ({ user }) => {
           {(filters.teacher || filters.class || filters.subject || filters.status !== 'all') && (
             <button
               onClick={() => setFilters({ teacher: '', class: '', subject: '', status: 'all' })}
-              className="mt-3 text-xs text-blue-600 hover:text-blue-800 font-medium"
+              className="mt-3 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
             >
               Clear all filters
             </button>
@@ -574,9 +574,89 @@ const HMDailyOversight = ({ user }) => {
         </div>
       )}
 
-      {/* Daily Reports Table */}
+      {/* Daily Reports - Mobile Card View */}
       {activeTab === 'reports' && (
-        <div className="overflow-x-auto">
+        <div className="block md:hidden space-y-3">
+          {filteredReports.map((report, idx) => (
+            <div
+              key={idx}
+              className={`border rounded-lg p-4 ${
+                report.submitted ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+              }`}
+            >
+              {/* Header: Teacher + Status */}
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-semibold text-gray-600">P{report.period}</span>
+                    <span className="text-sm font-semibold text-gray-900 truncate">
+                      {report.teacher}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-600">
+                    {report.class} • {report.subject}
+                  </div>
+                </div>
+                <div className="flex-shrink-0">
+                  {report.submitted ? (
+                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                      ✓
+                    </span>
+                  ) : (
+                    <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                      ⚠️
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Chapter */}
+              {report.chapter && (
+                <div className="mb-2">
+                  <div className="flex items-center gap-2">
+                    {report.planType === 'in plan' && (
+                      <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">📚</span>
+                    )}
+                    <span className="text-sm text-gray-900 line-clamp-2 break-words">
+                      {report.chapter}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Completion Status */}
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs text-gray-500">Completion:</span>
+                <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded ${
+                  report.completed === 'Fully Completed' 
+                    ? 'bg-green-100 text-green-800'
+                    : report.completed === 'Partially Completed'
+                    ? 'bg-yellow-100 text-yellow-800'
+                    : 'bg-gray-100 text-gray-800'
+                }`}>
+                  {report.completed}
+                </span>
+              </div>
+
+              {/* Notes */}
+              {report.notes && (
+                <div className="text-xs text-gray-600 mt-2 pt-2 border-t border-gray-200">
+                  <span className="font-medium">Notes:</span> {report.notes}
+                </div>
+              )}
+            </div>
+          ))}
+          {filteredReports.length === 0 && !loading && (
+            <div className="text-center py-8 text-gray-500 text-sm">
+              No reports found for the selected filters.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Daily Reports - Desktop Table View */}
+      {activeTab === 'reports' && (
+        <div className="hidden md:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -652,9 +732,99 @@ const HMDailyOversight = ({ user }) => {
         </div>
       )}
 
-      {/* Lesson Plans Table */}
+      {/* Lesson Plans - Mobile Card View */}
       {activeTab === 'lessonplans' && (
-      <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+        <div className="block md:hidden space-y-3">
+          {lessonPlans.map((lp, idx) => (
+            <div
+              key={idx}
+              className={`border rounded-lg p-4 ${
+                lp.lpStatus === 'Approved' ? 'bg-green-50 border-green-200' : 
+                lp.lpStatus === 'Pending Review' ? 'bg-yellow-50 border-yellow-200' : 
+                lp.lpStatus === 'Rejected' ? 'bg-red-50 border-red-200' : 
+                'bg-white border-gray-200'
+              }`}
+            >
+              {/* Header: Teacher + LP Status */}
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-semibold text-gray-600">P{lp.period}</span>
+                    <span className="text-sm font-semibold text-gray-900 truncate">
+                      {lp.teacher}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-600">
+                    {lp.class} • {lp.subject}
+                  </div>
+                </div>
+                <div className="flex-shrink-0">
+                  <span className={`inline-flex px-2 py-1 text-xs font-medium rounded ${
+                    lp.lpStatus === 'Approved' 
+                      ? 'bg-green-100 text-green-800'
+                      : lp.lpStatus === 'Pending Review'
+                      ? 'bg-yellow-100 text-yellow-800'
+                      : lp.lpStatus === 'Rejected'
+                      ? 'bg-red-100 text-red-800'
+                      : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {lp.lpStatus === 'Pending Review' ? '⏳' : 
+                     lp.lpStatus === 'Approved' ? '✓' : 
+                     lp.lpStatus === 'Rejected' ? '✗' : 
+                     '📝'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Chapter */}
+              {lp.chapter && (
+                <div className="mb-2">
+                  <span className="text-sm text-gray-900 line-clamp-2 break-words">
+                    {lp.chapter}
+                  </span>
+                  {lp.sessionNo && (
+                    <span className="ml-2 text-xs text-gray-500">
+                      (Session {lp.sessionNo})
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Completion Status */}
+              {lp.completionStatus && (
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs text-gray-500">Completion:</span>
+                  <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded ${
+                    lp.completionStatus === 'Fully Completed' 
+                      ? 'bg-green-100 text-green-800'
+                      : lp.completionStatus === 'Partially Completed'
+                      ? 'bg-yellow-100 text-yellow-800'
+                      : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {lp.completionStatus}
+                  </span>
+                </div>
+              )}
+
+              {/* Notes */}
+              {(lp.notes || lp.reviewComments) && (
+                <div className="text-xs text-gray-600 mt-2 pt-2 border-t border-gray-200">
+                  <span className="font-medium">Notes:</span> {lp.notes || lp.reviewComments}
+                </div>
+              )}
+            </div>
+          ))}
+          {lessonPlans.length === 0 && !loading && (
+            <div className="text-center py-8 text-gray-500 text-sm">
+              No lesson plans found for this date.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Lesson Plans - Desktop Table View */}
+      {activeTab === 'lessonplans' && (
+      <div className="hidden md:block bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">

@@ -1193,71 +1193,58 @@ const HMDailyOversightEnhanced = ({ user }) => {
         )}
       </div>
 
-      {/* Filters */}
-      <div className="bg-white p-4 border border-gray-200 rounded-lg mb-6">
-        <h3 className="text-lg font-medium text-gray-900 mb-3">Filters</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Teacher</label>
+      {/* Filters - Gradient Bar with Mobile Responsive Layout */}
+      <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 p-3 sm:p-4 border border-gray-200 rounded-lg mb-6 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <h3 className="text-base sm:text-lg font-semibold text-gray-900">📊 Filters</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 flex-1 sm:max-w-4xl">
             <select
               value={filters.teacher}
               onChange={(e) => setFilters(prev => ({ ...prev, teacher: e.target.value }))}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              className="text-xs sm:text-sm border border-gray-300 rounded-md px-2 py-1.5 bg-white focus:ring-2 focus:ring-blue-500"
             >
               <option value="">All Teachers</option>
               {teachers.map(teacher => (
                 <option key={teacher} value={teacher}>{teacher}</option>
               ))}
             </select>
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Class</label>
+            
             <select
               value={filters.class}
               onChange={(e) => setFilters(prev => ({ ...prev, class: e.target.value }))}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              className="text-xs sm:text-sm border border-gray-300 rounded-md px-2 py-1.5 bg-white focus:ring-2 focus:ring-blue-500"
             >
               <option value="">All Classes</option>
               {classes.map(cls => (
                 <option key={cls} value={cls}>{cls}</option>
               ))}
             </select>
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+            
             <select
               value={filters.subject}
               onChange={(e) => setFilters(prev => ({ ...prev, subject: e.target.value }))}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              className="text-xs sm:text-sm border border-gray-300 rounded-md px-2 py-1.5 bg-white focus:ring-2 focus:ring-blue-500"
             >
               <option value="">All Subjects</option>
               {subjects.map(subject => (
                 <option key={subject} value={subject}>{subject}</option>
               ))}
             </select>
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+            
             <select
               value={filters.status}
               onChange={(e) => setFilters(prev => ({ ...prev, status: e.target.value }))}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              className="text-xs sm:text-sm border border-gray-300 rounded-md px-2 py-1.5 bg-white focus:ring-2 focus:ring-blue-500"
             >
-              <option value="all">All</option>
+              <option value="all">All Status</option>
               <option value="submitted">Submitted</option>
               <option value="pending">Pending</option>
             </select>
-          </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Completion</label>
             <select
               value={filters.completionRange}
               onChange={(e) => setFilters(prev => ({ ...prev, completionRange: e.target.value }))}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              className="text-xs sm:text-sm border border-gray-300 rounded-md px-2 py-1.5 bg-white focus:ring-2 focus:ring-blue-500"
             >
               <option value="all">All Levels</option>
               <option value="excellent">Excellent (80%+)</option>
@@ -1336,311 +1323,543 @@ const HMDailyOversightEnhanced = ({ user }) => {
 
       {/* Content */}
       {activeTab === 'reports' && (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teacher</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Period</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class/Subject</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter & Session</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Completion</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Issues</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredReports.map((report, index) => {
-                  const completion = Number(report.completionPercentage) || 0;
-                  // Treat report as submitted only if we have an explicit submittedAt timestamp OR a positive completion percentage OR explicit submitted flag
-                  const isSubmitted = !!(report.submittedAt || report.submitted || (report.completionPercentage != null && completion > 0));
-                  const isVerified = String(report.verified ?? report.Verified ?? '').toLowerCase() === 'true';
-                  const isReopened = Boolean(report.reopenedAt || report.reopenReason || (String(report.reopened ?? '').toLowerCase() === 'true'));
-                  // Determine if a matching lesson plan exists (by id first, then by fields)
-                  const matchingPlanById = Array.isArray(lessonPlans) ? lessonPlans.find(p => String(p.lpId || p.lessonPlanId || '') === String(report.lessonPlanId || '')) : null;
-                  const matchingPlanByFields = !matchingPlanById && Array.isArray(lessonPlans) ? lessonPlans.find(p =>
-                    String(p.teacherEmail || '').toLowerCase() === String(report.teacherEmail || '').toLowerCase() &&
-                    String(p.class || '') === String(report.class || '') &&
-                    String(p.subject || '') === String(report.subject || '') &&
-                    String(p.selectedPeriod || p.period || '') === String(report.period || '')
-                  ) : null;
-                  const matchingPlan = matchingPlanById || matchingPlanByFields;
-                  const hasMatchingPlan = !!matchingPlan;
-                  // Only show Unplanned warning for substitution sessions without a matching plan
-                  const showUnplanned = isSubmitted && !hasMatchingPlan && (report.isSubstitution === true || String(report.isSubstitution).toLowerCase() === 'true');
-                  // Derive display chapter/session from report, fallback to matching lesson plan
-                  const displayChapter = report.chapter || (matchingPlan && matchingPlan.chapter) || '';
-                  const displaySessionNo = report.sessionNo || report.session || (matchingPlan && (matchingPlan.session || matchingPlan.sessionNo));
-                  const displayTotalSessions = report.totalSessions || (matchingPlan && matchingPlan.totalSessions) || '';
-                  return (
-                    <tr key={index} className={isSubmitted ? 'bg-green-50' : 'bg-yellow-50'}>
-                      <td className="px-4 py-3 text-sm">
-                        <div className="font-medium text-gray-900">
-                          {report.teacherName || report.teacherEmail}
-                        </div>
-                      </td>
-                      
-                      <td className="px-4 py-3 text-sm text-gray-900">
-                        Period {report.period}
-                      </td>
-                      
-                      <td className="px-4 py-3 text-sm">
-                        <div className="font-medium text-gray-900">{report.class}</div>
-                        <div className="text-gray-500">{report.subject}</div>
-                      </td>
-                      
-                      <td className="px-4 py-3 text-sm">
-                        <div className="font-medium text-gray-900">{displayChapter || <span className="text-gray-400">—</span>}</div>
-                        {displaySessionNo && (
-                          <div className="text-xs text-purple-600">
-                            Session {displaySessionNo}{displayTotalSessions ? ` of ${displayTotalSessions}` : ''}
+        <>
+          {/* Desktop Table View */}
+          <div className="hidden md:block bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teacher</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Period</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class/Subject</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter & Session</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Completion</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Issues</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredReports.map((report, index) => {
+                    const completion = Number(report.completionPercentage) || 0;
+                    // Treat report as submitted only if we have an explicit submittedAt timestamp OR a positive completion percentage OR explicit submitted flag
+                    const isSubmitted = !!(report.submittedAt || report.submitted || (report.completionPercentage != null && completion > 0));
+                    const isVerified = String(report.verified ?? report.Verified ?? '').toLowerCase() === 'true';
+                    const isReopened = Boolean(report.reopenedAt || report.reopenReason || (String(report.reopened ?? '').toLowerCase() === 'true'));
+                    // Determine if a matching lesson plan exists (by id first, then by fields)
+                    const matchingPlanById = Array.isArray(lessonPlans) ? lessonPlans.find(p => String(p.lpId || p.lessonPlanId || '') === String(report.lessonPlanId || '')) : null;
+                    const matchingPlanByFields = !matchingPlanById && Array.isArray(lessonPlans) ? lessonPlans.find(p =>
+                      String(p.teacherEmail || '').toLowerCase() === String(report.teacherEmail || '').toLowerCase() &&
+                      String(p.class || '') === String(report.class || '') &&
+                      String(p.subject || '') === String(report.subject || '') &&
+                      String(p.selectedPeriod || p.period || '') === String(report.period || '')
+                    ) : null;
+                    const matchingPlan = matchingPlanById || matchingPlanByFields;
+                    const hasMatchingPlan = !!matchingPlan;
+                    // Only show Unplanned warning for substitution sessions without a matching plan
+                    const showUnplanned = isSubmitted && !hasMatchingPlan && (report.isSubstitution === true || String(report.isSubstitution).toLowerCase() === 'true');
+                    // Derive display chapter/session from report, fallback to matching lesson plan
+                    const displayChapter = report.chapter || (matchingPlan && matchingPlan.chapter) || '';
+                    const displaySessionNo = report.sessionNo || report.session || (matchingPlan && (matchingPlan.session || matchingPlan.sessionNo));
+                    const displayTotalSessions = report.totalSessions || (matchingPlan && matchingPlan.totalSessions) || '';
+                    return (
+                      <tr key={index} className={isSubmitted ? 'bg-green-50' : 'bg-yellow-50'}>
+                        <td className="px-4 py-3 text-sm">
+                          <div className="font-medium text-gray-900">
+                            {report.teacherName || report.teacherEmail}
                           </div>
-                        )}
-                      </td>
-                      
-                      <td className="px-4 py-3">
-                        {isSubmitted ? (
-                          <div className="flex items-center gap-2">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getCompletionColor(completion)}`}>
-                              {completion}%
+                        </td>
+                        
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          Period {report.period}
+                        </td>
+                        
+                        <td className="px-4 py-3 text-sm">
+                          <div className="font-medium text-gray-900">{report.class}</div>
+                          <div className="text-gray-500">{report.subject}</div>
+                        </td>
+                        
+                        <td className="px-4 py-3 text-sm">
+                          <div className="font-medium text-gray-900">{displayChapter || <span className="text-gray-400">—</span>}</div>
+                          {displaySessionNo && (
+                            <div className="text-xs text-purple-600">
+                              Session {displaySessionNo}{displayTotalSessions ? ` of ${displayTotalSessions}` : ''}
+                            </div>
+                          )}
+                        </td>
+                        
+                        <td className="px-4 py-3">
+                          {isSubmitted ? (
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getCompletionColor(completion)}`}>
+                                {completion}%
+                              </span>
+                              {completion < 60 && (
+                                <svg className="w-4 h-4 text-orange-500" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                              Not Submitted
                             </span>
-                            {completion < 60 && (
-                              <svg className="w-4 h-4 text-orange-500" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                              </svg>
+                          )}
+                        </td>
+                        
+                        <td className="px-4 py-3 text-sm">
+                          <div className="space-y-1">
+                            {showUnplanned && (
+                              <div className="text-xs text-orange-700 bg-orange-50 px-2 py-1 rounded border border-orange-200">
+                                ⚠️ Unplanned (Substitution without matching plan)
+                              </div>
+                            )}
+                            {report.difficulties && (
+                              <div className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded">
+                                ⚠️ {report.difficulties}
+                              </div>
+                            )}
+                            {report.nextSessionPlan && (
+                              <div className="text-xs text-blue-700 bg-blue-50 px-2 py-1 rounded">
+                                📝 {report.nextSessionPlan}
+                              </div>
+                            )}
+                            {!report.difficulties && !report.nextSessionPlan && (
+                              <span className="text-xs text-gray-500">No issues reported</span>
                             )}
                           </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {isSubmitted ? (
+                            <div className="flex flex-col gap-2">
+                              {(isVerified || isReopened) && (
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {isVerified && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                      <CheckCircle className="w-3 h-3 mr-1" /> Verified
+                                    </span>
+                                  )}
+                                  {isReopened && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                                      <Undo2 className="w-3 h-3 mr-1" /> Reopened
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                              <div className="flex gap-2">
+                                {(() => {
+                                  const rk = computeReportKey(report);
+                                  const isVerifying = verifyingKey === rk;
+                                  const isReopening = reopeningKey === rk;
+                                  return (
+                                    <>
+                                      {/* Show Verify/Reopen only when truly submitted (not empty 0% placeholder) */}
+                                      {isSubmitted && completion > 0 && (
+                                        <>
+                                          <button
+                                            disabled={isVerifying || isReopening}
+                                            onClick={() => handleVerify(report)}
+                                            className="px-2 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 inline-flex items-center"
+                                          >
+                                            {isVerifying && (
+                                              <span className="inline-block h-3 w-3 mr-1 border-2 border-white/70 border-t-transparent rounded-full animate-spin"></span>
+                                            )}
+                                            {isVerifying ? 'Verifying…' : 'Verify'}
+                                          </button>
+                                          <button
+                                            disabled={isVerifying || isReopening}
+                                            onClick={() => handleReopen(report)}
+                                            className="px-2 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 inline-flex items-center"
+                                          >
+                                            {isReopening && (
+                                              <span className="inline-block h-3 w-3 mr-1 border-2 border-white/70 border-t-transparent rounded-full animate-spin"></span>
+                                            )}
+                                            {isReopening ? 'Reopening…' : 'Reopen'}
+                                          </button>
+                                        </>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  
+                  {filteredReports.length === 0 && !loading && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                        No reports found for the selected filters.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden space-y-3">
+            {filteredReports.map((report, index) => {
+              const completion = Number(report.completionPercentage) || 0;
+              const isSubmitted = !!(report.submittedAt || report.submitted || (report.completionPercentage != null && completion > 0));
+              const isVerified = String(report.verified ?? report.Verified ?? '').toLowerCase() === 'true';
+              const isReopened = Boolean(report.reopenedAt || report.reopenReason || (String(report.reopened ?? '').toLowerCase() === 'true'));
+              const matchingPlanById = Array.isArray(lessonPlans) ? lessonPlans.find(p => String(p.lpId || p.lessonPlanId || '') === String(report.lessonPlanId || '')) : null;
+              const matchingPlanByFields = !matchingPlanById && Array.isArray(lessonPlans) ? lessonPlans.find(p =>
+                String(p.teacherEmail || '').toLowerCase() === String(report.teacherEmail || '').toLowerCase() &&
+                String(p.class || '') === String(report.class || '') &&
+                String(p.subject || '') === String(report.subject || '') &&
+                String(p.selectedPeriod || p.period || '') === String(report.period || '')
+              ) : null;
+              const matchingPlan = matchingPlanById || matchingPlanByFields;
+              const hasMatchingPlan = !!matchingPlan;
+              const showUnplanned = isSubmitted && !hasMatchingPlan && (report.isSubstitution === true || String(report.isSubstitution).toLowerCase() === 'true');
+              const displayChapter = report.chapter || (matchingPlan && matchingPlan.chapter) || '';
+              const displaySessionNo = report.sessionNo || report.session || (matchingPlan && (matchingPlan.session || matchingPlan.sessionNo));
+              const displayTotalSessions = report.totalSessions || (matchingPlan && matchingPlan.totalSessions) || '';
+              const rk = computeReportKey(report);
+              const isVerifying = verifyingKey === rk;
+              const isReopening = reopeningKey === rk;
+              
+              return (
+                <div key={index} className={`p-3 rounded-lg border-2 ${isSubmitted ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
+                  {/* Header */}
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-100 text-blue-800">
+                          P{report.period}
+                        </span>
+                        {isSubmitted ? (
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded ${getCompletionColor(completion)}`}>
+                            {completion}%
+                          </span>
                         ) : (
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded bg-gray-100 text-gray-800">
                             Not Submitted
                           </span>
                         )}
-                      </td>
-                      
-                      <td className="px-4 py-3 text-sm">
-                        <div className="space-y-1">
-                          {showUnplanned && (
-                            <div className="text-xs text-orange-700 bg-orange-50 px-2 py-1 rounded border border-orange-200">
-                              ⚠️ Unplanned (Substitution without matching plan)
-                            </div>
-                          )}
-                          {report.difficulties && (
-                            <div className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded">
-                              ⚠️ {report.difficulties}
-                            </div>
-                          )}
-                          {report.nextSessionPlan && (
-                            <div className="text-xs text-blue-700 bg-blue-50 px-2 py-1 rounded">
-                              📝 {report.nextSessionPlan}
-                            </div>
-                          )}
-                          {!report.difficulties && !report.nextSessionPlan && (
-                            <span className="text-xs text-gray-500">No issues reported</span>
-                          )}
+                      </div>
+                      <p className="text-sm font-bold text-gray-900 truncate">
+                        {report.teacherName || report.teacherEmail}
+                      </p>
+                    </div>
+                    <div className="flex gap-1">
+                      {isVerified && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          ✓
+                        </span>
+                      )}
+                      {isReopened && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                          ↺
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Class/Subject */}
+                  <div className="flex items-center gap-2 mb-2 text-xs">
+                    <span className="font-medium text-gray-700">{report.class}</span>
+                    <span className="text-gray-400">•</span>
+                    <span className="text-gray-600">{report.subject}</span>
+                  </div>
+
+                  {/* Chapter/Session */}
+                  {displayChapter && (
+                    <div className="mb-2">
+                      <p className="text-xs text-gray-600 line-clamp-2 break-words">
+                        📖 {displayChapter}
+                      </p>
+                      {displaySessionNo && (
+                        <p className="text-xs text-purple-600 mt-0.5">
+                          Session {displaySessionNo}{displayTotalSessions ? ` of ${displayTotalSessions}` : ''}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Issues */}
+                  {(showUnplanned || report.difficulties || report.nextSessionPlan) && (
+                    <div className="mb-2 space-y-1">
+                      {showUnplanned && (
+                        <div className="text-xs text-orange-700 bg-orange-50 px-2 py-1 rounded border border-orange-200">
+                          ⚠️ Unplanned
                         </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm">
-                        {isSubmitted ? (
-                          <div className="flex flex-col gap-2">
-                            {(isVerified || isReopened) && (
-                              <div className="flex flex-wrap items-center gap-2">
-                                {isVerified && (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                    <CheckCircle className="w-3 h-3 mr-1" /> Verified
-                                  </span>
-                                )}
-                                {isReopened && (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
-                                    <Undo2 className="w-3 h-3 mr-1" /> Reopened
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            <div className="flex gap-2">
-                              {(() => {
-                                const rk = computeReportKey(report);
-                                const isVerifying = verifyingKey === rk;
-                                const isReopening = reopeningKey === rk;
-                                return (
-                                  <>
-                                    {/* Show Verify/Reopen only when truly submitted (not empty 0% placeholder) */}
-                                    {isSubmitted && completion > 0 && (
-                                      <>
-                                        <button
-                                          disabled={isVerifying || isReopening}
-                                          onClick={() => handleVerify(report)}
-                                          className="px-2 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 inline-flex items-center"
-                                        >
-                                          {isVerifying && (
-                                            <span className="inline-block h-3 w-3 mr-1 border-2 border-white/70 border-t-transparent rounded-full animate-spin"></span>
-                                          )}
-                                          {isVerifying ? 'Verifying…' : 'Verify'}
-                                        </button>
-                                        <button
-                                          disabled={isVerifying || isReopening}
-                                          onClick={() => handleReopen(report)}
-                                          className="px-2 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 inline-flex items-center"
-                                        >
-                                          {isReopening && (
-                                            <span className="inline-block h-3 w-3 mr-1 border-2 border-white/70 border-t-transparent rounded-full animate-spin"></span>
-                                          )}
-                                          {isReopening ? 'Reopening…' : 'Reopen'}
-                                        </button>
-                                      </>
-                                    )}
-                                  </>
-                                );
-                              })()}
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-gray-400">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-                
-                {filteredReports.length === 0 && !loading && (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
-                      No reports found for the selected filters.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                      )}
+                      {report.difficulties && (
+                        <div className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded">
+                          ⚠️ {report.difficulties}
+                        </div>
+                      )}
+                      {report.nextSessionPlan && (
+                        <div className="text-xs text-blue-700 bg-blue-50 px-2 py-1 rounded">
+                          📝 {report.nextSessionPlan}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  {isSubmitted && completion > 0 && (
+                    <div className="flex gap-2 pt-2 border-t border-gray-200">
+                      <button
+                        disabled={isVerifying || isReopening}
+                        onClick={() => handleVerify(report)}
+                        className="flex-1 px-2 py-1.5 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        {isVerifying ? 'Verifying…' : '✓ Verify'}
+                      </button>
+                      <button
+                        disabled={isVerifying || isReopening}
+                        onClick={() => handleReopen(report)}
+                        className="flex-1 px-2 py-1.5 text-xs rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                      >
+                        {isReopening ? 'Reopening…' : '↺ Reopen'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {filteredReports.length === 0 && !loading && (
+              <div className="p-8 text-center text-gray-500 bg-white border border-gray-200 rounded-lg">
+                No reports found for the selected filters.
+              </div>
+            )}
           </div>
-        </div>
+        </>
       )}
 
       {activeTab === 'plan-actual' && (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <>
           {/* Summary header */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 p-4 border-b border-gray-200 bg-gray-50">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4 p-3 sm:p-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-blue-50 rounded-t-lg">
             <div>
               <p className="text-xs text-gray-600">Scheduled</p>
-              <p className="text-lg font-semibold text-gray-900">{merged.summary?.total || 0}</p>
+              <p className="text-lg sm:text-xl font-semibold text-gray-900">{merged.summary?.total || 0}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-600">Planned (Ready/Approved)</p>
-              <p className="text-lg font-semibold text-blue-700">{merged.summary?.plannedReady || 0}</p>
+              <p className="text-xs text-gray-600">Planned</p>
+              <p className="text-lg sm:text-xl font-semibold text-blue-700">{merged.summary?.plannedReady || 0}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-600">Reports Submitted</p>
-              <p className="text-lg font-semibold text-green-700">{merged.summary?.reported || 0}</p>
+              <p className="text-xs text-gray-600">Reported</p>
+              <p className="text-lg sm:text-xl font-semibold text-green-700">{merged.summary?.reported || 0}</p>
             </div>
             <div>
               <p className="text-xs text-gray-600">Unplanned</p>
-              <p className="text-lg font-semibold text-amber-700">{merged.summary?.unplannedCount || 0}</p>
+              <p className="text-lg sm:text-xl font-semibold text-amber-700">{merged.summary?.unplannedCount || 0}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-600">Avg Completion</p>
-              <p className="text-lg font-semibold text-indigo-700">{merged.summary?.avgCompletion || 0}%</p>
+              <p className="text-xs text-gray-600">Avg</p>
+              <p className="text-lg sm:text-xl font-semibold text-indigo-700">{merged.summary?.avgCompletion || 0}%</p>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Class/Subject</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Teacher</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Plan</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Report</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Flags</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {(merged.periods || []).map((row, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm text-gray-900">P{row.period}</td>
-                    <td className="px-4 py-3 text-sm">
-                      <div className="font-medium text-gray-900">{row.class}</div>
-                      <div className="text-gray-600">{row.subject}</div>
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <div className="font-medium text-gray-900">{row.teacherName || row.teacherEmail}</div>
-                      {row.isSubstitution && (
-                        <div className="text-xs text-amber-700">Substitution</div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      {row.hasPlan ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
-                          {row.planStatus}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-500">No Plan</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      {row.hasReport ? (
-                        <div className="flex items-center gap-2">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
-                            {row.completionPercentage || 0}%
+          {/* Desktop Table View */}
+          <div className="hidden md:block bg-white border border-gray-200 rounded-b-lg overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Class/Subject</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Teacher</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Plan</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Report</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Flags</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {(merged.periods || []).map((row, idx) => (
+                    <tr key={idx} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm text-gray-900">P{row.period}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <div className="font-medium text-gray-900">{row.class}</div>
+                        <div className="text-gray-600">{row.subject}</div>
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <div className="font-medium text-gray-900">{row.teacherName || row.teacherEmail}</div>
+                        {row.isSubstitution && (
+                          <div className="text-xs text-amber-700">Substitution</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        {row.hasPlan ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                            {row.planStatus}
                           </span>
-                          {row.verified && (
-                            <span className="text-xs text-emerald-700">Verified</span>
+                        ) : (
+                          <span className="text-xs text-gray-500">No Plan</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        {row.hasReport ? (
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
+                              {row.completionPercentage || 0}%
+                            </span>
+                            {row.verified && (
+                              <span className="text-xs text-emerald-700">Verified</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-500">No Report</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <div className="space-y-1">
+                          {row.unplanned && (
+                            <div className="text-xs text-orange-700 bg-orange-50 px-2 py-1 rounded border border-orange-200 inline-block">Unplanned</div>
+                          )}
+                          {row.difficulties && (
+                            <div className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded inline-block">⚠️ {row.difficulties}</div>
+                          )}
+                          {row.nextSessionPlan && (
+                            <div className="text-xs text-blue-700 bg-blue-50 px-2 py-1 rounded inline-block">📝 {row.nextSessionPlan}</div>
                           )}
                         </div>
-                      ) : (
-                        <span className="text-xs text-gray-500">No Report</span>
+                      </td>
+                    </tr>
+                  ))}
+                  {(merged.periods || []).length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-gray-500">No data for selected date.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden space-y-3">
+            {(merged.periods || []).map((row, idx) => (
+              <div key={idx} className="p-3 bg-white rounded-lg border-2 border-gray-200">
+                {/* Header */}
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-100 text-blue-800">
+                        P{row.period}
+                      </span>
+                      {row.isSubstitution && (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
+                          Sub
+                        </span>
                       )}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <div className="space-y-1">
-                        {row.unplanned && (
-                          <div className="text-xs text-orange-700 bg-orange-50 px-2 py-1 rounded border border-orange-200 inline-block">Unplanned</div>
-                        )}
-                        {row.difficulties && (
-                          <div className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded inline-block">⚠️ {row.difficulties}</div>
-                        )}
-                        {row.nextSessionPlan && (
-                          <div className="text-xs text-blue-700 bg-blue-50 px-2 py-1 rounded inline-block">📝 {row.nextSessionPlan}</div>
+                    </div>
+                    <p className="text-sm font-bold text-gray-900 truncate">
+                      {row.teacherName || row.teacherEmail}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Class/Subject */}
+                <div className="flex items-center gap-2 mb-2 text-xs">
+                  <span className="font-medium text-gray-700">{row.class}</span>
+                  <span className="text-gray-400">•</span>
+                  <span className="text-gray-600">{row.subject}</span>
+                </div>
+
+                {/* Plan & Report Status */}
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Plan:</p>
+                    {row.hasPlan ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                        {row.planStatus}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-400">No Plan</span>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Report:</p>
+                    {row.hasReport ? (
+                      <div className="flex items-center gap-1">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
+                          {row.completionPercentage || 0}%
+                        </span>
+                        {row.verified && (
+                          <span className="text-xs">✓</span>
                         )}
                       </div>
-                    </td>
-                  </tr>
-                ))}
-                {(merged.periods || []).length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500">No data for selected date.</td>
-                  </tr>
+                    ) : (
+                      <span className="text-xs text-gray-400">No Report</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Flags */}
+                {(row.unplanned || row.difficulties || row.nextSessionPlan) && (
+                  <div className="space-y-1 pt-2 border-t border-gray-200">
+                    {row.unplanned && (
+                      <div className="text-xs text-orange-700 bg-orange-50 px-2 py-1 rounded border border-orange-200">
+                        ⚠️ Unplanned
+                      </div>
+                    )}
+                    {row.difficulties && (
+                      <div className="text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded">
+                        ⚠️ {row.difficulties}
+                      </div>
+                    )}
+                    {row.nextSessionPlan && (
+                      <div className="text-xs text-blue-700 bg-blue-50 px-2 py-1 rounded">
+                        📝 {row.nextSessionPlan}
+                      </div>
+                    )}
+                  </div>
                 )}
-              </tbody>
-            </table>
+              </div>
+            ))}
+
+            {(merged.periods || []).length === 0 && (
+              <div className="p-8 text-center text-gray-500 bg-white border border-gray-200 rounded-lg">
+                No data for selected date.
+              </div>
+            )}
           </div>
-        </div>
+        </>
       )}
 
       {activeTab === 'missing' && (
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <div className="flex items-center justify-between mb-4">
+        <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">Missing Submissions</h3>
-              <p className="text-sm text-gray-600">Total periods: {missing.stats.totalPeriods} • Missing: {missing.stats.missingCount} • Teachers: {missing.stats.teachersImpacted}</p>
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900">Missing Submissions</h3>
+              <p className="text-xs sm:text-sm text-gray-600">
+                Total: {missing.stats.totalPeriods} • Missing: {missing.stats.missingCount} • Teachers: {missing.stats.teachersImpacted}
+              </p>
             </div>
             <div className="flex gap-2">
               <button
                 onClick={loadMissing}
                 disabled={missingLoading}
-                className="px-3 py-2 text-sm rounded bg-gray-100 hover:bg-gray-200 disabled:opacity-50"
+                className="px-3 py-2 text-xs sm:text-sm rounded bg-gray-100 hover:bg-gray-200 disabled:opacity-50"
               >
                 {missingLoading ? 'Refreshing…' : 'Refresh'}
               </button>
               <button
                 onClick={handleNotifyAllMissing}
                 disabled={actionBusy || (missing.stats.missingCount || 0) === 0}
-                className="px-3 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                className="px-3 py-2 text-xs sm:text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                Notify All Pending
+                Notify All
               </button>
             </div>
           </div>
-          <div className="overflow-x-auto">
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
@@ -1672,6 +1891,39 @@ const HMDailyOversightEnhanced = ({ user }) => {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden space-y-3">
+            {(missing.byTeacher || []).map((t, idx) => (
+              <div key={idx} className="p-3 bg-red-50 rounded-lg border-2 border-red-200">
+                {/* Header */}
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-900 truncate">{t.teacher}</p>
+                    <p className="text-xs text-gray-600 truncate">{t.teacherEmail}</p>
+                  </div>
+                  <span className="text-xs font-bold px-2 py-1 rounded bg-red-100 text-red-800 border border-red-300">
+                    {t.count} pending
+                  </span>
+                </div>
+
+                {/* Periods */}
+                <div className="space-y-1">
+                  {(t.periods || []).map((p, i) => (
+                    <div key={i} className="text-xs bg-yellow-50 px-2 py-1.5 rounded border border-yellow-200">
+                      <span className="font-semibold">P{p.period}:</span> {p.class} • {p.subject}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {(!missing.byTeacher || missing.byTeacher.length === 0) && (
+              <div className="p-8 text-center text-gray-500 bg-white border border-gray-200 rounded-lg">
+                No pending submissions for this date.
+              </div>
+            )}
           </div>
         </div>
       )}

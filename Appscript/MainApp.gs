@@ -5913,6 +5913,130 @@
   }
 
   /**
+   * Get daily reports with filtering support (for HM "All Reports" view)
+   * @param {string} teacher - Teacher email or name filter (partial match)
+   * @param {string} fromDate - Start date filter (YYYY-MM-DD)
+   * @param {string} toDate - End date filter (YYYY-MM-DD)
+   * @param {string} cls - Class filter (exact match)
+   * @param {string} subject - Subject filter (partial match)
+   * @returns {Array} - Filtered daily reports
+   */
+  function getDailyReports(teacher = '', fromDate = '', toDate = '', cls = '', subject = '') {
+    try {
+      Logger.log(`getDailyReports: teacher=${teacher}, fromDate=${fromDate}, toDate=${toDate}, class=${cls}, subject=${subject}`);
+      
+      const drSh = _getSheet('DailyReports');
+      const headers = _headers(drSh);
+      const allReports = _rows(drSh).map(row => _indexByHeader(row, headers));
+      
+      Logger.log(`Total daily reports: ${allReports.length}`);
+      
+      // Apply filters
+      let filtered = allReports.filter(report => {
+        if (!report) return false;
+        
+        // Teacher filter (email or name, case-insensitive partial match)
+        if (teacher) {
+          const teacherLower = teacher.toLowerCase().trim();
+          const emailMatch = String(report.teacherEmail || '').toLowerCase().includes(teacherLower);
+          const nameMatch = String(report.teacherName || '').toLowerCase().includes(teacherLower);
+          if (!emailMatch && !nameMatch) return false;
+        }
+        
+        // Date range filter
+        if (fromDate || toDate) {
+          const reportDate = _isoDateIST(report.date);
+          if (!reportDate) return false;
+          
+          if (fromDate) {
+            const from = _normalizeQueryDate(fromDate);
+            if (reportDate < from) return false;
+          }
+          
+          if (toDate) {
+            const to = _normalizeQueryDate(toDate);
+            if (reportDate > to) return false;
+          }
+        }
+        
+        // Class filter (exact match, case-insensitive)
+        if (cls) {
+          const classMatch = String(report.class || '').toLowerCase().trim() === cls.toLowerCase().trim();
+          if (!classMatch) return false;
+        }
+        
+        // Subject filter (partial match, case-insensitive)
+        if (subject) {
+          const subjectLower = subject.toLowerCase().trim();
+          const subjectMatch = String(report.subject || '').toLowerCase().includes(subjectLower);
+          if (!subjectMatch) return false;
+        }
+        
+        return true;
+      });
+      
+      // Sort by date (newest first), then by teacher
+      filtered.sort((a, b) => {
+        const dateA = _isoDateIST(a.date);
+        const dateB = _isoDateIST(b.date);
+        if (dateA !== dateB) return dateB.localeCompare(dateA); // Newest first
+        
+        const teacherA = String(a.teacherName || a.teacherEmail || '').toLowerCase();
+        const teacherB = String(b.teacherName || b.teacherEmail || '').toLowerCase();
+        if (teacherA < teacherB) return -1;
+        if (teacherA > teacherB) return 1;
+        
+        return Number(a.period || 0) - Number(b.period || 0);
+      });
+      
+      Logger.log(`Filtered daily reports: ${filtered.length}`);
+      
+      // Format dates for frontend display
+      const result = filtered.map(report => ({
+        id: report.id || '',
+        reportId: report.id || '', // Alias for compatibility
+        date: _isoDateIST(report.date),
+        teacherEmail: report.teacherEmail || '',
+        teacherName: report.teacherName || '',
+        class: report.class || '',
+        subject: report.subject || '',
+        period: Number(report.period || 0),
+        planType: report.planType || '',
+        lessonPlanId: report.lessonPlanId || '',
+        chapter: report.chapter || '',
+        sessionNo: Number(report.sessionNo || 0),
+        totalSessions: Number(report.totalSessions || 0),
+        completionPercentage: Number(report.completionPercentage || 0),
+        chapterStatus: report.chapterStatus || '',
+        deviationReason: report.deviationReason || '',
+        difficulties: report.difficulties || '',
+        nextSessionPlan: report.nextSessionPlan || '',
+        objectives: report.objectives || '',
+        activities: report.activities || '',
+        completed: report.completed || 'Not Started',
+        notes: report.notes || '',
+        createdAt: report.createdAt || '',
+        isSubstitution: report.isSubstitution || '',
+        absentTeacher: report.absentTeacher || '',
+        regularSubject: report.regularSubject || '',
+        substituteSubject: report.substituteSubject || '',
+        verified: report.verified || '',
+        verifiedBy: report.verifiedBy || '',
+        verifiedAt: report.verifiedAt || '',
+        reopenReason: report.reopenReason || '',
+        reopenedBy: report.reopenedBy || '',
+        reopenedAt: report.reopenedAt || ''
+      }));
+      
+      return result;
+      
+    } catch (error) {
+      Logger.log(`ERROR in getDailyReports: ${error.message}\n${error.stack}`);
+      return [];
+    }
+  }
+
+  /**
    * Get all missing lesson plans across all teachers (for HM dashboard)
    * @param {number} daysAhead - Number of days to look ahead (default: 7)
    * @returns {Object} - Missing lesson plans grouped by teacher
