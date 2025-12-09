@@ -5208,7 +5208,7 @@ const App = () => {
         if (lesson.status === 'Needs Rework') groupMap[key].counts.needsRework++;
         if (lesson.status === 'Rejected') groupMap[key].counts.rejected++;
       });
-      return Object.values(groupMap).sort((a, b) => (a.chapter || '').localeCompare(b.chapter || ''));
+      return Object.values(groupMap).sort((a, b) => String(a.chapter || '').localeCompare(String(b.chapter || '')));
     }, [filteredLessons]);
 
     const computedClassGroups = useMemo(() => {
@@ -5253,7 +5253,7 @@ const App = () => {
           classMap[cls].counts.rejected++;
         }
       });
-      return Object.values(classMap).sort((a, b) => (a.class || '').localeCompare(b.class || ''));
+      return Object.values(classMap).sort((a, b) => String(a.class || '').localeCompare(String(b.class || '')));
     }, [filteredLessons]);
 
     const handleApproveLesson = async (lpId, status) => {
