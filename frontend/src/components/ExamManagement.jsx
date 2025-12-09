@@ -692,6 +692,25 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     }
   };
 
+  // Select all subjects for bulk exam creation
+  const selectAllSubjects = () => {
+    setSelectedSubjects([...availableSubjects]);
+    // Set today's date for all subjects
+    const allSubjectExams = availableSubjects.map(subject => ({
+      subject,
+      date: todayIST()
+    }));
+    setBulkExamFormData({
+      ...bulkExamFormData,
+      subjectExams: allSubjectExams
+    });
+  };
+
+  // Deselect all subjects
+  const deselectAllSubjects = () => {
+    setSelectedSubjects([]);
+  };
+
   // Update the date for a specific subject in bulk creation
   const updateSubjectExamDate = (subject, date) => {
     // Validate and normalize the date format
@@ -1946,7 +1965,27 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
             
             {/* Subject Selection */}
             <div className="mt-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Select Subjects & Set Exam Dates</label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-gray-700">Select Subjects & Set Exam Dates</label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={selectAllSubjects}
+                    className="text-xs px-3 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                    disabled={availableSubjects.length === 0}
+                  >
+                    Select All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={deselectAllSubjects}
+                    className="text-xs px-3 py-1 bg-gray-50 text-gray-600 rounded hover:bg-gray-100 transition-colors"
+                    disabled={selectedSubjects.length === 0}
+                  >
+                    Deselect All
+                  </button>
+                </div>
+              </div>
               <div className="border border-gray-200 rounded-lg p-4 max-h-72 overflow-y-auto">
                 {availableSubjects.length > 0 ? (
                   <table className="min-w-full divide-y divide-gray-200">
