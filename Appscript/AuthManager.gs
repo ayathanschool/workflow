@@ -198,16 +198,33 @@ function userCanCreateExam(userEmail, className, subject) {
   const list = _rows(sh).map(r => _indexByHeader(r, headers));
   const user = list.find(u => String(u.email||'').toLowerCase() === userEmail.toLowerCase());
   
-  if (!user) return false;
+  if (!user) {
+    appLog('ERROR', 'userCanCreateExam', 'User not found: ' + userEmail);
+    return false;
+  }
   
   // HM can create exams for any class/subject
   const roles = String(user.roles || '').toLowerCase();
-  if (roles.includes('hm') || roles.includes('headmaster')) {
+  if (roles.includes('hm') || roles.includes('headmaster') || roles.includes('h m')) {
+    appLog('INFO', 'userCanCreateExam', 'HM access granted for ' + userEmail);
     return true;
   }
   
   // Check if user teaches this class and subject
-  return userCanAccessClass(userEmail, className) && userTeachesSubject(userEmail, subject);
+  const hasClassAccess = userCanAccessClass(userEmail, className);
+  const teachesSubject = userTeachesSubject(userEmail, subject);
+  
+  appLog('INFO', 'userCanCreateExam', {
+    email: userEmail,
+    class: className,
+    subject: subject,
+    hasClassAccess: hasClassAccess,
+    teachesSubject: teachesSubject,
+    userClasses: user.classes,
+    userSubjects: user.subjects
+  });
+  
+  return hasClassAccess && teachesSubject;
 }
 
 /**
