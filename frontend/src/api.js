@@ -887,12 +887,14 @@ export async function getStudents(cls = '') {
 // examType and the maximum marks.  Useful for populating dynamic exam
 // creation forms.
 export async function getGradeTypes() {
-  return getJSON(`${BASE_URL}?action=getGradeTypes`)
+  const result = await getJSON(`${BASE_URL}?action=getGradeTypes`);
+  return result?.data || result || [];
 }
 
 // Fetch grade boundaries used to assign letter grades based on percentage
 export async function getGradeBoundaries() {
-  return getJSON(`${BASE_URL}?action=getGradeBoundaries`)
+  const result = await getJSON(`${BASE_URL}?action=getGradeBoundaries`);
+  return result?.data || result || [];
 }
 
 // Submit attendance records.  The payload should include date, class,

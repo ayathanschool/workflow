@@ -285,10 +285,33 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
   useEffect(() => {
     async function fetchGradeTypes() {
       try {
+        console.log('📚 Fetching grade types...');
         const types = await api.getGradeTypes();
-        setGradeTypes(Array.isArray(types) ? types : []);
+        console.log('✅ Grade types fetched:', types);
+        
+        if (!types) {
+          console.warn('⚠️  Grade types response is null/undefined');
+          setGradeTypes([]);
+          return;
+        }
+        
+        if (!Array.isArray(types)) {
+          console.warn('⚠️  Grade types is not an array:', types);
+          // If it's wrapped in a data object, extract it
+          if (types.data && Array.isArray(types.data)) {
+            console.log('📦 Extracting grade types from data wrapper');
+            setGradeTypes(types.data);
+          } else {
+            setGradeTypes([]);
+          }
+          return;
+        }
+        
+        console.log('✅ Setting grade types:', types.length, 'types found');
+        setGradeTypes(types);
       } catch (err) {
-        console.error(err);
+        console.error('❌ Error fetching grade types:', err);
+        setGradeTypes([]);
       }
     }
     fetchGradeTypes();
@@ -1558,7 +1581,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
               onClick={() => {
                 // If there are no exams matching this teacher's classes/subjects, show feedback
                 if (!examsForTeacher || examsForTeacher.length === 0) {
-                  setApiError('No exams available for your classes or subjects to enter marks.');
+                  setApiError('No exams available for your classes or subjects to enter marks. Please ask your Headmaster to create exams.');
                   return;
                 }
                 // Teacher selects exam to enter marks; if only one exam, open directly, else pick the first
@@ -1567,10 +1590,11 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                 }
               }}
               disabled={!examsForTeacher || examsForTeacher.length === 0}
-              className={`bg-green-600 text-white px-4 py-2 rounded-lg flex items-center ${(!examsForTeacher || examsForTeacher.length === 0) ? 'opacity-50 cursor-not-allowed hover:bg-green-600' : 'hover:bg-green-700'}`}
+              className={`px-4 py-2 rounded-lg flex items-center ${(!examsForTeacher || examsForTeacher.length === 0) ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'}`}
+              title={(!examsForTeacher || examsForTeacher.length === 0) ? 'No exams available - please ask your Headmaster to create exams' : 'Enter marks for your exams'}
             >
               <Plus className="h-4 w-4 mr-2" />
-              Edit Marks
+              Enter Marks
             </button>
           )}
         </div>
@@ -2212,14 +2236,46 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
             </table>
           </div>
         ) : (
-          <div className="text-gray-500 text-center py-8 bg-gray-50 rounded-lg">
-            <div className="flex justify-center mb-2">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-12 h-12 text-gray-400">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <div className="text-gray-500 text-center py-12 bg-gray-50 rounded-lg">
+            <div className="flex justify-center mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-16 h-16 text-gray-400">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
             </div>
-            <p className="text-lg font-medium">No exams available for you to manage.</p>
-            <p className="mt-1 text-sm">Try adjusting your filters or check back later.</p>
+            <p className="text-xl font-semibold text-gray-700 mb-2">No Exams Available</p>
+            {normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster')) ? (
+              <div className="space-y-2">
+                <p className="text-sm text-gray-600">Get started by creating your first exam</p>
+                <div className="flex justify-center gap-3 mt-4">
+                  <button
+                    onClick={() => setShowExamForm(true)}
+                    className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 inline-flex items-center"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create Exam
+                  </button>
+                  <button
+                    onClick={() => setShowBulkExamForm(true)}
+                    className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 inline-flex items-center"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create Multiple Exams
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2 max-w-md mx-auto">
+                <p className="text-sm text-gray-600">No exams have been created for your classes or subjects yet.</p>
+                <p className="text-xs text-gray-500 mt-2">
+                  Please contact your Headmaster to create exams. Once exams are created, you'll be able to enter marks here.
+                </p>
+                {filters.class || filters.subject || filters.examType ? (
+                  <p className="text-xs text-blue-600 mt-3">
+                    💡 Tip: Try clearing the filters above to see if there are exams in other classes/subjects.
+                  </p>
+                ) : null}
+              </div>
+            )}
           </div>
         )}
       </div>
