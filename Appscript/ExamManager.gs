@@ -8,58 +8,77 @@
  * Create a new exam
  */
 function createExam(data) {
-  const creatorEmail = (data.email||'').toLowerCase().trim();
-  const examClass = data.class || '';
-  const examSubject = data.subject || '';
-  
-  if (!creatorEmail) {
-    return { error: 'Creator email is required' };
+  try {
+    appLog('INFO', 'createExam', { data: data });
+    
+    const creatorEmail = (data.email||'').toLowerCase().trim();
+    const examClass = data.class || '';
+    const examSubject = data.subject || '';
+    
+    if (!creatorEmail) {
+      appLog('ERROR', 'createExam', 'Creator email is required');
+      return { error: 'Creator email is required' };
+    }
+    
+    // Check if user has permission to create exams
+    if (!userCanCreateExam(creatorEmail, examClass, examSubject)) {
+      appLog('ERROR', 'createExam', 'Permission denied for ' + creatorEmail);
+      return { error: 'You do not have permission to create an exam for this class and subject' };
+    }
+    
+    const sh = _getSheet('Exams');
+    _ensureHeaders(sh, SHEETS.Exams);
+    const now = new Date().toISOString();
+    
+    const examId = _generateUniqueExamId(data.examType, data.class, data.subject);
+    appLog('INFO', 'createExam', 'Generated exam ID: ' + examId);
+    
+    // Get creator details
+    const userSh = _getSheet('Users');
+    const userHeaders = _headers(userSh);
+    const users = _rows(userSh).map(r => _indexByHeader(r, userHeaders));
+    const creator = users.find(u => String(u.email||'').toLowerCase() === creatorEmail);
+    const creatorName = creator ? creator.name : creatorEmail;
+    
+    // Calculate totals
+    const internalMax = parseInt(data.internalMax) || 0;
+    const externalMax = parseInt(data.externalMax) || 0;
+    const totalMax = internalMax + externalMax;
+    
+    const examName = `${data.examType} - ${data.class} - ${data.subject}`;
+    
+    // Handle hasInternalMarks - accept both boolean and string
+    const hasInternal = (
+      data.hasInternalMarks === true || 
+      data.hasInternalMarks === 'true' || 
+      data.hasInternalMarks === 'TRUE'
+    ) ? 'TRUE' : 'FALSE';
+    
+    const examData = [
+      examId,
+      creatorEmail,
+      creatorName,
+      data.class || '',
+      data.subject || '',
+      data.examType || '',
+      hasInternal,
+      internalMax,
+      externalMax,
+      totalMax,
+      data.date || '',
+      now,
+      examName
+    ];
+    
+    appLog('INFO', 'createExam', 'Appending row to Exams sheet');
+    sh.appendRow(examData);
+    appLog('INFO', 'createExam', 'Exam created successfully: ' + examId);
+    
+    return { submitted: true, examId };
+  } catch (err) {
+    appLog('ERROR', 'createExam', 'Exception: ' + err.message);
+    return { error: 'Failed to create exam: ' + err.message };
   }
-  
-  // Check if user has permission to create exams
-  if (!userCanCreateExam(creatorEmail, examClass, examSubject)) {
-    return { error: 'You do not have permission to create an exam for this class and subject' };
-  }
-  
-  const sh = _getSheet('Exams');
-  _ensureHeaders(sh, SHEETS.Exams);
-  const now = new Date().toISOString();
-  
-  const examId = _generateUniqueExamId(data.examType, data.class, data.subject);
-  
-  // Get creator details
-  const userSh = _getSheet('Users');
-  const userHeaders = _headers(userSh);
-  const users = _rows(userSh).map(r => _indexByHeader(r, userHeaders));
-  const creator = users.find(u => String(u.email||'').toLowerCase() === creatorEmail);
-  const creatorName = creator ? creator.name : creatorEmail;
-  
-  // Calculate totals
-  const internalMax = parseInt(data.internalMax) || 0;
-  const externalMax = parseInt(data.externalMax) || 0;
-  const totalMax = internalMax + externalMax;
-  
-  const examName = `${data.examType} - ${data.class} - ${data.subject}`;
-  
-  const examData = [
-    examId,
-    creatorEmail,
-    creatorName,
-    data.class || '',
-    data.subject || '',
-    data.examType || '',
-    data.hasInternalMarks === 'true' ? 'TRUE' : 'FALSE',
-    internalMax,
-    externalMax,
-    totalMax,
-    data.date || '',
-    now,
-    examName
-  ];
-  
-  sh.appendRow(examData);
-  
-  return { submitted: true, examId };
 }
 
 /**

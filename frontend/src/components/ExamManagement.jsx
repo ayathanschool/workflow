@@ -608,7 +608,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       
       // Create exam and show overlay/toast while the request runs
       await withSubmit('Creating exam...', async () => {
-        const result = await api.createExam(user.email, {
+        const examPayload = {
           creatorName: user.name || '',
           class: examFormData.class,
           subject: examFormData.subject,
@@ -618,9 +618,17 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
           externalMax: Number(examFormData.externalMax),
           totalMax: totalMax,
           date: examFormData.date
-        });
+        };
+        
+        console.log('📝 Creating exam with payload:', examPayload);
+        console.log('👤 User email:', user.email);
+        
+        const result = await api.createExam(user.email, examPayload);
+        
+        console.log('✅ Exam creation result:', result);
         
         if (result && result.error) {
+          console.error('❌ Exam creation error:', result.error);
           throw new Error(result.error);
         }
         
