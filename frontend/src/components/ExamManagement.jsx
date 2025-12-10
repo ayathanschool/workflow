@@ -424,8 +424,6 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
               
               console.log(`🔍 Found ${classSubjects.size} subjects in timetable for ${selectedClass}`);
               
-              console.log(`🔍 Found ${classSubjects.size} subjects in timetable for ${selectedClass}`);
-              
               if (classSubjects.size > 0) {
                 const sortedSubjects = Array.from(classSubjects).filter(Boolean).sort();
                 console.log(`📚 Subjects for ${selectedClass}:`, sortedSubjects);

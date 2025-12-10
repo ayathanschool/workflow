@@ -479,58 +479,20 @@ function getFullTimetable() {
   Logger.log(`[getFullTimetable] Total entries from sheet: ${timetable.length}`);
   if (timetable.length > 0) {
     Logger.log(`[getFullTimetable] Sample entry: ${JSON.stringify(timetable[0])}`);
+    Logger.log(`[getFullTimetable] Classes found: ${[...new Set(timetable.map(e => e.class))].join(', ')}`);
   }
   
-  // Group by day and period
-  const dayMap = {};
+  // Return flat array for frontend exam subject loading
+  const result = timetable.map(entry => ({
+    class: entry.class || '',
+    subject: entry.subject || '',
+    teacher: entry.teacherName || '',
+    teacherEmail: entry.teacherEmail || '',
+    dayOfWeek: entry.dayOfWeek || '',
+    period: entry.period || ''
+  }));
   
-  timetable.forEach(entry => {
-    // Use exact column name from sheet: dayOfWeek
-    const day = entry.dayOfWeek || 'Unknown';
-    const period = parseInt(entry.period) || 0;
-    
-    if (!dayMap[day]) {
-      dayMap[day] = {};
-    }
-    
-    if (!dayMap[day][period]) {
-      dayMap[day][period] = [];
-    }
-    
-    dayMap[day][period].push({
-      class: entry.class || '',
-      subject: entry.subject || '',
-      teacher: entry.teacherName || '',
-      teacherEmail: entry.teacherEmail || ''
-    });
-  });
-  
-  Logger.log(`[getFullTimetable] Days found: ${Object.keys(dayMap).join(', ')}`);
-  
-  // Convert to array format expected by frontend
-  const daysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const result = [];
-  
-  daysOrder.forEach(day => {
-    if (dayMap[day]) {
-      const periods = [];
-      const periodNumbers = Object.keys(dayMap[day]).map(p => parseInt(p)).sort((a, b) => a - b);
-      
-      periodNumbers.forEach(periodNum => {
-        periods.push({
-          period: periodNum,
-          entries: dayMap[day][periodNum]
-        });
-      });
-      
-      result.push({
-        day: day,
-        periods: periods
-      });
-    }
-  });
-  
-  Logger.log(`[getFullTimetable] Returning ${result.length} days with structured periods`);
+  Logger.log(`[getFullTimetable] Returning ${result.length} timetable entries`);
   
   return result;
 }
