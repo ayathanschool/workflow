@@ -400,28 +400,52 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
             try {
               const fullTimetable = await api.getFullTimetable();
               const classSubjects = new Set();
-              
+
+              // Flatten timetable regardless of backend shape (flat vs grouped by day/period)
+              let flatRows = [];
               if (Array.isArray(fullTimetable)) {
-                fullTimetable.forEach(entry => {
-                  // Normalize class comparison - remove spaces, "STD", and make lowercase
-                  const entryClass = String(entry.class || '')
-                    .trim()
-                    .toLowerCase()
-                    .replace(/std\s*/gi, '')  // Remove "STD" prefix
-                    .replace(/\s+/g, '');      // Remove all spaces
-                  
-                  const targetClass = selectedClass
-                    .trim()
-                    .toLowerCase()
-                    .replace(/std\s*/gi, '')
-                    .replace(/\s+/g, '');
-                  
-                  if (entryClass === targetClass && entry.subject) {
-                    classSubjects.add(String(entry.subject).trim());
-                  }
-                });
+                if (
+                  fullTimetable.length > 0 &&
+                  fullTimetable[0] &&
+                  typeof fullTimetable[0] === 'object' &&
+                  'day' in fullTimetable[0] &&
+                  Array.isArray(fullTimetable[0].periods)
+                ) {
+                  // Old/structured shape: [{ day, periods: [{ period, entries: [{class, subject,...}] }] }]
+                  fullTimetable.forEach(day => {
+                    (day.periods || []).forEach(p => {
+                      (p.entries || []).forEach(e => flatRows.push(e));
+                    });
+                  });
+                } else {
+                  // New/flat shape: [{ class, subject, teacherEmail, ... }]
+                  flatRows = fullTimetable;
+                }
               }
-              
+
+              // Diagnose shapes
+              console.log(`🧭 Timetable entries (raw): ${Array.isArray(fullTimetable) ? fullTimetable.length : 0}`);
+              console.log(`🧭 Timetable entries (flat): ${flatRows.length}`);
+
+              // Normalize and collect subjects for the selected class
+              flatRows.forEach(entry => {
+                const entryClass = String(entry.class || '')
+                  .trim()
+                  .toLowerCase()
+                  .replace(/std\s*/gi, '')
+                  .replace(/\s+/g, '');
+
+                const targetClass = selectedClass
+                  .trim()
+                  .toLowerCase()
+                  .replace(/std\s*/gi, '')
+                  .replace(/\s+/g, '');
+
+                if (entryClass === targetClass && entry.subject) {
+                  classSubjects.add(String(entry.subject).trim());
+                }
+              });
+
               console.log(`🔍 Found ${classSubjects.size} subjects in timetable for ${selectedClass}`);
               
               if (classSubjects.size > 0) {

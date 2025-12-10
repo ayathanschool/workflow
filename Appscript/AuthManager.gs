@@ -239,7 +239,16 @@ function userCanAccessClass(userEmail, className) {
     .map(c => c.trim())
     .filter(c => c.length > 0);
   
-  return classes.includes(className) || classTeacherFor.includes(className);
+  // Normalize: ignore 'STD', spaces; support section-insensitive (match by number)
+  const norm = function(s) { return String(s || '').toLowerCase().replace(/std\s*/g, '').replace(/\s+/g, ''); };
+  const num = function(s) { const m = String(s || '').match(/\d+/); return m ? m[0] : ''; };
+  const targetNorm = norm(className);
+  const targetNum = num(className);
+  
+  const inClasses = classes.some(c => norm(c) === targetNorm || (targetNum && num(c) === targetNum));
+  const inCTFor = classTeacherFor.some(c => norm(c) === targetNorm || (targetNum && num(c) === targetNum));
+  
+  return inClasses || inCTFor;
 }
 
 /**
@@ -262,15 +271,24 @@ function userCanCreateExam(userEmail, className, subject) {
     return true;
   }
   
-  // Super Admin or HM can create exams for any class/subject
-  if (isSuperAdmin(userEmail)) {
-    appLog('INFO', 'userCanCreateExam', 'Super Admin access granted for ' + userEmail);
-    return true;
-  }
-  
   const roles = String(user.roles || '').toLowerCase();
   if (roles.includes('hm') || roles.includes('headmaster') || roles.includes('h m')) {
     appLog('INFO', 'userCanCreateExam', 'HM access granted for ' + userEmail);
+    return true;
+  }
+  
+  // Class Teacher: allow creating exams for their own class regardless of subject (section-insensitive)
+  const classTeacherFor = String(user.classTeacherFor || '')
+    .split(',')
+    .map(c => c.trim())
+    .filter(c => c.length > 0);
+  const norm = function(s) { return String(s || '').toLowerCase().replace(/std\s*/g, '').replace(/\s+/g, ''); };
+  const num = function(s) { const m = String(s || '').match(/\d+/); return m ? m[0] : ''; };
+  const targetNorm = norm(className);
+  const targetNum = num(className);
+  const isClassTeacherForTarget = classTeacherFor.some(c => norm(c) === targetNorm || (targetNum && num(c) === targetNum));
+  if (isClassTeacherForTarget) {
+    appLog('INFO', 'userCanCreateExam', 'Class Teacher access granted for ' + userEmail + ' on class ' + className);
     return true;
   }
   

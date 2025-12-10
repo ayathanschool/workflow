@@ -7878,12 +7878,19 @@ const App = () => {
                   const isHm = hasRole('h m');
                   const isClassTeacher = hasRole('class teacher') || hasAnyRole(['classteacher']);
                   const isSubjectTeacher = hasAnyRole(['teacher']);
-                  const teachesClass = new Set((user?.classes||[]).map(c => appNormalize(c))).has(appNormalize(exam.class));
+                  // Enhanced class match: include classTeacherFor and allow section-insensitive match by standard number
+                  const norm = (s) => (s || '').toString().trim().toLowerCase().replace(/std\s*/g, '').replace(/\s+/g, '');
+                  const num = (s) => { const m = (s || '').toString().match(/\d+/); return m ? m[0] : ''; };
+                  const examClassNorm = norm(exam.class);
+                  const examClassNum = num(exam.class);
+                  const userClasses = Array.isArray(user?.classes) ? user.classes : [];
+                  const userCTFor = Array.isArray(user?.classTeacherFor) ? user.classTeacherFor : [];
+                  const teachesClass = [...userClasses, ...userCTFor].some(c => norm(c) === examClassNorm || (examClassNum && num(c) === examClassNum));
                   const teachesSubject = new Set((user?.subjects||[]).map(s => appNormalize(s))).has(appNormalize(exam.subject));
                   let canEnter = false;
                   if (!user) canEnter = false;
                   else if (isHm) canEnter = true;
-                  else if (isClassTeacher) canEnter = teachesClass;
+                  else if (isClassTeacher) canEnter = teachesClass; // Class teachers can manage their class (all sections)
                   else if (isSubjectTeacher) canEnter = teachesClass && teachesSubject;
                   // Permission check completed
                   return (
