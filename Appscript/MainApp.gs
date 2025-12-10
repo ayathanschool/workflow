@@ -564,6 +564,15 @@
         return _respond(getAllTeachers());
       }
       
+      // === USER MANAGEMENT ROUTES ===
+      if (action === 'getAllUsers') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!isHMOrSuperAdmin(email)) {
+          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        return _respond(getAllUsers());
+      }
+      
       // === OTHER ESSENTIAL ROUTES ===
       // Add more routes as needed from your original Code.gs
       
@@ -615,8 +624,99 @@
         return _respond(createExam(data));
       }
       
+      if (action === 'createBulkExams') {
+        return _respond(createBulkExams(data));
+      }
+      
+      if (action === 'deleteExam') {
+        // Super Admin only
+        if (!isSuperAdmin(data.email)) {
+          return _respond({ error: 'Permission denied. Super Admin access required to delete exams.' });
+        }
+        return _respond(deleteExam(data.examId));
+      }
+      
       if (action === 'submitExamMarks') {
         return _respond(submitExamMarks(data));
+      }
+      
+      // === SUPER ADMIN MANAGEMENT ROUTES ===
+      if (action === 'deleteLessonPlan') {
+        if (!isSuperAdmin(data.email)) {
+          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        }
+        return _respond(deleteLessonPlan(data.lessonPlanId));
+      }
+      
+      if (action === 'deleteScheme') {
+        if (!isSuperAdmin(data.email)) {
+          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        }
+        return _respond(deleteScheme(data.schemeId));
+      }
+      
+      if (action === 'deleteReport') {
+        if (!isSuperAdmin(data.email)) {
+          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        }
+        return _respond(deleteReport(data.reportId));
+      }
+      
+      if (action === 'addUser') {
+        if (!isSuperAdmin(data.email)) {
+          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        }
+        return _respond(addUser(data));
+      }
+      
+      if (action === 'updateUser') {
+        if (!isSuperAdmin(data.email)) {
+          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        }
+        return _respond(updateUser(data));
+      }
+      
+      if (action === 'deleteUser') {
+        if (!isSuperAdmin(data.email)) {
+          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        }
+        return _respond(deleteUser(data.userEmail));
+      }
+      
+      if (action === 'getAllUsers') {
+        if (!isHMOrSuperAdmin(data.email || e.parameter.email)) {
+          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        return _respond(getAllUsers());
+      }
+      
+      // === AUDIT LOG ROUTES ===
+      if (action === 'getAuditLogs') {
+        if (!isSuperAdmin(data.email || e.parameter.email)) {
+          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        }
+        return _respond(getAuditLogs(data.filters || {}));
+      }
+      
+      if (action === 'getEntityAuditTrail') {
+        if (!isHMOrSuperAdmin(data.email || e.parameter.email)) {
+          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        return _respond(getEntityAuditTrail(data.entityType, data.entityId));
+      }
+      
+      if (action === 'getAuditSummary') {
+        if (!isSuperAdmin(data.email || e.parameter.email)) {
+          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        }
+        return _respond(getAuditSummary(data.filters || {}));
+      }
+      
+      if (action === 'exportAuditLogs') {
+        if (!isSuperAdmin(data.email || e.parameter.email)) {
+          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        }
+        return _respond(exportAuditLogs(data.filters || {}));
       }
       
       // === SUBSTITUTION ROUTES ===
@@ -6113,3 +6213,260 @@
       };
     }
   }
+
+/**
+ * ====== SUPER ADMIN MANAGEMENT FUNCTIONS ======
+ * These functions allow Super Admins to manage all system data
+ */
+
+/**
+ * Delete a lesson plan
+ */
+function deleteLessonPlan(lessonPlanId) {
+  try {
+    const sh = _getSheet('LessonPlans');
+    const headers = _headers(sh);
+    const data = sh.getDataRange().getValues();
+    
+    for (let i = 1; i < data.length; i++) {
+      const row = _indexByHeader(data[i], headers);
+      if (row.lessonPlanId === lessonPlanId) {
+        sh.deleteRow(i + 1);
+        appLog('INFO', 'deleteLessonPlan', 'Deleted lesson plan: ' + lessonPlanId);
+        return { success: true, message: 'Lesson plan deleted successfully' };
+      }
+    }
+    return { error: 'Lesson plan not found' };
+  } catch (err) {
+    appLog('ERROR', 'deleteLessonPlan', err.message);
+    return { error: 'Failed to delete lesson plan: ' + err.message };
+  }
+}
+
+/**
+ * Delete a scheme
+ */
+function deleteScheme(schemeId) {
+  try {
+    const sh = _getSheet('Schemes');
+    const headers = _headers(sh);
+    const data = sh.getDataRange().getValues();
+    
+    for (let i = 1; i < data.length; i++) {
+      const row = _indexByHeader(data[i], headers);
+      if (row.schemeId === schemeId) {
+        sh.deleteRow(i + 1);
+        appLog('INFO', 'deleteScheme', 'Deleted scheme: ' + schemeId);
+        return { success: true, message: 'Scheme deleted successfully' };
+      }
+    }
+    return { error: 'Scheme not found' };
+  } catch (err) {
+    appLog('ERROR', 'deleteScheme', err.message);
+    return { error: 'Failed to delete scheme: ' + err.message };
+  }
+}
+
+/**
+ * Delete a daily report
+ */
+function deleteReport(reportId) {
+  try {
+    const sh = _getSheet('DailyReports');
+    const headers = _headers(sh);
+    const data = sh.getDataRange().getValues();
+    
+    for (let i = 1; i < data.length; i++) {
+      const row = _indexByHeader(data[i], headers);
+      if (row.reportId === reportId) {
+        sh.deleteRow(i + 1);
+        appLog('INFO', 'deleteReport', 'Deleted report: ' + reportId);
+        return { success: true, message: 'Report deleted successfully' };
+      }
+    }
+    return { error: 'Report not found' };
+  } catch (err) {
+    appLog('ERROR', 'deleteReport', err.message);
+    return { error: 'Failed to delete report: ' + err.message };
+  }
+}
+
+/**
+ * Add a new user
+ */
+function addUser(userData) {
+  try {
+    const sh = _getSheet('Users');
+    _ensureHeaders(sh, SHEETS.Users);
+    
+    const email = (userData.email || userData.userEmail || '').toLowerCase().trim();
+    const name = userData.name || userData.userName || '';
+    const password = userData.password || 'password123';
+    const roles = userData.roles || 'teacher';
+    const classes = userData.classes || '';
+    const subjects = userData.subjects || '';
+    const classTeacherFor = userData.classTeacherFor || '';
+    const phone = userData.phone || '';
+    
+    // Check if user already exists
+    const headers = _headers(sh);
+    const existing = _rows(sh).map(r => _indexByHeader(r, headers));
+    if (existing.find(u => String(u.email||'').toLowerCase() === email)) {
+      return { error: 'User already exists with this email' };
+    }
+    
+    const now = new Date().toISOString();
+    const newUserData = [
+      email,
+      name,
+      password,
+      roles,
+      classes,
+      subjects,
+      classTeacherFor,
+      phone,
+      now
+    ];
+    
+    sh.appendRow(newUserData);
+    appLog('INFO', 'addUser', 'Added new user: ' + email);
+    
+    return { success: true, message: 'User added successfully', email: email };
+  } catch (err) {
+    appLog('ERROR', 'addUser', err.message);
+    return { error: 'Failed to add user: ' + err.message };
+  }
+}
+
+/**
+ * Update an existing user
+ */
+function updateUser(userData) {
+  try {
+    const sh = _getSheet('Users');
+    const headers = _headers(sh);
+    const data = sh.getDataRange().getValues();
+    
+    const email = (userData.email || userData.userEmail || '').toLowerCase().trim();
+    
+    for (let i = 1; i < data.length; i++) {
+      const row = _indexByHeader(data[i], headers);
+      if (String(row.email||'').toLowerCase() === email) {
+        // Update fields
+        const rowNum = i + 1;
+        if (userData.name || userData.userName) {
+          const nameIdx = headers.indexOf('name');
+          if (nameIdx >= 0) sh.getRange(rowNum, nameIdx + 1).setValue(userData.name || userData.userName);
+        }
+        if (userData.password) {
+          const pwIdx = headers.indexOf('password');
+          if (pwIdx >= 0) sh.getRange(rowNum, pwIdx + 1).setValue(userData.password);
+        }
+        if (userData.roles !== undefined) {
+          const rolesIdx = headers.indexOf('roles');
+          if (rolesIdx >= 0) sh.getRange(rowNum, rolesIdx + 1).setValue(userData.roles);
+        }
+        if (userData.classes !== undefined) {
+          const classesIdx = headers.indexOf('classes');
+          if (classesIdx >= 0) sh.getRange(rowNum, classesIdx + 1).setValue(userData.classes);
+        }
+        if (userData.subjects !== undefined) {
+          const subjectsIdx = headers.indexOf('subjects');
+          if (subjectsIdx >= 0) sh.getRange(rowNum, subjectsIdx + 1).setValue(userData.subjects);
+        }
+        if (userData.classTeacherFor !== undefined) {
+          const ctIdx = headers.indexOf('classTeacherFor');
+          if (ctIdx >= 0) sh.getRange(rowNum, ctIdx + 1).setValue(userData.classTeacherFor);
+        }
+        if (userData.phone !== undefined) {
+          const phoneIdx = headers.indexOf('phone');
+          if (phoneIdx >= 0) sh.getRange(rowNum, phoneIdx + 1).setValue(userData.phone);
+        }
+        
+        // Audit log: User update
+        logAudit({
+          action: AUDIT_ACTIONS.UPDATE,
+          entityType: AUDIT_ENTITIES.USER,
+          entityId: email,
+          userEmail: email,
+          userName: userData.name || userData.userName || row.name || '',
+          userRole: userData.roles || row.roles || '',
+          beforeData: row,
+          afterData: userData,
+          description: `User profile updated: ${email}`,
+          severity: AUDIT_SEVERITY.WARNING
+        });
+        
+        appLog('INFO', 'updateUser', 'Updated user: ' + email);
+        return { success: true, message: 'User updated successfully' };
+      }
+    }
+    return { error: 'User not found' };
+  } catch (err) {
+    appLog('ERROR', 'updateUser', err.message);
+    return { error: 'Failed to update user: ' + err.message };
+  }
+}
+
+/**
+ * Delete a user
+ */
+function deleteUser(userEmail) {
+  try {
+    const sh = _getSheet('Users');
+    const headers = _headers(sh);
+    const data = sh.getDataRange().getValues();
+    
+    const email = (userEmail || '').toLowerCase().trim();
+    
+    for (let i = 1; i < data.length; i++) {
+      const row = _indexByHeader(data[i], headers);
+      if (String(row.email||'').toLowerCase() === email) {
+        // Audit log: User deletion (before deleting)
+        logAudit({
+          action: AUDIT_ACTIONS.DELETE,
+          entityType: AUDIT_ENTITIES.USER,
+          entityId: email,
+          userEmail: email,
+          userName: row.name || '',
+          userRole: row.roles || '',
+          beforeData: row,
+          description: `User account deleted: ${row.name} (${email})`,
+          severity: AUDIT_SEVERITY.CRITICAL
+        });
+        
+        sh.deleteRow(i + 1);
+        appLog('INFO', 'deleteUser', 'Deleted user: ' + email);
+        return { success: true, message: 'User deleted successfully' };
+      }
+    }
+    return { error: 'User not found' };
+  } catch (err) {
+    appLog('ERROR', 'deleteUser', err.message);
+    return { error: 'Failed to delete user: ' + err.message };
+  }
+}
+
+/**
+ * Get all users (for user management)
+ */
+function getAllUsers() {
+  try {
+    const sh = _getSheet('Users');
+    const headers = _headers(sh);
+    const users = _rows(sh).map(r => _indexByHeader(r, headers));
+    
+    // Don't return passwords in the response
+    return users.map(u => ({
+      email: u.email,
+      name: u.name,
+      roles: u.roles,
+      classes: u.classes,
+      subjects: u.subjects,
+      classTeacherFor: u.classTeacherFor
+    }));
+  } catch (err) {
+    appLog('ERROR', 'getAllUsers', err.message);
+    return { error: 'Failed to get users: ' + err.message };
+  }
+}

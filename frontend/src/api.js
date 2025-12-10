@@ -749,6 +749,84 @@ export async function createBulkExams(email, bulkExamData) {
   return postJSON(`${BASE_URL}?action=createBulkExams`, { email, ...bulkExamData })
 }
 
+// Delete an exam (Super Admin only)
+export async function deleteExam(email, examId) {
+  const result = await postJSON(`${BASE_URL}?action=deleteExam`, { email, examId });
+  return result?.data || result;
+}
+
+// Delete a daily report (Super Admin only)
+export async function deleteReport(email, reportId) {
+  const result = await postJSON(`${BASE_URL}?action=deleteReport`, { email, reportId });
+  return result?.data || result;
+}
+
+// === USER MANAGEMENT (Super Admin only) ===
+export async function getAllUsers(email) {
+  const result = await getJSON(`${BASE_URL}?action=getAllUsers&email=${encodeURIComponent(email)}`);
+  return result?.data || result || [];
+}
+
+export async function addUser(email, userData) {
+  const result = await postJSON(`${BASE_URL}?action=addUser`, { email, ...userData });
+  return result?.data || result;
+}
+
+export async function updateUser(adminEmail, userEmail, userData) {
+  const result = await postJSON(`${BASE_URL}?action=updateUser`, { 
+    email: adminEmail,  // Admin email for permission check
+    userEmail: userEmail,  // Email of user to update
+    ...userData 
+  });
+  return result?.data || result;
+}
+
+export async function deleteUser(email, userEmail) {
+  const result = await postJSON(`${BASE_URL}?action=deleteUser`, { email, userEmail });
+  return result?.data || result;
+}
+
+// === AUDIT LOG FUNCTIONS ===
+
+// Get audit logs with optional filters
+export async function getAuditLogs(filters = {}) {
+  const result = await postJSON(`${BASE_URL}?action=getAuditLogs`, { 
+    email: localStorage.getItem('userEmail'),
+    filters 
+  });
+  return result?.data || result || [];
+}
+
+// Get audit trail for a specific entity
+export async function getEntityAuditTrail(entityType, entityId) {
+  const result = await postJSON(`${BASE_URL}?action=getEntityAuditTrail`, {
+    email: localStorage.getItem('userEmail'),
+    entityType,
+    entityId
+  });
+  return result?.data || result || [];
+}
+
+// Get audit summary statistics
+export async function getAuditSummary(filters = {}) {
+  const result = await postJSON(`${BASE_URL}?action=getAuditSummary`, {
+    email: localStorage.getItem('userEmail'),
+    filters
+  });
+  return result?.data || result || {};
+}
+
+// Export audit logs for compliance
+export async function exportAuditLogs(filters = {}) {
+  const result = await postJSON(`${BASE_URL}?action=exportAuditLogs`, {
+    email: localStorage.getItem('userEmail'),
+    filters
+  });
+  return result?.data || result || [];
+}
+
+// === EXAM FUNCTIONS ===
+
 // Update an existing exam. Requires examId and updated exam details.
 // Returns { ok: true } on success.
 export async function updateExam(examData) {

@@ -74,10 +74,101 @@ function createExam(data) {
     sh.appendRow(examData);
     appLog('INFO', 'createExam', 'Exam created successfully: ' + examId);
     
+    // Audit log: Exam creation
+    logAudit({
+      action: AUDIT_ACTIONS.CREATE,
+      entityType: AUDIT_ENTITIES.EXAM,
+      entityId: examId,
+      userEmail: creatorEmail,
+      userName: creatorName,
+      userRole: 'Teacher/HM',
+      afterData: {
+        examId: examId,
+        class: data.class,
+        subject: data.subject,
+        examType: data.examType,
+        totalMax: totalMax
+      },
+      description: `Exam created: ${examName}`,
+      severity: AUDIT_SEVERITY.INFO
+    });
+    
     return { submitted: true, examId };
   } catch (err) {
     appLog('ERROR', 'createExam', 'Exception: ' + err.message);
     return { error: 'Failed to create exam: ' + err.message };
+  }
+}
+
+/**
+ * Create multiple exams at once for different subjects
+ */
+function createBulkExams(data) {
+  try {
+    appLog('INFO', 'createBulkExams', { data: data });
+    
+    const creatorEmail = (data.email || '').toLowerCase().trim();
+    const examClass = data.class || '';
+    const subjectExams = data.subjectExams || [];
+    
+    if (!creatorEmail) {
+      return { error: 'Creator email is required' };
+    }
+    
+    if (!Array.isArray(subjectExams) || subjectExams.length === 0) {
+      return { error: 'No subjects provided for bulk exam creation' };
+    }
+    
+    const results = [];
+    const errors = [];
+    
+    // Create an exam for each subject
+    for (const subjectExam of subjectExams) {
+      const examData = {
+        email: creatorEmail,
+        creatorName: data.creatorName || '',
+        class: examClass,
+        subject: subjectExam.subject || '',
+        examType: data.examType || '',
+        hasInternalMarks: data.hasInternalMarks,
+        internalMax: data.internalMax || 0,
+        externalMax: data.externalMax || 0,
+        totalMax: data.totalMax || 0,
+        date: subjectExam.date || data.date || ''
+      };
+      
+      // Create individual exam
+      const result = createExam(examData);
+      
+      if (result.error) {
+        errors.push({ subject: subjectExam.subject, error: result.error });
+      } else {
+        results.push({ subject: subjectExam.subject, examId: result.examId });
+      }
+    }
+    
+    appLog('INFO', 'createBulkExams', {
+      totalRequested: subjectExams.length,
+      successful: results.length,
+      failed: errors.length
+    });
+    
+    if (errors.length > 0 && results.length === 0) {
+      // All failed
+      return { error: 'All exams failed to create', details: errors };
+    }
+    
+    return {
+      submitted: true,
+      created: results.length,
+      failed: errors.length,
+      results: results,
+      errors: errors
+    };
+    
+  } catch (err) {
+    appLog('ERROR', 'createBulkExams', 'Exception: ' + err.message);
+    return { error: 'Failed to create bulk exams: ' + err.message };
   }
 }
 
@@ -137,7 +228,10 @@ function submitExamMarks(data) {
     const ce = parseInt(studentMark.ce || studentMark.internal) || 0;
     const te = parseInt(studentMark.te || studentMark.external) || 0;
     const total = ce + te;
-    const grade = _calculateGradeFromBoundaries((total / exam.totalMax) * 100, exam.class);
+    const percentage = (total / exam.totalMax) * 100;
+    const grade = _calculateGradeFromBoundaries(percentage, exam.class);
+    
+    Logger.log(`[Marks Submission] Student: ${studentMark.studentName}, CE: ${ce}, TE: ${te}, Total: ${total}/${exam.totalMax}, Percentage: ${percentage.toFixed(2)}%, Grade: ${grade}`);
     
     const markData = [
       examId,
@@ -157,6 +251,24 @@ function submitExamMarks(data) {
     
     marksSh.appendRow(markData);
   }
+  
+  // Audit log: Exam marks submission
+  logAudit({
+    action: AUDIT_ACTIONS.SUBMIT,
+    entityType: AUDIT_ENTITIES.EXAM_MARKS,
+    entityId: examId,
+    userEmail: data.teacherEmail || '',
+    userName: data.teacherName || '',
+    userRole: 'Teacher',
+    afterData: {
+      examId: examId,
+      studentsCount: marks.length,
+      class: exam.class,
+      subject: exam.subject
+    },
+    description: `Exam marks submitted for ${marks.length} students in ${exam.class} ${exam.subject}`,
+    severity: AUDIT_SEVERITY.INFO
+  });
   
   return { ok: true };
 }
@@ -693,5 +805,75 @@ function recalculateAllGrades() {
   } catch (error) {
     Logger.log('Error in recalculateAllGrades: ' + error.message);
     return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Delete an exam (Super Admin only)
+ * This will also delete all associated exam marks
+ */
+function deleteExam(examId) {
+  try {
+    appLog('INFO', 'deleteExam', 'Deleting exam: ' + examId);
+    
+    const sh = _getSheet('Exams');
+    const headers = _headers(sh);
+    const data = sh.getDataRange().getValues();
+    
+    let deleted = false;
+    
+    // Find and delete the exam row (iterate backwards to avoid index issues)
+    for (let i = data.length - 1; i >= 1; i--) {
+      const row = _indexByHeader(data[i], headers);
+      if (row.examId === examId) {
+        sh.deleteRow(i + 1);
+        deleted = true;
+        appLog('INFO', 'deleteExam', 'Exam row deleted: ' + examId);
+        break;
+      }
+    }
+    
+    if (!deleted) {
+      return { error: 'Exam not found' };
+    }
+    
+    // Delete all associated exam marks
+    deleteExamMarks(examId);
+    
+    return { success: true, message: 'Exam and associated marks deleted successfully' };
+    
+  } catch (error) {
+    appLog('ERROR', 'deleteExam', 'Error: ' + error.message);
+    return { error: 'Failed to delete exam: ' + error.message };
+  }
+}
+
+/**
+ * Delete all marks for a specific exam
+ * Helper function used by deleteExam
+ */
+function deleteExamMarks(examId) {
+  try {
+    const sh = _getSheet('ExamMarks');
+    const headers = _headers(sh);
+    const data = sh.getDataRange().getValues();
+    
+    let deletedCount = 0;
+    
+    // Iterate backwards to avoid index shifting issues
+    for (let i = data.length - 1; i >= 1; i--) {
+      const row = _indexByHeader(data[i], headers);
+      if (row.examId === examId) {
+        sh.deleteRow(i + 1);
+        deletedCount++;
+      }
+    }
+    
+    appLog('INFO', 'deleteExamMarks', `Deleted ${deletedCount} marks for exam ${examId}`);
+    return deletedCount;
+    
+  } catch (error) {
+    appLog('ERROR', 'deleteExamMarks', 'Error: ' + error.message);
+    return 0;
   }
 }

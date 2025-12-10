@@ -5,6 +5,57 @@
  */
 
 /**
+ * Check if a user is a Super Admin
+ * Super Admins have unrestricted access to everything in the system
+ * To make a user Super Admin, add "Super Admin" to their roles in the Users sheet
+ */
+function isSuperAdmin(userEmail) {
+  try {
+    const sh = _getSheet('Users');
+    const headers = _headers(sh);
+    const list = _rows(sh).map(r => _indexByHeader(r, headers));
+    const user = list.find(u => String(u.email||'').toLowerCase() === userEmail.toLowerCase());
+    
+    if (!user) return false;
+    
+    const roles = String(user.roles || '').toLowerCase();
+    return roles.includes('super admin') || 
+           roles.includes('superadmin') || 
+           roles.includes('super_admin');
+  } catch (err) {
+    appLog('ERROR', 'isSuperAdmin', err.message);
+    return false;
+  }
+}
+
+/**
+ * Check if a user is HM or Super Admin
+ * Returns true if user has elevated privileges (HM level or above)
+ */
+function isHMOrSuperAdmin(userEmail) {
+  try {
+    // Super Admin check first (highest privilege)
+    if (isSuperAdmin(userEmail)) return true;
+    
+    const sh = _getSheet('Users');
+    const headers = _headers(sh);
+    const list = _rows(sh).map(r => _indexByHeader(r, headers));
+    const user = list.find(u => String(u.email||'').toLowerCase() === userEmail.toLowerCase());
+    
+    if (!user) return false;
+    
+    const roles = String(user.roles || '').toLowerCase();
+    return roles.includes('hm') || 
+           roles.includes('headmaster') || 
+           roles.includes('h m') ||
+           roles.includes('principal');
+  } catch (err) {
+    appLog('ERROR', 'isHMOrSuperAdmin', err.message);
+    return false;
+  }
+}
+
+/**
  * Handle regular email/password login
  */
 function handleBasicLogin(email, password) {
@@ -169,7 +220,9 @@ function userCanAccessClass(userEmail, className) {
   
   if (!user) return false;
   
-  // HM can access all classes
+  // Super Admin and HM can access all classes
+  if (isSuperAdmin(userEmail)) return true;
+  
   const roles = String(user.roles || '').toLowerCase();
   if (roles.includes('hm') || roles.includes('headmaster')) {
     return true;
@@ -203,7 +256,18 @@ function userCanCreateExam(userEmail, className, subject) {
     return false;
   }
   
-  // HM can create exams for any class/subject
+  // Super Admin can create exams for any class/subject
+  if (isSuperAdmin(userEmail)) {
+    appLog('INFO', 'userCanCreateExam', 'Super Admin access granted for ' + userEmail);
+    return true;
+  }
+  
+  // Super Admin or HM can create exams for any class/subject
+  if (isSuperAdmin(userEmail)) {
+    appLog('INFO', 'userCanCreateExam', 'Super Admin access granted for ' + userEmail);
+    return true;
+  }
+  
   const roles = String(user.roles || '').toLowerCase();
   if (roles.includes('hm') || roles.includes('headmaster') || roles.includes('h m')) {
     appLog('INFO', 'userCanCreateExam', 'HM access granted for ' + userEmail);

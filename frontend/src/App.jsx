@@ -38,7 +38,8 @@ import {
   ClipboardCheck,
   Check,
   AlertTriangle,
-  XCircle
+  XCircle,
+  Shield
 } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
 import * as api from './api'
@@ -68,6 +69,9 @@ const SchemeLessonPlanning = lazy(() => import('./components/SchemeLessonPlannin
 const SessionCompletionTracker = lazy(() => import('./components/SessionCompletionTracker'));
 const HMDailyOversight = lazy(() => import('./components/HMDailyOversightEnhanced'));
 const HMTeacherPerformanceView = lazy(() => import('./components/HMTeacherPerformanceView'));
+const SuperAdminDashboard = lazy(() => import('./components/SuperAdminDashboard'));
+const UserManagement = lazy(() => import('./components/UserManagement'));
+const AuditLog = lazy(() => import('./components/AuditLog'));
 
 // Keep lightweight components as regular imports
 import { periodToTimeString, todayIST, formatDateForInput, formatLocalDate } from './utils/dateUtils';
@@ -437,6 +441,29 @@ const App = () => {
     ];
     
     if (!currentUser.roles || !Array.isArray(currentUser.roles) || currentUser.roles.length === 0) {
+      return items;
+    }
+
+    // Super Admin gets access to everything
+    if (hasAnyRole(['super admin', 'superadmin', 'super_admin'])) {
+      items.push(
+        { id: 'users', label: 'User Management', icon: Users },
+        { id: 'audit-log', label: 'Audit Log', icon: Shield },
+        { id: 'schemes', label: 'Schemes of Work', icon: Book },
+        { id: 'lesson-plans', label: 'Lesson Plans', icon: BookOpen },
+        { id: 'scheme-lesson-planning', label: 'Scheme-Based Planning', icon: BookCheck },
+        { id: 'timetable', label: 'Timetable', icon: Calendar },
+        { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
+        { id: 'reports', label: 'Daily Reports', icon: FileText },
+        { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
+        { id: 'teacher-performance', label: 'Teacher Performance', icon: BarChart2 },
+        { id: 'exam-marks', label: 'Exam Management', icon: Award },
+        { id: 'report-card', label: 'Report Cards', icon: FileCheck },
+        { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
+        { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
+        { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
+        { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays }
+      );
       return items;
     }
 
@@ -1063,8 +1090,17 @@ const App = () => {
           </>
         ) : (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6">
-            <h2 className="text-lg md:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Welcome, {user?.name}</h2>
-            <p className="text-gray-600 dark:text-gray-400">Use the navigation menu to access your school workflow tools.</p>
+            {/* Check if user is Super Admin */}
+            {user?.roles && (user.roles.includes('super admin') || user.roles.includes('superadmin') || user.roles.includes('super_admin')) ? (
+              <Suspense fallback={<div className="flex items-center justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>}>
+                <SuperAdminDashboard user={user} onNavigate={setActiveView} />
+              </Suspense>
+            ) : (
+              <>
+                <h2 className="text-lg md:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Welcome, {user?.name}</h2>
+                <p className="text-gray-600 dark:text-gray-400">Use the navigation menu to access your school workflow tools.</p>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -1322,6 +1358,10 @@ const App = () => {
         return <FullTimetableView />;
       case 'smart-reminders':
         return <SmartReminders user={user} />;
+      case 'users':
+        return <UserManagement user={user} />;
+      case 'audit-log':
+        return <AuditLog user={user} />;
       case 'exam-marks':
         return <ExamManagement user={user} withSubmit={withSubmit} />;
       case 'report-card':

@@ -52,7 +52,10 @@ const SHEETS = {
   
   // === SESSION TRACKING SYSTEM (2 sheets) ===
   TeacherPerformance: ['teacherEmail','teacherName','totalSessions','completedSessions','partialSessions','averageCompletion','onTimeCompletion','cascadingIssues','performanceGrade','lastUpdated','recommendations'],
-  SessionDependencies: ['prerequisiteSession','dependentSession','completionPercentage','impactLevel','recommendedAction','createdAt']
+  SessionDependencies: ['prerequisiteSession','dependentSession','completionPercentage','impactLevel','recommendedAction','createdAt'],
+  
+  // === AUDIT & COMPLIANCE (1 sheet) ===
+  AuditLog: ['timestamp','userEmail','userName','userRole','action','entityType','entityId','beforeData','afterData','ipAddress','changeDescription','severity','createdAt']
 };
 
 /**

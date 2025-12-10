@@ -35,6 +35,16 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       ? user.roles.map(r => String(r).toLowerCase().trim())
       : [String(user.roles).toLowerCase().trim()];
   }, [user, userRolesNorm]);
+  
+  // Check if user is Super Admin
+  const isSuperAdmin = useMemo(() => {
+    return normalizedRoles.some(r => 
+      r === 'super admin' || 
+      r === 'superadmin' || 
+      r === 'super_admin'
+    );
+  }, [normalizedRoles]);
+  
   const [exams, setExams] = useState([]);
   const [showExamForm, setShowExamForm] = useState(false);
   const [showBulkExamForm, setShowBulkExamForm] = useState(false);
@@ -115,6 +125,11 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         setGradeBoundaries(boundaries);
         setGradeBoundariesLoaded(true);
         console.log('📊 Grade boundaries loaded:', boundaries);
+        console.log('📊 Boundaries count:', boundaries?.length || 0);
+        if (boundaries && boundaries.length > 0) {
+          console.log('📊 Sample boundary:', boundaries[0]);
+          console.log('📊 All standard groups:', [...new Set(boundaries.map(b => b.standardGroup))]);
+        }
       } catch (error) {
         console.error('❌ Error loading grade boundaries:', error);
         setGradeBoundariesLoaded(true); // Still mark as loaded to prevent infinite loading
@@ -133,7 +148,15 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       return 'Absent';
     }
     
+    console.log('🎓 calculateGrade called:', { 
+      percentage, 
+      className, 
+      gradeBoundariesLoaded, 
+      boundariesCount: gradeBoundaries.length 
+    });
+    
     if (!gradeBoundariesLoaded || !gradeBoundaries.length) {
+      console.log('⚠️ Using fallback grading - boundaries not loaded');
       // Fallback - use simple grades without + for safety
       if (percentage >= 80) return 'A';
       if (percentage >= 60) return 'B';
@@ -156,6 +179,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     };
 
     const stdGroup = getStandardGroup(className);
+    console.log('📚 Standard group determined:', { className, stdGroup });
     
     // Find appropriate grade boundary - use case-insensitive comparison
     const boundaries = gradeBoundaries
@@ -166,12 +190,16 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       })
       .sort((a, b) => b.minPercentage - a.minPercentage); // Sort descending
 
+    console.log('🔍 Filtered boundaries:', boundaries);
+
     for (const boundary of boundaries) {
       if (percentage >= boundary.minPercentage && percentage <= boundary.maxPercentage) {
+        console.log('✅ Grade found:', boundary.grade, `(${percentage}% in range ${boundary.minPercentage}-${boundary.maxPercentage}%)`);
         return boundary.grade;
       }
     }
 
+    console.log('⚠️ No matching boundary, using lowest grade');
     // Return lowest grade if no boundary found
     return boundaries.length > 0 ? boundaries[boundaries.length - 1].grade : 'E';
   }, [gradeBoundaries, gradeBoundariesLoaded]);
@@ -354,8 +382,6 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     async function fetchAllSubjects() {
       try {
         setSubjectsLoading(true);
-        // Get all available subjects from the centralized API endpoint
-        const allSubjects = await api.getSubjects();
         
         // Check if hasRole is a function before calling it
         const isHeadmaster = typeof hasRole === 'function' ? 
@@ -365,8 +391,87 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         // Check if user is a class teacher
         const isClassTeacher = normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher');
         
-        // Filter subjects based on user role and selected class
-        if (user && !isHeadmaster) {
+        // Get all subjects from the timetable for the selected class
+        const selectedClass = (examFormData.class || '').toString().trim();
+        
+        if (isSuperAdmin || isHeadmaster) {
+          // For HM/Super Admin: Get subjects from full timetable for the selected class
+          if (selectedClass) {
+            try {
+              const fullTimetable = await api.getFullTimetable();
+              const classSubjects = new Set();
+              
+              if (Array.isArray(fullTimetable)) {
+                fullTimetable.forEach(entry => {
+                  // Normalize class comparison - remove spaces, "STD", and make lowercase
+                  const entryClass = String(entry.class || '')
+                    .trim()
+                    .toLowerCase()
+                    .replace(/std\s*/gi, '')  // Remove "STD" prefix
+                    .replace(/\s+/g, '');      // Remove all spaces
+                  
+                  const targetClass = selectedClass
+                    .trim()
+                    .toLowerCase()
+                    .replace(/std\s*/gi, '')
+                    .replace(/\s+/g, '');
+                  
+                  if (entryClass === targetClass && entry.subject) {
+                    classSubjects.add(String(entry.subject).trim());
+                  }
+                });
+              }
+              
+              console.log(`🔍 Found ${classSubjects.size} subjects in timetable for ${selectedClass}`);
+              
+              console.log(`🔍 Found ${classSubjects.size} subjects in timetable for ${selectedClass}`);
+              
+              if (classSubjects.size > 0) {
+                const sortedSubjects = Array.from(classSubjects).filter(Boolean).sort();
+                console.log(`📚 Subjects for ${selectedClass}:`, sortedSubjects);
+                setAvailableSubjects(sortedSubjects);
+              } else {
+                console.log(`⚠️  No subjects in timetable for ${selectedClass}, checking exams fallback`);
+                // Fallback: Get subjects from existing exams
+                const examSubjects = new Set();
+                if (Array.isArray(exams)) {
+                  exams.forEach(ex => {
+                    const exClass = String(ex.class || '')
+                      .trim()
+                      .toLowerCase()
+                      .replace(/std\s*/gi, '')
+                      .replace(/\s+/g, '');
+                    const targetClass = selectedClass
+                      .trim()
+                      .toLowerCase()
+                      .replace(/std\s*/gi, '')
+                      .replace(/\s+/g, '');
+                    
+                    if (exClass === targetClass && ex.subject) {
+                      examSubjects.add(String(ex.subject).trim());
+                    }
+                  });
+                }
+                
+                if (examSubjects.size > 0) {
+                  console.log(`📋 Found ${examSubjects.size} subjects from existing exams`);
+                  setAvailableSubjects(Array.from(examSubjects).filter(Boolean).sort());
+                } else {
+                  // Last resort: show default subjects
+                  const defaultSubjects = ['Mathematics', 'English', 'Science', 'Social Studies', 'Hindi', 'Computer Science', 'Malayalam', 'Physical Education'];
+                  console.log('🔄 Using default subjects as fallback');
+                  setAvailableSubjects(defaultSubjects);
+                }
+              }
+            } catch (err) {
+              console.error('❌ Error fetching timetable for subjects:', err);
+              setAvailableSubjects(['Mathematics', 'English', 'Science', 'Social Studies', 'Hindi']);
+            }
+          } else {
+            // No class selected - show common subjects
+            setAvailableSubjects(['Mathematics', 'English', 'Science', 'Social Studies', 'Hindi', 'Computer Science']);
+          }
+        } else {
           // For class teacher: show subjects they teach + subjects in their assigned class
           if (isClassTeacher) {
             const subjectsSet = new Set();
@@ -419,131 +524,18 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
             const teacherSubjects = Array.isArray(user.subjects) ? user.subjects : [];
             setAvailableSubjects(teacherSubjects);
           }
-        } else {
-          // Headmaster: filter subjects based on selected class
-          const selectedClass = (examFormData.class || '').toString().trim();
-          
-          if (selectedClass) {
-            // Show only subjects for the selected class
-            const classSubjects = new Set();
-            
-            // Get subjects from exams for this class
-            if (Array.isArray(exams)) {
-              exams.forEach(ex => {
-                if (!ex) return;
-                if (String(ex.class || '').trim() === selectedClass) {
-                  const subj = String(ex.subject || '').trim();
-                  if (subj) classSubjects.add(subj);
-                }
-              });
-            }
-            
-            // If no subjects found from exams, show all subjects as fallback
-            if (classSubjects.size === 0) {
-              console.log('⚠️  No subjects found for class, showing all subjects');
-              setAvailableSubjects(allSubjects);
-            } else {
-              const sortedClassSubjects = Array.from(classSubjects).sort();
-              console.log('📚 Class-specific subjects:', sortedClassSubjects);
-              setAvailableSubjects(sortedClassSubjects);
-            }
-          } else {
-            // No class selected, show all subjects for headmaster
-            console.log('🌟 Headmaster - showing all subjects:', allSubjects);
-            setAvailableSubjects(allSubjects);
-          }
         }
       } catch (error) {
         console.error("❌ Error fetching subjects:", error);
-        // Fallback to the old method if API call fails
-        fallbackToExamBasedSubjects();
+        // Fallback to default subjects if everything fails
+        setAvailableSubjects(['Mathematics', 'English', 'Science', 'Social Studies', 'Hindi']);
       } finally {
         setSubjectsLoading(false);
       }
     }
     
-    // Fallback method to use exam-based subjects if API fails
-    function fallbackToExamBasedSubjects() {
-      const cls = (examFormData.class || '').toString().trim();
-      
-      // Check if hasRole is a function before calling it
-      const isHeadmaster = typeof hasRole === 'function' ? 
-        hasRole('h m') : 
-        normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'));
-      
-      // Check if user is a class teacher
-      const isClassTeacher = normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher');
-      
-      // If user is a class teacher, add all subjects from their assigned class AND subjects they teach
-      if (user && isClassTeacher && !isHeadmaster) {
-        const subjectsSet = new Set();
-        
-        // Add subjects that the teacher teaches
-        if (Array.isArray(user.subjects)) {
-          user.subjects.forEach(s => subjectsSet.add(s));
-        }
-        
-        // Add all subjects for the class they are class teacher for
-        if (user.classTeacherFor) {
-          const classTeacherClass = user.classTeacherFor;
-          
-          // Get subjects for this class from existing exams
-          if (Array.isArray(exams)) {
-            exams.forEach(ex => {
-              if (!ex) return;
-              if (String(ex.class || '').trim() === classTeacherClass) {
-                const subj = String(ex.subject || '').trim();
-                if (subj) subjectsSet.add(subj);
-              }
-            });
-          }
-        }
-        
-        const list = Array.from(subjectsSet).filter(Boolean).sort();
-        setAvailableSubjects(list);
-        return;
-      }
-      
-      // If user is a regular teacher (not class teacher, not HM), restrict to their subjects
-      if (user && !isHeadmaster) {
-        const teacherSubjects = Array.isArray(user.subjects) ? user.subjects : [];
-        setAvailableSubjects(teacherSubjects);
-        return;
-      }
-
-      // Headmaster: Derive subjects from the fetched exams
-      const subjectsSet = new Set();
-      
-      // Get subjects from existing exams
-      if (Array.isArray(exams)) {
-        exams.forEach(ex => {
-          if (!ex) return;
-          if (cls) {
-            if (String(ex.class || '').trim() === cls) {
-              const subj = String(ex.subject || '').trim();
-              if (subj) subjectsSet.add(subj);
-            }
-          } else {
-            const subj = String(ex.subject || '').trim();
-            if (subj) subjectsSet.add(subj);
-          }
-        });
-      }
-
-      // If still no subjects, add some common subjects as last resort
-      if (subjectsSet.size === 0) {
-        console.warn('⚠️  No subjects found anywhere, adding default subjects');
-        ['Mathematics', 'English', 'Science', 'Social Studies', 'Hindi'].forEach(s => subjectsSet.add(s));
-      }
-      
-      const list = Array.from(subjectsSet).filter(Boolean).sort();
-      setAvailableSubjects(list);
-      setSubjectsLoading(false);
-    }
-    
-    // Call the function to fetch subjects
     fetchAllSubjects();
-  }, [user, hasRole, normalizedRoles, exams, examFormData.class]);
+  }, [user, hasRole, normalizedRoles, isSuperAdmin, examFormData.class, exams]);
 
   // Handlers for Exam Creation
   const handleExamFormChange = (field, value) => {
@@ -847,7 +839,8 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       
       // Determine role information
       const isClassTeacher = normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher');
-      const userRole = isClassTeacher ? 'classteacher' : 
+      const userRole = isSuperAdmin ? 'superadmin' :
+                     isClassTeacher ? 'classteacher' : 
                      normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster')) ? 'headmaster' : 
                      'teacher';
       
@@ -864,6 +857,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         _ts: Date.now()
       });
       
+      console.log('📊 Exams loaded:', list?.length || 0, 'exams for role:', userRole);
       setExams(Array.isArray(list) ? list : []);
     } catch (e) {
       console.error('Failed to reload exams', e);
@@ -881,14 +875,17 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
   const examsForTeacher = useMemo(() => {
     if (!user || !exams.length) return [];
     
+    // Super Admin and HM see ALL exams
+    if (isSuperAdmin || normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'))) {
+      return exams;
+    }
+    
     // Pre-compute normalized user data
     const userClassesNorm = user.classes ? new Set(user.classes.map(c => normKey(c))) : new Set();
     const userSubjectsNorm = user.subjects ? new Set(user.subjects.map(s => normKey(s))) : new Set();
     const userClassTeacherForNorm = user.classTeacherFor ? normKey(user.classTeacherFor) : '';
     
     return exams.filter(ex => {
-      // Check for HM role, allowing for different formats (h m, hm, headmaster)
-      if (normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'))) return true;
       
       const exClass = normKey(ex.class);
       const exSubject = normKey(ex.subject);
@@ -1582,24 +1579,26 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-2xl font-bold text-gray-900">Exam Management</h1>
-        <div className="flex space-x-3">
+        <div className="flex flex-wrap gap-3 w-full sm:w-auto">
           {user && (normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'))) && (
             <>
               <button
                 onClick={() => setShowExamForm(true)}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700"
+                className="flex-1 sm:flex-initial bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center justify-center hover:bg-blue-700"
               >
                 <Plus className="h-4 w-4 mr-2" />
-                Create Exam
+                <span className="hidden sm:inline">Create Exam</span>
+                <span className="sm:hidden">Create</span>
               </button>
               <button
                 onClick={() => setShowBulkExamForm(true)}
-                className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-indigo-700"
+                className="flex-1 sm:flex-initial bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center justify-center hover:bg-indigo-700"
               >
                 <Plus className="h-4 w-4 mr-2" />
-                Create Bulk Exams
+                <span className="hidden sm:inline">Create Bulk Exams</span>
+                <span className="sm:hidden">Bulk</span>
               </button>
             </>
           )}
@@ -1617,7 +1616,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                 }
               }}
               disabled={!examsForTeacher || examsForTeacher.length === 0}
-              className={`px-4 py-2 rounded-lg flex items-center ${(!examsForTeacher || examsForTeacher.length === 0) ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'}`}
+              className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg flex items-center justify-center ${(!examsForTeacher || examsForTeacher.length === 0) ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'}`}
               title={(!examsForTeacher || examsForTeacher.length === 0) ? 'No exams available - please ask your Headmaster to create exams' : 'Enter marks for your exams'}
             >
               <Plus className="h-4 w-4 mr-2" />
@@ -2097,8 +2096,8 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
           </div>
           
           {/* Filter Bar */}
-          <div className="flex flex-wrap gap-3 mb-4">
-            <div className="flex-1 min-w-[180px]">
+          <div className="flex flex-col md:flex-row md:flex-wrap gap-3 mb-4">
+            <div className="flex-1 min-w-full md:min-w-[180px]">
               <label className="block text-xs font-medium text-gray-700 mb-1">Filter by Class</label>
               <div className="relative">
                 <select
@@ -2123,7 +2122,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
               </div>
             </div>
             
-            <div className="flex-1 min-w-[180px]">
+            <div className="flex-1 min-w-full md:min-w-[180px]">
               <label className="block text-xs font-medium text-gray-700 mb-1">Filter by Subject</label>
               <div className="relative">
                 <select
@@ -2140,7 +2139,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
               </div>
             </div>
             
-            <div className="flex-1 min-w-[180px]">
+            <div className="flex-1 min-w-full md:min-w-[180px]">
               <label className="block text-xs font-medium text-gray-700 mb-1">Filter by Exam Type</label>
               <div className="relative">
                 <select
@@ -2157,23 +2156,20 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
               </div>
             </div>
             
-            <div className="flex items-end">
+            <div className="flex gap-2 w-full md:w-auto md:items-end">
               <button
                 onClick={() => reloadExams()}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                className="flex-1 md:flex-initial px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
                 disabled={isLoading}
               >
-                <Filter className="w-4 h-4" /> Apply Filters
+                <Filter className="w-4 h-4" /> Apply
               </button>
-            </div>
-            
-            <div className="flex items-end">
               <button
                 onClick={() => {
                   setFilters({class: '', subject: '', examType: ''});
                   reloadExams();
                 }}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center gap-2"
+                className="flex-1 md:flex-initial px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"
                 disabled={isLoading}
               >
                 <RefreshCw className="w-4 h-4" /> Reset
@@ -2197,20 +2193,22 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
             Loading exams...
           </div>
         ) : examsForTeacher && examsForTeacher.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exam Name</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Max Marks</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {examsForTeacher.map((exam) => {
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exam Name</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Max Marks</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {examsForTeacher.map((exam) => {
                   const isClassTeacher = normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher');
                   const isClassTeacherForThisClass = user.classTeacherFor && normKey(user.classTeacherFor) === normKey(exam.class);
                   const teachesSubject = user.subjects && new Set(user.subjects.map(s => normKey(s))).has(normKey(exam.subject));
@@ -2282,6 +2280,89 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
               </tbody>
             </table>
           </div>
+          
+          {/* Mobile Card View */}
+          <div className="md:hidden space-y-4">
+            {examsForTeacher.map((exam) => {
+              const isClassTeacher = normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher');
+              const isClassTeacherForThisClass = user.classTeacherFor && normKey(user.classTeacherFor) === normKey(exam.class);
+              const teachesSubject = user.subjects && new Set(user.subjects.map(s => normKey(s))).has(normKey(exam.subject));
+              
+              let accessBadge = null;
+              
+              if (isClassTeacher && isClassTeacherForThisClass) {
+                accessBadge = (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                    Class Teacher
+                  </span>
+                );
+              } else if (teachesSubject) {
+                accessBadge = (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                    Subject Teacher
+                  </span>
+                );
+              }
+              
+              return (
+                <div key={exam.examId} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex-1">
+                      <h3 className="text-base font-semibold text-gray-900">{exam.examName || `${exam.examType} - ${exam.class} - ${exam.subject}`}</h3>
+                      {accessBadge && <div className="mt-1">{accessBadge}</div>}
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3 text-sm mb-3">
+                    <div>
+                      <span className="text-gray-500 block">Class</span>
+                      <span className="font-medium text-gray-900">{exam.class}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 block">Subject</span>
+                      <span className="font-medium text-gray-900">{exam.subject}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 block">Date</span>
+                      <span className="font-medium text-gray-900">
+                        {exam.date && exam.date !== '1950-01-01' && exam.date !== '1999-12-31' ? 
+                          formatShortDate(parseApiDate(exam.date)) : 
+                          formatShortDate(new Date())}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 block">Max Marks</span>
+                      <span className="font-medium text-gray-900">{exam.totalMax}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-2 pt-3 border-t border-gray-200">
+                    <button 
+                      onClick={() => viewMarks(exam)}
+                      className="flex-1 min-w-[120px] bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium"
+                    >
+                      View Marks
+                    </button>
+                    <button 
+                      onClick={() => openMarksForm(exam)}
+                      className="flex-1 min-w-[120px] bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 text-sm font-medium"
+                    >
+                      Edit Marks
+                    </button>
+                    {normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster')) && (
+                      <button 
+                        onClick={() => openEditExamForm(exam)}
+                        className="flex-1 min-w-[120px] bg-purple-600 text-white px-3 py-2 rounded-lg hover:bg-purple-700 text-sm font-medium"
+                      >
+                        Edit Exam
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
         ) : (
           <div className="text-gray-500 text-center py-12 bg-gray-50 rounded-lg">
             <div className="flex justify-center mb-4">
