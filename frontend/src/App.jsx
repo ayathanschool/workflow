@@ -444,14 +444,11 @@ const App = () => {
       return items;
     }
 
-    // Super Admin gets access to everything
+    // Super Admin gets access to everything (monitoring & management, not teacher workflows)
     if (hasAnyRole(['super admin', 'superadmin', 'super_admin'])) {
       items.push(
         { id: 'users', label: 'User Management', icon: Users },
         { id: 'audit-log', label: 'Audit Log', icon: Shield },
-        { id: 'schemes', label: 'Schemes of Work', icon: Book },
-        { id: 'lesson-plans', label: 'Lesson Plans', icon: BookOpen },
-        { id: 'scheme-lesson-planning', label: 'Scheme-Based Planning', icon: BookCheck },
         { id: 'timetable', label: 'Timetable', icon: Calendar },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
         { id: 'reports', label: 'Daily Reports', icon: FileText },
