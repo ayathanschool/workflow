@@ -790,17 +790,66 @@ export async function deleteUser(email, userEmail) {
 
 // Get audit logs with optional filters
 export async function getAuditLogs(filters = {}) {
-  const result = await postJSON(`${BASE_URL}?action=getAuditLogs`, { 
-    email: localStorage.getItem('userEmail'),
+  console.log('[API] getAuditLogs called with filters:', filters);
+  
+  // Extract email from stored user object (check both basic login and Google OAuth storage)
+  let userEmail = null;
+  
+  // Check basic login storage first
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try {
+      userEmail = JSON.parse(basicUser).email;
+      console.log('[API] Email from basic login:', userEmail);
+    } catch (e) {
+      console.error('[API] Failed to parse basic user:', e);
+    }
+  }
+  
+  // If not found, check Google OAuth storage
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try {
+        const session = JSON.parse(googleSession);
+        userEmail = session.user?.email;
+        console.log('[API] Email from Google session:', userEmail);
+      } catch (e) {
+        console.error('[API] Failed to parse Google session:', e);
+      }
+    }
+  }
+  
+  console.log('[API] Final extracted user email:', userEmail);
+  
+  const payload = { 
+    email: userEmail,
     filters 
-  });
-  return result?.data || result || [];
+  };
+  
+  const result = await postJSON(`${BASE_URL}?action=getAuditLogs`, payload);
+  // Backend wraps response as { status, data, timestamp }
+  const finalResult = Array.isArray(result?.data) ? result.data : (Array.isArray(result) ? result : []);
+  return finalResult;
 }
 
 // Get audit trail for a specific entity
 export async function getEntityAuditTrail(entityType, entityId) {
+  // Extract email from stored user object (check both basic login and Google OAuth storage)
+  let userEmail = null;
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { userEmail = JSON.parse(basicUser).email; } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { userEmail = JSON.parse(googleSession).user?.email; } catch (e) {}
+    }
+  }
+  
   const result = await postJSON(`${BASE_URL}?action=getEntityAuditTrail`, {
-    email: localStorage.getItem('userEmail'),
+    email: userEmail,
     entityType,
     entityId
   });
@@ -809,8 +858,21 @@ export async function getEntityAuditTrail(entityType, entityId) {
 
 // Get audit summary statistics
 export async function getAuditSummary(filters = {}) {
+  // Extract email from stored user object (check both basic login and Google OAuth storage)
+  let userEmail = null;
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { userEmail = JSON.parse(basicUser).email; } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { userEmail = JSON.parse(googleSession).user?.email; } catch (e) {}
+    }
+  }
+  
   const result = await postJSON(`${BASE_URL}?action=getAuditSummary`, {
-    email: localStorage.getItem('userEmail'),
+    email: userEmail,
     filters
   });
   return result?.data || result || {};
@@ -818,8 +880,20 @@ export async function getAuditSummary(filters = {}) {
 
 // Export audit logs for compliance
 export async function exportAuditLogs(filters = {}) {
+  // Extract email from stored user object (check both basic login and Google OAuth storage)
+  let userEmail = null;
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { userEmail = JSON.parse(basicUser).email; } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { userEmail = JSON.parse(googleSession).user?.email; } catch (e) {}
+    }
+  }
   const result = await postJSON(`${BASE_URL}?action=exportAuditLogs`, {
-    email: localStorage.getItem('userEmail'),
+    email: userEmail,
     filters
   });
   return result?.data || result || [];

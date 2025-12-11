@@ -143,9 +143,11 @@ function logAudit(params) {
  */
 function getAuditLogs(filters = {}) {
   try {
+    Logger.log('[getAuditLogs] Called with filters: ' + JSON.stringify(filters));
     const sh = _getSheet('AuditLog');
     const headers = _headers(sh);
     let logs = _rows(sh).map(r => _indexByHeader(r, headers));
+    Logger.log('[getAuditLogs] Total logs from sheet: ' + logs.length);
     
     // Apply filters
     if (filters.userEmail) {
@@ -186,6 +188,7 @@ function getAuditLogs(filters = {}) {
       logs = logs.slice(0, filters.limit);
     }
     
+    Logger.log('[getAuditLogs] Returning ' + logs.length + ' logs after filters');
     return logs;
     
   } catch (error) {

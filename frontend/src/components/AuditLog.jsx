@@ -42,9 +42,14 @@ const AuditLog = ({ user }) => {
   const loadAuditLogs = async () => {
     setLoading(true);
     try {
+      console.log('[AuditLog] Requesting with filters:', filters);
       const result = await api.getAuditLogs(filters);
+      console.log('[AuditLog] Received result:', result);
+      console.log('[AuditLog] Is array?', Array.isArray(result));
+      console.log('[AuditLog] Result length:', result?.length);
       setLogs(Array.isArray(result) ? result : []);
     } catch (err) {
+      console.error('[AuditLog] Error:', err);
       showError('Failed to Load Audit Logs', err.message || 'An error occurred');
       setLogs([]);
     } finally {
