@@ -76,7 +76,17 @@ function getUndeclaredHolidays(activeOnly = true) {
     _ensureHeaders(sh, SHEETS.UndeclaredHolidays);
     
     const headers = _headers(sh);
-    let holidays = _rows(sh).map(r => _indexByHeader(r, headers));
+    let holidays = _rows(sh).map(r => {
+      const holiday = _indexByHeader(r, headers);
+      // Convert date to YYYY-MM-DD string format to avoid timezone issues
+      if (holiday.date instanceof Date) {
+        const year = holiday.date.getFullYear();
+        const month = String(holiday.date.getMonth() + 1).padStart(2, '0');
+        const day = String(holiday.date.getDate()).padStart(2, '0');
+        holiday.date = `${year}-${month}-${day}`;
+      }
+      return holiday;
+    });
     
     if (activeOnly) {
       holidays = holidays.filter(h => h.status === 'active');
@@ -206,16 +216,25 @@ function cascadeLessonPlansFromDate(startDate, userEmail, userName) {
     // Find all lesson plans on or after the start date that are not completed
     for (let i = 0; i < allRows.length; i++) {
       const data = _indexByHeader(allRows[i], headers);
-      const lessonDate = data.scheduledDate || data.date;
+      const lessonDate = data.selectedDate || data.scheduledDate || data.date;
       
       // Skip if no date or lesson is already completed
       if (!lessonDate || data.status === 'completed' || data.status === 'Completed') {
         continue;
       }
       
+      // Convert date to string format for comparison
+      let dateStr = lessonDate;
+      if (lessonDate instanceof Date) {
+        const year = lessonDate.getFullYear();
+        const month = String(lessonDate.getMonth() + 1).padStart(2, '0');
+        const day = String(lessonDate.getDate()).padStart(2, '0');
+        dateStr = `${year}-${month}-${day}`;
+      }
+      
       // Only process lessons on or after start date
-      if (lessonDate >= startDate) {
-        let newDate = lessonDate;
+      if (dateStr >= startDate) {
+        let newDate = dateStr;
         
         // If lesson is on a holiday, shift it forward
         while (holidayDates.includes(newDate)) {
@@ -224,12 +243,12 @@ function cascadeLessonPlansFromDate(startDate, userEmail, userName) {
         }
         
         // Update if date changed
-        if (newDate !== lessonDate) {
+        if (newDate !== dateStr) {
           updates.push({
             rowNum: i + 2, // +1 for header, +1 for 0-index
-            oldDate: lessonDate,
+            oldDate: dateStr,
             newDate: newDate,
-            lessonId: data.id || data.lessonId,
+            lessonId: data.lpId || data.id || data.lessonId,
             teacher: data.teacherEmail,
             class: data.class,
             subject: data.subject
@@ -239,9 +258,11 @@ function cascadeLessonPlansFromDate(startDate, userEmail, userName) {
     }
     
     // Apply updates
-    const dateCol = headers.indexOf('scheduledDate') !== -1 
-      ? headers.indexOf('scheduledDate') + 1 
-      : headers.indexOf('date') + 1;
+    const dateCol = headers.indexOf('selectedDate') !== -1 
+      ? headers.indexOf('selectedDate') + 1 
+      : (headers.indexOf('scheduledDate') !== -1 
+        ? headers.indexOf('scheduledDate') + 1 
+        : headers.indexOf('date') + 1);
     
     updates.forEach(update => {
       sh.getRange(update.rowNum, dateCol).setValue(update.newDate);
@@ -277,6 +298,82 @@ function cascadeLessonPlansFromDate(startDate, userEmail, userName) {
     
   } catch (error) {
     console.error('Error cascading lesson plans:', error);
+    return { error: error.toString() };
+  }
+}
+
+/**
+ * Get preview of lesson plans that will be affected by cascading from a date
+ * @param {string} startDate - Date from which to preview cascading (YYYY-MM-DD)
+ * @returns {Object} Preview data with affected lessons
+ */
+function getAffectedLessonPlans(startDate) {
+  try {
+    const sh = _getSheet('LessonPlans');
+    const headers = _headers(sh);
+    const allRows = _rows(sh);
+    
+    // Get all undeclared holidays from start date onwards
+    const holidays = getUndeclaredHolidays(true);
+    const holidayDates = holidays
+      .filter(h => h.date >= startDate)
+      .map(h => h.date);
+    
+    if (holidayDates.length === 0) {
+      return { 
+        affectedLessons: [], 
+        holidays: [],
+        message: 'No holidays found from this date onwards'
+      };
+    }
+    
+    const affectedLessons = [];
+    
+    // Find all lesson plans on holiday dates that are not completed
+    for (let i = 0; i < allRows.length; i++) {
+      const data = _indexByHeader(allRows[i], headers);
+      const lessonDate = data.selectedDate || data.scheduledDate || data.date;
+      
+      // Skip if no date or lesson is already completed
+      if (!lessonDate || data.status === 'completed' || data.status === 'Completed') {
+        continue;
+      }
+      
+      // Convert date to string format for comparison
+      let dateStr = lessonDate;
+      if (lessonDate instanceof Date) {
+        const year = lessonDate.getFullYear();
+        const month = String(lessonDate.getMonth() + 1).padStart(2, '0');
+        const day = String(lessonDate.getDate()).padStart(2, '0');
+        dateStr = `${year}-${month}-${day}`;
+      }
+      
+      // Check if lesson is on a holiday date
+      if (holidayDates.includes(dateStr)) {
+        affectedLessons.push({
+          lpId: data.lpId,
+          date: dateStr,
+          period: data.selectedPeriod,
+          teacher: data.teacherName || data.teacherEmail,
+          teacherEmail: data.teacherEmail,
+          class: data.class,
+          subject: data.subject,
+          chapter: data.chapter,
+          session: data.session,
+          status: data.status
+        });
+      }
+    }
+    
+    return {
+      affectedLessons: affectedLessons,
+      holidays: holidays.filter(h => h.date >= startDate),
+      totalCount: affectedLessons.length,
+      message: `Found ${affectedLessons.length} lesson plans on ${holidayDates.length} holiday dates`
+    };
+    
+  } catch (error) {
+    console.error('Error getting affected lesson plans:', error);
     return { error: error.toString() };
   }
 }

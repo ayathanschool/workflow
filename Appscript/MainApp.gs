@@ -747,6 +747,13 @@
         }
         return _respond(cascadeLessonPlansFromDate(data.startDate, data.email, data.name));
       }
+
+      if (action === 'getAffectedLessonPlans') {
+        if (!isHMOrSuperAdmin(data.email || e.parameter.email)) {
+          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        return _respond(getAffectedLessonPlans(data.startDate));
+      }
       
       // === SUBSTITUTION ROUTES ===
       if (action === 'assignSubstitution') {

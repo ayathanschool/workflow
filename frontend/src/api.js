@@ -1020,6 +1020,32 @@ export async function cascadeLessonPlans(startDate) {
   return result?.data || result;
 }
 
+// Get affected lesson plans for a start date (preview before cascading)
+export async function getAffectedLessonPlans(startDate) {
+  let userEmail = null;
+  
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { 
+      userEmail = JSON.parse(basicUser).email;
+    } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { 
+        userEmail = JSON.parse(googleSession).user?.email;
+      } catch (e) {}
+    }
+  }
+  
+  const result = await postJSON(`${BASE_URL}?action=getAffectedLessonPlans`, {
+    startDate,
+    email: userEmail
+  });
+  return result?.data || result;
+}
+
 // === EXAM FUNCTIONS ===
 
 // Update an existing exam. Requires examId and updated exam details.

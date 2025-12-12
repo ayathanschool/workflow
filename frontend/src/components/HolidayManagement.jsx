@@ -14,6 +14,8 @@ const HolidayManagement = ({ user }) => {
   const [reason, setReason] = useState('');
   const [cascadeDate, setCascadeDate] = useState('');
   const [showCascadeConfirm, setShowCascadeConfirm] = useState(false);
+  const [affectedLessons, setAffectedLessons] = useState([]);
+  const [showPreview, setShowPreview] = useState(false);
   
   // Load holidays on mount
   useEffect(() => {
@@ -25,7 +27,20 @@ const HolidayManagement = ({ user }) => {
       setLoading(true);
       setError(null);
       const data = await api.getUndeclaredHolidays(true);
-      setHolidays(Array.isArray(data) ? data : []);
+      console.log('Holidays data received:', data);
+      
+      // Handle both array and object with holidays property
+      let holidaysList = [];
+      if (Array.isArray(data)) {
+        holidaysList = data;
+      } else if (data && Array.isArray(data.holidays)) {
+        holidaysList = data.holidays;
+      } else if (data && data.data && Array.isArray(data.data)) {
+        holidaysList = data.data;
+      }
+      
+      console.log('Parsed holidays list:', holidaysList);
+      setHolidays(holidaysList);
     } catch (err) {
       console.error('Error loading holidays:', err);
       setError('Failed to load holidays: ' + (err.message || 'Unknown error'));
@@ -98,15 +113,31 @@ const HolidayManagement = ({ user }) => {
       return;
     }
     
-    // Count affected holidays
-    const affectedHolidays = holidays.filter(h => h.date >= cascadeDate);
-    
-    if (affectedHolidays.length === 0) {
-      setError('No holidays found from the selected date onwards');
-      return;
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Get preview of affected lessons
+      const preview = await api.getAffectedLessonPlans(cascadeDate);
+      
+      if (preview.error) {
+        setError(preview.error);
+        return;
+      }
+      
+      if (!preview.affectedLessons || preview.affectedLessons.length === 0) {
+        setError('No lesson plans found on holiday dates from the selected date onwards');
+        return;
+      }
+      
+      setAffectedLessons(preview.affectedLessons);
+      setShowPreview(true);
+    } catch (err) {
+      console.error('Error getting affected lessons:', err);
+      setError('Failed to load affected lessons: ' + (err.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
     }
-    
-    setShowCascadeConfirm(true);
   };
   
   const confirmCascade = async () => {
@@ -114,7 +145,7 @@ const HolidayManagement = ({ user }) => {
       setLoading(true);
       setError(null);
       setSuccess(null);
-      setShowCascadeConfirm(false);
+      setShowPreview(false);
       
       const result = await api.cascadeLessonPlans(cascadeDate);
       
@@ -123,10 +154,11 @@ const HolidayManagement = ({ user }) => {
       } else {
         setSuccess(
           `Successfully cascaded lesson plans! ` +
-          `${result.affectedCount || 0} lesson plans adjusted to skip ` +
+          `${result.updatedLessons || 0} lesson plans adjusted to skip ` +
           `${result.holidays?.length || 0} holidays.`
         );
         setCascadeDate('');
+        setAffectedLessons([]);
       }
     } catch (err) {
       console.error('Error cascading lessons:', err);
@@ -272,6 +304,93 @@ const HolidayManagement = ({ user }) => {
           </button>
         </div>
         
+        {/* Preview Modal */}
+        {showPreview && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-800">
+                  Affected Lesson Plans Preview
+                </h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  The following {affectedLessons.length} lesson plans are scheduled on holiday dates and will be cascaded forward:
+                </p>
+              </div>
+              
+              <div className="p-6 overflow-y-auto max-h-[60vh]">
+                {affectedLessons.length === 0 ? (
+                  <p className="text-center text-gray-500 py-8">No lesson plans found</p>
+                ) : (
+                  <div className="space-y-2">
+                    {affectedLessons.map((lesson, index) => (
+                      <div
+                        key={lesson.lpId || index}
+                        className="p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-semibold text-gray-800">
+                                {(() => {
+                                  const [year, month, day] = lesson.date.split('-').map(Number);
+                                  const date = new Date(year, month - 1, day);
+                                  return date.toLocaleDateString('en-US', {
+                                    weekday: 'short',
+                                    month: 'short',
+                                    day: 'numeric'
+                                  });
+                                })()}
+                              </span>
+                              <span className="text-sm text-gray-500">Period {lesson.period}</span>
+                            </div>
+                            <div className="text-sm space-y-1">
+                              <div>
+                                <span className="font-medium text-gray-700">{lesson.class}</span>
+                                {' • '}
+                                <span className="text-gray-600">{lesson.subject}</span>
+                              </div>
+                              <div className="text-gray-600">
+                                Teacher: {lesson.teacher}
+                              </div>
+                              {lesson.chapter && (
+                                <div className="text-gray-500 text-xs">
+                                  Chapter: {lesson.chapter} {lesson.session && `(Session ${lesson.session})`}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded">
+                            {lesson.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              
+              <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setShowPreview(false);
+                    setAffectedLessons([]);
+                  }}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmCascade}
+                  disabled={loading}
+                  className="px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 disabled:opacity-50"
+                >
+                  {loading ? 'Processing...' : 'Confirm Cascade'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        
         {showCascadeConfirm && (
           <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
             <div className="flex items-start mb-4">
@@ -329,12 +448,17 @@ const HolidayManagement = ({ user }) => {
                   <div className="flex items-center gap-3">
                     <Calendar size={18} className="text-blue-600" />
                     <span className="font-semibold text-gray-800">
-                      {new Date(holiday.date + 'T00:00:00').toLocaleDateString('en-US', {
-                        weekday: 'short',
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric'
-                      })}
+                      {(() => {
+                        // Parse YYYY-MM-DD format properly
+                        const [year, month, day] = holiday.date.split('-').map(Number);
+                        const date = new Date(year, month - 1, day);
+                        return date.toLocaleDateString('en-US', {
+                          weekday: 'short',
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric'
+                        });
+                      })()}
                     </span>
                   </div>
                   <p className="text-sm text-gray-600 mt-1 ml-7">{holiday.reason}</p>
