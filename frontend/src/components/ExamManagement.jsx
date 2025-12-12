@@ -933,6 +933,28 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     });
   }, [exams, user, normalizedRoles, normKey]);
 
+  // Client-side filtering for instant results without API calls
+  const filteredExams = useMemo(() => {
+    let result = examsForTeacher;
+    
+    // Apply class filter
+    if (filters.class) {
+      result = result.filter(ex => normKey(ex.class) === normKey(filters.class));
+    }
+    
+    // Apply subject filter
+    if (filters.subject) {
+      result = result.filter(ex => normKey(ex.subject) === normKey(filters.subject));
+    }
+    
+    // Apply exam type filter
+    if (filters.examType) {
+      result = result.filter(ex => normKey(ex.examType) === normKey(filters.examType));
+    }
+    
+    return result;
+  }, [examsForTeacher, filters, normKey]);
+
   // Open marks form for a specific exam with caching optimization
   const openMarksForm = useCallback(async (exam) => {
     setSelectedExam(exam);
@@ -2180,21 +2202,18 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
             
             <div className="flex gap-2 w-full md:w-auto md:items-end">
               <button
+                onClick={() => setFilters({class: '', subject: '', examType: ''})}
+                className="flex-1 md:flex-initial px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"
+                disabled={isLoading}
+              >
+                <RefreshCw className="w-4 h-4" /> Clear Filters
+              </button>
+              <button
                 onClick={() => reloadExams()}
                 className="flex-1 md:flex-initial px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
                 disabled={isLoading}
               >
-                <Filter className="w-4 h-4" /> Apply
-              </button>
-              <button
-                onClick={() => {
-                  setFilters({class: '', subject: '', examType: ''});
-                  reloadExams();
-                }}
-                className="flex-1 md:flex-initial px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"
-                disabled={isLoading}
-              >
-                <RefreshCw className="w-4 h-4" /> Reset
+                <RefreshCw className="w-4 h-4" /> Refresh Data
               </button>
             </div>
           </div>
@@ -2214,7 +2233,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
             </div>
             Loading exams...
           </div>
-        ) : examsForTeacher && examsForTeacher.length > 0 ? (
+        ) : filteredExams && filteredExams.length > 0 ? (
           <>
             {/* Desktop Table View */}
             <div className="hidden md:block overflow-x-auto">
@@ -2230,7 +2249,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {examsForTeacher.map((exam) => {
+                  {filteredExams.map((exam) => {
                   const isClassTeacher = normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher');
                   const isClassTeacherForThisClass = user.classTeacherFor && normKey(user.classTeacherFor) === normKey(exam.class);
                   const teachesSubject = user.subjects && new Set(user.subjects.map(s => normKey(s))).has(normKey(exam.subject));
@@ -2305,7 +2324,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
           
           {/* Mobile Card View */}
           <div className="md:hidden space-y-4">
-            {examsForTeacher.map((exam) => {
+            {filteredExams.map((exam) => {
               const isClassTeacher = normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher');
               const isClassTeacherForThisClass = user.classTeacherFor && normKey(user.classTeacherFor) === normKey(exam.class);
               const teachesSubject = user.subjects && new Set(user.subjects.map(s => normKey(s))).has(normKey(exam.subject));

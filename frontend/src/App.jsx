@@ -65,6 +65,7 @@ const HMMissingLessonPlansOverview = lazy(() => import('./components/HMMissingLe
 const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodSubstitutionView'));
 const ExamManagement = lazy(() => import('./components/ExamManagement'));
 const ReportCard = lazy(() => import('./components/ReportCard'));
+const Marklist = lazy(() => import('./components/Marklist'));
 const SchemeLessonPlanning = lazy(() => import('./components/SchemeLessonPlanning'));
 const SessionCompletionTracker = lazy(() => import('./components/SessionCompletionTracker'));
 const HMDailyOversight = lazy(() => import('./components/HMDailyOversightEnhanced'));
@@ -456,6 +457,7 @@ const App = () => {
         { id: 'teacher-performance', label: 'Teacher Performance', icon: BarChart2 },
         { id: 'exam-marks', label: 'Exam Management', icon: Award },
         { id: 'report-card', label: 'Report Cards', icon: FileCheck },
+        { id: 'marklist', label: 'Marklist', icon: FileText },
         { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
         { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
@@ -1363,6 +1365,8 @@ const App = () => {
         return <ExamManagement user={user} withSubmit={withSubmit} />;
       case 'report-card':
         return <ReportCard user={user} />;
+      case 'marklist':
+        return <Marklist user={user} />;
       case 'class-data':
         return <ClassDataView />;
       case 'class-students':

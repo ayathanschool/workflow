@@ -146,8 +146,8 @@ const ReportCard = () => {
   }, [selectedClass]);
 
   const generateReport = async () => {
-    if (!selectedClass || !selectedExam || !selectedStudent) {
-      setError("Please select class, exam, and student");
+    if (!selectedClass || !selectedStudent) {
+      setError("Please select class and student");
       return;
     }
 
@@ -160,90 +160,121 @@ const ReportCard = () => {
         (s.admNo || s.AdmNo || s.ID || s.id) === selectedStudent
       );
       
-      // Call API with examType (selectedExam now contains the examType directly)
-      const data = await api.getStudentReportCard(selectedExam, selectedStudent, selectedClass);
+      // Get all exam types for this student
+      const examTypesForClass = [...new Set(exams.map(e => e.examType))];
+      console.log('📋 Fetching reports for exam types:', examTypesForClass);
       
-      console.log('=== RAW API RESPONSE ===');
-      console.log('Full data:', JSON.stringify(data, null, 2));
-      console.log('data.students:', data?.students);
-      console.log('data.students.length:', data?.students?.length);
+      // Fetch report data for all exam types
+      const reportPromises = examTypesForClass.map(examType => 
+        api.getStudentReportCard(examType, selectedStudent, selectedClass)
+          .catch(err => {
+            console.warn(`Failed to fetch ${examType}:`, err);
+            return null;
+          })
+      );
       
-      if (data && !data.error && data.students && data.students.length > 0) {
-        // Find the student data in the response
-        const studentData = data.students.find(s => 
-          String(s.admNo || '') === selectedStudent
-        ) || data.students[0]; // Fallback to first student if not found
-        
-        console.log('Student data from backend:', JSON.stringify(studentData, null, 2));
-        
-        // Transform the subjects data from backend format to frontend format
-        // Backend returns: { subjects: { "English": { internal, external, total, grade, ... }, ... } }
-        const examTypeGroups = {};
-        
-        if (studentData && studentData.subjects) {
-          // Get the exam type (use selectedExam or data.examType)
-          const examType = data.examType || selectedExam || 'General';
-          examTypeGroups[examType] = [];
-          
-          // Iterate through subjects object
-          Object.keys(studentData.subjects).forEach(subjectName => {
-            const subjectMarks = studentData.subjects[subjectName];
-            
-            console.log(`Subject ${subjectName}:`, {
-              ce: subjectMarks.ce,
-              te: subjectMarks.te,
-              internal: subjectMarks.internal,
-              external: subjectMarks.external,
-              total: subjectMarks.total,
-              hasInternalMarks: subjectMarks.hasInternalMarks
-            });
-            
-            // CRITICAL DEBUG: Log the exact values
-            console.log(`RAW VALUES - ce type: ${typeof subjectMarks.ce}, value: ${subjectMarks.ce}`);
-            console.log(`RAW VALUES - te type: ${typeof subjectMarks.te}, value: ${subjectMarks.te}`);
-            
-            examTypeGroups[examType].push({
-              name: subjectName,
-              // SIMPLIFIED: Just use the raw values from backend
-              ce: subjectMarks.ce,
-              te: subjectMarks.te,
-              total: subjectMarks.total,
-              grade: subjectMarks.grade || 'N/A',
-              percentage: subjectMarks.percentage || 0,
-              maxMarks: subjectMarks.maxMarks || 100,
-              hasInternalMarks: subjectMarks.hasInternalMarks
-            });
-          });
+      const allReports = await Promise.all(reportPromises);
+      console.log('📊 All reports fetched:', allReports);
+      
+      // Combine all exam types into one report
+      const examTypeGroups = {};
+      let totalMaxMarks = 0;
+      let totalMarksObtained = 0;
+      let validExamCount = 0;
+      
+      allReports.forEach((data, index) => {
+        if (!data || data.error || !data.students || data.students.length === 0) {
+          console.log(`⚠️ Skipping ${examTypesForClass[index]} - no data`);
+          return;
         }
         
-        console.log('Transformed examTypeGroups:', examTypeGroups);
+        const examType = examTypesForClass[index];
+        const studentData = data.students.find(s => 
+          String(s.admNo || '') === selectedStudent
+        ) || data.students[0];
         
-        setReportData({
-          student: {
-            Name: student?.name || student?.Name || studentData?.name || 'Unknown',
-            Class: student?.class || student?.Class || studentData?.class || selectedClass,
-            AdmNo: student?.admNo || student?.AdmNo || studentData?.admNo || selectedStudent
-          },
-          exam: { examType: selectedExam, examName: selectedExam },
-          examTypeGroups: examTypeGroups,
-          subjects: Object.values(examTypeGroups).flat(), // Keep for backward compatibility
-          summary: {
-            totalMarks: studentData?.totalMarks || 0,
-            maxMarks: studentData?.maxMarks || 0,
-            percentage: studentData?.percentage || 0,
-            grade: studentData?.grade || 'N/A',
-            subjectCount: studentData?.subjectCount || 0
-          }
+        if (!studentData || !studentData.subjects) {
+          console.log(`⚠️ Skipping ${examType} - no subject data`);
+          return;
+        }
+        
+        console.log(`✅ Processing ${examType}:`, studentData);
+        validExamCount++;
+        
+        // Initialize exam type group
+        examTypeGroups[examType] = {
+          subjects: [],
+          totalMarks: studentData.totalMarks || 0,
+          maxMarks: studentData.maxMarks || 0,
+          percentage: studentData.percentage || 0,
+          grade: studentData.grade || 'N/A'
+        };
+        
+        // Add to overall totals
+        totalMaxMarks += studentData.maxMarks || 0;
+        totalMarksObtained += studentData.totalMarks || 0;
+        
+        // Process subjects
+        Object.keys(studentData.subjects).forEach(subjectName => {
+          const subjectMarks = studentData.subjects[subjectName];
+          examTypeGroups[examType].subjects.push({
+            name: subjectName,
+            ce: subjectMarks.ce,
+            te: subjectMarks.te,
+            total: subjectMarks.total,
+            grade: subjectMarks.grade || 'N/A',
+            percentage: subjectMarks.percentage || 0,
+            maxMarks: subjectMarks.maxMarks || 100,
+            hasInternalMarks: subjectMarks.hasInternalMarks
+          });
         });
-      } else {
-        setError(data?.error || "Failed to generate report card. No data found.");
+      });
+      
+      if (validExamCount === 0) {
+        setError("No exam data found for this student");
+        return;
       }
+      
+      console.log('📊 Combined examTypeGroups:', examTypeGroups);
+      
+      setReportData({
+        student: {
+          Name: student?.name || student?.Name || 'Unknown',
+          Class: student?.class || student?.Class || selectedClass,
+          AdmNo: student?.admNo || student?.AdmNo || selectedStudent
+        },
+        exam: { examType: 'All Exams', examName: 'Comprehensive Report' },
+        examTypeGroups: examTypeGroups,
+        subjects: Object.values(examTypeGroups).flatMap(g => g.subjects), // For backward compatibility
+        summary: {
+          totalMarks: totalMarksObtained,
+          maxMarks: totalMaxMarks,
+          percentage: totalMaxMarks > 0 ? (totalMarksObtained / totalMaxMarks * 100).toFixed(2) : 0,
+          grade: calculateOverallGrade(totalMarksObtained, totalMaxMarks),
+          subjectCount: Object.values(examTypeGroups).reduce((sum, g) => sum + g.subjects.length, 0),
+          examCount: validExamCount
+        }
+      });
     } catch (err) {
       console.error("Error generating report:", err);
       setError("Failed to generate report card: " + (err.message || "Unknown error"));
     } finally {
       setLoading(false);
     }
+  };
+  
+  // Helper function to calculate overall grade
+  const calculateOverallGrade = (obtained, max) => {
+    if (!max || max === 0) return 'N/A';
+    const percentage = (obtained / max) * 100;
+    if (percentage >= 90) return 'A+';
+    if (percentage >= 80) return 'A';
+    if (percentage >= 70) return 'B+';
+    if (percentage >= 60) return 'B';
+    if (percentage >= 50) return 'C';
+    if (percentage >= 40) return 'D';
+    if (percentage >= 30) return 'E';
+    return 'F';
   };
 
   if (!user || !hasAccess) {
@@ -260,7 +291,7 @@ const ReportCard = () => {
     <div className="max-w-7xl mx-auto p-6">
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Report Card Generator</h1>
-        <p className="text-gray-600 dark:text-gray-400">Multi-Term Assessment System</p>
+        <p className="text-gray-600 dark:text-gray-400">Grade-only view for all exams</p>
         {isHM && (
           <p className="text-sm text-blue-600 dark:text-blue-400 mt-2">
             🔑 HM Access: You can view all classes and students
@@ -274,9 +305,10 @@ const ReportCard = () => {
       </div>
 
       <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow border dark:border-gray-700 mb-6">
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Generate Report Card</h2>
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Generate Comprehensive Report Card</h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">📊 View student performance across all exam types in one comprehensive report</p>
         
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Select Class</label>
             <select value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
@@ -284,19 +316,6 @@ const ReportCard = () => {
               {classes.map((cls) => (<option key={cls} value={cls}>{cls}</option>))}
             </select>
             <p className="text-xs text-gray-500 mt-1">{classes.length} classes available</p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Select Exam</label>
-            <select value={selectedExam} onChange={(e) => setSelectedExam(e.target.value)} disabled={!selectedClass || exams.length === 0} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50">
-              <option value="">Choose an exam...</option>
-              {exams.map((exam) => (
-                <option key={exam.examType} value={exam.examType}>
-                  {exam.examType}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-gray-500 mt-1">{exams.length} exam types available</p>
           </div>
 
           <div>
@@ -321,8 +340,8 @@ const ReportCard = () => {
         </div>
 
         <div className="flex items-center gap-4">
-          <button onClick={generateReport} disabled={!selectedClass || !selectedExam || !selectedStudent || loading} className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
-            {loading ? "Generating..." : "Generate Report Card"}
+          <button onClick={generateReport} disabled={!selectedClass || !selectedStudent || loading} className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
+            {loading ? "Generating..." : "Generate Report Card (Grades Only)"}
           </button>
 
           {reportData && (
@@ -358,8 +377,6 @@ const ReportCard = () => {
 
           <div className="overflow-x-auto">
             {(() => {
-              const hasInternalMarks = classHasInternalMarks(reportData.student?.Class || selectedClass);
-              
               if (!reportData.examTypeGroups || Object.keys(reportData.examTypeGroups).length === 0) {
                 return (
                   <div className="text-center py-8 text-gray-500">
@@ -368,79 +385,87 @@ const ReportCard = () => {
                 );
               }
               
+              // Get all exam types (columns)
+              const examTypes = Object.keys(reportData.examTypeGroups);
+              
+              // Get all unique subjects (rows)
+              const allSubjects = new Set();
+              Object.values(reportData.examTypeGroups).forEach(examData => {
+                if (examData.subjects) {
+                  examData.subjects.forEach(subject => {
+                    allSubjects.add(subject.name);
+                  });
+                }
+              });
+              const subjects = Array.from(allSubjects).sort();
+              
+              // Build grade matrix: subject -> examType -> grade
+              const gradeMatrix = {};
+              subjects.forEach(subjectName => {
+                gradeMatrix[subjectName] = {};
+                examTypes.forEach(examType => {
+                  const examData = reportData.examTypeGroups[examType];
+                  const subjectData = examData.subjects?.find(s => s.name === subjectName);
+                  gradeMatrix[subjectName][examType] = subjectData?.grade || 'N/A';
+                });
+              });
+              
               return (
-                <div className="space-y-6">
-                  {Object.entries(reportData.examTypeGroups).map(([examType, subjects]) => (
-                    <div key={examType} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                      {/* Exam Type Header */}
-                      <div className="bg-blue-50 dark:bg-blue-900 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-                        <h3 className="text-lg font-semibold text-blue-800 dark:text-blue-200">
-                          {examType}
-                        </h3>
-                      </div>
-                      
-                      {/* Marks Table */}
-                      <table className="w-full border-collapse">
-                        <thead>
-                          <tr className="bg-gray-50 dark:bg-gray-700">
-                            <th className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-left">Subject</th>
-                            {hasInternalMarks && (
-                              <>
-                                <th className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center">CE</th>
-                                <th className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center">TE</th>
-                              </>
-                            )}
-                            {!hasInternalMarks && (
-                              <th className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center">External</th>
-                            )}
-                            <th className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center">Total</th>
-                            <th className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center">Grade</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {subjects && subjects.length > 0 ? (
-                            subjects.map((subject, index) => {
-                              // SIMPLIFIED: Just check if ce exists and is not null
-                              const showInternal = hasInternalMarks && subject.ce !== null && subject.ce !== undefined;
-                              
-                              console.log(`Rendering ${subject.name}: ce=${subject.ce}, te=${subject.te}, showInternal=${showInternal}, hasInternalMarks=${hasInternalMarks}`);
-                              
-                              return (
-                                <tr key={index}>
-                                  <td className="border border-gray-300 dark:border-gray-600 px-4 py-2">{subject.name || "Unknown Subject"}</td>
-                                  {hasInternalMarks && (
-                                    <>
-                                      <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center">
-                                        {subject.ce !== null && subject.ce !== undefined ? subject.ce : "-"}
-                                      </td>
-                                      <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center">
-                                        {subject.te !== null && subject.te !== undefined ? subject.te : "-"}
-                                      </td>
-                                    </>
-                                  )}
-                                  {!hasInternalMarks && (
-                                    <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center">
-                                      {subject.te !== null && subject.te !== undefined ? subject.te : "-"}
-                                    </td>
-                                  )}
-                                  <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center font-semibold">
-                                    {subject.total !== null && subject.total !== undefined ? subject.total : "-"}
-                                  </td>
-                                  <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center font-semibold">{subject.grade || "-"}</td>
-                                </tr>
-                              );
-                            })
-                          ) : (
-                            <tr>
-                              <td colSpan={hasInternalMarks ? "5" : "4"} className="border border-gray-300 dark:border-gray-600 px-4 py-8 text-center text-gray-500">
-                                No subjects found for {examType}
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
+                <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                  {/* Summary Stats */}
+                  <div className="bg-blue-50 dark:bg-blue-900 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                    <h3 className="text-lg font-semibold text-blue-800 dark:text-blue-200">
+                      Grade Summary
+                    </h3>
+                    <div className="flex gap-4 mt-2 text-sm">
+                      {examTypes.map(examType => {
+                        const examData = reportData.examTypeGroups[examType];
+                        return (
+                          <span key={examType} className="text-gray-700 dark:text-gray-300">
+                            <strong>{examType}:</strong> {examData.percentage}% ({examData.grade})
+                          </span>
+                        );
+                      })}
                     </div>
-                  ))}
+                  </div>
+                  
+                  {/* Matrix Table - Subject x Exam Type */}
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="bg-gray-50 dark:bg-gray-700">
+                        <th className="border border-gray-300 dark:border-gray-600 px-4 py-3 text-left sticky left-0 bg-gray-50 dark:bg-gray-700 z-10">Subject</th>
+                        {examTypes.map(examType => (
+                          <th key={examType} className="border border-gray-300 dark:border-gray-600 px-4 py-3 text-center min-w-[100px]">
+                            {examType}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {subjects.length > 0 ? (
+                        subjects.map((subjectName, index) => (
+                          <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                            <td className="border border-gray-300 dark:border-gray-600 px-4 py-3 font-medium sticky left-0 bg-white dark:bg-gray-800 z-10">
+                              {subjectName}
+                            </td>
+                            {examTypes.map(examType => (
+                              <td key={examType} className="border border-gray-300 dark:border-gray-600 px-4 py-3 text-center">
+                                <span className="font-semibold text-lg text-blue-600 dark:text-blue-400">
+                                  {gradeMatrix[subjectName][examType]}
+                                </span>
+                              </td>
+                            ))}
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={examTypes.length + 1} className="border border-gray-300 dark:border-gray-600 px-4 py-3 text-center text-gray-500">
+                            No subjects found
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               );
             })()}
