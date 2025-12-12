@@ -927,32 +927,34 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       
       // If user is a Class Teacher, allow access to:
       // 1. ANY subject from the class they are class teacher for (PRIMARY ACCESS)
-      // 2. OR subjects they teach in classes they are assigned to teach (SECONDARY ACCESS)
+      // 2. OR subjects they teach in ANY class they are assigned to teach (SECONDARY ACCESS)
       if (isClassTeacher) {
         // Primary: Access to ALL subjects in the class they are class teacher for
         const isClassTeacherForThisClass = userClassTeacherForNorm && userClassTeacherForNorm === exClass;
         
         if (isClassTeacherForThisClass) {
-          console.log('✅ Class Teacher access granted for exam:', {
+          console.log('✅ Class Teacher access (Primary):', {
             class: ex.class,
             subject: ex.subject,
-            reason: 'Class Teacher for this class'
+            reason: 'Class Teacher for this class - ALL SUBJECTS'
           });
           return true;
         }
         
-        // Secondary: Access to subjects they teach, but only in classes they are assigned to
+        // Secondary: Access to subjects they teach in OTHER classes they are assigned to
         const teachesThisSubjectInThisClass = teachesSubject && teachesClass;
         
         if (teachesThisSubjectInThisClass) {
-          console.log('✅ Class Teacher access granted for exam:', {
+          console.log('✅ Class Teacher access (Secondary):', {
             class: ex.class,
             subject: ex.subject,
             reason: 'Teaches this subject in this class'
           });
+          return true; // Changed from returning after if statement
         }
         
-        return teachesThisSubjectInThisClass;
+        // If neither condition met, deny access
+        return false;
       }
       
       // Regular subject teacher: require both class and subject match.

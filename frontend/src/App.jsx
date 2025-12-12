@@ -756,6 +756,19 @@ const App = () => {
                 
                 // Calculate academic performance for class teacher's classes
                 try {
+                  // Initialize classPerformance with all teaching classes (even without marks)
+                  teachingClasses.forEach(className => {
+                    if (!classPerformance[className]) {
+                      classPerformance[className] = {
+                        aboveAverage: 0,
+                        needFocus: 0,
+                        avgPercentage: 0,
+                        totalStudents: classStudentCounts[className] || 0,
+                        studentsWithMarks: 0
+                      };
+                    }
+                  });
+                  
                   // Get all exams to find latest exam for class teacher's classes
                   const allExams = await api.getExams();
                   const relevantExams = Array.isArray(allExams) 
