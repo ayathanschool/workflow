@@ -1046,6 +1046,64 @@ export async function getAffectedLessonPlans(startDate) {
   return result?.data || result;
 }
 
+// Get recent cascade operations
+export async function getRecentCascades(limit = 10) {
+  let userEmail = null;
+  
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { 
+      userEmail = JSON.parse(basicUser).email;
+    } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { 
+        userEmail = JSON.parse(googleSession).user?.email;
+      } catch (e) {}
+    }
+  }
+  
+  const result = await postJSON(`${BASE_URL}?action=getRecentCascades`, {
+    limit,
+    email: userEmail
+  });
+  return result?.data || result;
+}
+
+// Undo a cascade operation
+export async function undoCascade(cascadeId) {
+  let userEmail = null;
+  let userName = null;
+  
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { 
+      const user = JSON.parse(basicUser);
+      userEmail = user.email;
+      userName = user.name;
+    } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { 
+        const session = JSON.parse(googleSession);
+        userEmail = session.user?.email;
+        userName = session.user?.name;
+      } catch (e) {}
+    }
+  }
+  
+  const result = await postJSON(`${BASE_URL}?action=undoCascade`, {
+    cascadeId,
+    email: userEmail,
+    name: userName
+  });
+  return result?.data || result;
+}
+
 // === EXAM FUNCTIONS ===
 
 // Update an existing exam. Requires examId and updated exam details.

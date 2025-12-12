@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Plus, Trash2, AlertCircle, Check, X } from 'lucide-react';
+import { Calendar, Plus, Trash2, AlertCircle, Check, X, RotateCcw, History } from 'lucide-react';
 import * as api from '../api';
 
 const HolidayManagement = ({ user }) => {
@@ -17,9 +17,14 @@ const HolidayManagement = ({ user }) => {
   const [affectedLessons, setAffectedLessons] = useState([]);
   const [showPreview, setShowPreview] = useState(false);
   
+  // Cascade history
+  const [cascadeHistory, setCascadeHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+  
   // Load holidays on mount
   useEffect(() => {
     loadHolidays();
+    loadCascadeHistory();
   }, []);
   
   const loadHolidays = async () => {
@@ -159,10 +164,46 @@ const HolidayManagement = ({ user }) => {
         );
         setCascadeDate('');
         setAffectedLessons([]);
+        loadCascadeHistory(); // Reload history after cascade
       }
     } catch (err) {
       console.error('Error cascading lessons:', err);
       setError('Failed to cascade lesson plans: ' + (err.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const loadCascadeHistory = async () => {
+    try {
+      const data = await api.getRecentCascades(10);
+      setCascadeHistory(Array.isArray(data) ? data : (data.cascades || []));
+    } catch (err) {
+      console.error('Error loading cascade history:', err);
+    }
+  };
+  
+  const handleUndoCascade = async (cascadeId) => {
+    if (!confirm('Are you sure you want to undo this cascade? All lesson plans will be restored to their original dates.')) {
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      setError(null);
+      setSuccess(null);
+      
+      const result = await api.undoCascade(cascadeId);
+      
+      if (result.error) {
+        setError(result.error);
+      } else {
+        setSuccess(`Successfully undid cascade! ${result.restoredCount} lesson plans restored.`);
+        loadCascadeHistory();
+      }
+    } catch (err) {
+      console.error('Error undoing cascade:', err);
+      setError('Failed to undo cascade: ' + (err.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }
@@ -477,6 +518,78 @@ const HolidayManagement = ({ user }) => {
                 </button>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+      
+      {/* Cascade History */}
+      <div className="bg-white rounded-lg shadow-md p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+            <History size={20} />
+            Cascade History
+          </h2>
+          <button
+            onClick={() => setShowHistory(!showHistory)}
+            className="text-sm text-blue-600 hover:text-blue-700"
+          >
+            {showHistory ? 'Hide' : 'Show'} History
+          </button>
+        </div>
+        
+        {showHistory && (
+          <div className="space-y-3">
+            {cascadeHistory.length === 0 ? (
+              <p className="text-center py-4 text-gray-500">No cascade operations yet</p>
+            ) : (
+              cascadeHistory.map((cascade) => (
+                <div
+                  key={cascade.cascadeId}
+                  className="border border-gray-200 rounded-lg p-4"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-sm font-medium text-gray-700">
+                          {new Date(cascade.cascadeDate).toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </span>
+                        <span className={`text-xs px-2 py-1 rounded ${
+                          cascade.status === 'cascaded' 
+                            ? 'bg-green-100 text-green-700' 
+                            : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {cascade.status === 'cascaded' ? 'Active' : 'Undone'}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-600">
+                        Affected {cascade.lessons.length} lesson plans from {cascade.startDate}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        By {cascade.performedBy}
+                      </p>
+                    </div>
+                    
+                    {cascade.status === 'cascaded' && (
+                      <button
+                        onClick={() => handleUndoCascade(cascade.cascadeId)}
+                        disabled={loading}
+                        className="flex items-center gap-1 px-3 py-1.5 text-sm text-orange-600 hover:bg-orange-50 rounded-md disabled:opacity-50"
+                        title="Undo this cascade"
+                      >
+                        <RotateCcw size={16} />
+                        Undo
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         )}
       </div>
