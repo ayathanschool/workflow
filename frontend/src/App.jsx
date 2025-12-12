@@ -481,6 +481,7 @@ const App = () => {
       // enter marks for their classes and subjects, and view marks.
       items.push({ id: 'exam-marks', label: 'Exam Marks', icon: Award });
       items.push({ id: 'report-card', label: 'Report Card', icon: FileText });
+      items.push({ id: 'marklist', label: 'Marklist', icon: FileText });
     }
 
     // Daily reporting teachers should have access to daily reports functionality
@@ -509,7 +510,8 @@ const App = () => {
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
         { id: 'smart-reminders', label: 'Smart Reminders', icon: Bell },
         { id: 'exam-marks', label: 'Exam Marks', icon: Award },
-        { id: 'report-card', label: 'Report Card', icon: FileText }
+        { id: 'report-card', label: 'Report Card', icon: FileText },
+        { id: 'marklist', label: 'Marklist', icon: FileText }
       );
       // Additional management views for the headmaster
       items.push(

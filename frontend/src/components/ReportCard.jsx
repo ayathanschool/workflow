@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import * as api from "../api";
-import { useGoogleAuth } from "../contexts/GoogleAuthContext";
 
 /**
  * Determine if a class should have internal marks (CE/TE system)
@@ -22,8 +21,7 @@ const classHasInternalMarks = (cls) => {
   }
 };
 
-const ReportCard = () => {
-  const { user, roles } = useGoogleAuth();
+const ReportCard = ({ user }) => {
   
   const [selectedClass, setSelectedClass] = useState("");
   const [selectedExam, setSelectedExam] = useState("");
@@ -35,19 +33,22 @@ const ReportCard = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // Get roles from user object
+  const userRoles = user?.roles || [];
+
   // Check user role
-  const isHM = roles && roles.some(role => {
+  const isHM = userRoles && userRoles.some(role => {
     const roleLower = (role || "").toLowerCase().trim();
     const roleNoSpaces = roleLower.replace(/\s+/g, "");
     return roleNoSpaces === "hm" || roleLower.includes("head master") || roleLower.includes("headmaster");
   });
 
-  const isClassTeacher = roles && roles.some(role => {
+  const isClassTeacher = userRoles && userRoles.some(role => {
     const roleLower = (role || "").toLowerCase().trim();
     return roleLower.includes("class teacher");
   });
 
-  const hasAccess = roles && roles.length > 0 && roles.some(role => {
+  const hasAccess = userRoles && userRoles.length > 0 && userRoles.some(role => {
     const roleLower = (role || "").toLowerCase().trim();
     const roleNoSpaces = roleLower.replace(/\s+/g, "");
     if (roleLower.includes("teacher")) return true;
@@ -155,10 +156,17 @@ const ReportCard = () => {
       setLoading(true);
       setError(null);
       
+      console.log('🔍 Finding student:', selectedStudent);
+      console.log('📚 Available students:', students);
+      
       // Handle both uppercase and lowercase field names
-      const student = students.find(s => 
-        (s.admNo || s.AdmNo || s.ID || s.id) === selectedStudent
-      );
+      // Also handle string vs number comparison
+      const student = students.find(s => {
+        const admNo = s.admNo || s.AdmNo || s.ID || s.id;
+        return String(admNo) === String(selectedStudent);
+      });
+      
+      console.log('👤 Found student:', student);
       
       // Get all exam types for this student
       const examTypesForClass = [...new Set(exams.map(e => e.examType))];
