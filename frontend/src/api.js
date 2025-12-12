@@ -899,6 +899,127 @@ export async function exportAuditLogs(filters = {}) {
   return result?.data || result || [];
 }
 
+// === HOLIDAY MANAGEMENT FUNCTIONS ===
+
+// Mark a date as undeclared holiday
+export async function markUndeclaredHoliday(date, reason) {
+  let userEmail = null;
+  let userName = null;
+  
+  // Extract user from stored session
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { 
+      const user = JSON.parse(basicUser);
+      userEmail = user.email;
+      userName = user.name;
+    } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { 
+        const session = JSON.parse(googleSession);
+        userEmail = session.user?.email;
+        userName = session.user?.name;
+      } catch (e) {}
+    }
+  }
+  
+  const result = await postJSON(`${BASE_URL}?action=markUndeclaredHoliday`, {
+    date,
+    reason,
+    email: userEmail,
+    name: userName
+  });
+  return result?.data || result;
+}
+
+// Get all undeclared holidays
+export async function getUndeclaredHolidays(activeOnly = true) {
+  let userEmail = null;
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { userEmail = JSON.parse(basicUser).email; } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { userEmail = JSON.parse(googleSession).user?.email; } catch (e) {}
+    }
+  }
+  
+  const result = await postJSON(`${BASE_URL}?action=getUndeclaredHolidays`, {
+    email: userEmail,
+    activeOnly
+  });
+  return result?.data || result || [];
+}
+
+// Delete an undeclared holiday
+export async function deleteUndeclaredHoliday(holidayId) {
+  let userEmail = null;
+  let userName = null;
+  
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { 
+      const user = JSON.parse(basicUser);
+      userEmail = user.email;
+      userName = user.name;
+    } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { 
+        const session = JSON.parse(googleSession);
+        userEmail = session.user?.email;
+        userName = session.user?.name;
+      } catch (e) {}
+    }
+  }
+  
+  const result = await postJSON(`${BASE_URL}?action=deleteUndeclaredHoliday`, {
+    holidayId,
+    email: userEmail,
+    name: userName
+  });
+  return result?.data || result;
+}
+
+// Cascade lesson plans from a start date, skipping undeclared holidays
+export async function cascadeLessonPlans(startDate) {
+  let userEmail = null;
+  let userName = null;
+  
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { 
+      const user = JSON.parse(basicUser);
+      userEmail = user.email;
+      userName = user.name;
+    } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { 
+        const session = JSON.parse(googleSession);
+        userEmail = session.user?.email;
+        userName = session.user?.name;
+      } catch (e) {}
+    }
+  }
+  
+  const result = await postJSON(`${BASE_URL}?action=cascadeLessonPlans`, {
+    startDate,
+    email: userEmail,
+    name: userName
+  });
+  return result?.data || result;
+}
+
 // === EXAM FUNCTIONS ===
 
 // Update an existing exam. Requires examId and updated exam details.

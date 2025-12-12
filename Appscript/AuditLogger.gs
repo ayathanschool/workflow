@@ -22,7 +22,10 @@ const AUDIT_ACTIONS = {
   IMPORT: 'imported',
   ASSIGN: 'assigned',
   ACKNOWLEDGE: 'acknowledged',
-  VERIFY: 'verified'
+  VERIFY: 'verified',
+  MARK_HOLIDAY: 'marked_undeclared_holiday',
+  DELETE_HOLIDAY: 'deleted_holiday',
+  CASCADE_LESSONS: 'cascaded_lesson_plans'
 };
 
 /**
@@ -40,7 +43,8 @@ const AUDIT_ENTITIES = {
   TIMETABLE: 'Timetable',
   SETTINGS: 'Settings',
   SYLLABUS: 'Syllabus',
-  ACADEMIC_CALENDAR: 'AcademicCalendar'
+  ACADEMIC_CALENDAR: 'AcademicCalendar',
+  HOLIDAY: 'Holiday'
 };
 
 /**

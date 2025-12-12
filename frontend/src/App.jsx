@@ -66,6 +66,7 @@ const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodS
 const ExamManagement = lazy(() => import('./components/ExamManagement'));
 const ReportCard = lazy(() => import('./components/ReportCard'));
 const Marklist = lazy(() => import('./components/Marklist'));
+const HolidayManagement = lazy(() => import('./components/HolidayManagement'));
 const SchemeLessonPlanning = lazy(() => import('./components/SchemeLessonPlanning'));
 const SessionCompletionTracker = lazy(() => import('./components/SessionCompletionTracker'));
 const HMDailyOversight = lazy(() => import('./components/HMDailyOversightEnhanced'));
@@ -506,6 +507,7 @@ const App = () => {
         { id: 'daily-oversight', label: 'Daily Oversight (Enhanced)', icon: ClipboardCheck },
         { id: 'teacher-performance', label: 'Teacher Performance', icon: BarChart2 },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
+        { id: 'holiday-management', label: 'Holiday Management', icon: Calendar },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
         { id: 'smart-reminders', label: 'Smart Reminders', icon: Bell },
@@ -1369,6 +1371,8 @@ const App = () => {
         return <ReportCard user={user} />;
       case 'marklist':
         return <Marklist user={user} />;
+      case 'holiday-management':
+        return <HolidayManagement user={user} />;
       case 'class-data':
         return <ClassDataView />;
       case 'class-students':

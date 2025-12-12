@@ -719,6 +719,35 @@
         return _respond(exportAuditLogs(data.filters || {}));
       }
       
+      // === HOLIDAY MANAGEMENT ROUTES ===
+      if (action === 'markUndeclaredHoliday') {
+        if (!isHMOrSuperAdmin(data.email || e.parameter.email)) {
+          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        return _respond(markUndeclaredHoliday(data.date, data.reason, data.email, data.name));
+      }
+      
+      if (action === 'getUndeclaredHolidays') {
+        if (!isHMOrSuperAdmin(data.email || e.parameter.email)) {
+          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        return _respond(getUndeclaredHolidays(data.activeOnly !== false));
+      }
+      
+      if (action === 'deleteUndeclaredHoliday') {
+        if (!isHMOrSuperAdmin(data.email || e.parameter.email)) {
+          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        return _respond(deleteUndeclaredHoliday(data.holidayId, data.email, data.name));
+      }
+      
+      if (action === 'cascadeLessonPlans') {
+        if (!isHMOrSuperAdmin(data.email || e.parameter.email)) {
+          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        return _respond(cascadeLessonPlansFromDate(data.startDate, data.email, data.name));
+      }
+      
       // === SUBSTITUTION ROUTES ===
       if (action === 'assignSubstitution') {
         return _respond(assignSubstitution(data));

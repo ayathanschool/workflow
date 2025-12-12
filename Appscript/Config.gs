@@ -55,7 +55,10 @@ const SHEETS = {
   SessionDependencies: ['prerequisiteSession','dependentSession','completionPercentage','impactLevel','recommendedAction','createdAt'],
   
   // === AUDIT & COMPLIANCE (1 sheet) ===
-  AuditLog: ['timestamp','userEmail','userName','userRole','action','entityType','entityId','beforeData','afterData','ipAddress','changeDescription','severity','createdAt']
+  AuditLog: ['timestamp','userEmail','userName','userRole','action','entityType','entityId','beforeData','afterData','ipAddress','changeDescription','severity','createdAt'],
+  
+  // === HOLIDAY MANAGEMENT (1 sheet) ===
+  UndeclaredHolidays: ['id','date','reason','markedBy','markedAt','status']
 };
 
 /**

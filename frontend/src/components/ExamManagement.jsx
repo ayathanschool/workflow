@@ -907,6 +907,17 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     const userSubjectsNorm = user.subjects ? new Set(user.subjects.map(s => normKey(s))) : new Set();
     const userClassTeacherForNorm = user.classTeacherFor ? normKey(user.classTeacherFor) : '';
     
+    const isClassTeacher = normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher');
+    
+    console.log('📋 ExamManagement Filter Debug:', {
+      isClassTeacher,
+      userClassTeacherFor: user.classTeacherFor,
+      userClassTeacherForNorm,
+      userClasses: user.classes,
+      userSubjects: user.subjects,
+      totalExams: exams.length
+    });
+    
     return exams.filter(ex => {
       
       const exClass = normKey(ex.class);
@@ -915,23 +926,39 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       const teachesSubject = userSubjectsNorm.has(exSubject);
       
       // If user is a Class Teacher, allow access to:
-      // 1. Any subject from the class they are class teacher for
-      // 2. OR subjects they teach but only in classes they are assigned to teach
-      const isClassTeacher = normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher');
+      // 1. ANY subject from the class they are class teacher for (PRIMARY ACCESS)
+      // 2. OR subjects they teach in classes they are assigned to teach (SECONDARY ACCESS)
       if (isClassTeacher) {
-        // Access to all subjects in the class they are class teacher for
+        // Primary: Access to ALL subjects in the class they are class teacher for
         const isClassTeacherForThisClass = userClassTeacherForNorm && userClassTeacherForNorm === exClass;
         
-        // Access to subjects they teach, but only in classes they are assigned to
+        if (isClassTeacherForThisClass) {
+          console.log('✅ Class Teacher access granted for exam:', {
+            class: ex.class,
+            subject: ex.subject,
+            reason: 'Class Teacher for this class'
+          });
+          return true;
+        }
+        
+        // Secondary: Access to subjects they teach, but only in classes they are assigned to
         const teachesThisSubjectInThisClass = teachesSubject && teachesClass;
         
-        return isClassTeacherForThisClass || teachesThisSubjectInThisClass;
+        if (teachesThisSubjectInThisClass) {
+          console.log('✅ Class Teacher access granted for exam:', {
+            class: ex.class,
+            subject: ex.subject,
+            reason: 'Teaches this subject in this class'
+          });
+        }
+        
+        return teachesThisSubjectInThisClass;
       }
       
       // Regular subject teacher: require both class and subject match.
       return teachesClass && teachesSubject;
     });
-  }, [exams, user, normalizedRoles, normKey]);
+  }, [exams, user, normalizedRoles, normKey, isSuperAdmin]);
 
   // Client-side filtering for instant results without API calls
   const filteredExams = useMemo(() => {
