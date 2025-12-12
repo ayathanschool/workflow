@@ -461,6 +461,7 @@ const App = () => {
         { id: 'marklist', label: 'Marklist', icon: FileText },
         { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
         { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
+        { id: 'holiday-management', label: 'Holiday Management', icon: Calendar },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays }
       );
