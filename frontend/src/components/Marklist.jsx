@@ -26,6 +26,7 @@ const Marklist = ({ user }) => {
   const [students, setStudents] = useState([]);
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState("");
   const [error, setError] = useState(null);
 
   // Get roles from user object
@@ -109,6 +110,7 @@ const Marklist = ({ user }) => {
     try {
       setLoading(true);
       setError(null);
+      setLoadingProgress("Finding student...");
       
       console.log('🔍 Finding student:', selectedStudent);
       console.log('📚 Available students:', students);
@@ -123,12 +125,14 @@ const Marklist = ({ user }) => {
       console.log('👤 Found student:', student);
       
       // Fetch all exam types and get marks for each
+      setLoadingProgress("Loading exam types...");
       const allExams = await api.getAllExams();
       const uniqueExamTypes = [...new Set(allExams.map(e => e.examType))].filter(Boolean);
       
       console.log('📋 Fetching marklist for exam types:', uniqueExamTypes);
+      setLoadingProgress(`Loading ${uniqueExamTypes.length} exam types...`);
       
-      // Fetch reports for all exam types
+      // Fetch reports for all exam types in parallel
       const reportPromises = uniqueExamTypes.map(examType => 
         api.getStudentReportCard(examType, selectedStudent, selectedClass)
       );
@@ -200,6 +204,7 @@ const Marklist = ({ user }) => {
       setError("Failed to generate marklist: " + (err.message || "Unknown error"));
     } finally {
       setLoading(false);
+      setLoadingProgress("");
     }
   };
 
@@ -266,7 +271,7 @@ const Marklist = ({ user }) => {
 
         <div className="flex items-center gap-4">
           <button onClick={generateMarklist} disabled={!selectedClass || !selectedStudent || loading} className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
-            {loading ? "Generating..." : "Generate Marklist"}
+            {loading ? (loadingProgress || "Generating...") : "Generate Marklist"}
           </button>
 
           {reportData && (

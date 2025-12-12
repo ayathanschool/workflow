@@ -31,6 +31,7 @@ const ReportCard = ({ user }) => {
   const [students, setStudents] = useState([]);
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState("");
   const [error, setError] = useState(null);
 
   // Get roles from user object
@@ -155,6 +156,7 @@ const ReportCard = ({ user }) => {
     try {
       setLoading(true);
       setError(null);
+      setLoadingProgress("Finding student...");
       
       console.log('🔍 Finding student:', selectedStudent);
       console.log('📚 Available students:', students);
@@ -171,8 +173,9 @@ const ReportCard = ({ user }) => {
       // Get all exam types for this student
       const examTypesForClass = [...new Set(exams.map(e => e.examType))];
       console.log('📋 Fetching reports for exam types:', examTypesForClass);
+      setLoadingProgress(`Loading ${examTypesForClass.length} exam types...`);
       
-      // Fetch report data for all exam types
+      // Fetch report data for all exam types in parallel
       const reportPromises = examTypesForClass.map(examType => 
         api.getStudentReportCard(examType, selectedStudent, selectedClass)
           .catch(err => {
@@ -268,6 +271,7 @@ const ReportCard = ({ user }) => {
       setError("Failed to generate report card: " + (err.message || "Unknown error"));
     } finally {
       setLoading(false);
+      setLoadingProgress("");
     }
   };
   
@@ -349,7 +353,7 @@ const ReportCard = ({ user }) => {
 
         <div className="flex items-center gap-4">
           <button onClick={generateReport} disabled={!selectedClass || !selectedStudent || loading} className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
-            {loading ? "Generating..." : "Generate Report Card (Grades Only)"}
+            {loading ? (loadingProgress || "Generating...") : "Generate Report Card (Grades Only)"}
           </button>
 
           {reportData && (
