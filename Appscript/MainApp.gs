@@ -754,6 +754,20 @@
         }
         return _respond(getAffectedLessonPlans(data.startDate));
       }
+
+      if (action === 'getRecentCascades') {
+        if (!isHMOrSuperAdmin(data.email || e.parameter.email)) {
+          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        return _respond({ cascades: getRecentCascades(data.limit || 10) });
+      }
+
+      if (action === 'undoCascade') {
+        if (!isHMOrSuperAdmin(data.email || e.parameter.email)) {
+          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        return _respond(undoCascade(data.cascadeId, data.email, data.name));
+      }
       
       // === SUBSTITUTION ROUTES ===
       if (action === 'assignSubstitution') {

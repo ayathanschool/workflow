@@ -57,8 +57,9 @@ const SHEETS = {
   // === AUDIT & COMPLIANCE (1 sheet) ===
   AuditLog: ['timestamp','userEmail','userName','userRole','action','entityType','entityId','beforeData','afterData','ipAddress','changeDescription','severity','createdAt'],
   
-  // === HOLIDAY MANAGEMENT (1 sheet) ===
-  UndeclaredHolidays: ['id','date','reason','markedBy','markedAt','status']
+  // === HOLIDAY MANAGEMENT (2 sheets) ===
+  UndeclaredHolidays: ['id','date','reason','markedBy','markedAt','status'],
+  CascadeHistory: ['cascadeId','cascadeDate','startDate','performedBy','performedAt','lessonPlanId','oldDate','newDate','teacherEmail','class','subject','status']
 };
 
 /**

@@ -264,8 +264,32 @@ function cascadeLessonPlansFromDate(startDate, userEmail, userName) {
         ? headers.indexOf('scheduledDate') + 1 
         : headers.indexOf('date') + 1);
     
+    const cascadeId = 'CAS_' + Date.now();
+    const cascadeDate = new Date().toISOString();
+    
+    // Store cascade history before applying updates
+    const historySheet = _getSheet('CascadeHistory');
+    _ensureHeaders(historySheet, SHEETS.CascadeHistory);
+    
     updates.forEach(update => {
+      // Update lesson plan date
       sh.getRange(update.rowNum, dateCol).setValue(update.newDate);
+      
+      // Record in cascade history
+      historySheet.appendRow([
+        cascadeId,
+        cascadeDate,
+        startDate,
+        userEmail,
+        cascadeDate,
+        update.lessonId,
+        update.oldDate,
+        update.newDate,
+        update.teacher,
+        update.class,
+        update.subject,
+        'cascaded'
+      ]);
     });
     
     // Log audit for cascade operation
@@ -374,6 +398,142 @@ function getAffectedLessonPlans(startDate) {
     
   } catch (error) {
     console.error('Error getting affected lesson plans:', error);
+    return { error: error.toString() };
+  }
+}
+
+/**
+ * Get recent cascade operations
+ * @param {number} limit - Number of recent cascades to return
+ * @returns {Array} List of cascade operations
+ */
+function getRecentCascades(limit = 10) {
+  try {
+    const historySheet = _getSheet('CascadeHistory');
+    _ensureHeaders(historySheet, SHEETS.CascadeHistory);
+    
+    const headers = _headers(historySheet);
+    const allRows = _rows(historySheet);
+    
+    // Group by cascadeId
+    const cascadeMap = {};
+    allRows.forEach(row => {
+      const data = _indexByHeader(row, headers);
+      if (!cascadeMap[data.cascadeId]) {
+        cascadeMap[data.cascadeId] = {
+          cascadeId: data.cascadeId,
+          cascadeDate: data.cascadeDate,
+          startDate: data.startDate,
+          performedBy: data.performedBy,
+          lessons: [],
+          status: data.status
+        };
+      }
+      cascadeMap[data.cascadeId].lessons.push({
+        lessonPlanId: data.lessonPlanId,
+        oldDate: data.oldDate,
+        newDate: data.newDate,
+        teacher: data.teacherEmail,
+        class: data.class,
+        subject: data.subject
+      });
+    });
+    
+    // Convert to array and sort by date
+    const cascades = Object.values(cascadeMap)
+      .sort((a, b) => new Date(b.cascadeDate) - new Date(a.cascadeDate))
+      .slice(0, limit);
+    
+    return cascades;
+    
+  } catch (error) {
+    console.error('Error getting cascade history:', error);
+    return [];
+  }
+}
+
+/**
+ * Undo a specific cascade operation
+ * @param {string} cascadeId - Cascade ID to undo
+ * @param {string} userEmail - User performing the undo
+ * @param {string} userName - User name
+ * @returns {Object} Result with success or error
+ */
+function undoCascade(cascadeId, userEmail, userName) {
+  try {
+    const historySheet = _getSheet('CascadeHistory');
+    const headers = _headers(historySheet);
+    const allRows = _rows(historySheet);
+    
+    // Find all entries for this cascade
+    const cascadeEntries = [];
+    for (let i = 0; i < allRows.length; i++) {
+      const data = _indexByHeader(allRows[i], headers);
+      if (data.cascadeId === cascadeId && data.status === 'cascaded') {
+        cascadeEntries.push({
+          rowNum: i + 2,
+          data: data
+        });
+      }
+    }
+    
+    if (cascadeEntries.length === 0) {
+      return { error: 'Cascade not found or already undone' };
+    }
+    
+    // Restore lesson plans to original dates
+    const lpSheet = _getSheet('LessonPlans');
+    const lpHeaders = _headers(lpSheet);
+    const lpRows = _rows(lpSheet);
+    
+    const dateCol = lpHeaders.indexOf('selectedDate') !== -1 
+      ? lpHeaders.indexOf('selectedDate') + 1 
+      : (lpHeaders.indexOf('scheduledDate') !== -1 
+        ? lpHeaders.indexOf('scheduledDate') + 1 
+        : lpHeaders.indexOf('date') + 1);
+    
+    let restoredCount = 0;
+    
+    cascadeEntries.forEach(entry => {
+      // Find the lesson plan and restore its date
+      for (let i = 0; i < lpRows.length; i++) {
+        const lpData = _indexByHeader(lpRows[i], lpHeaders);
+        if (lpData.lpId === entry.data.lessonPlanId) {
+          lpSheet.getRange(i + 2, dateCol).setValue(entry.data.oldDate);
+          restoredCount++;
+          break;
+        }
+      }
+      
+      // Mark as undone in history
+      const statusCol = headers.indexOf('status') + 1;
+      historySheet.getRange(entry.rowNum, statusCol).setValue('undone');
+    });
+    
+    // Log audit
+    logAudit({
+      action: 'undid_cascade',
+      entityType: 'LessonPlan',
+      entityId: cascadeId,
+      userEmail: userEmail,
+      userName: userName,
+      userRole: 'HM',
+      afterData: {
+        cascadeId: cascadeId,
+        restoredCount: restoredCount
+      },
+      description: `Undid cascade operation ${cascadeId}, restored ${restoredCount} lesson plans`,
+      severity: AUDIT_SEVERITY.WARNING
+    });
+    
+    return {
+      ok: true,
+      restoredCount: restoredCount,
+      message: `Successfully restored ${restoredCount} lesson plans to their original dates`
+    };
+    
+  } catch (error) {
+    console.error('Error undoing cascade:', error);
     return { error: error.toString() };
   }
 }
