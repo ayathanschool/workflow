@@ -74,7 +74,6 @@ const HMTeacherPerformanceView = lazy(() => import('./components/HMTeacherPerfor
 const SuperAdminDashboard = lazy(() => import('./components/SuperAdminDashboard'));
 const UserManagement = lazy(() => import('./components/UserManagement'));
 const AuditLog = lazy(() => import('./components/AuditLog'));
-const CacheDebugPanel = lazy(() => import('./components/CacheDebugPanel'));
 
 // Keep lightweight components as regular imports
 import { periodToTimeString, todayIST, formatDateForInput, formatLocalDate } from './utils/dateUtils';
@@ -82,9 +81,6 @@ import { periodToTimeString, todayIST, formatDateForInput, formatLocalDate } fro
 
 // Common utility functions to avoid duplication
 const appNormalize = (s) => (s || '').toString().trim().toLowerCase();
-
-// Check if in development mode for cache debugging
-const isDevelopment = import.meta.env.DEV;
 
 const App = () => {
   
