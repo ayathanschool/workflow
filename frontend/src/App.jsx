@@ -39,7 +39,8 @@ import {
   Check,
   AlertTriangle,
   XCircle,
-  Shield
+  Shield,
+  DollarSign
 } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
 import * as api from './api'
@@ -66,7 +67,6 @@ const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodS
 const ExamManagement = lazy(() => import('./components/ExamManagement'));
 const ReportCard = lazy(() => import('./components/ReportCard'));
 const Marklist = lazy(() => import('./components/Marklist'));
-const HolidayManagement = lazy(() => import('./components/HolidayManagement'));
 const SchemeLessonPlanning = lazy(() => import('./components/SchemeLessonPlanning'));
 const SessionCompletionTracker = lazy(() => import('./components/SessionCompletionTracker'));
 const HMDailyOversight = lazy(() => import('./components/HMDailyOversightEnhanced'));
@@ -74,6 +74,7 @@ const HMTeacherPerformanceView = lazy(() => import('./components/HMTeacherPerfor
 const SuperAdminDashboard = lazy(() => import('./components/SuperAdminDashboard'));
 const UserManagement = lazy(() => import('./components/UserManagement'));
 const AuditLog = lazy(() => import('./components/AuditLog'));
+const CacheDebugPanel = lazy(() => import('./components/CacheDebugPanel'));
 
 // Keep lightweight components as regular imports
 import { periodToTimeString, todayIST, formatDateForInput, formatLocalDate } from './utils/dateUtils';
@@ -81,6 +82,9 @@ import { periodToTimeString, todayIST, formatDateForInput, formatLocalDate } fro
 
 // Common utility functions to avoid duplication
 const appNormalize = (s) => (s || '').toString().trim().toLowerCase();
+
+// Check if in development mode for cache debugging
+const isDevelopment = import.meta.env.DEV;
 
 const App = () => {
   
@@ -408,6 +412,8 @@ const App = () => {
     if (googleAuth?.user) googleAuth.logout();
     setUser(null);
     localStorage.removeItem('user');
+    // Clear all cached data on logout
+    api.invalidateCache.onLogout();
   };
 
   // Initialize app
@@ -461,9 +467,9 @@ const App = () => {
         { id: 'marklist', label: 'Marklist', icon: FileText },
         { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
         { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
-        { id: 'holiday-management', label: 'Holiday Management', icon: Calendar },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
-        { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays }
+        { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
+        { id: 'fee-collection', label: 'Fee Collection', icon: DollarSign }
       );
       return items;
     }
@@ -508,13 +514,13 @@ const App = () => {
         { id: 'daily-oversight', label: 'Daily Oversight (Enhanced)', icon: ClipboardCheck },
         { id: 'teacher-performance', label: 'Teacher Performance', icon: BarChart2 },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
-        { id: 'holiday-management', label: 'Holiday Management', icon: Calendar },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
         { id: 'smart-reminders', label: 'Smart Reminders', icon: Bell },
         { id: 'exam-marks', label: 'Exam Marks', icon: Award },
         { id: 'report-card', label: 'Report Card', icon: FileText },
-        { id: 'marklist', label: 'Marklist', icon: FileText }
+        { id: 'marklist', label: 'Marklist', icon: FileText },
+        { id: 'fee-collection', label: 'Fee Collection', icon: DollarSign }
       );
       // Additional management views for the headmaster
       items.push(
@@ -1385,8 +1391,6 @@ const App = () => {
         return <ReportCard user={user} />;
       case 'marklist':
         return <Marklist user={user} />;
-      case 'holiday-management':
-        return <HolidayManagement user={user} />;
       case 'class-data':
         return <ClassDataView />;
       case 'class-students':
@@ -1395,6 +1399,8 @@ const App = () => {
         return <DailyReportsManagementView />;
       case 'class-period-timetable':
         return <ClassPeriodSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
+      case 'fee-collection':
+        return <FeeCollectionView />;
       default:
         return <Dashboard />;
     }
@@ -1421,6 +1427,30 @@ const App = () => {
     });
     const [planningHelper, setPlanningHelper] = useState(null);
     const [loadingHelper, setLoadingHelper] = useState(false);
+    
+    // Filter states for submitted schemes
+    const [schemeFilters, setSchemeFilters] = useState({
+      class: 'all',
+      term: 'all'
+    });
+    
+    // Filtered schemes based on selected filters
+    const filteredSchemes = useMemo(() => {
+      return schemes.filter(scheme => {
+        const classMatch = schemeFilters.class === 'all' || scheme.class === schemeFilters.class;
+        const termMatch = schemeFilters.term === 'all' || scheme.term === schemeFilters.term;
+        return classMatch && termMatch;
+      });
+    }, [schemes, schemeFilters]);
+    
+    // Get unique classes and terms from schemes
+    const availableClasses = useMemo(() => {
+      return [...new Set(schemes.map(s => s.class))].filter(Boolean).sort();
+    }, [schemes]);
+    
+    const availableTerms = useMemo(() => {
+      return [...new Set(schemes.map(s => s.term))].filter(Boolean).sort((a, b) => Number(a) - Number(b));
+    }, [schemes]);
 
     // Handle delete scheme
     const handleDeleteScheme = async (scheme) => {
@@ -1919,18 +1949,57 @@ const App = () => {
 
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
           <div className="px-4 md:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100">Submitted Schemes</h2>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100">Submitted Schemes</h2>
+              
+              {/* Filters */}
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <label className="text-gray-600 dark:text-gray-400 whitespace-nowrap">Filter by:</label>
+                <select
+                  value={schemeFilters.class}
+                  onChange={(e) => setSchemeFilters(prev => ({ ...prev, class: e.target.value }))}
+                  className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="all">All Classes</option>
+                  {availableClasses.map(cls => (
+                    <option key={cls} value={cls}>{cls}</option>
+                  ))}
+                </select>
+                
+                <select
+                  value={schemeFilters.term}
+                  onChange={(e) => setSchemeFilters(prev => ({ ...prev, term: e.target.value }))}
+                  className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="all">All Terms</option>
+                  {availableTerms.map(term => (
+                    <option key={term} value={term}>Term {term}</option>
+                  ))}
+                </select>
+                
+                {(schemeFilters.class !== 'all' || schemeFilters.term !== 'all') && (
+                  <button
+                    onClick={() => setSchemeFilters({ class: 'all', term: 'all' })}
+                    className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 text-xs underline"
+                  >
+                    Clear filters
+                  </button>
+                )}
+                
+                <span className="text-gray-500 dark:text-gray-400 text-xs">({filteredSchemes.length} of {schemes.length})</span>
+              </div>
+            </div>
           </div>
 
           {/* Mobile Card Layout */}
           <div className="block md:hidden">
-            {schemes.length === 0 ? (
+            {filteredSchemes.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                No schemes submitted yet.
+                {schemes.length === 0 ? 'No schemes submitted yet.' : 'No schemes match the selected filters.'}
               </div>
             ) : (
               <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                {schemes.map((scheme) => (
+                {filteredSchemes.map((scheme) => (
                   <div key={scheme.schemeId || scheme.id} className="p-4 hover:bg-gray-50 dark:hover:bg-gray-700">
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div className="flex-1 min-w-0">
@@ -2007,7 +2076,7 @@ const App = () => {
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {schemes.map((scheme) => (
+                {filteredSchemes.map((scheme) => (
                   <tr key={scheme.schemeId || scheme.id}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{scheme.class}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{scheme.subject}</td>
@@ -2050,10 +2119,10 @@ const App = () => {
                     </td>
                   </tr>
                 ))}
-                {schemes.length === 0 && (
+                {filteredSchemes.length === 0 && (
                   <tr>
                     <td colSpan={7} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 text-center">
-                      No schemes submitted yet.
+                      {schemes.length === 0 ? 'No schemes submitted yet.' : 'No schemes match the selected filters.'}
                     </td>
                   </tr>
                 )}
@@ -5337,7 +5406,7 @@ const App = () => {
           // Already called above, just for UI feedback
         });
         
-        setPendingLessons(prev => {
+        setAllLessons(prev => {
           return prev
             .map(lesson => lesson.lpId === lpId ? { ...lesson, status } : lesson)
             .filter(lesson => {
@@ -5392,7 +5461,7 @@ const App = () => {
         if (filters.status === 'Pending Review') {
           lessons = lessons.filter(l => l.status === 'Pending Review');
         }
-        setPendingLessons(lessons);
+        setAllLessons(lessons);
         // If grouped view is active, refresh groups to reflect changes
         if (groupByChapter || groupByClass) {
           await refreshApprovals();
@@ -7998,6 +8067,40 @@ const App = () => {
             </div>
           </div>
         )}
+      </div>
+    );
+  };
+
+  // Fee Collection View - Embedded iframe for fee collection app
+  const FeeCollectionView = () => {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">
+            <DollarSign className="inline h-6 w-6 mr-2" />
+            Fee Collection
+          </h1>
+        </div>
+        
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden" style={{ height: 'calc(100vh - 200px)', minHeight: '600px' }}>
+          <iframe
+            src="https://fee-app-6jwp.vercel.app/"
+            title="Fee Collection Application"
+            className="w-full h-full border-0"
+            allow="fullscreen"
+            sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+          />
+        </div>
+        
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+          <div className="flex items-start">
+            <AlertCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5 mr-3 flex-shrink-0" />
+            <div className="text-sm text-blue-800 dark:text-blue-300">
+              <p className="font-semibold mb-1">About Fee Collection</p>
+              <p>This module provides access to the school's fee collection system. You can manage student fees, track payments, and generate receipts.</p>
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
