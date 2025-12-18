@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Calendar, Clock, ChevronDown, ChevronUp, User, TrendingDown } from 'lucide-react';
+import { AlertTriangle, Calendar, ChevronDown, ChevronUp, User } from 'lucide-react';
 import * as api from '../api';
 
 /**

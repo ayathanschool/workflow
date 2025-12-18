@@ -1,23 +1,8 @@
-import { formatDistanceToNow, isBefore, addDays, format, differenceInDays } from 'date-fns';
-import { 
-  Clock, 
-  AlertTriangle, 
-  Calendar, 
-  CheckCircle, 
-  Bell, 
-  RefreshCw,
-  Filter,
-  BookOpen,
-  FileText,
-  Award,
-  Users,
-  Settings,
-  TrendingUp,
-  XCircle
-} from 'lucide-react';
+import { addDays, format } from 'date-fns';
+import { Clock, AlertTriangle, Calendar, CheckCircle, Bell, RefreshCw, TrendingUp, XCircle } from 'lucide-react';
 import React, { useState, useEffect, useCallback } from 'react';
-import * as api from '../api';
 import { useNotifications, NOTIFICATION_PRIORITY } from '../contexts/NotificationContext';
+import { Settings } from 'lucide-react';
 
 const SmartReminders = ({ user }) => {
   const [reminders, setReminders] = useState([]);

@@ -48,6 +48,8 @@ import LoadingSplash from './auth/LoadingSplash';
 import LoginForm from './auth/LoginForm';
 import AnimatedPage from './components/AnimatedPage';
 import NotificationCenter from './components/NotificationCenter';
+import FeeCollectionModule from './components/FeeCollectionModule';
+import ModernFeeCollection from './components/FeeCollection/ModernFeeCollection';
 import PWAControls from './components/PWAControls';
 import PWAInstallBanner from './components/PWAInstallBanner';
 import ThemeToggle from './components/ThemeToggle';
@@ -136,8 +138,8 @@ const App = () => {
           });
         }
       } catch (err) {
-        console.warn('Error loading app settings:', err);
-        // Keep default settings
+        console.warn('⚠️ Could not load app settings (offline or backend unavailable). Using defaults.');
+        // Keep default settings - app will still work
       }
     }
     fetchAppSettings();
@@ -188,6 +190,12 @@ const App = () => {
     } catch (e) {
       return dateString; // Return original if parsing fails
     }
+  };
+
+  // Strip "STD " prefix from class names for display
+  const stripStdPrefix = (className) => {
+    if (!className) return '';
+    return String(className).replace(/^STD\s+/i, '');
   };
 
   const withSubmit = async (message, fn) => {
@@ -263,7 +271,7 @@ const App = () => {
           <div className="space-y-4">
             {/* Basic Info Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4 border-b border-gray-200 dark:border-gray-700">
-              <Detail label="Class" value={viewLesson.class} />
+              <Detail label="Class" value={stripStdPrefix(viewLesson.class)} />
               <Detail label="Subject" value={viewLesson.subject} />
               <Detail label="Chapter" value={viewLesson.chapter} />
               <Detail label="Session" value={viewLesson.noOfSessions ? `${viewLesson.session} of ${viewLesson.noOfSessions}` : viewLesson.session} />
@@ -470,6 +478,12 @@ const App = () => {
       return items;
     }
 
+    // Accounts role: Only Fee Collection module (plus dashboard)
+    if (hasAnyRole(['accounts', 'accountant', 'account'])) {
+      items.push({ id: 'fee-collection', label: 'Fee Collection', icon: DollarSign });
+      return items;
+    }
+
     if (hasAnyRole(['teacher','class teacher'])) {
       items.push(
         { id: 'schemes', label: 'Schemes of Work', icon: Book },
@@ -499,7 +513,8 @@ const App = () => {
     if (hasRole('class teacher')) {
       items.push(
         { id: 'class-data', label: 'Class Data', icon: UserCheck },
-        { id: 'class-students', label: 'Students', icon: Users }
+        { id: 'class-students', label: 'Students', icon: Users },
+        { id: 'fee-collection', label: 'Fee Collection', icon: DollarSign }
       );
     }
 
@@ -1551,7 +1566,7 @@ const App = () => {
         // Submit the scheme with timetable validation
         const schemeData = {
           teacherName: user.name || '',
-          class: formData.class,
+          class: stripStdPrefix(formData.class),
           subject: formData.subject,
           term: formData.term,
           unit: formData.unit,
@@ -1832,7 +1847,7 @@ const App = () => {
                 >
                   <option value="">Select Class</option>
                   {user?.classes?.map(cls => (
-                    <option key={cls} value={cls}>{cls}</option>
+                    <option key={cls} value={cls}>{stripStdPrefix(cls)}</option>
                   ))}
                 </select>
               </div>
@@ -1999,7 +2014,7 @@ const App = () => {
                   <div key={scheme.schemeId || scheme.id} className="p-4 hover:bg-gray-50 dark:hover:bg-gray-700">
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium text-gray-900 dark:text-gray-100">{scheme.class} - {scheme.subject}</div>
+                        <div className="font-medium text-gray-900 dark:text-gray-100">{stripStdPrefix(scheme.class)} - {scheme.subject}</div>
                         <div className="text-sm text-gray-600 dark:text-gray-400 mt-1 break-words">{scheme.chapter}</div>
                       </div>
                       <span className={`ml-2 px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
@@ -2074,7 +2089,7 @@ const App = () => {
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                 {filteredSchemes.map((scheme) => (
                   <tr key={scheme.schemeId || scheme.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{scheme.class}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{stripStdPrefix(scheme.class)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{scheme.subject}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{scheme.chapter}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{scheme.month}</td>
@@ -2963,7 +2978,7 @@ const App = () => {
                         <div key={plan.lpId} className="p-4 hover:bg-gray-50 dark:hover:bg-gray-700">
                           <div className="flex items-start justify-between gap-3 mb-3">
                             <div className="flex-1 min-w-0">
-                              <div className="font-medium text-gray-900 dark:text-gray-100">{plan.class} - {plan.subject}</div>
+                              <div className="font-medium text-gray-900 dark:text-gray-100">{stripStdPrefix(plan.class)} - {plan.subject}</div>
                               <div className="text-sm text-gray-600 dark:text-gray-400 mt-1 break-words">{plan.chapter || 'N/A'}</div>
                             </div>
                             <span className={`ml-2 px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
@@ -3045,7 +3060,7 @@ const App = () => {
                     <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                       {filtered.map((plan) => (
                         <tr key={plan.lpId}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{plan.class}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{stripStdPrefix(plan.class)}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{plan.subject}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{plan.chapter || 'N/A'}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{plan.session}</td>
@@ -3177,7 +3192,7 @@ const App = () => {
                           <div key={idx} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded-lg">
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 px-2 py-1 rounded">P{p.period}</span>
-                              <span className="text-sm text-gray-900 dark:text-gray-100">{p.class} - {p.subject}</span>
+                              <span className="text-sm text-gray-900 dark:text-gray-100">{stripStdPrefix(p.class)} - {p.subject}</span>
                             </div>
                           </div>
                         ))}
@@ -3216,7 +3231,7 @@ const App = () => {
                         : undefined;
                       return (
                         <td key={periodNumber} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                          {p ? `${p.class} - ${p.subject}` : ''}
+                          {p ? `${stripStdPrefix(p.class)} - ${p.subject}` : ''}
                         </td>
                       );
                     })}
@@ -3292,7 +3307,7 @@ const App = () => {
                   <tr key={i}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.period}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{periodToTimeString(r.period, customPeriodTimes)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.class}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{stripStdPrefix(r.class)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.teacher || r.teacherName || ''}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.subject || r.regularSubject || r.substituteSubject || ''}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.isSubstitution ? 'Substitution' : 'Regular'}</td>
@@ -3505,7 +3520,7 @@ const App = () => {
                                 year: 'numeric' 
                               })} • Period {sub.period}
                             </div>
-                            <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">{sub.class}</div>
+                            <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">{stripStdPrefix(sub.class)}</div>
                           </div>
                           {acknowledged ? (
                             <span className="ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
@@ -3603,7 +3618,7 @@ const App = () => {
                               {getPeriodTime(sub.period)}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                              {sub.class}
+                              {stripStdPrefix(sub.class)}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
                               <div className="flex flex-col">
@@ -4573,7 +4588,7 @@ const App = () => {
                       <div className="flex-1">
                         <div className="font-medium text-gray-900">{report.teacherName}</div>
                         <div className="text-sm text-gray-500">
-                          {report.class} • {report.subject} • Period {report.period}
+                          {stripStdPrefix(report.class)} • {report.subject} • Period {report.period}
                         </div>
                       </div>
                     </div>
@@ -4992,7 +5007,7 @@ const App = () => {
                   
                   {/* Class & Subject */}
                   <div className="text-xs text-gray-600 mb-1.5">
-                    {scheme.class} • {scheme.subject}
+                    {stripStdPrefix(scheme.class)} • {scheme.subject}
                   </div>
                   
                   {/* Chapter */}
@@ -5096,7 +5111,7 @@ const App = () => {
                         </td>
                       )}
                       <td className="px-1 py-2 text-xs text-gray-900 max-w-[80px] truncate" title={scheme.teacherName}>{scheme.teacherName}</td>
-                      <td className="px-1 py-2 text-xs text-gray-900 w-16">{scheme.class}</td>
+                      <td className="px-1 py-2 text-xs text-gray-900 w-16">{stripStdPrefix(scheme.class)}</td>
                       <td className="px-1 py-2 text-xs text-gray-900 max-w-[100px] truncate" title={scheme.subject}>{scheme.subject}</td>
                       <td className="px-1 py-2 text-xs text-gray-900 max-w-[150px] truncate" title={scheme.chapter}>{scheme.chapter}</td>
                       <td className="px-1 py-2 text-xs text-gray-900 text-center font-medium w-10">{scheme.noOfSessions}</td>
@@ -5817,7 +5832,7 @@ const App = () => {
                 
                 {/* Class & Subject */}
                 <div className="text-xs text-gray-600 mb-1.5">
-                  {lesson.class} • {lesson.subject}
+                  {stripStdPrefix(lesson.class)} • {lesson.subject}
                 </div>
                 
                 {/* Chapter */}
@@ -5925,7 +5940,7 @@ const App = () => {
                   return (
                     <tr key={lesson.lpId} className="hover:bg-gray-50">
                       <td className="px-1 py-2 text-xs text-gray-900 max-w-[80px] truncate" title={lesson.teacherName}>{lesson.teacherName}</td>
-                      <td className="px-1 py-2 text-xs text-gray-900 w-16">{lesson.class}</td>
+                      <td className="px-1 py-2 text-xs text-gray-900 w-16">{stripStdPrefix(lesson.class)}</td>
                       <td className="px-1 py-2 text-xs text-gray-900 max-w-[100px] truncate" title={lesson.subject}>{lesson.subject}</td>
                       <td className="px-1 py-2 text-xs text-gray-900 max-w-[150px] truncate" title={lesson.chapter}>{lesson.chapter}</td>
                       <td className="px-1 py-2 text-xs text-gray-900 text-center font-medium w-10">
@@ -6129,7 +6144,7 @@ const App = () => {
                     <div key={clsGroup.class} className="border rounded-lg">
                       <div className="flex items-center justify-between px-3 py-2 sm:px-4 sm:py-3 bg-gray-50 border-b">
                         <div>
-                          <div className="text-base font-semibold text-gray-900">{clsGroup.class}</div>
+                          <div className="text-base font-semibold text-gray-900">{stripStdPrefix(clsGroup.class)}</div>
                           <div className="text-xs sm:text-sm text-gray-600">Subject • Chapter groups</div>
                         </div>
                         <div className="flex items-center gap-1.5 sm:gap-2">
@@ -6232,7 +6247,7 @@ const App = () => {
                   <div className="flex-1 min-w-0">
                     <h2 className="text-xl md:text-2xl font-bold text-gray-900 break-words">{selectedChapter.chapter}</h2>
                     <p className="text-sm text-gray-600 mt-1">
-                      {selectedChapter.class} • {selectedChapter.subject} • {selectedChapter.teacherName}
+                      {stripStdPrefix(selectedChapter.class)} • {selectedChapter.subject} • {selectedChapter.teacherName}
                     </p>
                   </div>
                   <button onClick={closeChapterModal} className="text-gray-500 hover:text-gray-700">
@@ -8067,38 +8082,10 @@ const App = () => {
     );
   };
 
-  // Fee Collection View - Embedded iframe for fee collection app
+  // Fee Collection View - Integrated module
   const FeeCollectionView = () => {
-    return (
-      <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-          <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">
-            <DollarSign className="inline h-6 w-6 mr-2" />
-            Fee Collection
-          </h1>
-        </div>
-        
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden" style={{ height: 'calc(100vh - 200px)', minHeight: '600px' }}>
-          <iframe
-            src="https://fee-app-6jwp.vercel.app/"
-            title="Fee Collection Application"
-            className="w-full h-full border-0"
-            allow="fullscreen"
-            sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-          />
-        </div>
-        
-        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-          <div className="flex items-start">
-            <AlertCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5 mr-3 flex-shrink-0" />
-            <div className="text-sm text-blue-800 dark:text-blue-300">
-              <p className="font-semibold mb-1">About Fee Collection</p>
-              <p>This module provides access to the school's fee collection system. You can manage student fees, track payments, and generate receipts.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    // Use modern fee collection UI
+    return <ModernFeeCollection user={user} apiBaseUrl={api.getBaseUrl()} />;
   };
 
   // Class Data View (Class Teacher only)

@@ -15,7 +15,7 @@ import {
   Award
 } from 'lucide-react';
 import React, { useState, useRef, useEffect } from 'react';
-import { useNotifications, NOTIFICATION_CATEGORIES, NOTIFICATION_PRIORITY } from '../contexts/NotificationContext';
+import { useNotifications, NOTIFICATION_CATEGORIES } from '../contexts/NotificationContext';
 
 const NotificationCenter = () => {
   const [isOpen, setIsOpen] = useState(false);

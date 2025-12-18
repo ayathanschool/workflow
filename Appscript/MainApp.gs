@@ -225,6 +225,10 @@
         return _respond(getGradeTypes());
       }
       
+      if (action === 'getClassSubjects') {
+        return _respond(getClassSubjects(e.parameter.class));
+      }
+      
       if (action === 'getGradeBoundaries') {
         return _respond(getGradeBoundaries());
       }
@@ -240,6 +244,39 @@
         const admNo = e.parameter.admNo || '';
         const cls = e.parameter.class || '';
         return _respond(getStudentReportCard(examType, admNo, cls));
+      }
+      
+      // === FEE COLLECTION ROUTES ===
+      if (action === 'feeheads') {
+        const className = e.parameter.class || '';
+        return _respond({ ok: true, data: getFeeHeads(className) });
+      }
+      
+      if (action === 'transactions') {
+        const filters = {
+          admNo: e.parameter.admNo || '',
+          className: e.parameter.class || '',
+          feeHead: e.parameter.feeHead || '',
+          fromDate: e.parameter.fromDate || '',
+          toDate: e.parameter.toDate || ''
+        };
+        return _respond({ ok: true, data: getTransactions(filters) });
+      }
+      
+      if (action === 'studentFeeStatus') {
+        const admNo = e.parameter.admNo || '';
+        if (!admNo) return _respond({ ok: false, error: 'missing_admission_number' });
+        try {
+          const result = getStudentFeeStatus(admNo);
+          return _respond({ ok: true, ...result });
+        } catch (err) {
+          return _respond({ ok: false, error: String(err) });
+        }
+      }
+      
+      if (action === 'feeDefaulters') {
+        const className = e.parameter.class || '';
+        return _respond({ ok: true, data: getFeeDefaulters(className) });
       }
       
       // === HM DASHBOARD ===
@@ -718,35 +755,7 @@
         }
         return _respond(exportAuditLogs(data.filters || {}));
       }
-      
-      // === HOLIDAY MANAGEMENT ROUTES ===
-      if (action === 'markUndeclaredHoliday') {
-        if (!isHMOrSuperAdmin(data.email || e.parameter.email)) {
-          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
-        }
-        return _respond(markUndeclaredHoliday(data.date, data.reason, data.email, data.name));
-      }
-      
-      if (action === 'getUndeclaredHolidays') {
-        if (!isHMOrSuperAdmin(data.email || e.parameter.email)) {
-          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
-        }
-        return _respond(getUndeclaredHolidays(data.activeOnly !== false));
-      }
-      
-      if (action === 'deleteUndeclaredHoliday') {
-        if (!isHMOrSuperAdmin(data.email || e.parameter.email)) {
-          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
-        }
-        return _respond(deleteUndeclaredHoliday(data.holidayId, data.email, data.name));
-      }
-      
-      if (action === 'cascadeLessonPlans') {
-        if (!isHMOrSuperAdmin(data.email || e.parameter.email)) {
-          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
-        }
-        return _respond(cascadeLessonPlansFromDate(data.startDate, data.email, data.name));
-      }
+
 
       if (action === 'getAffectedLessonPlans') {
         if (!isHMOrSuperAdmin(data.email || e.parameter.email)) {
@@ -1227,6 +1236,68 @@
       // Simple diagnostic: reveals LessonPlans sheet headers and detects status column
       if (action === 'diagnoseLessonPlanHeaders') {
         return _respond(_handleDiagnoseLessonPlanHeaders());
+      }
+      
+      // === FEE COLLECTION POST ROUTES ===
+      if (action === 'addPaymentBatch') {
+        try {
+          const result = addPayment(data);
+          return _respond({ ok: true, ...result });
+        } catch (err) {
+          return _respond({ ok: false, error: String(err) });
+        }
+      }
+      
+      if (action === 'voidReceipt') {
+        try {
+          const result = voidReceipt(data.receiptNo);
+          return _respond({ ok: true, ...result });
+        } catch (err) {
+          return _respond({ ok: false, error: String(err) });
+        }
+      }
+      
+      if (action === 'unvoidReceipt') {
+        try {
+          const result = unvoidReceipt(data.receiptNo);
+          return _respond({ ok: true, ...result });
+        } catch (err) {
+          return _respond({ ok: false, error: String(err) });
+        }
+      }
+      
+      if (action === 'bulkPayment') {
+        try {
+          // Transform data format: map body to match addPayment format for each student
+          const payments = Array.isArray(data.payments) ? data.payments : [];
+          const results = [];
+          
+          payments.forEach(payment => {
+            try {
+              const result = addPayment({
+                date: data.date,
+                admNo: payment.admNo,
+                name: payment.name,
+                cls: payment.cls || payment.class,
+                mode: payment.mode,
+                items: payment.feeHeads || []
+              });
+              results.push({ ...result, admNo: payment.admNo, success: true });
+            } catch (err) {
+              results.push({ admNo: payment.admNo, success: false, error: String(err) });
+            }
+          });
+          
+          return _respond({
+            ok: true,
+            results: results,
+            successCount: results.filter(r => r.success).length,
+            totalCount: results.length,
+            date: data.date
+          });
+        } catch (err) {
+          return _respond({ ok: false, error: String(err) });
+        }
       }
       
       // === OTHER POST ROUTES ===
@@ -2318,7 +2389,8 @@
       
       const queryDate = _normalizeQueryDate(date);
 
-      // Block lesson planning on non-teaching days (exams/holidays) from AcademicCalendar
+      // Block lesson planning on non-teaching days (exams/holidays/events) from AcademicCalendar
+      // Check if queryDate falls within any ExamsHolidaysEventsStart to ExamsHolidaysEventsEnd range
       let isNonTeachingDay = false;
       let nonTeachingReason = '';
       try {
@@ -2328,37 +2400,15 @@
 
         for (let i = 0; i < rows.length && !isNonTeachingDay; i++) {
           const r = rows[i] || {};
-          // Range-based exams
-          const examStart = r.examStartDate ? _coerceToDate(r.examStartDate) : null;
-          const examEnd = r.examEndDate ? _coerceToDate(r.examEndDate) : null;
-          if (examStart && examEnd) {
-            const dStart = _isoDateIST(examStart);
-            const dEnd = _isoDateIST(examEnd);
-            if (qd >= dStart && qd <= dEnd) {
-              isNonTeachingDay = true;
-              nonTeachingReason = 'Exam Period';
-              break;
-            }
-          }
-          // Explicit exam dates (comma-separated)
-          const examDatesStr = String(r.examDates || '').trim();
-          if (examDatesStr) {
-            const examDates = examDatesStr.split(',').map(s => _isoDateIST(_coerceToDate(s.trim()))).filter(Boolean);
-            if (examDates.indexOf(qd) !== -1) {
-              isNonTeachingDay = true;
-              nonTeachingReason = 'Exam Day';
-              break;
-            }
-          }
-          // Holidays (comma-separated)
-          const holidaysStr = String(r.holidays || '').trim();
-          if (holidaysStr) {
-            const holidays = holidaysStr.split(',').map(s => _isoDateIST(_coerceToDate(s.trim()))).filter(Boolean);
-            if (holidays.indexOf(qd) !== -1) {
-              isNonTeachingDay = true;
-              nonTeachingReason = 'Holiday';
-              break;
-            }
+          
+          // Check if date falls within ExamsHolidaysEventsStart to ExamsHolidaysEventsEnd range
+          const blockStart = r.ExamsHolidaysEventsStart ? _isoDateIST(_coerceToDate(r.ExamsHolidaysEventsStart)) : null;
+          const blockEnd = r.ExamsHolidaysEventsEnd ? _isoDateIST(_coerceToDate(r.ExamsHolidaysEventsEnd)) : null;
+          
+          if (blockStart && blockEnd && qd >= blockStart && qd <= blockEnd) {
+            isNonTeachingDay = true;
+            nonTeachingReason = 'Blocked Period (Exam/Holiday/Event)';
+            break;
           }
         }
       } catch (calErr) {
@@ -4223,13 +4273,11 @@
       // 2. Calculate term timeline
       const startDate = _coerceToDate(termInfo.startDate);
       const endDate = _coerceToDate(termInfo.endDate);
-      const examStartDate = termInfo.examStartDate ? _coerceToDate(termInfo.examStartDate) : null;
       const today = new Date();
       
+      // Calculate teaching weeks (reserve last 2 weeks for exams)
       const totalWeeks = Math.ceil((endDate - startDate) / (7 * 24 * 60 * 60 * 1000));
-      const teachingWeeks = examStartDate 
-        ? Math.ceil((examStartDate - startDate) / (7 * 24 * 60 * 60 * 1000))
-        : totalWeeks;
+      const teachingWeeks = Math.max(1, totalWeeks - 2);
       const weeksElapsed = Math.max(0, Math.ceil((today - startDate) / (7 * 24 * 60 * 60 * 1000)));
       const weeksRemaining = Math.max(0, teachingWeeks - weeksElapsed);
       
@@ -4395,7 +4443,6 @@
           term: termInfo.term,
           startDate: _isoDateIST(startDate),
           endDate: _isoDateIST(endDate),
-          examStartDate: examStartDate ? _isoDateIST(examStartDate) : null,
           totalWeeks: totalWeeks,
           teachingWeeks: teachingWeeks,
           weeksElapsed: weeksElapsed,

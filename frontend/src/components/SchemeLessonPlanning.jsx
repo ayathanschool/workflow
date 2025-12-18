@@ -1,5 +1,5 @@
 import { Clock, CheckCircle, AlertCircle, BookOpen, Users, Plus, Search, Sparkles } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import * as ai from '../api-ai.js';
 import * as api from '../api.js';
 
@@ -74,11 +74,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   // Bulk-only mode setting
   const [isBulkOnlyMode, setIsBulkOnlyMode] = useState(false);
 
-  useEffect(() => {
-    loadApprovedSchemes();
-  }, [userEmail]);
-
-  const loadApprovedSchemes = async () => {
+  const loadApprovedSchemes = useCallback(async () => {
     try {
       setLoading(true);
 
@@ -124,7 +120,33 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [userEmail]);
+
+  useEffect(() => {
+    if (userEmail) {
+      loadApprovedSchemes();
+    }
+  }, [userEmail, loadApprovedSchemes]);
+
+  // Memoize available classes to prevent recalculation on every render
+  const availableClasses = useMemo(() => {
+    return [...new Set(schemes.map(s => s.class))].sort();
+  }, [schemes]);
+
+  // Memoize filtered schemes to prevent recalculation on every render
+  const filteredSchemes = useMemo(() => {
+    return classFilter === 'all' ? schemes : schemes.filter(s => s.class === classFilter);
+  }, [schemes, classFilter]);
+
+  // Memoize statistics to prevent recalculation on every render
+  const statistics = useMemo(() => {
+    const filtered = filteredSchemes;
+    return {
+      count: filtered.length,
+      totalSessions: filtered.reduce((sum, s) => sum + s.totalSessions, 0),
+      plannedSessions: filtered.reduce((sum, s) => sum + s.plannedSessions, 0)
+    };
+  }, [filteredSchemes]);
 
   const loadAvailablePeriods = async (session) => {
     try {
@@ -438,6 +460,12 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
     });
   };
 
+  // Strip "STD " prefix from class names for display
+  const stripStdPrefix = (className) => {
+    if (!className) return '';
+    return String(className).replace(/^STD\s+/i, '');
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center p-8">
@@ -465,48 +493,61 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-gray-900 flex items-center">
-            <BookOpen className="w-5 h-5 mr-2 text-blue-600" />
-            Lesson Plan Preparation
-          </h2>
-          <div className="flex items-center space-x-4">
+    <div className="space-y-4 sm:space-y-6">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+        {/* Mobile-optimized header */}
+        <div className="space-y-4 mb-4">
+          {/* Title */}
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg sm:text-xl font-semibold text-gray-900 flex items-center">
+              <BookOpen className="w-5 h-5 mr-2 text-blue-600" />
+              <span className="hidden sm:inline">Lesson Plan Preparation</span>
+              <span className="sm:hidden">Lesson Plans</span>
+            </h2>
             <button
-              onClick={() => {
-                setLoading(true);
-                loadApprovedSchemes();
-              }}
+              onClick={loadApprovedSchemes}
               disabled={loading}
-              className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1"
+              className="px-3 py-1.5 text-xs sm:text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              <span>{loading ? 'Refreshing...' : 'Refresh'}</span>
+              <span className="hidden sm:inline">{loading ? 'Refreshing...' : 'Refresh'}</span>
             </button>
-            <div className="flex items-center space-x-2">
-              <label htmlFor="class-filter" className="text-sm font-medium text-gray-700">
-                Filter by Class:
-              </label>
-              <select
-                id="class-filter"
-                value={classFilter}
-                onChange={(e) => setClassFilter(e.target.value)}
-                className="border border-gray-300 rounded-md px-3 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="all">All Classes</option>
-                {[...new Set(schemes.map(s => s.class))].sort().map(cls => (
-                  <option key={cls} value={cls}>{cls}</option>
-                ))}
-              </select>
+          </div>
+
+          {/* Statistics - Mobile optimized */}
+          <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center sm:justify-between sm:gap-4 text-xs sm:text-sm">
+            <div className="bg-blue-50 rounded px-2 py-1 text-center sm:text-left">
+              <div className="font-semibold text-blue-700">{statistics.count}</div>
+              <div className="text-blue-600 text-[10px] sm:text-xs">Schemes</div>
             </div>
-            <div className="text-sm text-gray-500">
-              Schemes: {schemes.filter(s => classFilter === 'all' || s.class === classFilter).length} |
-              Total Sessions: {schemes.filter(s => classFilter === 'all' || s.class === classFilter).reduce((sum, s) => sum + s.totalSessions, 0)} |
-              Planned: {schemes.filter(s => classFilter === 'all' || s.class === classFilter).reduce((sum, s) => sum + s.plannedSessions, 0)}
+            <div className="bg-purple-50 rounded px-2 py-1 text-center sm:text-left">
+              <div className="font-semibold text-purple-700">{statistics.totalSessions}</div>
+              <div className="text-purple-600 text-[10px] sm:text-xs">Total</div>
             </div>
+            <div className="bg-green-50 rounded px-2 py-1 text-center sm:text-left">
+              <div className="font-semibold text-green-700">{statistics.plannedSessions}</div>
+              <div className="text-green-600 text-[10px] sm:text-xs">Planned</div>
+            </div>
+          </div>
+
+          {/* Filter - Full width on mobile */}
+          <div className="flex items-center space-x-2">
+            <label htmlFor="class-filter" className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap">
+              Class:
+            </label>
+            <select
+              id="class-filter"
+              value={classFilter}
+              onChange={(e) => setClassFilter(e.target.value)}
+              className="flex-1 border border-gray-300 rounded-md px-2 sm:px-3 py-1.5 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="all">All Classes</option>
+              {availableClasses.map(cls => (
+                <option key={cls} value={cls}>{cls}</option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -517,7 +558,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
           </div>
         ) : (
           <div className="space-y-6">
-            {schemes.filter(scheme => classFilter === 'all' || scheme.class === classFilter).length === 0 ? (
+            {filteredSchemes.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                 <p>No schemes found for class "{classFilter}"</p>
@@ -529,24 +570,23 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                 </button>
               </div>
             ) : (
-              schemes
-                .filter(scheme => classFilter === 'all' || scheme.class === classFilter)
-                .map((scheme) => (
-                  <div key={scheme.schemeId} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <h3 className="text-lg font-medium text-gray-900">
-                          {scheme.class} - {scheme.subject}
+              filteredSchemes.map((scheme) => (
+                  <div key={scheme.schemeId} className="border border-gray-200 rounded-lg p-3 sm:p-4">
+                    {/* Mobile-optimized scheme header */}
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                      <div className="flex-1">
+                        <h3 className="text-base sm:text-lg font-medium text-gray-900">
+                          {stripStdPrefix(scheme.class)} - {scheme.subject}
                         </h3>
-                        <p className="text-sm text-gray-500">
+                        <p className="text-xs sm:text-sm text-gray-500">
                           {scheme.academicYear} | Term: {scheme.term}
                         </p>
                       </div>
-                      <div className="text-right">
-                        <div className="text-sm text-gray-600">
+                      <div className="sm:text-right">
+                        <div className="text-xs sm:text-sm text-gray-600 mb-1">
                           Progress: {scheme.plannedSessions}/{scheme.totalSessions} sessions
                         </div>
-                        <div className="w-32 bg-gray-200 rounded-full h-2 mt-1">
+                        <div className="w-full sm:w-32 bg-gray-200 rounded-full h-2">
                           <div
                             className={`h-2 rounded-full ${getProgressColor(scheme.overallProgress)}`}
                             style={{ width: `${scheme.overallProgress}%` }}
@@ -558,13 +598,13 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                       </div>
                     </div>
 
-                    <div className="space-y-4">
+                    <div className="space-y-3 sm:space-y-4">
                       {scheme.chapters.map((chapter) => (
-                        <div key={`${scheme.schemeId}-${chapter.chapterNumber}`} className="border-l-4 border-blue-200 pl-4">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-3">
-                              <h4 className="font-medium text-gray-800">
-                                Chapter {chapter.chapterNumber}: {chapter.chapterName}
+                        <div key={`${scheme.schemeId}-${chapter.chapterNumber}`} className="border-l-4 border-blue-200 pl-2 sm:pl-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
+                            <div className="flex items-center gap-2 sm:gap-3">
+                              <h4 className="text-sm sm:text-base font-medium text-gray-800">
+                                Ch {chapter.chapterNumber}: {chapter.chapterName}
                               </h4>
                               {chapter.plannedSessions === 0 && (
                                 <button
@@ -609,8 +649,8 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                         handleSessionClick(scheme, chapter, session);
                                       } else {
                                         // For regular sessions, redirect to bulk preparation
-                                        setSelectedForBulkPrep({ scheme, chapter });
-                                        setShowBulkPrepModal(true);
+                                        setBulkPrepData({ scheme, chapter });
+                                        setShowBulkModal(true);
                                       }
                                     }
                                     return;
@@ -723,13 +763,13 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
       {/* Lesson Plan Creation Modal */}
       {showLessonPlanForm && selectedSession && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white p-3 sm:p-6 border-b border-gray-200 z-10">
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900">
                 Create Lesson Plan: {selectedSession.chapter} - Session {selectedSession.session}
               </h3>
-              <p className="text-sm text-gray-500">
+              <p className="text-xs sm:text-sm text-gray-500 mt-1">
                 {selectedSession.class} {selectedSession.subject} | {selectedSession.sessionName}
               </p>
             </div>
@@ -750,10 +790,10 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               </div>
             )}
 
-            <div className="p-6 space-y-6">
+            <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
               {/* Period Selection */}
               <div>
-                <h4 className="font-medium text-gray-900 mb-3">Select Teaching Period</h4>
+                <h4 className="font-medium text-gray-900 mb-2 text-sm sm:text-base">Select Teaching Period</h4>
                 {loadingPeriods ? (
                   <div className="text-center py-4">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
@@ -1032,6 +1072,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
           data={bulkPrepData}
           userEmail={userEmail}
           userName={userName}
+          planningDateRange={planningDateRange}
           onClose={() => {
             setShowBulkModal(false);
             setBulkPrepData(null);
@@ -1201,7 +1242,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 };
 
 // Bulk Preparation Modal Component
-const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess }) => {
+const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, onClose, onSuccess }) => {
   // Initialize session-specific data
   const [sessions, setSessions] = useState(
     Array.from({ length: data.sessionCount }, (_, idx) => ({
@@ -1221,10 +1262,16 @@ const BulkPreparationModal = ({ data, userEmail, userName, onClose, onSuccess })
   const loadPreview = async () => {
     setLoadingPreview(true);
     try {
+      // Use planningDateRange from backend, or fallback to today + 30 days
+      const startDate = planningDateRange?.startDate || new Date().toISOString().split('T')[0];
+      const endDate = planningDateRange?.endDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      
+      console.log('🗓️ Bulk modal using date range:', { startDate, endDate, source: planningDateRange ? 'backend' : 'fallback' });
+      
       const response = await api.getAvailablePeriodsForLessonPlan(
         userEmail,
-        data.scheme.planningDateRange?.startDate || new Date().toISOString().split('T')[0],
-        data.scheme.planningDateRange?.endDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        startDate,
+        endDate,
         true,
         data.scheme.class,
         data.scheme.subject

@@ -1,9 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Users, 
-  Trash2, 
-  Edit, 
-  Plus, 
   Shield, 
   Database,
   Activity,
@@ -12,10 +9,8 @@ import {
   Calendar,
   BookOpen,
   AlertCircle,
-  CheckCircle,
-  Download,
-  Upload
-} from 'lucide-react';
+  CheckCircle
+} from 'lucide-react'; // Removed unused icons: Trash2, Edit, Plus, Download, Upload
 import * as api from '../api';
 import { useNotifications } from '../contexts/NotificationContext';
 

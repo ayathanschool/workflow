@@ -1326,20 +1326,94 @@ function _buildLessonSuggestion(params) {
     materials = join('Textbook/printed passage: ' + (ch || 'selection'), 'Dictionary list (5 words)', 'Notebook');
     assessment = join('Oral responses during reading', '3 written answers (short)', 'Vocabulary usage in 2 original sentences');
   } else if (/social|history|geography|civics|economics/i.test(subj)) {
+    // Vary content based on session progression
+    var sessionPhases = [
+      { phase: 'Introduction', focus: 'introduce key concepts and vocabulary', activity: 'brainstorm what students already know' },
+      { phase: 'Exploration', focus: 'explore main ideas with examples', activity: 'analyze primary sources or case studies' },
+      { phase: 'Analysis', focus: 'analyze causes and effects', activity: 'create comparison charts or timelines' },
+      { phase: 'Application', focus: 'connect concepts to real-world situations', activity: 'role-play or scenario analysis' },
+      { phase: 'Synthesis', focus: 'synthesize information from multiple sources', activity: 'group discussion and presentation prep' },
+      { phase: 'Evaluation', focus: 'evaluate different perspectives', activity: 'debate or written argument on key questions' },
+      { phase: 'Review', focus: 'review and consolidate learning', activity: 'quiz and concept mapping' },
+      { phase: 'Assessment', focus: 'assess understanding through application', activity: 'project work or extended response questions' }
+    ];
+    
+    // Use modulo to cycle through phases for sessions beyond 8
+    var phaseIndex = (sessionNo - 1) % sessionPhases.length;
+    var currentPhase = sessionPhases[phaseIndex];
+    
     objectives = join(
-      'Identify and explain key facts/terms from ' + (ch || 'the unit'),
-      'Locate/place items on map/timeline where relevant',
-      'Compare/contrast two ideas or events briefly'
+      'Identify and explain key terms/concepts from ' + (ch || 'the unit') + ' (Session ' + sessionNo + ': ' + currentPhase.phase + ')',
+      currentPhase.phase === 'Introduction' ? 'Build background knowledge and activate prior learning' :
+      currentPhase.phase === 'Exploration' ? 'Examine main ideas through examples and evidence' :
+      currentPhase.phase === 'Analysis' ? 'Analyze relationships between events/concepts' :
+      currentPhase.phase === 'Application' ? 'Apply concepts to new contexts or problems' :
+      currentPhase.phase === 'Synthesis' ? 'Combine information from multiple sources' :
+      currentPhase.phase === 'Evaluation' ? 'Evaluate arguments and form reasoned conclusions' :
+      currentPhase.phase === 'Review' ? 'Consolidate and review key learning points' :
+      'Demonstrate mastery through comprehensive assessment',
+      
+      sessionNo <= 2 ? 'Locate key terms and basic facts' :
+      sessionNo <= 4 ? 'Compare/contrast ideas or events with supporting details' :
+      sessionNo <= 6 ? 'Analyze causes, effects, and patterns' :
+      'Synthesize information and form independent conclusions'
     );
+    
+    var hookActivity = sessionNo === 1 ? 'Opening image/question to spark curiosity' :
+                       sessionNo <= 3 ? 'Quick recall of previous session\'s key points' :
+                       sessionNo <= 5 ? 'Thought-provoking scenario or current event link' :
+                       'Connect to previous sessions and bridge to new learning';
+    
+    var teachActivity = sessionNo === 1 ? 'Introduce core vocabulary and concepts with visuals' :
+                        sessionNo <= 3 ? 'Explain main ideas with 2-3 diverse examples' :
+                        sessionNo <= 5 ? 'Deeper analysis with cause-effect relationships' :
+                        'Synthesis of key themes and critical perspectives';
+    
+    var practiceActivity = sessionNo === 1 ? 'Fill vocabulary table (term | definition | simple example)' :
+                           sessionNo <= 3 ? 'Create comparison chart or simple timeline' :
+                           sessionNo <= 5 ? 'Analyze primary source excerpt or case study' :
+                           'Prepare argument or presentation outline';
+    
+    var applyActivity = sessionNo === 1 ? 'Match images/labels to basic concepts' :
+                        sessionNo <= 3 ? 'Map/timeline activity with 3-4 items' :
+                        sessionNo <= 5 ? 'Apply concept to real-world example or role-play' :
+                        'Create original example or evaluate different viewpoints';
+    
+    var exitActivity = sessionNo === 1 ? 'List 3 new terms learned today' :
+                       sessionNo <= 3 ? 'Write 3-4 line summary of main idea' :
+                       sessionNo <= 5 ? 'Answer one analytical question (5-6 lines)' :
+                       'Reflect on learning or pose thoughtful question';
+    
     activities = join(
-      timeBlock('Hook', 5, 'Image/map prompt linked to ' + (ch || 'the chapter')),
-      timeBlock('Teach', 15, 'Explain concept with 2 examples; create quick mind-map on board'),
-      timeBlock('Practice', 10, 'Students fill a table (term | meaning | example)'),
-      timeBlock('Apply', 5, 'Map/timeline label activity (2 labels)'),
-      timeBlock('Exit Ticket', 5, '1 short note (3–4 lines)')
+      timeBlock('Hook', 5, hookActivity + ' about ' + (ch || 'the topic')),
+      timeBlock('Teach', 15, teachActivity),
+      timeBlock('Practice', 10, practiceActivity),
+      timeBlock('Apply', 5, applyActivity),
+      timeBlock('Exit Ticket', 5, exitActivity)
     );
-    materials = join('Board/Marker', 'Textbook: ' + (ch || 'section'), 'Map/timeline handout (if available)');
-    assessment = join('Check table entries for accuracy', 'Map/timeline labels', 'Short note quality (key points present)');
+    
+    materials = join(
+      'Board/Marker', 
+      'Textbook: ' + (ch || 'section') + ' (Session ' + sessionNo + ')',
+      sessionNo === 1 ? 'Vocabulary cards or visual aids' :
+      sessionNo <= 3 ? 'Map/timeline handout' :
+      sessionNo <= 5 ? 'Primary source excerpts or case study sheets' :
+      'Project rubric or assessment guidelines'
+    );
+    
+    assessment = join(
+      sessionNo === 1 ? 'Check vocabulary table completion' :
+      sessionNo <= 3 ? 'Review comparison charts/timelines for accuracy' :
+      sessionNo <= 5 ? 'Assess depth of analysis and use of evidence' :
+      'Evaluate synthesis, argumentation, and critical thinking',
+      
+      'Exit ticket quality and understanding',
+      
+      sessionNo === 1 ? 'Homework: Define 5 key terms with examples' :
+      sessionNo <= 3 ? 'Homework: Read next section and note 3 main points' :
+      sessionNo <= 5 ? 'Homework: Answer 2 analytical questions' :
+      'Homework: Complete project component or prepare presentation'
+    );
   } else if (/computer|ict|information technology|cs/i.test(subj)) {
     objectives = join(
       'Understand core idea of ' + (ch || 'the topic'),

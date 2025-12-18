@@ -15,19 +15,23 @@ export function getBaseUrl() {
   return getBaseUrlUtil();
 }
 
+// Import advanced caching system
+import { cacheManager, CacheTTL, invalidateCache } from './utils/cacheManager.js';
+export { invalidateCache }; // Export for components to use
+
 // Lightweight logger: disabled in production build to avoid noise
 const __DEV_LOG__ = !!import.meta.env.DEV && (import.meta.env.VITE_VERBOSE_API === 'true');
 const devLog = (...args) => { if (__DEV_LOG__) console.log('[api]', ...args); };
 
-// Cache for API responses to reduce duplicate calls
+// Legacy cache system (keep for backward compatibility, but new code should use cacheManager)
 const apiCache = new Map();
 const pendingRequests = new Map();
 
-// Cache duration in milliseconds - Optimized for speed
-const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes (increased for better performance)
-const SHORT_CACHE_DURATION = 2 * 60 * 1000; // 2 minutes (increased from 60s)
-const LONG_CACHE_DURATION = 60 * 60 * 1000; // 60 minutes for rarely changing data (doubled)
-const NO_CACHE = 0; // No caching - always fetch fresh data
+// Cache duration presets - mapped to new cache manager
+const CACHE_DURATION = CacheTTL.MEDIUM;        // 5 minutes
+const SHORT_CACHE_DURATION = CacheTTL.SHORT;   // 2 minutes
+const LONG_CACHE_DURATION = CacheTTL.LONG;     // 15 minutes
+const NO_CACHE = 0;                             // No caching
 
 function getCacheKey(url) {
   return url;
@@ -46,96 +50,87 @@ function setCacheEntry(key, data, duration = CACHE_DURATION) {
 }
 
 async function getJSON(url, cacheDuration = CACHE_DURATION) {
+  // Skip caching for NO_CACHE requests
+  if (cacheDuration === NO_CACHE) {
+    devLog('GET (no cache)', url);
+    try {
+      const res = await fetch(url, { method: 'GET' });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status} ${text}`);
+      }
+      return res.json();
+    } catch (err) {
+      console.error('API GET failed', url, err);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url } }));
+      }
+      throw new Error(`Failed to fetch ${url}: ${String(err && err.message ? err.message : err)}`);
+    }
+  }
+
   const cacheKey = getCacheKey(url);
 
-  // Check cache first
-  const cached = apiCache.get(cacheKey);
-  if (isCacheValid(cached)) {
-    devLog('cache hit', url);
-    return cached.data;
-  }
-
-  // Check if request is already pending to avoid duplicates
-  if (pendingRequests.has(cacheKey)) {
-    devLog('dedupe', url);
-    return pendingRequests.get(cacheKey);
-  }
-
-  try {
-    devLog('GET', url);
-    const requestPromise = fetch(url, { method: 'GET' })
-      .then(async res => {
-        if (!res.ok) {
-          const text = await res.text().catch(() => '');
-          const err = new Error(`HTTP ${res.status} ${text}`);
-          throw err;
-        }
-        return res.json();
-      });
-
-    // Store pending request
-    pendingRequests.set(cacheKey, requestPromise);
-
-    const result = await requestPromise;
-
-    // Cache the result with specified duration
-    setCacheEntry(cacheKey, result, cacheDuration);
-
-    // Clear pending request
-    pendingRequests.delete(cacheKey);
-
-    return result;
-  } catch (err) {
-    // Clear pending request on error
-    pendingRequests.delete(cacheKey);
-
+  // Use advanced cache manager with background refresh
+  return cacheManager.fetchWithCache(
+    cacheKey,
+    async () => {
+      devLog('GET', url);
+      const res = await fetch(url, { method: 'GET' });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status} ${text}`);
+      }
+      return res.json();
+    },
+    {
+      ttl: cacheDuration,
+      acceptStale: true, // Show stale data while refreshing
+      onRefresh: (freshData) => {
+        // Optional: notify components that fresh data arrived
+        devLog('Background refresh completed for', url);
+      }
+    }
+  ).catch(err => {
     console.error('API GET failed', url, err);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url } }));
     }
-    const e2 = new Error(`Failed to fetch ${url}: ${String(err && err.message ? err.message : err)}`);
-    throw e2;
-  }
+    throw new Error(`Failed to fetch ${url}: ${String(err && err.message ? err.message : err)}`);
+  });
 }
 
 async function postJSON(url, payload) {
-  // Smart cache invalidation - clear related caches on mutations
+  // Smart cache invalidation using advanced cache manager
   const action = payload?.action || '';
 
   if (action.includes('submit') || action.includes('create') || action.includes('update') || action.includes('delete')) {
-    // Clear all caches related to the action
+    // Clear all caches related to the action using pattern matching
     if (action.includes('DailyReport')) {
-      clearCache('getDailyReport');
-      clearCache('getTeacherDailyData');
-      clearCache('getPlannedLessons');
+      cacheManager.deletePattern('getDailyReport');
+      cacheManager.deletePattern('getTeacherDailyData');
+      cacheManager.deletePattern('getPlannedLessons');
+      invalidateCache.onLessonPlanChange(); // Also invalidate lesson plans
     }
     if (action.includes('LessonPlan') || action.includes('SchemeLessonPlan')) {
-      clearCache('getLessonPlan');
-      clearCache('getTeacherLessonPlan');
-      clearCache('getApprovedSchemes');
-      clearCache('getAvailablePeriods');
-      // Additional lesson plan views relying on cached data
-      clearCache('getPendingLessonReviews');
-      clearCache('getTeacherLessonPlans');
-      clearCache('getPendingPreparationLessonPlans');
-      clearCache('getAllPlans');
+      invalidateCache.onLessonPlanChange();
+      cacheManager.deletePattern('getApprovedSchemes');
+      cacheManager.deletePattern('getAvailablePeriods');
     }
     if (action.includes('Substitution') || action === 'assignSubstitution') {
-      clearCache('Substitution');
-      clearCache('VacantSlots');
-      clearCache('Timetable');
-      clearCache('FreeTeachers');
-      clearCache('AvailableTeachers');
+      invalidateCache.onSubstitutionChange();
+      cacheManager.deletePattern('VacantSlots');
+      cacheManager.deletePattern('FreeTeachers');
+      cacheManager.deletePattern('AvailableTeachers');
     }
     if (action.includes('Exam') || action.includes('Marks')) {
-      clearCache('Exam');
-      clearCache('Marks');
-      clearCache('ReportCard');
+      cacheManager.deletePattern('Exam');
+      cacheManager.deletePattern('Marks');
+      cacheManager.deletePattern('ReportCard');
     }
     if (action.includes('Scheme')) {
-      clearCache('Scheme');
-      clearCache('getTeacherSchemes');
-      clearCache('getAllApprovedSchemes');
+      invalidateCache.onSchemeChange();
+      cacheManager.deletePattern('getAllApprovedSchemes');
     }
   }
 
@@ -171,13 +166,17 @@ async function postJSON(url, payload) {
 
 // Utility to clear cache
 export function clearCache(pattern) {
+  // Use advanced cache manager for pattern-based clearing
   if (pattern) {
+    cacheManager.deletePattern(pattern);
+    // Also clear legacy cache for backward compatibility
     for (const [key] of apiCache) {
       if (key.includes(pattern)) {
         apiCache.delete(key);
       }
     }
   } else {
+    cacheManager.clearAll();
     apiCache.clear();
   }
 }
@@ -1252,6 +1251,12 @@ export async function getGradeTypes() {
 export async function getGradeBoundaries() {
   const result = await getJSON(`${BASE_URL}?action=getGradeBoundaries`);
   return result?.data || result || [];
+}
+
+// Fetch subjects for a specific class from ClassSubjects sheet
+export async function getClassSubjects(className) {
+  const result = await getJSON(`${BASE_URL}?action=getClassSubjects&class=${encodeURIComponent(className)}`, CACHE_DURATION);
+  return result?.data || result;
 }
 
 // Submit attendance records.  The payload should include date, class,

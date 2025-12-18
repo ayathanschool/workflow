@@ -8,17 +8,17 @@
  * @returns {string} The base URL for API requests
  */
 export function getBaseUrl() {
-  const PROD_BASE = import.meta.env.VITE_GAS_WEB_APP_URL || '';
-  
-  // In development mode:
-  // - Use '/gas' for proxying in HTTP mode
-  // - Use the actual URL for HTTPS mode where proxy might not work
-  if (import.meta.env.DEV) {
-    return (window.location.protocol === 'https:') ? PROD_BASE : '/gas';
+  // Always prefer explicit env-configured URL when available
+  const BASE = import.meta.env.VITE_API_BASE_URL
+    || import.meta.env.VITE_GAS_WEB_APP_URL
+    || import.meta.env.VITE_APP_SCRIPT_URL
+    || '';
+
+  if (!BASE) {
+    console.warn('[api] No API base URL provided. Set VITE_API_BASE_URL in .env');
   }
-  
-  // In production, always use the configured URL
-  return PROD_BASE;
+
+  return BASE || '/gas';
 }
 
 /**
@@ -33,8 +33,4 @@ export function getEnvironment() {
  * Log API events (only in development)
  * @param  {...any} args Arguments to log
  */
-export function logApi(...args) {
-  if (import.meta.env.DEV) {
-    console.log('[API]', ...args);
-  }
-}
+// Removed unused dev-only logger to reduce bundle size

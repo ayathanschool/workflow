@@ -27,6 +27,10 @@ const SHEETS = {
   Students: ['admNo','name','class','email','parentContact'], 
   Settings: ['key','value'],
   
+  // === FEE COLLECTION SYSTEM (2 sheets) ===
+  FeeHeads: ['feeHead','class','amount','dueDate'],
+  Transactions: ['date','receiptNo','admNo','name','class','feeHead','amount','fine','mode','void'],
+  
   // === ACADEMIC WORKFLOW (4 sheets) ===
   Timetable: ['class','dayOfWeek','period','subject','teacherEmail','teacherName'],
   // Schemes sheet headers expanded to include approval + academic context columns
@@ -37,18 +41,21 @@ const SHEETS = {
   
   // === SYLLABUS & CALENDAR (2 sheets) ===
   Syllabus: ['standard','subject','term','chapterNo','chapterName','minSessions','topics','sequence'],
-  // AcademicCalendar supports both legacy and new columns for flexibility
-  AcademicCalendar: ['term','startDate','endDate','examStartDate','examEndDate','eventDates','eventNames','teachingWeeks','examDates','holidays','events'],
+  // AcademicCalendar: Simple blocking periods for lesson planning
+  // Add multiple rows for different blocking periods (exams, holidays, events)
+  // System will skip these date ranges when showing available lesson plan dates
+  AcademicCalendar: ['term','startDate','endDate','ExamsHolidaysEventsStart','ExamsHolidaysEventsEnd'],
   
   // === SUBSTITUTION SYSTEM (2 sheets) ===  
   Substitutions: ['date','period','class','absentTeacher','regularSubject','substituteTeacher','substituteSubject','note','acknowledged','acknowledgedBy','acknowledgedAt','createdAt'],
   SubstitutionNotifications: ['id','recipient','title','message','type','data','acknowledged','acknowledgedAt','createdAt'],
   
-  // === EXAM MANAGEMENT (4 sheets) ===
+  // === EXAM MANAGEMENT (5 sheets) ===
   Exams: ['examId','creatorEmail','creatorName','class','subject','examType','hasInternalMarks','internalMax','externalMax','totalMax','date','createdAt','examName'],
   ExamMarks: ['examId','class','subject','teacherEmail','teacherName','admNo','studentName','examType','ce','te','total','grade','createdAt'],
   GradeTypes: ['examType','internalMax','externalMax','totalMax'],
   GradeBoundaries: ['standardGroup','grade','minPercentage','maxPercentage'],
+  ClassSubjects: ['class','subjects'],
   
   // === SESSION TRACKING SYSTEM (2 sheets) ===
   TeacherPerformance: ['teacherEmail','teacherName','totalSessions','completedSessions','partialSessions','averageCompletion','onTimeCompletion','cascadingIssues','performanceGrade','lastUpdated','recommendations'],
@@ -57,8 +64,10 @@ const SHEETS = {
   // === AUDIT & COMPLIANCE (1 sheet) ===
   AuditLog: ['timestamp','userEmail','userName','userRole','action','entityType','entityId','beforeData','afterData','ipAddress','changeDescription','severity','createdAt'],
   
-  // === HOLIDAY MANAGEMENT (2 sheets) ===
-  UndeclaredHolidays: ['id','date','reason','markedBy','markedAt','status'],
+  // === NOTIFICATIONS (1 sheet) ===
+  Notifications: ['email','type','message','payload','createdAt','readAt'],
+  
+  // === LESSON RESCHEDULING TRACKING (1 sheet) ===
   CascadeHistory: ['cascadeId','cascadeDate','startDate','performedBy','performedAt','lessonPlanId','oldDate','newDate','teacherEmail','class','subject','status']
 };
 

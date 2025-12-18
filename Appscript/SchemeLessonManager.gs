@@ -423,34 +423,98 @@ function _calculateLessonPlanningDateRange() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    // Start from today
-    const startDate = new Date(today);
+    // Get AcademicCalendar to check term dates
+    const calendarSheet = _getSheet('AcademicCalendar');
+    const calendarHeaders = _headers(calendarSheet);
+    const calendarRows = _rows(calendarSheet).map(row => _indexByHeader(row, calendarHeaders));
     
-    // End at 30 days from start (inclusive window)
-    const endDate = new Date(today);
-    endDate.setDate(endDate.getDate() + 30);
-    endDate.setHours(0, 0, 0, 0);
+    // Find the current/upcoming term based on today's date
+    let activeTerm = null;
+    let upcomingTerm = null;
     
-    // Format as ISO date strings
+    for (const term of calendarRows) {
+      if (!term.startDate || !term.endDate) continue;
+      
+      const termStart = new Date(term.startDate);
+      const termEnd = new Date(term.endDate);
+      termStart.setHours(0, 0, 0, 0);
+      termEnd.setHours(0, 0, 0, 0);
+      
+      // Current term: today is between start and end
+      if (today >= termStart && today <= termEnd) {
+        activeTerm = { ...term, termStart, termEnd };
+        Logger.log(`Found active term ${term.term}: ${_isoDateString(termStart)} to ${_isoDateString(termEnd)}`);
+        break;
+      }
+      
+      // Upcoming term: starts in the future and closest to today
+      if (termStart > today) {
+        if (!upcomingTerm || termStart < upcomingTerm.termStart) {
+          upcomingTerm = { ...term, termStart, termEnd };
+        }
+      }
+    }
+    
+    // Determine planning window
+    let startDate, endDate, termInfo;
+    
+    if (activeTerm) {
+      // We're in an active term - plan from today to term end (or +30 days, whichever is sooner)
+      startDate = new Date(today);
+      const thirtyDaysOut = new Date(today);
+      thirtyDaysOut.setDate(thirtyDaysOut.getDate() + 30);
+      
+      endDate = thirtyDaysOut <= activeTerm.termEnd ? thirtyDaysOut : activeTerm.termEnd;
+      termInfo = `Term ${activeTerm.term} (Active)`;
+      
+      Logger.log(`=== LESSON PLANNING: ACTIVE TERM ${activeTerm.term} ===`);
+      Logger.log(`Term runs: ${_isoDateString(activeTerm.termStart)} to ${_isoDateString(activeTerm.termEnd)}`);
+      Logger.log(`Planning window: ${_isoDateString(startDate)} to ${_isoDateString(endDate)}`);
+      
+    } else if (upcomingTerm) {
+      // No active term, but there's an upcoming term - plan from term start
+      startDate = new Date(upcomingTerm.termStart);
+      const thirtyDaysFromStart = new Date(upcomingTerm.termStart);
+      thirtyDaysFromStart.setDate(thirtyDaysFromStart.getDate() + 30);
+      
+      endDate = thirtyDaysFromStart <= upcomingTerm.termEnd ? thirtyDaysFromStart : upcomingTerm.termEnd;
+      termInfo = `Term ${upcomingTerm.term} (Upcoming)`;
+      
+      Logger.log(`=== LESSON PLANNING: UPCOMING TERM ${upcomingTerm.term} ===`);
+      Logger.log(`Term starts: ${_isoDateString(upcomingTerm.termStart)}`);
+      Logger.log(`Term ends: ${_isoDateString(upcomingTerm.termEnd)}`);
+      Logger.log(`Planning window: ${_isoDateString(startDate)} to ${_isoDateString(endDate)}`);
+      
+    } else {
+      // No term data found - fallback to today + 30 days
+      startDate = new Date(today);
+      endDate = new Date(today);
+      endDate.setDate(endDate.getDate() + 30);
+      termInfo = 'No Term Data';
+      
+      Logger.log(`=== LESSON PLANNING: NO TERM DATA (FALLBACK) ===`);
+      Logger.log(`Using default range: ${_isoDateString(startDate)} to ${_isoDateString(endDate)}`);
+    }
+    
     const startDateString = _isoDateString(startDate);
     const endDateString = _isoDateString(endDate);
-    
     const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
     
-    Logger.log(`=== LESSON PLANNING DATE RANGE (NEXT 30 DAYS) ===`);
     Logger.log(`TODAY: ${_isoDateString(today)}`);
     Logger.log(`START: ${startDateString}`);
-    Logger.log(`END: ${endDateString} (+30 days)`);
+    Logger.log(`END: ${endDateString}`);
     Logger.log(`TOTAL DAYS: ${totalDays}`);
+    Logger.log(`TERM INFO: ${termInfo}`);
     
     return {
       startDate: startDateString,
       endDate: endDateString,
       deferredDays: 0,
       daysAhead: totalDays,
-      preparationDay: 'Any', // No longer restricted by day
-      isPreparationDay: true, // Always true - any day allowed
-      canSubmit: true
+      preparationDay: 'Any',
+      isPreparationDay: true,
+      canSubmit: true,
+      termInfo: termInfo // Add term info for debugging
     };
   } catch (error) {
     Logger.log(`Error calculating date range: ${error.message}, using defaults`);
@@ -467,7 +531,8 @@ function _calculateLessonPlanningDateRange() {
       daysAhead: Math.ceil((endDate - today) / (1000 * 60 * 60 * 24)) + 1,
       preparationDay: 'Any',
       isPreparationDay: true,
-      canSubmit: true
+      canSubmit: true,
+      termInfo: 'Error - Using fallback'
     };
   }
 }
@@ -718,6 +783,49 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
       });
     }
     
+    // Get blocked dates from AcademicCalendar (ExamsHolidaysEventsStart/End)
+    const blockedDateRanges = [];
+    try {
+      const calendarSheet = _getSheet('AcademicCalendar');
+      const calendarHeaders = _headers(calendarSheet);
+      const calendarRows = _rows(calendarSheet).map(row => _indexByHeader(row, calendarHeaders));
+      
+      for (const row of calendarRows) {
+        const blockStart = row.ExamsHolidaysEventsStart || row.examsHolidaysEventsStart;
+        const blockEnd = row.ExamsHolidaysEventsEnd || row.examsHolidaysEventsEnd;
+        
+        if (blockStart && blockEnd) {
+          const startDate = new Date(blockStart);
+          const endDate = new Date(blockEnd);
+          startDate.setHours(0, 0, 0, 0);
+          endDate.setHours(0, 0, 0, 0);
+          
+          blockedDateRanges.push({
+            start: startDate,
+            end: endDate,
+            startStr: _isoDateString(startDate),
+            endStr: _isoDateString(endDate)
+          });
+          
+          Logger.log(`Blocked date range: ${_isoDateString(startDate)} to ${_isoDateString(endDate)}`);
+        }
+      }
+      
+      Logger.log(`Total blocked date ranges: ${blockedDateRanges.length}`);
+    } catch (calErr) {
+      Logger.log(`Warning: Could not load blocked dates from AcademicCalendar: ${calErr.message}`);
+    }
+    
+    // Helper function to check if a date is blocked
+    const isDateBlocked = (dateStr) => {
+      const checkDate = new Date(dateStr);
+      checkDate.setHours(0, 0, 0, 0);
+      
+      return blockedDateRanges.some(range => {
+        return checkDate >= range.start && checkDate <= range.end;
+      });
+    };
+    
     // Generate available slots within planning window (Monday-Friday only)
     const availableSlots = [];
     
@@ -727,6 +835,12 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
       
       // Only show Monday to Friday (weekdays only)
       if (dayName === 'Saturday' || dayName === 'Sunday') continue;
+      
+      // Skip blocked dates (exams/holidays/events from AcademicCalendar)
+      if (isDateBlocked(dateString)) {
+        Logger.log(`⛔ ${dayName} (${dateString}): BLOCKED by AcademicCalendar - skipping`);
+        continue;
+      }
       
       // Find periods for this day that match the scheme's class and subject
       const dayPeriods = teacherTimetable.filter(slot => {

@@ -5,14 +5,8 @@ import {
   Edit2, 
   Trash2, 
   Search,
-  UserPlus,
-  Shield,
-  Mail,
-  Phone,
   X,
-  Save,
-  AlertCircle,
-  CheckCircle
+  Save
 } from 'lucide-react';
 import * as api from '../api';
 import { useNotifications } from '../contexts/NotificationContext';

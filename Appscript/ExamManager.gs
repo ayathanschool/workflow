@@ -421,8 +421,74 @@ function getGradeTypes() {
   return _rows(sh).map(r => _indexByHeader(r, headers));
 }
 
-/**
- * Get grade boundaries
+/** * Get subjects for a specific class from ClassSubjects sheet
+ * Falls back to Timetable if ClassSubjects not found
+ */
+function getClassSubjects(className) {
+  try {
+    if (!className) {
+      return { success: false, error: 'Class name is required' };
+    }
+    
+    // Try to get from ClassSubjects sheet first
+    const classSubjectsSh = _getSheet('ClassSubjects');
+    if (classSubjectsSh && classSubjectsSh.getLastRow() > 1) {
+      _ensureHeaders(classSubjectsSh, SHEETS.ClassSubjects);
+      const headers = _headers(classSubjectsSh);
+      const rows = _rows(classSubjectsSh).map(r => _indexByHeader(r, headers));
+      
+      // Find matching class (case-insensitive, flexible matching)
+      const normalizedClass = String(className).trim().toLowerCase().replace(/std\s*/gi, '').replace(/\s+/g, '');
+      const classRow = rows.find(row => {
+        const rowClass = String(row.class || '').trim().toLowerCase().replace(/std\s*/gi, '').replace(/\s+/g, '');
+        return rowClass === normalizedClass;
+      });
+      
+      if (classRow && classRow.subjects) {
+        // Parse comma-separated subjects
+        const subjects = String(classRow.subjects)
+          .split(',')
+          .map(s => s.trim())
+          .filter(s => s.length > 0);
+        
+        return { 
+          success: true, 
+          subjects: subjects,
+          source: 'ClassSubjects'
+        };
+      }
+    }
+    
+    // Fallback: Get from Timetable
+    const timetableSh = _getSheet('Timetable');
+    const timetableHeaders = _headers(timetableSh);
+    const timetableRows = _rows(timetableSh).map(r => _indexByHeader(r, timetableHeaders));
+    
+    const normalizedClass = String(className).trim().toLowerCase().replace(/std\s*/gi, '').replace(/\s+/g, '');
+    const subjects = new Set();
+    
+    timetableRows.forEach(row => {
+      const rowClass = String(row.class || '').trim().toLowerCase().replace(/std\s*/gi, '').replace(/\s+/g, '');
+      if (rowClass === normalizedClass && row.subject) {
+        subjects.add(String(row.subject).trim());
+      }
+    });
+    
+    return { 
+      success: true, 
+      subjects: Array.from(subjects),
+      source: 'Timetable'
+    };
+    
+  } catch (err) {
+    return { 
+      success: false, 
+      error: 'Failed to get class subjects: ' + err.message 
+    };
+  }
+}
+
+/** * Get grade boundaries
  */
 function getGradeBoundaries() {
   const sh = _getSheet('GradeBoundaries');

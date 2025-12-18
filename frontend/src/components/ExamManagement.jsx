@@ -1,4 +1,4 @@
-import { Plus, Filter, RefreshCw, Upload, Download, ChevronUp, ChevronDown } from 'lucide-react';
+import { Plus, RefreshCw, Upload, Download, ChevronUp, ChevronDown } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as api from '../api';
 import { useNotifications } from '../contexts/NotificationContext';
@@ -103,7 +103,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
   const [showGlobalBulkUpload, setShowGlobalBulkUpload] = useState(false);
   const [globalBulkFile, setGlobalBulkFile] = useState(null);
   const [globalBulkData, setGlobalBulkData] = useState([]);
-  const [_globalBulkPreview, setGlobalBulkPreview] = useState([]);
+  const [globalBulkPreview, setGlobalBulkPreview] = useState([]);
   const [bulkUploadProgress, setBulkUploadProgress] = useState({ current: 0, total: 0 });
 
   const [viewExamMarks, setViewExamMarks] = useState(null);
@@ -395,9 +395,19 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         const selectedClass = (examFormData.class || '').toString().trim();
         
         if (isSuperAdmin || isHeadmaster) {
-          // For HM/Super Admin: Get subjects from full timetable for the selected class
+          // For HM/Super Admin: Get subjects from ClassSubjects sheet or fallback to timetable
           if (selectedClass) {
             try {
+              // Try ClassSubjects API first
+              const classSubjectsResult = await api.getClassSubjects(selectedClass);
+              if (classSubjectsResult.success && classSubjectsResult.subjects?.length > 0) {
+                console.log(`✅ Loaded ${classSubjectsResult.subjects.length} subjects from ${classSubjectsResult.source}`);
+                setAvailableSubjects(classSubjectsResult.subjects);
+                setSubjectsLoading(false);
+                return;
+              }
+              
+              // Fallback to timetable if ClassSubjects returns no results
               const fullTimetable = await api.getFullTimetable();
               const classSubjects = new Set();
 

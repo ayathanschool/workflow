@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Calendar, User, Filter, RefreshCw, Download, AlertTriangle, Info, Clock } from 'lucide-react';
-import { formatDistanceToNow, format } from 'date-fns';
+import { Shield, User, Filter, RefreshCw, Download, AlertTriangle, Info, Clock } from 'lucide-react';
+import { format } from 'date-fns';
 import * as api from '../api';
 import { useNotifications } from '../contexts/NotificationContext';
 
