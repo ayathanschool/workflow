@@ -48,6 +48,7 @@ import LoadingSplash from './auth/LoadingSplash';
 import LoginForm from './auth/LoginForm';
 import AnimatedPage from './components/AnimatedPage';
 import NotificationCenter from './components/NotificationCenter';
+import StatsCard from './components/shared/StatsCard';
 import FeeCollectionModule from './components/FeeCollectionModule';
 import ModernFeeCollection from './components/FeeCollection/ModernFeeCollection';
 import PWAControls from './components/PWAControls';
@@ -967,73 +968,55 @@ const App = () => {
             </Suspense>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4">
-              {/* Classes Teaching */}
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
-                <div className="flex items-center">
-                  <div className="p-2 md:p-3 bg-blue-100 dark:bg-blue-900 rounded-lg">
-                    <School className="w-5 h-5 md:w-6 md:h-6 text-blue-600 dark:text-blue-400" />
-                  </div>
-                  <div className="ml-3 md:ml-4">
-                    <p className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-400">Classes</p>
-                    <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.classCount}</p>
-                  </div>
-                </div>
-              </div>
+              <StatsCard
+                icon={<School />}
+                iconColor="blue"
+                title="Classes"
+                value={insights.classCount}
+                subtitle="Teaching classes"
+              />
               
-              {/* Subjects */}
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
-                <div className="flex items-center">
-                  <div className="p-2 md:p-3 bg-green-100 dark:bg-green-900 rounded-lg">
-                    <Book className="w-5 h-5 md:w-6 md:h-6 text-green-600 dark:text-green-400" />
-                  </div>
-                  <div className="ml-3 md:ml-4">
-                    <p className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-400">Subjects</p>
-                    <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.subjectCount}</p>
-                  </div>
-                </div>
-              </div>
+              <StatsCard
+                icon={<Book />}
+                iconColor="green"
+                title="Subjects"
+                value={insights.subjectCount}
+                subtitle="Subjects assigned"
+              />
               
-              {/* Pending Reports */}
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
-                <div className="flex items-center">
-                  <div className="p-2 md:p-3 bg-purple-100 dark:bg-purple-900 rounded-lg">
-                    <FileText className="w-5 h-5 md:w-6 md:h-6 text-purple-600 dark:text-purple-400" />
-                  </div>
-                  <div className="ml-3 md:ml-4">
-                    <p className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-400">Pending Reports</p>
-                    <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.pendingReports}</p>
-                  </div>
-                </div>
-              </div>
+              <StatsCard
+                icon={<FileText />}
+                iconColor="purple"
+                title="Pending Reports"
+                value={insights.pendingReports}
+                subtitle="Reports due today"
+                onClick={() => setActiveView('reports')}
+              />
               
-              {/* Students Above Average - Only for class teachers with performance data */}
               {hasRole('class teacher') && (
-                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
-                  <div className="flex items-center">
-                    <div className="p-2 md:p-3 bg-emerald-100 dark:bg-emerald-900 rounded-lg">
-                      <Award className="w-5 h-5 md:w-6 md:h-6 text-emerald-600 dark:text-emerald-400" />
-                    </div>
-                    <div className="ml-3 md:ml-4">
-                      <p className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-400">Above Average</p>
-                      <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.studentsAboveAverage}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-              
-              {/* Students Need Focus - Only for class teachers with performance data */}
-              {hasRole('class teacher') && (
-                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
-                  <div className="flex items-center">
-                    <div className="p-2 md:p-3 bg-amber-100 dark:bg-amber-900 rounded-lg">
-                      <AlertCircle className="w-5 h-5 md:w-6 md:h-6 text-amber-600 dark:text-amber-400" />
-                    </div>
-                    <div className="ml-3 md:ml-4">
-                      <p className="text-xs md:text-sm font-medium text-gray-600 dark:text-gray-400">Need Focus</p>
-                      <p className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.studentsNeedFocus}</p>
-                    </div>
-                  </div>
-                </div>
+                <>
+                  <StatsCard
+                    icon={<Award />}
+                    iconColor="green"
+                    title="Above Average"
+                    value={insights.studentsAboveAverage}
+                    subtitle="Performing well"
+                    trend={insights.studentsAboveAverage > 0 ? {
+                      direction: 'up',
+                      value: `${Math.round((insights.studentsAboveAverage / Math.max(1, insights.studentsAboveAverage + insights.studentsNeedFocus)) * 100)}%`,
+                      label: 'of class'
+                    } : undefined}
+                  />
+                  
+                  <StatsCard
+                    icon={<AlertCircle />}
+                    iconColor="orange"
+                    title="Need Focus"
+                    value={insights.studentsNeedFocus}
+                    subtitle="Require attention"
+                    variant="bordered"
+                  />
+                </>
               )}
             </div>
             

@@ -175,6 +175,22 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
     setLoading(true);
     setError('');
     
+    // OPTIMISTIC UI: Show receipt immediately with "Processing..." status
+    const optimisticReceipt = {
+      receiptNo: 'Processing...',
+      date: paymentForm.date,
+      student: selectedStudent,
+      items,
+      total: selectedFeesTotal,
+      totalAmount: items.reduce((sum, i) => sum + (Number(i.amount) || 0), 0),
+      totalFine: items.reduce((sum, i) => sum + (Number(i.fine) || 0), 0),
+      mode: paymentForm.mode,
+      processing: true
+    };
+    
+    setReceipt(optimisticReceipt);
+    setStep(4); // Move to receipt step immediately
+    
     try {
       const response = await fetch(apiBaseUrl, {
         method: 'POST',
@@ -193,30 +209,30 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
       const result = await response.json();
       
       if (result.ok || result.status === 200) {
-        // Create receipt object with all details
-        const receiptData = {
+        // Update receipt with real receipt number
+        const finalReceipt = {
+          ...optimisticReceipt,
           receiptNo: result.receiptNo,
           date: result.date || paymentForm.date,
-          student: selectedStudent,
-          items,
-          total: selectedFeesTotal,
-          totalAmount: items.reduce((sum, i) => sum + (Number(i.amount) || 0), 0),
-          totalFine: items.reduce((sum, i) => sum + (Number(i.fine) || 0), 0),
-          mode: paymentForm.mode
+          processing: false,
+          partialPayments: result.partialPayments
         };
         
-        setReceipt(receiptData);
-        setStep(4); // Move to receipt step
+        setReceipt(finalReceipt);
         
         // Call success callback if provided
         if (onPaymentSuccess) {
-          onPaymentSuccess(receiptData);
+          onPaymentSuccess(finalReceipt);
         }
       } else {
         setError(result.error || result.message || 'Payment failed');
+        setStep(3); // Go back to payment step on error
+        setReceipt(null);
       }
     } catch (err) {
       setError('Failed to process payment: ' + err.message);
+      setStep(3); // Go back to payment step on error
+      setReceipt(null);
     } finally {
       setLoading(false);
     }
@@ -631,18 +647,27 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
       {/* Step 4: Receipt */}
       {step === 4 && receipt && (
         <div className="space-y-6">
-          {/* Success Banner */}
-          <div className="bg-gradient-to-r from-green-500 to-green-600 rounded-2xl shadow-xl p-6 text-white">
+          {/* Success/Processing Banner */}
+          <div className={`bg-gradient-to-r ${receipt.processing ? 'from-blue-500 to-blue-600' : 'from-green-500 to-green-600'} rounded-2xl shadow-xl p-6 text-white`}>
             <div className="flex items-center gap-4">
               <div className="flex-shrink-0">
                 <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
-                  <CheckCircle className="h-10 w-10 text-white" />
+                  {receipt.processing ? (
+                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-white"></div>
+                  ) : (
+                    <CheckCircle className="h-10 w-10 text-white" />
+                  )}
                 </div>
               </div>
               <div className="flex-1">
-                <h2 className="text-2xl font-bold mb-1">Payment Successful!</h2>
-                <p className="text-green-100">
-                  Receipt {receipt.receiptNo} has been generated successfully.
+                <h2 className="text-2xl font-bold mb-1">
+                  {receipt.processing ? 'Processing Payment...' : 'Payment Successful!'}
+                </h2>
+                <p className={receipt.processing ? 'text-blue-100' : 'text-green-100'}>
+                  {receipt.processing 
+                    ? 'Please wait while we generate your receipt...' 
+                    : `Receipt ${receipt.receiptNo} has been generated successfully.`
+                  }
                 </p>
               </div>
             </div>
@@ -668,7 +693,9 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
             <div className="space-y-3 mb-6">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600 dark:text-gray-400">Receipt No:</span>
-                <span className="font-mono font-bold text-gray-900 dark:text-gray-100">{receipt.receiptNo}</span>
+                <span className={`font-mono font-bold ${receipt.processing ? 'text-blue-600 animate-pulse' : 'text-gray-900 dark:text-gray-100'}`}>
+                  {receipt.receiptNo}
+                </span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600 dark:text-gray-400">Date:</span>

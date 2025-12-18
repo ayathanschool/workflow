@@ -146,10 +146,6 @@ function addPayment(paymentData) {
     
     const sh = _getSheet('Transactions');
     
-    // Generate next receipt number (inside lock to prevent duplicates)
-    const receiptNo = _getNextReceiptNo(sh);
-    console.log('[addPayment] Generated receipt:', receiptNo, 'for student:', paymentData.admNo);
-    
     const date = paymentData.date || _isoDateString(new Date());
     const items = Array.isArray(paymentData.items) ? paymentData.items : [];
     
@@ -158,10 +154,6 @@ function addPayment(paymentData) {
     }
     
     console.log('[addPayment] Processing', items.length, 'fee items');
-    
-    if (!items.length) {
-      throw new Error('No payment items provided');
-    }
     
     // Check for duplicate fee heads in the same batch
     const feeHeadCounts = {};
@@ -174,31 +166,50 @@ function addPayment(paymentData) {
       throw new Error('Duplicate fee heads in payment: ' + duplicates.join(', '));
     }
     
-    // Check for duplicate payments (already fully paid fees)
+    // OPTIMIZED: Check for duplicate payments in batch
     const feeHeads = getFeeHeads(paymentData.cls);
+    const feeHeadMap = {};
+    feeHeads.forEach(f => {
+      feeHeadMap[String(f.feeHead).trim().toLowerCase()] = f.amount;
+    });
+    
+    // Get all existing payments for this student at once
+    const existingTransactions = getTransactions({ admNo: paymentData.admNo });
+    
+    // Build payment status map for all fee heads in one pass
+    const paymentStatusMap = {};
+    existingTransactions.forEach(tx => {
+      const feeHeadKey = String(tx.feeHead).trim().toLowerCase();
+      if (!paymentStatusMap[feeHeadKey]) {
+        paymentStatusMap[feeHeadKey] = { totalPaid: 0, totalFine: 0 };
+      }
+      if (!String(tx.void || '').toUpperCase().startsWith('Y')) {
+        paymentStatusMap[feeHeadKey].totalPaid += Number(tx.amount) || 0;
+        paymentStatusMap[feeHeadKey].totalFine += Number(tx.fine) || 0;
+      }
+    });
+    
+    // Validate items and build partial payment info
     const fullyPaidItems = [];
     const partialPaymentInfo = [];
     
     items.forEach(item => {
-      const feeStructure = feeHeads.find(f => 
-        String(f.feeHead).trim().toLowerCase() === String(item.feeHead).trim().toLowerCase()
-      );
+      const feeHeadKey = String(item.feeHead || '').trim().toLowerCase();
+      const expectedAmount = feeHeadMap[feeHeadKey] || null;
+      const status = paymentStatusMap[feeHeadKey] || { totalPaid: 0, totalFine: 0 };
       
-      const expectedAmount = feeStructure ? feeStructure.amount : null;
-      const paymentStatus = getPaymentStatus(paymentData.admNo, item.feeHead, expectedAmount);
-      
-      if (paymentStatus.isFullyPaid) {
+      // Check if already fully paid
+      if (expectedAmount && status.totalPaid >= expectedAmount) {
         fullyPaidItems.push(item.feeHead);
-      } else if (paymentStatus.totalPaid > 0) {
-        // Track partial payments with fine info
-        const newPaymentTotal = (Number(item.amount) || 0) + (Number(item.fine) || 0);
+      } else if (status.totalPaid > 0) {
+        // Track partial payments
         partialPaymentInfo.push({
           feeHead: item.feeHead,
-          previouslyPaid: paymentStatus.totalPaid,
-          previousFine: paymentStatus.totalFine,
+          previouslyPaid: status.totalPaid,
+          previousFine: status.totalFine,
           newPayment: item.amount,
           newFine: item.fine || 0,
-          balance: Math.max(0, (expectedAmount || 0) - paymentStatus.totalPaid - (item.amount || 0))
+          balance: Math.max(0, (expectedAmount || 0) - status.totalPaid - (item.amount || 0))
         });
       }
     });
@@ -207,6 +218,10 @@ function addPayment(paymentData) {
       console.log('[addPayment] Already paid items detected:', fullyPaidItems.join(', '));
       throw new Error(`Already fully paid: ${fullyPaidItems.join(', ')}`);
     }
+    
+    // Generate receipt number AFTER validations pass (inside lock)
+    const receiptNo = _getNextReceiptNo(sh);
+    console.log('[addPayment] Generated receipt:', receiptNo);
     
     console.log('[addPayment] All validation passed. Writing to sheet...');
     
@@ -258,20 +273,35 @@ function addPayment(paymentData) {
 }
 
 /**
- * Generate next receipt number
+ * Generate next receipt number - OPTIMIZED VERSION
+ * Uses sheet formula to get max instead of reading all rows
  */
 function _getNextReceiptNo(sheet) {
   try {
-    const headers = _headers(sheet);
-    const data = _rows(sheet).map(r => _indexByHeader(r, headers));
+    // Get the receipt number column (column B, index 2)
+    const receiptColLetter = 'B';
+    const lastRow = sheet.getLastRow();
+    
+    if (lastRow <= 1) {
+      // No data rows, start with R00001
+      return 'R00001';
+    }
+    
+    // Use QUERY or direct range to get last few receipts only (faster)
+    // Get last 100 rows instead of all rows
+    const startRow = Math.max(2, lastRow - 99); // Start from row 2 or last 100 rows
+    const numRows = lastRow - startRow + 1;
+    
+    if (numRows <= 0) {
+      return 'R00001';
+    }
+    
+    const receiptValues = sheet.getRange(receiptColLetter + startRow + ':' + receiptColLetter + lastRow).getValues();
     
     let maxN = 0;
-    let totalRows = 0;
-    
-    data.forEach(row => {
-      totalRows++;
-      const val = String(row.receiptNo || '').trim();
-      if (!val) return; // Skip empty
+    receiptValues.forEach(row => {
+      const val = String(row[0] || '').trim();
+      if (!val) return;
       
       const match = /^R(\d+)$/i.exec(val);
       if (match) {
@@ -283,8 +313,7 @@ function _getNextReceiptNo(sheet) {
     const next = maxN + 1;
     const receiptNo = 'R' + String(next).padStart(5, '0');
     
-    // Log for debugging
-    console.log('Receipt generation: scanned ' + totalRows + ' rows, max=' + maxN + ', next=' + receiptNo);
+    console.log('[Receipt] Generated:', receiptNo, '(checked last', numRows, 'rows, max found:', maxN + ')');
     
     return receiptNo;
   } catch (err) {
