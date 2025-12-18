@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Search, User, DollarSign, Calendar, CreditCard, Receipt,
-  CheckCircle, XCircle, AlertCircle, ArrowRight, Printer, X
+  CheckCircle, XCircle, AlertCircle, ArrowRight, Printer, X, Share2
 } from 'lucide-react';
 
 const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPaymentSuccess, onNewPayment, preselectedStudent }) => {
@@ -236,6 +236,33 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
     } finally {
       setLoading(false);
     }
+  };
+
+  const shareToWhatsApp = () => {
+    if (!receipt || !selectedStudent) return;
+    
+    const message = `*FEE PAYMENT RECEIPT*%0A%0A` +
+      `*AYATHAN CENTRAL SCHOOL*%0A` +
+      `----------------------------%0A` +
+      `Receipt No: ${receipt.receiptNo}%0A` +
+      `Date: ${receipt.date}%0A%0A` +
+      `Student: ${selectedStudent.name}%0A` +
+      `Admission No: ${selectedStudent.admNo}%0A` +
+      `Class: ${selectedStudent.class}%0A%0A` +
+      `*Fee Details:*%0A` +
+      receipt.items.map(item => 
+        `• ${item.feeHead}: ₹${item.amount}${item.fine > 0 ? ` (Fine: ₹${item.fine})` : ''}`
+      ).join('%0A') +
+      `%0A----------------------------%0A` +
+      `Total Amount: ₹${receipt.totalAmount || 0}%0A` +
+      (receipt.totalFine > 0 ? `Total Fine: ₹${receipt.totalFine}%0A` : '') +
+      `*Grand Total: ₹${receipt.total || receipt.grandTotal || 0}*%0A` +
+      `Payment Mode: ${receipt.mode}%0A%0A` +
+      `Thank you for your payment!`;
+    
+    // Open WhatsApp with pre-filled message (user can choose contact)
+    const whatsappUrl = `https://wa.me/?text=${message}`;
+    window.open(whatsappUrl, '_blank');
   };
 
   const resetForm = () => {
@@ -751,7 +778,15 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
           </div>
 
           {/* Action Buttons */}
-          <div className="flex gap-3 print:hidden">
+          <div className="flex flex-col sm:flex-row gap-3 print:hidden">
+            <button
+              onClick={shareToWhatsApp}
+              disabled={receipt?.processing}
+              className="flex-1 px-6 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Share2 className="h-5 w-5" />
+              Share via WhatsApp
+            </button>
             <button
               onClick={printReceipt}
               className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
@@ -761,7 +796,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
             </button>
             <button
               onClick={resetForm}
-              className="flex-1 px-6 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+              className="flex-1 px-6 py-3 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 transition-colors flex items-center justify-center gap-2"
             >
               New Payment
               <ArrowRight className="h-5 w-5" />

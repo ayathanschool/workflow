@@ -97,9 +97,10 @@ const ModernFeeCollection = ({ user, apiBaseUrl }) => {
   };
 
   const handlePaymentSuccess = useCallback((receiptData) => {
-    // Don't reload data - let user see receipt
-    // Data will reload when they manually refresh
+    // Don't reload data immediately - let user see receipt and share
+    // User stays on receipt page until they click "New Payment"
     setPreselectedStudent(null);
+    // Note: Data refresh happens only when user navigates away or manually refreshes
   }, []);
 
   // Filter menu items based on user role
