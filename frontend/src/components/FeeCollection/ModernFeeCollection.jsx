@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   LayoutDashboard, CreditCard, Receipt, Users, AlertTriangle, Bell,
   Menu, X, RefreshCw
@@ -38,8 +38,8 @@ const ModernFeeCollection = ({ user, apiBaseUrl }) => {
   });
   const [preselectedStudent, setPreselectedStudent] = useState(null);
 
-  // Load all data
-  const loadData = async () => {
+  // Memoize data loading to prevent unnecessary refetches
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [studentsRes, feeHeadsRes, transactionsRes] = await Promise.all([
@@ -84,22 +84,23 @@ const ModernFeeCollection = ({ user, apiBaseUrl }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [apiBaseUrl]);
 
+  // Only load data once on mount
   useEffect(() => {
     loadData();
-  }, [apiBaseUrl]);
+  }, [loadData]);
 
   const handleNavigateToPayment = (student) => {
     setPreselectedStudent(student);
     setActiveView('payment');
   };
 
-  const handlePaymentSuccess = (receiptData) => {
+  const handlePaymentSuccess = useCallback((receiptData) => {
     // Don't reload data - let user see receipt
-    // Data will reload when they click "New Payment"
+    // Data will reload when they manually refresh
     setPreselectedStudent(null);
-  };
+  }, []);
 
   // Filter menu items based on user role
   const allMenuItems = [

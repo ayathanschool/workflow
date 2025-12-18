@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Search, User, DollarSign, Calendar, CreditCard, Receipt,
   CheckCircle, XCircle, AlertCircle, ArrowRight, Printer, X
@@ -774,4 +774,4 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
   );
 };
 
-export default ModernPaymentForm;
+export default React.memo(ModernPaymentForm);
