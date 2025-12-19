@@ -90,8 +90,7 @@ const App = () => {
   // Get notifications context
   const notificationSystem = useNotifications();
   
-  // Get theme context
-  const { theme } = useTheme();
+  // Theme styling relies on 'dark' class on <html>; avoid consuming theme in App to prevent re-renders on toggle
   
   // API error banner state
   const [apiError, setApiError] = useState(null);
@@ -1157,7 +1156,6 @@ const App = () => {
   // Sidebar component
   const Sidebar = () => {
     const navigationItems = getNavigationItems();
-    const { theme } = useTheme();
     
     // Debug: Log navigation items
     if (navigationItems.length === 0) {
@@ -1184,7 +1182,7 @@ const App = () => {
               }}
             />
             <div 
-              className={`fixed inset-y-0 left-0 flex flex-col max-w-xs w-full ${theme === 'dark' ? 'bg-gray-800' : 'bg-white'} z-[70] shadow-xl`}
+              className="fixed inset-y-0 left-0 flex flex-col max-w-xs w-full bg-white dark:bg-gray-800 z-[70] shadow-xl"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="absolute top-0 right-0 -mr-12 pt-2">
@@ -1198,7 +1196,7 @@ const App = () => {
               <div className="flex-1 h-0 pt-5 pb-4 overflow-y-auto">
                 <div className="flex-shrink-0 flex items-center px-4">
                   <School className="h-8 w-8 text-blue-600" />
-                  <span className={`ml-2 text-xl font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>SchoolFlow</span>
+                  <span className="ml-2 text-xl font-bold text-gray-900 dark:text-white">SchoolFlow</span>
                 </div>
                 <nav className="mt-5 px-2 space-y-1">
                   {navigationItems.map((item) => {
@@ -1215,9 +1213,7 @@ const App = () => {
                         className={`${
                           activeView === item.id
                             ? 'bg-blue-100 text-blue-600'
-                            : theme === 'dark' 
-                              ? 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white'
                         } group flex items-center px-2 py-2 text-base font-medium rounded-md w-full text-left transition-colors duration-200`}
                       >
                         <Icon className="mr-4 h-6 w-6" />
@@ -1234,13 +1230,13 @@ const App = () => {
         {/* Desktop sidebar */}
         <div className="hidden lg:flex lg:flex-shrink-0">
           <div className="flex flex-col w-64">
-            <div className={`flex flex-col h-0 flex-1 border-r ${theme === 'dark' ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'} transition-colors duration-300`}>
-              <div className={`flex items-center h-16 flex-shrink-0 px-4 ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'} transition-colors duration-300`}>
+            <div className="flex flex-col h-0 flex-1 border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 transition-colors duration-300">
+              <div className="flex items-center h-16 flex-shrink-0 px-4 bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
                 <School className="h-8 w-8 text-blue-600" />
-                <span className={`ml-2 text-xl font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>SchoolFlow</span>
+                <span className="ml-2 text-xl font-bold text-gray-900 dark:text-white">SchoolFlow</span>
               </div>
               <div className="flex-1 flex flex-col overflow-y-auto">
-                <nav className={`flex-1 px-2 py-4 space-y-1 ${theme === 'dark' ? 'bg-gray-800' : 'bg-white'} transition-colors duration-300`}>
+                <nav className="flex-1 px-2 py-4 space-y-1 bg-white dark:bg-gray-800 transition-colors duration-300">
                   {navigationItems.map((item) => {
                     const Icon = item.icon;
                     return (
@@ -1250,9 +1246,7 @@ const App = () => {
                         className={`${
                           activeView === item.id
                             ? 'bg-blue-100 text-blue-600'
-                            : theme === 'dark' 
-                              ? 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white'
                         } group flex items-center px-2 py-2 text-sm font-medium rounded-md w-full text-left transition-colors duration-200`}
                       >
                         <Icon className="mr-3 h-5 w-5" />
@@ -1271,31 +1265,30 @@ const App = () => {
 
   // Header component
   const Header = () => {
-    const { theme } = useTheme();
     return (
-      <div className={`flex items-center justify-between p-4 ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} border-b transition-colors duration-300`}>
+      <div className="flex items-center justify-between p-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 transition-colors duration-300">
         <div className="flex items-center">
           <button
             onClick={() => { setSidebarOpen(true); setSidebarOpenedAt(Date.now()); }}
-            className={`lg:hidden mr-3 p-2 rounded-md transition-colors duration-200 ${theme === 'dark' ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-500 hover:bg-gray-100'}`}
+            className="lg:hidden mr-3 p-2 rounded-md transition-colors duration-200 text-gray-400 hover:text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-300 dark:hover:bg-gray-700"
           >
             <Menu className="h-6 w-6" />
           </button>
-          <h1 className={`text-xl font-semibold capitalize ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+          <h1 className="text-xl font-semibold capitalize text-gray-900 dark:text-white">
             {activeView.replace('-', ' ')}
           </h1>
         </div>
         
         <div className="flex items-center space-x-4">
           <ThemeToggle />
-          <button className={`p-2 transition-colors duration-200 ${theme === 'dark' ? 'text-gray-400 hover:text-gray-300' : 'text-gray-400 hover:text-gray-500'}`}>
+          <button className="p-2 transition-colors duration-200 text-gray-400 hover:text-gray-500 dark:text-gray-400 dark:hover:text-gray-300">
             <Bell className="h-5 w-5" />
           </button>
           <div className="flex items-center">
             <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
               <User className="h-5 w-5 text-blue-600" />
             </div>
-            <div className={`ml-2 hidden md:block ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+            <div className="ml-2 hidden md:block text-gray-700 dark:text-gray-300">
               <div className="text-sm font-medium">{user?.name}</div>
               {user?.roles && user.roles.length > 0 && (
                 <div className="text-xs text-gray-500 dark:text-gray-400">
@@ -1310,7 +1303,7 @@ const App = () => {
             </div>
             <button
               onClick={logout}
-              className={`ml-4 text-sm flex items-center transition-colors duration-200 ${theme === 'dark' ? 'text-gray-400 hover:text-gray-300' : 'text-gray-500 hover:text-gray-700'}`}
+              className="ml-4 text-sm flex items-center transition-colors duration-200 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
             >
               <LogOut className="h-4 w-4 mr-1" />
               Logout
@@ -1323,83 +1316,98 @@ const App = () => {
   
   // Main content router
   const renderContent = () => {
-    
     return (
-      <Suspense fallback={
-        <div className="flex items-center justify-center h-full">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-        </div>
-      }>
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
+        }
+      >
         <AnimatedPage transitionKey={activeView}>
           {(() => {
             switch (activeView) {
-        case 'dashboard':
-          return <Dashboard 
-            showSendNotification={showSendNotification} 
-            setShowSendNotification={setShowSendNotification}
-            notificationData={notificationData}
-            setNotificationData={setNotificationData}
-          />;
-        case 'schemes':
-          return <SchemesView />;
-        case 'lesson-plans':
-          return <LessonPlansView />;
-        case 'scheme-lesson-planning':
-          return <SchemeLessonPlanning userEmail={user?.email} userName={user?.name} />;
-        case 'session-tracking':
-          return <SessionCompletionTracker user={user} />;
-        case 'timetable':
-          return <TimetableView />;
-        case 'my-substitutions':
-          return <MySubstitutionsView user={user} periodTimes={memoizedSettings.periodTimes} />;
-      case 'reports':
-        return <ReportsView />;
-      case 'hm-dashboard':
-        // hm-dashboard should reuse the main Dashboard to avoid duplicate UIs
-        return <Dashboard />;
-      case 'day-timetable':
-        return <DayTimetableView periodTimes={memoizedSettings.periodTimes} />;
-      case 'scheme-approvals':
-        return <SchemeApprovalsView />;
-      case 'lesson-approvals':
-        return <LessonApprovalsView />;
-      case 'my-daily-reports':
-        return <MyDailyReportsView />;
-      case 'daily-oversight':
-        return <HMDailyOversight user={user} />;
-      case 'teacher-performance':
-        return <HMTeacherPerformanceView user={user} />;
-      case 'substitutions':
-        return <EnhancedSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
-      case 'full-timetable':
-        return <FullTimetableView />;
-      case 'smart-reminders':
-        return <SmartReminders user={user} />;
-      case 'users':
-        return <UserManagement user={user} />;
-      case 'audit-log':
-        return <AuditLog user={user} />;
-      case 'exam-marks':
-        return <ExamManagement user={user} withSubmit={withSubmit} />;
-      case 'report-card':
-        return <ReportCard user={user} />;
-      case 'marklist':
-        return <Marklist user={user} />;
-      case 'class-data':
-        return <ClassDataView />;
-      case 'class-students':
-        return <ClassStudentsView />;
-      case 'daily-reports-management':
-        return <DailyReportsManagementView />;
-      case 'class-period-timetable':
-        return <ClassPeriodSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
-      case 'fee-collection':
-        return <FeeCollectionView />;
-      default:
-        return <Dashboard />;
-    }
-        })()}
-      </AnimatedPage>
+              case 'dashboard':
+                return (
+                  <Dashboard
+                    showSendNotification={showSendNotification}
+                    setShowSendNotification={setShowSendNotification}
+                    notificationData={notificationData}
+                    setNotificationData={setNotificationData}
+                  />
+                );
+              case 'schemes':
+                return <SchemesView />;
+              case 'lesson-plans':
+                return <LessonPlansView />;
+              case 'scheme-lesson-planning':
+                return <SchemeLessonPlanning userEmail={user?.email} userName={user?.name} />;
+              case 'session-tracking':
+                return <SessionCompletionTracker user={user} />;
+              case 'timetable':
+                return <TimetableView />;
+              case 'my-substitutions':
+                return <MySubstitutionsView user={user} periodTimes={memoizedSettings.periodTimes} />;
+              case 'reports':
+                // Render reporting directly to avoid remounts on parent re-renders
+                return (
+                  <div className="space-y-6">
+                    <div className="flex justify-between items-center">
+                      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Daily Reports</h1>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">
+                        Complete your daily reports based on your timetable
+                      </div>
+                    </div>
+                    <div className="bg-transparent">
+                      <DailyReportModern user={memoizedUser} />
+                    </div>
+                  </div>
+                );
+              case 'hm-dashboard':
+                return <Dashboard />;
+              case 'day-timetable':
+                return <DayTimetableView periodTimes={memoizedSettings.periodTimes} />;
+              case 'scheme-approvals':
+                return <SchemeApprovalsView />;
+              case 'lesson-approvals':
+                return <LessonApprovalsView />;
+              case 'my-daily-reports':
+                return <MyDailyReportsView />;
+              case 'daily-oversight':
+                return <HMDailyOversight user={user} />;
+              case 'teacher-performance':
+                return <HMTeacherPerformanceView user={user} />;
+              case 'substitutions':
+                return <EnhancedSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
+              case 'full-timetable':
+                return <FullTimetableView />;
+              case 'smart-reminders':
+                return <SmartReminders user={user} />;
+              case 'users':
+                return <UserManagement user={user} />;
+              case 'audit-log':
+                return <AuditLog user={user} />;
+              case 'exam-marks':
+                return <ExamManagement user={user} withSubmit={withSubmit} />;
+              case 'report-card':
+                return <ReportCard user={user} />;
+              case 'marklist':
+                return <Marklist user={user} />;
+              case 'class-data':
+                return <ClassDataView />;
+              case 'class-students':
+                return <ClassStudentsView />;
+              case 'daily-reports-management':
+                return <DailyReportsManagementView />;
+              case 'class-period-timetable':
+                return <ClassPeriodSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
+              case 'fee-collection':
+                return <ModernFeeCollection user={user} apiBaseUrl={api.getBaseUrl()} />;
+              default:
+                return <Dashboard />;
+            }
+          })()}
+        </AnimatedPage>
       </Suspense>
     );
   };
@@ -9377,7 +9385,7 @@ const App = () => {
   try {
     if (loading) {
       return (
-        <div className={`min-h-screen flex items-center justify-center ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'} transition-colors duration-300`}>
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
         </div>
       );
@@ -9401,7 +9409,7 @@ const App = () => {
     }
 
     return (
-      <div className={`min-h-screen ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'} transition-colors duration-300`}>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
         {/* Send Notification Modal */}
         {showSendNotification && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-[99999] flex items-center justify-center">
@@ -9549,7 +9557,7 @@ const App = () => {
           <Sidebar />
           <div className="flex-1 flex flex-col overflow-hidden">
             <Header />
-            <main className={`flex-1 overflow-auto p-6 ${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-50'} transition-colors duration-300`}>
+            <main className="flex-1 overflow-auto p-6 bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
               {renderContent()}
             </main>
           </div>

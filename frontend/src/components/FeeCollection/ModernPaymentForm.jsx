@@ -278,9 +278,12 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
       remarks: ''
     });
     
-    // Notify parent to reload data
+    // Notify parent to refresh transactions lightly (non-blocking)
     if (onNewPayment) {
-      onNewPayment();
+      // Defer to next tick to avoid jank in UI reset
+      setTimeout(() => {
+        try { onNewPayment(); } catch {}
+      }, 0);
     }
   };
 

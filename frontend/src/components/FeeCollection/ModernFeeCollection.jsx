@@ -103,6 +103,24 @@ const ModernFeeCollection = ({ user, apiBaseUrl }) => {
     // Note: Data refresh happens only when user navigates away or manually refreshes
   }, []);
 
+  // Lightweight refresh used by "New Payment" button: update transactions only
+  const refreshTransactionsOnly = useCallback(async () => {
+    try {
+      const res = await fetch(`${apiBaseUrl}?action=transactions`, { cache: 'no-store' });
+      const json = await res.json();
+      const extractArray = (response) => {
+        if (Array.isArray(response)) return response;
+        if (response?.data && Array.isArray(response.data)) return response.data;
+        if (response?.data?.data && Array.isArray(response.data.data)) return response.data.data;
+        return [];
+      };
+      const tx = extractArray(json);
+      setData(prev => ({ ...prev, transactions: tx }));
+    } catch (err) {
+      console.warn('Refresh transactions failed:', err);
+    }
+  }, [apiBaseUrl]);
+
   // Filter menu items based on user role
   const allMenuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, color: 'text-blue-600 dark:text-blue-400' },
@@ -282,7 +300,8 @@ const ModernFeeCollection = ({ user, apiBaseUrl }) => {
                 transactions={data.transactions}
                 apiBaseUrl={apiBaseUrl}
                 onPaymentSuccess={handlePaymentSuccess}
-                onNewPayment={loadData}
+                // Avoid full reload on "New Payment"; refresh transactions only
+                onNewPayment={refreshTransactionsOnly}
                 preselectedStudent={preselectedStudent}
               />
             </div>
