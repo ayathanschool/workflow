@@ -752,6 +752,14 @@ const App = () => {
             const teachingSubjects = Array.isArray(user.subjects) ? user.subjects : [];
             const classCount = teachingClasses.length;
             const subjectCount = teachingSubjects.length;
+            // Pre-populate counts to avoid initial blank UI
+            setInsights(prev => ({
+              ...prev,
+              classCount,
+              subjectCount,
+              teachingClasses,
+              teachingSubjects
+            }));
             
             // Fetch student counts per class for class teacher
             let classStudentCounts = {};
@@ -907,20 +915,17 @@ const App = () => {
               // If the endpoint is not implemented or fails, just leave pendingReports as 0
               console.warn('Unable to fetch teacher daily reports:', err);
             }
-            setInsights({
+            setInsights(prev => ({
+              ...prev,
               planCount: 0,
               lessonCount: 0,
               teacherCount: 0,
-              classCount,
-              subjectCount,
               pendingReports,
               classStudentCounts,
-              teachingClasses,
-              teachingSubjects,
               studentsAboveAverage,
               studentsNeedFocus,
               classPerformance
-            });
+            }));
           }
         } catch (err) {
           console.error('Error loading dashboard data:', err);

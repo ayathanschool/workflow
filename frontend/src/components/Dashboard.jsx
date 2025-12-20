@@ -23,10 +23,19 @@ const Dashboard = ({ user, hasRole, hasAnyRole }) => {
     async function fetchDashboardData() {
       try {
         if (!user) return;
+        // Pre-populate synchronously to avoid initial blank state
+        if (hasAnyRole(['teacher','class teacher'])) {
+          const classCount = Array.isArray(user.classes) ? user.classes.length : 0;
+          const subjectCount = Array.isArray(user.subjects) ? user.subjects.length : 0;
+          setInsights(prev => ({ ...prev, classCount, subjectCount }));
+        }
+
         // Headmaster view: use HM insights and classes count
         if (hasRole('h m')) {
-          const hmData = await api.getHmInsights();
-          const classes = await api.getAllClasses();
+          const [hmData, classes] = await Promise.all([
+            api.getHmInsights(),
+            api.getAllClasses()
+          ]);
           setInsights(prev => ({
             ...prev,
             planCount: hmData?.planCount || 0,
@@ -35,9 +44,6 @@ const Dashboard = ({ user, hasRole, hasAnyRole }) => {
             classCount: Array.isArray(classes) ? classes.length : 0
           }));
         } else if (hasAnyRole(['teacher','class teacher'])) {
-          // Teacher view: compute classes and subjects from user object
-          const classCount = Array.isArray(user.classes) ? user.classes.length : 0;
-          const subjectCount = Array.isArray(user.subjects) ? user.subjects.length : 0;
           // Attempt to fetch daily reports for today to count pending submissions
           let pendingReports = 0;
           try {
@@ -48,13 +54,10 @@ const Dashboard = ({ user, hasRole, hasAnyRole }) => {
               pendingReports = reports.filter(r => String(r.status || '').toLowerCase() !== 'submitted').length;
             }
           } catch (err) {
-            // If the endpoint is not implemented or fails, just leave pendingReports as 0
             console.warn('Unable to fetch teacher daily reports:', err);
           }
           setInsights(prev => ({
             ...prev,
-            classCount,
-            subjectCount,
             pendingReports
           }));
         }
@@ -63,7 +66,7 @@ const Dashboard = ({ user, hasRole, hasAnyRole }) => {
       }
     }
     fetchDashboardData();
-  }, [user, hasRole, hasAnyRole]);
+  }, [user?.email]);
 
   return (
     <div className="space-y-6">
