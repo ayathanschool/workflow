@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as api from '../api';
 import { useNotifications } from '../contexts/NotificationContext';
 import { todayIST, parseApiDate, formatShortDate } from '../utils/dateUtils';
+import ClassTeacherOnePage from './ClassTeacherOnePage.jsx';
 
 const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
   // Get notification functions
@@ -63,7 +64,10 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     hasInternalMarks: true,
     internalMax: 20,
     externalMax: 80,
-    subjectExams: [] // Will contain {subject, date} pairs
+    subjectExams: [],
+    mode: 'single', // 'single' | 'section'
+    section: '', // 'LP' | 'UP' | 'HS'
+    classesToCreate: []
   });
   const [selectedSubjects, setSelectedSubjects] = useState([]);
   const [availableClasses, setAvailableClasses] = useState([]);
@@ -74,13 +78,6 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
   const [availableSubjects, setAvailableSubjects] = useState([]);
   const [subjectsLoading, setSubjectsLoading] = useState(true);
   
-  // Initialize with some default subjects for immediate display
-  useEffect(() => {
-    // Set some default subjects immediately for better UX
-    const defaultSubjects = ['Mathematics', 'English', 'Science', 'Social Studies', 'Hindi', 'Computer Science', 'Physics', 'Chemistry', 'Biology'];
-    setAvailableSubjects(defaultSubjects);
-    setSubjectsLoading(false);
-  }, []);
   
   // Filter states
   const [filters, setFilters] = useState({
@@ -108,6 +105,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
 
   const [viewExamMarks, setViewExamMarks] = useState(null);
   const [examMarks, setExamMarks] = useState([]);
+  const [showClassTeacherView, setShowClassTeacherView] = useState(false);
   
   // Performance optimization: Cache frequently accessed data
   const [studentsCache, setStudentsCache] = useState(new Map());
@@ -377,197 +375,73 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     fetchData();
   }, [user, hasRole, normalizedRoles]);
 
-  // Load all subjects from the centralized API endpoint
+  // Load subjects exclusively from ClassSubjects sheet
   useEffect(() => {
     async function fetchAllSubjects() {
       try {
         setSubjectsLoading(true);
-        
-        // Check if hasRole is a function before calling it
-        const isHeadmaster = typeof hasRole === 'function' ? 
-          hasRole('h m') : 
-          normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'));
-        
-        // Check if user is a class teacher
+
+        const isHeadmaster = typeof hasRole === 'function'
+          ? hasRole('h m')
+          : normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'));
         const isClassTeacher = normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher');
-        
-        // Get all subjects from the timetable for the selected class
-        const selectedClass = (examFormData.class || '').toString().trim();
-        
-        if (isSuperAdmin || isHeadmaster) {
-          // For HM/Super Admin: Get subjects from ClassSubjects sheet or fallback to timetable
-          if (selectedClass) {
-            try {
-              // Try ClassSubjects API first
-              const classSubjectsResult = await api.getClassSubjects(selectedClass);
-              if (classSubjectsResult.success && classSubjectsResult.subjects?.length > 0) {
-                console.log(`✅ Loaded ${classSubjectsResult.subjects.length} subjects from ${classSubjectsResult.source}`);
-                setAvailableSubjects(classSubjectsResult.subjects);
-                setSubjectsLoading(false);
-                return;
-              }
-              
-              // Fallback to timetable if ClassSubjects returns no results
-              const fullTimetable = await api.getFullTimetable();
-              const classSubjects = new Set();
 
-              // Flatten timetable regardless of backend shape (flat vs grouped by day/period)
-              let flatRows = [];
-              if (Array.isArray(fullTimetable)) {
-                if (
-                  fullTimetable.length > 0 &&
-                  fullTimetable[0] &&
-                  typeof fullTimetable[0] === 'object' &&
-                  'day' in fullTimetable[0] &&
-                  Array.isArray(fullTimetable[0].periods)
-                ) {
-                  // Old/structured shape: [{ day, periods: [{ period, entries: [{class, subject,...}] }] }]
-                  fullTimetable.forEach(day => {
-                    (day.periods || []).forEach(p => {
-                      (p.entries || []).forEach(e => flatRows.push(e));
-                    });
-                  });
-                } else {
-                  // New/flat shape: [{ class, subject, teacherEmail, ... }]
-                  flatRows = fullTimetable;
-                }
-              }
+        // Determine target class: prefer bulk representative class, then exam form class, else class-teacher's class, else filter selection
+        const selectedClass = (bulkExamFormData.class || examFormData.class || (isClassTeacher ? user?.classTeacherFor : filters.class) || '')
+          .toString()
+          .trim();
 
-              // Diagnose shapes
-              console.log(`🧭 Timetable entries (raw): ${Array.isArray(fullTimetable) ? fullTimetable.length : 0}`);
-              console.log(`🧭 Timetable entries (flat): ${flatRows.length}`);
+        if (!selectedClass) {
+          // No class selected yet; keep subjects empty until class is chosen
+          setAvailableSubjects([]);
+          return;
+        }
 
-              // Normalize and collect subjects for the selected class
-              flatRows.forEach(entry => {
-                const entryClass = String(entry.class || '')
-                  .trim()
-                  .toLowerCase()
-                  .replace(/std\s*/gi, '')
-                  .replace(/\s+/g, '');
+        // Always source subjects from ClassSubjects for exams
+        const res = await api.getClassSubjects(selectedClass);
+        let finalSubjects = [];
 
-                const targetClass = selectedClass
-                  .trim()
-                  .toLowerCase()
-                  .replace(/std\s*/gi, '')
-                  .replace(/\s+/g, '');
+        const norm = (s) => (s || '').toString().trim().toLowerCase().replace(/std\s*/gi, '').replace(/\s+/g, '');
+        const targetClassNorm = norm(selectedClass);
 
-                if (entryClass === targetClass && entry.subject) {
-                  classSubjects.add(String(entry.subject).trim());
-                }
-              });
-
-              console.log(`🔍 Found ${classSubjects.size} subjects in timetable for ${selectedClass}`);
-              
-              if (classSubjects.size > 0) {
-                const sortedSubjects = Array.from(classSubjects).filter(Boolean).sort();
-                console.log(`📚 Subjects for ${selectedClass}:`, sortedSubjects);
-                setAvailableSubjects(sortedSubjects);
-              } else {
-                console.log(`⚠️  No subjects in timetable for ${selectedClass}, checking exams fallback`);
-                // Fallback: Get subjects from existing exams
-                const examSubjects = new Set();
-                if (Array.isArray(exams)) {
-                  exams.forEach(ex => {
-                    const exClass = String(ex.class || '')
-                      .trim()
-                      .toLowerCase()
-                      .replace(/std\s*/gi, '')
-                      .replace(/\s+/g, '');
-                    const targetClass = selectedClass
-                      .trim()
-                      .toLowerCase()
-                      .replace(/std\s*/gi, '')
-                      .replace(/\s+/g, '');
-                    
-                    if (exClass === targetClass && ex.subject) {
-                      examSubjects.add(String(ex.subject).trim());
-                    }
-                  });
-                }
-                
-                if (examSubjects.size > 0) {
-                  console.log(`📋 Found ${examSubjects.size} subjects from existing exams`);
-                  setAvailableSubjects(Array.from(examSubjects).filter(Boolean).sort());
-                } else {
-                  // Last resort: show default subjects
-                  const defaultSubjects = ['Mathematics', 'English', 'Science', 'Social Studies', 'Hindi', 'Computer Science', 'Malayalam', 'Physical Education'];
-                  console.log('🔄 Using default subjects as fallback');
-                  setAvailableSubjects(defaultSubjects);
-                }
-              }
-            } catch (err) {
-              console.error('❌ Error fetching timetable for subjects:', err);
-              setAvailableSubjects(['Mathematics', 'English', 'Science', 'Social Studies', 'Hindi']);
-            }
-          } else {
-            // No class selected - show common subjects
-            setAvailableSubjects(['Mathematics', 'English', 'Science', 'Social Studies', 'Hindi', 'Computer Science']);
-          }
-        } else {
-          // For class teacher: show subjects they teach + subjects in their assigned class
-          if (isClassTeacher) {
+        // Case 1: { subjects: [...] }
+        if (res && Array.isArray(res.subjects)) {
+          finalSubjects = res.subjects;
+        // Case 2: { data: { subjects: [...] } }
+        } else if (Array.isArray(res?.data?.subjects)) {
+          finalSubjects = res.data.subjects;
+        // Case 3: API returned array directly
+        } else if (Array.isArray(res)) {
+          if (res.length > 0 && typeof res[0] === 'string') {
+            // Array of subject strings
+            finalSubjects = res;
+          } else if (typeof res[0] === 'object') {
+            // Array of rows from ClassSubjects sheet: filter by class and extract subject
             const subjectsSet = new Set();
-            
-            // Add subjects that the teacher teaches in ANY class
-            if (Array.isArray(user.subjects)) {
-              user.subjects.forEach(s => subjectsSet.add(s));
-            }
-            
-            // Add ALL subjects for the class they are class teacher for
-            if (user.classTeacherFor) {
-              const classTeacherClass = user.classTeacherFor;
-              
-              // For class teacher, show ALL subjects in their assigned class
-              // Get subjects from timetable for this specific class
-              try {
-                const timetableData = await api.getTeacherWeeklyTimetable(user.email);
-                if (Array.isArray(timetableData)) {
-                  timetableData.forEach(day => {
-                    if (day.periods && Array.isArray(day.periods)) {
-                      day.periods.forEach(period => {
-                        if (period.class === classTeacherClass && period.subject) {
-                          subjectsSet.add(period.subject);
-                        }
-                      });
-                    }
-                  });
-                }
-              } catch (err) {
-                console.warn('Could not fetch timetable data for subjects:', err);
+            res.forEach(row => {
+              const rowClass = norm(row.class || row.Class || row.cls || row.standard || '');
+              const subj = (row.subject || row.Subject || row.subjects || row.Subjects || row.sub || row.name || '').toString().trim();
+              if (rowClass && subj && rowClass === targetClassNorm) {
+                subjectsSet.add(subj);
               }
-              
-              // Also add subjects from existing exams for this class
-              if (Array.isArray(exams)) {
-                exams.forEach(ex => {
-                  if (!ex) return;
-                  if (String(ex.class || '').trim() === classTeacherClass) {
-                    const subj = String(ex.subject || '').trim();
-                    if (subj) subjectsSet.add(subj);
-                  }
-                });
-              }
-            }
-            
-            // Convert the set back to an array and sort it
-            const filteredSubjects = Array.from(subjectsSet).filter(Boolean).sort();
-            setAvailableSubjects(filteredSubjects);
-          } else {
-            // Regular teacher: just show their subjects
-            const teacherSubjects = Array.isArray(user.subjects) ? user.subjects : [];
-            setAvailableSubjects(teacherSubjects);
+            });
+            finalSubjects = Array.from(subjectsSet);
           }
         }
+
+        finalSubjects = Array.isArray(finalSubjects) ? finalSubjects.filter(Boolean).sort() : [];
+        console.log(`✅ Loaded ${finalSubjects.length} subjects from ClassSubjects for ${selectedClass}`);
+        setAvailableSubjects(finalSubjects);
       } catch (error) {
-        console.error("❌ Error fetching subjects:", error);
-        // Fallback to default subjects if everything fails
-        setAvailableSubjects(['Mathematics', 'English', 'Science', 'Social Studies', 'Hindi']);
+        console.error('❌ Error fetching ClassSubjects:', error);
+        setAvailableSubjects([]);
       } finally {
         setSubjectsLoading(false);
       }
     }
-    
+
     fetchAllSubjects();
-  }, [user, hasRole, normalizedRoles, isSuperAdmin, examFormData.class, exams]);
+  }, [user, hasRole, normalizedRoles, bulkExamFormData.class, examFormData.class, filters.class]);
 
   // Handlers for Exam Creation
   const handleExamFormChange = (field, value) => {
@@ -702,6 +576,33 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     } else if (field === 'subjects') {
       // Handle multiple subject selection
       setSelectedSubjects(value);
+    } else if (field === 'mode') {
+      setBulkExamFormData({ ...bulkExamFormData, mode: value });
+    } else if (field === 'section') {
+      // Compute classes for selected section
+      const computeClassesForSection = (sectionLabel) => {
+        const classes = Array.isArray(availableClasses) ? availableClasses.slice() : [];
+        const extractNum = (cls) => {
+          const m = String(cls || '').match(/(\d+)/);
+          return m ? Number(m[1]) : NaN;
+        };
+        let min = 1, max = 4; // LP default
+        if (sectionLabel === 'UP') { min = 5; max = 7; }
+        if (sectionLabel === 'HS') { min = 8; max = 10; }
+        return classes.filter(c => {
+          const n = extractNum(c);
+          return !isNaN(n) && n >= min && n <= max;
+        });
+      };
+      const classesToCreate = computeClassesForSection(value);
+      // Use the first class to load subjects from ClassSubjects
+      const representativeClass = classesToCreate[0] || '';
+      setBulkExamFormData({ 
+        ...bulkExamFormData, 
+        section: value, 
+        classesToCreate, 
+        class: representativeClass 
+      });
     } else {
       setBulkExamFormData({ ...bulkExamFormData, [field]: value });
     }
@@ -784,8 +685,12 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         setApiError('Please select an exam type');
         return;
       }
-      if (!bulkExamFormData.class) {
+      if (bulkExamFormData.mode === 'single' && !bulkExamFormData.class) {
         setApiError('Please select a class');
+        return;
+      }
+      if (bulkExamFormData.mode === 'section' && (!Array.isArray(bulkExamFormData.classesToCreate) || bulkExamFormData.classesToCreate.length === 0)) {
+        setApiError('No classes found for the selected section');
         return;
       }
       if (selectedSubjects.length === 0) {
@@ -816,28 +721,35 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       // Calculate total max marks
       const totalMax = Number(bulkExamFormData.internalMax || 0) + Number(bulkExamFormData.externalMax || 0);
       
-      // Submit bulk exams creation
+      // Submit bulk exams creation for single class or multiple classes (section mode)
       await withSubmit('Creating exams...', async () => {
-        const result = await api.createBulkExams(user.email, {
-          creatorName: user.name || '',
-          class: bulkExamFormData.class,
-          examType: bulkExamFormData.examType,
-          hasInternalMarks: bulkExamFormData.hasInternalMarks,
-          internalMax: bulkExamFormData.hasInternalMarks ? Number(bulkExamFormData.internalMax) : 0,
-          externalMax: Number(bulkExamFormData.externalMax),
-          totalMax: totalMax,
-          subjectExams
-        });
-        
-        if (result && result.error) {
-          throw new Error(result.error);
+        const targetClasses = bulkExamFormData.mode === 'section'
+          ? bulkExamFormData.classesToCreate
+          : [bulkExamFormData.class];
+
+        const results = [];
+        for (const cls of targetClasses) {
+          const res = await api.createBulkExams(user.email, {
+            creatorName: user.name || '',
+            class: cls,
+            examType: bulkExamFormData.examType,
+            hasInternalMarks: bulkExamFormData.hasInternalMarks,
+            internalMax: bulkExamFormData.hasInternalMarks ? Number(bulkExamFormData.internalMax) : 0,
+            externalMax: Number(bulkExamFormData.externalMax),
+            totalMax: totalMax,
+            subjectExams
+          });
+          if (res && res.error) {
+            throw new Error(`Class ${cls}: ${res.error}`);
+          }
+          results.push(res);
         }
-        
-        return result;
+        return { ok: true, count: results.length };
       });
       
       // Show success message
-      success('Bulk Exams Created', `Successfully created ${selectedSubjects.length} exams`);
+      const classCount = bulkExamFormData.mode === 'section' ? (bulkExamFormData.classesToCreate?.length || 0) : 1;
+      success('Bulk Exams Created', `Successfully created ${selectedSubjects.length} subjects across ${classCount} class(es)`);
       
       // Refresh exams list
       await reloadExams();
@@ -850,7 +762,10 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         hasInternalMarks: true,
         internalMax: 20,
         externalMax: 80,
-        subjectExams: []
+        subjectExams: [],
+        mode: 'single',
+        section: '',
+        classesToCreate: []
       });
       setSelectedSubjects([]);
       
@@ -1515,15 +1430,20 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
           
           // Create exam with meaningful ID
           try {
+            // Determine standard number from class string (e.g., "10A" -> 10)
+            const stdMatch = String(className || '').match(/(\d+)/);
+            const stdNum = stdMatch ? parseInt(stdMatch[1], 10) : NaN;
+            const internalEnabled = !isNaN(stdNum) && stdNum >= 8 && stdNum <= 10;
+
             const examData = {
               examId: examId, // Use the meaningful ID directly
               class: className,
               subject: subject,
               examType: examType,
-              hasInternalMarks: className.match(/std[89]|std10/i) ? true : false, // STD 8-10 have internal marks
-              internalMax: className.match(/std[89]|std10/i) ? 20 : 0,
-              externalMax: 80,
-              totalMax: className.match(/std[89]|std10/i) ? 100 : 80,
+              hasInternalMarks: internalEnabled,
+              internalMax: internalEnabled ? 20 : 0,
+              externalMax: internalEnabled ? 80 : 80,
+              totalMax: internalEnabled ? 100 : 80,
               date: new Date().toISOString().slice(0, 10)
             };
             
@@ -1637,13 +1557,13 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         }
       });
     } else {
-      // Fallback sample data with meaningful exam IDs
+      // Fallback sample data with non-STD class IDs
       sampleData = [
-        ['TermTest1_Std5A_Math', '1001', 'John Doe', '18', '72'],
-        ['TermTest1_Std5A_Math', '1002', 'Jane Smith', '19', '68'], 
-        ['TermTest1_Std5A_Science', '1001', 'John Doe', '0', '85'],
-        ['TermTest1_Std5A_Science', '1002', 'Jane Smith', '0', '78'],
-        ['Quarterly_Std6B_English', '1003', 'Mike Johnson', '20', '75']
+        ['TermTest1_5A_Math', '1001', 'John Doe', '18', '72'],
+        ['TermTest1_5A_Math', '1002', 'Jane Smith', '19', '68'], 
+        ['TermTest1_5A_Science', '1001', 'John Doe', '0', '85'],
+        ['TermTest1_5A_Science', '1002', 'Jane Smith', '0', '78'],
+        ['Quarterly_6B_English', '1003', 'Mike Johnson', '20', '75']
       ];
     }
     
@@ -1704,6 +1624,15 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
             >
               <Plus className="h-4 w-4 mr-2" />
               Enter Marks
+            </button>
+          )}
+          {user && normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher') && (
+            <button
+              onClick={() => setShowClassTeacherView(true)}
+              className="flex-1 sm:flex-initial bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center justify-center hover:bg-gray-800"
+              title="One-page class view"
+            >
+              One-Page Class View
             </button>
           )}
         </div>
@@ -1992,18 +1921,51 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Class</label>
-                <select
-                  value={bulkExamFormData.class}
-                  onChange={(e) => handleBulkExamFormChange('class', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                  required
-                >
-                  <option value="">Select Class</option>
-                  {availableClasses.map((cls) => (
-                    <option key={cls} value={cls}>{cls}</option>
-                  ))}
-                </select>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Apply To</label>
+                <div className="flex gap-4 items-center">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="radio" name="bulkMode" checked={bulkExamFormData.mode === 'single'} onChange={() => handleBulkExamFormChange('mode', 'single')} />
+                    Single Class
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="radio" name="bulkMode" checked={bulkExamFormData.mode === 'section'} onChange={() => handleBulkExamFormChange('mode', 'section')} />
+                    Section (LP/UP/HS)
+                  </label>
+                </div>
+              </div>
+              <div>
+                {bulkExamFormData.mode === 'single' ? (
+                  <>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Class</label>
+                    <select
+                      value={bulkExamFormData.class}
+                      onChange={(e) => handleBulkExamFormChange('class', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      required
+                    >
+                      <option value="">Select Class</option>
+                      {availableClasses.map((cls) => (
+                        <option key={cls} value={cls}>{cls}</option>
+                      ))}
+                    </select>
+                  </>
+                ) : (
+                  <>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
+                    <select
+                      value={bulkExamFormData.section}
+                      onChange={(e) => handleBulkExamFormChange('section', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      required
+                    >
+                      <option value="">Select Section</option>
+                      <option value="LP">LP (Std 1-4)</option>
+                      <option value="UP">UP (Std 5-7)</option>
+                      <option value="HS">HS (Std 8-10)</option>
+                    </select>
+                    <div className="mt-2 text-xs text-gray-600">Classes: {bulkExamFormData.classesToCreate.join(', ') || '—'}</div>
+                  </>
+                )}
               </div>
               <div>
                 <div className="flex items-center mb-2">
@@ -2822,6 +2784,24 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                   </tbody>
                 </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Class Teacher One-Page View Modal */}
+      {showClassTeacherView && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto relative">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold">Class Teacher: One-Page View</h2>
+              <button 
+                onClick={() => setShowClassTeacherView(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            <ClassTeacherOnePage user={user} />
           </div>
         </div>
       )}
