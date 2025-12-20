@@ -377,9 +377,7 @@
       }
       
       // === SESSION COMPLETION TRACKING GET ROUTES ===
-      if (action === 'getTeacherPerformanceDashboard') {
-        return _handleGetTeacherPerformanceDashboard(e.parameter);
-      }
+      // TeacherPerformance dashboard removed
       
       if (action === 'getSchemeCompletionAnalytics') {
         return _handleGetSchemeCompletionAnalytics(e.parameter);
@@ -1172,9 +1170,7 @@
         return _handleUpdateSessionCompletion(data);
       }
       
-      if (action === 'getTeacherPerformanceDashboard') {
-        return _handleGetTeacherPerformanceDashboard(data);
-      }
+      // TeacherPerformance dashboard removed
       
       if (action === 'getSchemeCompletionAnalytics') {
         return _handleGetSchemeCompletionAnalytics(data);
@@ -3209,25 +3205,7 @@
     }
   }
 
-  /**
-  * Handle teacher performance dashboard requests  
-  */
-  function _handleGetTeacherPerformanceDashboard(data) {
-    try {
-      const teacherEmail = data.teacherEmail || '';
-      Logger.log(`_handleGetTeacherPerformanceDashboard called for: ${teacherEmail}`);
-      
-      if (!teacherEmail) {
-        return _respond({ success: false, error: 'Teacher email is required' });
-      }
-      
-      const result = getTeacherPerformanceDashboard(teacherEmail);
-      return _respond(result);
-    } catch (error) {
-      Logger.log(`ERROR in _handleGetTeacherPerformanceDashboard: ${error.message}`);
-      return _respond({ success: false, error: error.message });
-    }
-  }
+  // TeacherPerformance dashboard handler removed
 
   /**
   * Handle scheme completion analytics requests

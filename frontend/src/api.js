@@ -1449,14 +1449,6 @@ export async function updateSessionCompletion(sessionData) {
   });
 }
 
-// Get teacher performance dashboard
-export async function getTeacherPerformanceDashboard(teacherEmail) {
-  const q = new URLSearchParams({
-    action: 'getTeacherPerformanceDashboard',
-    teacherEmail
-  });
-  return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
-}
 
 // Get scheme completion analytics
 export async function getSchemeCompletionAnalytics(schemeId) {
@@ -1478,22 +1470,7 @@ export async function getSessionCompletionHistory(teacherEmail, dateRange = {}) 
 }
 
 // ===== HM MONITORING & ANALYTICS API =====
-
-// Get all teachers performance data (HM only)
-export async function getAllTeachersPerformance() {
-  const q = new URLSearchParams({
-    action: 'getAllTeachersPerformance'
-  });
-  return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
-}
-
-// Get class/subject-level performance metrics (HM only)
-export async function getClassSubjectPerformance() {
-  const q = new URLSearchParams({
-    action: 'getClassSubjectPerformance'
-  });
-  return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
-}
+// Note: TeacherPerformance sheet and related endpoints removed.
 
 // Get daily submission metrics and trends (HM only)
 export async function getDailySubmissionMetrics(daysBack = 30) {

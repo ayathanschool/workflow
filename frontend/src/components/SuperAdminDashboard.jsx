@@ -158,13 +158,7 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
             color="bg-orange-500"
             onClick={() => onNavigate && onNavigate('reports')}
           />
-          <QuickAction
-            icon={Activity}
-            title="Teacher Performance"
-            description="Monitor teacher performance metrics"
-            color="bg-indigo-500"
-            onClick={() => onNavigate && onNavigate('teacher-performance')}
-          />
+          
           <QuickAction
             icon={Calendar}
             title="Timetable Management"

@@ -57,8 +57,7 @@ const SHEETS = {
   GradeBoundaries: ['standardGroup','grade','minPercentage','maxPercentage'],
   ClassSubjects: ['class','subjects'],
   
-  // === SESSION TRACKING SYSTEM (2 sheets) ===
-  TeacherPerformance: ['teacherEmail','teacherName','totalSessions','completedSessions','partialSessions','averageCompletion','onTimeCompletion','cascadingIssues','performanceGrade','lastUpdated','recommendations'],
+  // === SESSION TRACKING SYSTEM (1 sheet) ===
   SessionDependencies: ['prerequisiteSession','dependentSession','completionPercentage','impactLevel','recommendedAction','createdAt'],
   
   // === AUDIT & COMPLIANCE (1 sheet) ===

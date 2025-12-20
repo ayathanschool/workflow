@@ -20,7 +20,7 @@ const SessionCompletionTracker = ({ user, onSessionUpdate }) => {
     estimatedCatchupTime: ''
   });
   const [showCompletionModal, setShowCompletionModal] = useState(false);
-  const [performanceData, setPerformanceData] = useState(null);
+  // TeacherPerformance removed; no performance fetch
   const [schemeAnalytics, setSchemeAnalytics] = useState({});
   const [todaysSessions, setTodaysSessions] = useState([]);
   const [submitting, setSubmitting] = useState(false);
@@ -29,7 +29,7 @@ const SessionCompletionTracker = ({ user, onSessionUpdate }) => {
   useEffect(() => {
     if (user?.email) {
       loadTodaysSessions();
-      loadPerformanceData();
+      // Performance dashboard removed
     }
   }, [user]);
 
@@ -63,16 +63,7 @@ const SessionCompletionTracker = ({ user, onSessionUpdate }) => {
     }
   };
 
-  const loadPerformanceData = async () => {
-    try {
-      const performance = await api.getTeacherPerformanceDashboard(user.email);
-      if (performance.success) {
-        setPerformanceData(performance.performance);
-      }
-    } catch (error) {
-      console.error('Error loading performance data:', error);
-    }
-  };
+  // Performance data removed
 
   const handleSessionComplete = (session) => {
     setActiveSession(session);
@@ -107,7 +98,7 @@ const SessionCompletionTracker = ({ user, onSessionUpdate }) => {
       if (result.success) {
         setShowCompletionModal(false);
         loadTodaysSessions();
-        loadPerformanceData();
+        // Performance dashboard removed
         
         if (onSessionUpdate) {
           onSessionUpdate(activeSession, sessionData);
@@ -156,74 +147,7 @@ const SessionCompletionTracker = ({ user, onSessionUpdate }) => {
 
   return (
     <div className="space-y-6">
-      {/* Performance Summary */}
-      {performanceData && (
-        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Teaching Performance</h2>
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${getPerformanceGradeColor(performanceData.performanceGrade)}`}>
-              {performanceData.performanceGrade}
-            </span>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-            <div className="bg-blue-50 rounded-lg p-4">
-              <div className="flex items-center">
-                <BookOpen className="h-8 w-8 text-blue-600" />
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-blue-800">Total Sessions</p>
-                  <p className="text-2xl font-bold text-blue-900">{performanceData.totalSessions || 0}</p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-green-50 rounded-lg p-4">
-              <div className="flex items-center">
-                <CheckCircle className="h-8 w-8 text-green-600" />
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-green-800">Completed</p>
-                  <p className="text-2xl font-bold text-green-900">{performanceData.completedSessions || 0}</p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-yellow-50 rounded-lg p-4">
-              <div className="flex items-center">
-                <Clock className="h-8 w-8 text-yellow-600" />
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-yellow-800">Avg Completion</p>
-                  <p className="text-2xl font-bold text-yellow-900">{performanceData.averageCompletion || 0}%</p>
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-purple-50 rounded-lg p-4">
-              <div className="flex items-center">
-                <Target className="h-8 w-8 text-purple-600" />
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-purple-800">On-Time Rate</p>
-                  <p className="text-2xl font-bold text-purple-900">{performanceData.onTimeCompletion || 100}%</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Recommendations */}
-          {performanceData.recommendations && performanceData.recommendations.length > 0 && (
-            <div className="bg-blue-50 rounded-lg p-4">
-              <h3 className="text-sm font-medium text-blue-800 mb-2">💡 Performance Recommendations</h3>
-              <ul className="text-sm text-blue-700 space-y-1">
-                {performanceData.recommendations.map((rec, index) => (
-                  <li key={index} className="flex items-start">
-                    <span className="text-blue-500 mr-2">•</span>
-                    {rec}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Performance Summary removed */}
 
       {/* Today's Sessions */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">

@@ -64,8 +64,7 @@ function updateSessionCompletion(sessionData) {
       Logger.log(`✅ Session complete (100%) - no cascading effects`);
     }
     
-    // Update teacher performance metrics (writes to separate TeacherPerformance sheet)
-    _updateTeacherPerformanceMetrics(sessionData.teacherEmail, currentPlan, sessionData);
+    // TeacherPerformance tracking removed
     
     return {
       success: true,
@@ -128,181 +127,7 @@ function _handleCascadingDelays(incompletePlan, sessionData) {
   }
 }
 
-/**
- * Update teacher performance metrics
- * Tracks Rema's overall teaching effectiveness
- */
-function _updateTeacherPerformanceMetrics(teacherEmail, lessonPlan, sessionData) {
-  try {
-    const performanceSheet = _getOrCreateSheet('TeacherPerformance');
-    
-    // Ensure required headers exist
-    const perfHeaders = [
-      'teacherEmail', 'teacherName', 'totalSessions', 'completedSessions', 
-      'partialSessions', 'averageCompletion', 'onTimeCompletion', 
-      'cascadingIssues', 'lastUpdated', 'performanceGrade'
-    ];
-    _ensureHeaders(performanceSheet, perfHeaders);
-    
-    const headers = _headers(performanceSheet);
-    const rows = _rows(performanceSheet).map(row => _indexByHeader(row, headers));
-    
-    // Find or create teacher performance record
-    let teacherRow = rows.find(row => row.teacherEmail === teacherEmail);
-    let isNewRecord = false;
-    let rowIndex;
-    
-    if (!teacherRow) {
-      isNewRecord = true;
-      teacherRow = {
-        teacherEmail: teacherEmail,
-        teacherName: lessonPlan.teacherName || '',
-        totalSessions: 0,
-        completedSessions: 0,
-        partialSessions: 0,
-        averageCompletion: 0,
-        onTimeCompletion: 0,
-        cascadingIssues: 0
-      };
-    } else {
-      rowIndex = rows.findIndex(row => row.teacherEmail === teacherEmail) + 2;
-    }
-    
-    // Update metrics
-    teacherRow.totalSessions = parseInt(teacherRow.totalSessions || 0) + 1;
-    
-    if (sessionData.completionPercentage >= 100) {
-      teacherRow.completedSessions = parseInt(teacherRow.completedSessions || 0) + 1;
-    } else {
-      teacherRow.partialSessions = parseInt(teacherRow.partialSessions || 0) + 1;
-    }
-    
-    if (sessionData.completionPercentage < 100) {
-      teacherRow.cascadingIssues = parseInt(teacherRow.cascadingIssues || 0) + 1;
-    }
-    
-    // Calculate performance metrics
-    const totalSessions = parseInt(teacherRow.totalSessions);
-    const completedSessions = parseInt(teacherRow.completedSessions || 0);
-    
-    teacherRow.averageCompletion = totalSessions > 0 ? 
-      Math.round((completedSessions / totalSessions) * 100) : 0;
-    
-    teacherRow.onTimeCompletion = totalSessions > 0 ? 
-      Math.round(((totalSessions - parseInt(teacherRow.cascadingIssues || 0)) / totalSessions) * 100) : 100;
-    
-    // Assign performance grade
-    if (teacherRow.averageCompletion >= 90 && teacherRow.onTimeCompletion >= 95) {
-      teacherRow.performanceGrade = 'Excellent';
-    } else if (teacherRow.averageCompletion >= 80 && teacherRow.onTimeCompletion >= 85) {
-      teacherRow.performanceGrade = 'Good';
-    } else if (teacherRow.averageCompletion >= 70 && teacherRow.onTimeCompletion >= 75) {
-      teacherRow.performanceGrade = 'Satisfactory';
-    } else {
-      teacherRow.performanceGrade = 'Needs Improvement';
-    }
-    
-    teacherRow.lastUpdated = new Date().toISOString();
-    
-    // Save the record
-    if (isNewRecord) {
-      const rowData = headers.map(header => teacherRow[header] || '');
-      performanceSheet.appendRow(rowData);
-    } else {
-      headers.forEach((header, index) => {
-        if (teacherRow.hasOwnProperty(header)) {
-          performanceSheet.getRange(rowIndex, index + 1).setValue(teacherRow[header]);
-        }
-      });
-    }
-    
-  } catch (error) {
-    Logger.log(`Error updating teacher performance metrics: ${error.message}`);
-  }
-}
-
-/**
- * Get teacher performance dashboard data
- */
-function getTeacherPerformanceDashboard(teacherEmail) {
-  try {
-    const performanceSheet = _getSheet('TeacherPerformance');
-    if (!performanceSheet) {
-      return { success: false, error: 'Performance tracking not initialized' };
-    }
-    
-    const headers = _headers(performanceSheet);
-    const rows = _rows(performanceSheet).map(row => _indexByHeader(row, headers));
-    
-    const teacherPerformance = rows.find(row => row.teacherEmail === teacherEmail);
-    
-    if (!teacherPerformance) {
-      return {
-        success: true,
-        performance: {
-          teacherEmail: teacherEmail,
-          totalSessions: 0,
-          completedSessions: 0,
-          partialSessions: 0,
-          averageCompletion: 0,
-          onTimeCompletion: 100,
-          cascadingIssues: 0,
-          performanceGrade: 'No Data',
-          recommendations: ['Start teaching sessions to track performance']
-        }
-      };
-    }
-    
-    // Generate recommendations based on performance
-    const recommendations = _generatePerformanceRecommendations(teacherPerformance);
-    
-    return {
-      success: true,
-      performance: {
-        ...teacherPerformance,
-        recommendations: recommendations
-      }
-    };
-    
-  } catch (error) {
-    Logger.log(`Error getting teacher performance dashboard: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
-/**
- * Generate performance recommendations for teachers
- * Helps Rema improve her teaching effectiveness
- */
-function _generatePerformanceRecommendations(performance) {
-  const recommendations = [];
-  
-  const avgCompletion = parseInt(performance.averageCompletion || 0);
-  const onTimeCompletion = parseInt(performance.onTimeCompletion || 100);
-  const cascadingIssues = parseInt(performance.cascadingIssues || 0);
-  
-  if (avgCompletion < 80) {
-    recommendations.push('Focus on completing full session objectives. Consider breaking complex topics into smaller parts.');
-  }
-  
-  if (onTimeCompletion < 85) {
-    recommendations.push('Plan session timing more carefully. Consider using timers and checkpoints during lessons.');
-  }
-  
-  if (cascadingIssues > 0) {
-    recommendations.push('Address incomplete sessions immediately. Schedule catch-up time before proceeding to next session.');
-  }
-  
-  if (avgCompletion >= 90 && onTimeCompletion >= 95) {
-    recommendations.push('Excellent performance! Consider mentoring other teachers or taking on advanced teaching responsibilities.');
-  }
-  
-  if (recommendations.length === 0) {
-    recommendations.push('Continue maintaining good teaching standards.');
-  }
-  
-  return recommendations;
-}
+// TeacherPerformance tracking and dashboard functions removed
 
 /**
  * Track session dependencies for better planning
@@ -415,45 +240,7 @@ function getSchemeCompletionAnalytics(schemeId) {
 /**
  * Get all teachers' performance data (HM only)
  */
-/**
- * Get all teachers performance from cached TeacherPerformance sheet
- * This is the LIGHTWEIGHT version - reads pre-computed data
- * NOTE: TeacherPerformance sheet must be populated first by updateTeacherPerformanceMetrics
- */
-function getAllTeachersPerformanceFromSheet() {
-  try {
-    const performanceSheet = _getSheet('TeacherPerformance');
-    if (!performanceSheet) {
-      return { success: false, error: 'Performance tracking not initialized' };
-    }
-    
-    const headers = _headers(performanceSheet);
-    const rows = _rows(performanceSheet).map(row => _indexByHeader(row, headers));
-    
-    const performanceData = rows.map(teacher => ({
-      ...teacher,
-      recommendations: _generatePerformanceRecommendations(teacher)
-    }));
-    
-    return {
-      success: true,
-      performances: performanceData,
-      summary: {
-        totalTeachers: performanceData.length,
-        averageCompletion: Math.round(
-          performanceData.reduce((sum, p) => sum + (parseInt(p.averageCompletion) || 0), 0) / performanceData.length
-        ),
-        teachersNeedingSupport: performanceData.filter(p => 
-          p.performanceGrade === 'Needs Improvement' || parseInt(p.cascadingIssues || 0) > 2
-        ).length
-      }
-    };
-    
-  } catch (error) {
-    Logger.log(`Error getting all teachers performance: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
+// Lightweight TeacherPerformance (sheet-based) function removed
 
 /**
  * Get school-wide session analytics (HM only)

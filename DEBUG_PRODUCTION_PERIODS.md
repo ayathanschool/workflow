@@ -105,3 +105,16 @@ Your scheme might say `"STD 9A"` but timetable says `"9A"`.
 5. Compare with what's in Schemes "class" column
 
 If they don't match EXACTLY (including spaces, capitalization), the filter will return 0 periods.
+
+## SessionDependencies: When It Populates
+
+- Purpose: Tracks cascading impacts when a session is not fully completed (e.g., Session 1 incomplete affects Session 2).
+- Automatic trigger: On session completion updates via API (`updateSessionCompletion`) when `completionPercentage < 100`.
+- What happens: `_trackSessionDependencies()` appends an entry linking the incomplete `prerequisiteSession` to each `dependentSession`, with `impactLevel`, `recommendedAction`, and timestamp.
+- Batch backfill: Admin/HM can populate from historical DailyReports using the `syncSessionDependenciesFromReports` API route.
+- Recommended schedule: Optional nightly cron trigger to run `syncSessionDependenciesFromReports()` for consistency.
+
+If the sheet is empty, likely causes:
+- No incomplete sessions have been submitted yet.
+- The `updateSessionCompletion` flow isn’t being used (teachers not reporting).
+- The batch sync hasn’t been run after importing historical reports.

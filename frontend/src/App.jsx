@@ -73,7 +73,6 @@ const Marklist = lazy(() => import('./components/Marklist'));
 const SchemeLessonPlanning = lazy(() => import('./components/SchemeLessonPlanning'));
 const SessionCompletionTracker = lazy(() => import('./components/SessionCompletionTracker'));
 const HMDailyOversight = lazy(() => import('./components/HMDailyOversightEnhanced'));
-const HMTeacherPerformanceView = lazy(() => import('./components/HMTeacherPerformanceView'));
 const SuperAdminDashboard = lazy(() => import('./components/SuperAdminDashboard'));
 const UserManagement = lazy(() => import('./components/UserManagement'));
 const AuditLog = lazy(() => import('./components/AuditLog'));
@@ -465,7 +464,6 @@ const App = () => {
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
         { id: 'reports', label: 'Daily Reports', icon: FileText },
         { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
-        { id: 'teacher-performance', label: 'Teacher Performance', icon: BarChart2 },
         { id: 'exam-marks', label: 'Exam Management', icon: Award },
         { id: 'report-card', label: 'Report Cards', icon: FileCheck },
         { id: 'marklist', label: 'Marklist', icon: FileText },
@@ -523,7 +521,6 @@ const App = () => {
         { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
         { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
         { id: 'daily-oversight', label: 'Daily Oversight (Enhanced)', icon: ClipboardCheck },
-        { id: 'teacher-performance', label: 'Teacher Performance', icon: BarChart2 },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
@@ -1375,8 +1372,7 @@ const App = () => {
                 return <MyDailyReportsView />;
               case 'daily-oversight':
                 return <HMDailyOversight user={user} />;
-              case 'teacher-performance':
-                return <HMTeacherPerformanceView user={user} />;
+              
               case 'substitutions':
                 return <EnhancedSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
               case 'full-timetable':
