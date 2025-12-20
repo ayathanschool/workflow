@@ -1571,20 +1571,21 @@ const App = () => {
         
         if (editingScheme) {
           // Update existing scheme
-          const response = await api.updateScheme(editingScheme.schemeId, user.email, schemeData);
-          result = response.data || response;
-          
-          if (result.success) {
+          result = await withSubmit('Updating scheme...', async () => {
+            const response = await api.updateScheme(editingScheme.schemeId, user.email, schemeData);
+            return response?.data || response;
+          });
+          if (result?.success) {
             success('Updated', 'Scheme updated successfully');
           } else {
-            throw new Error(result.error || 'Update failed');
+            throw new Error(result?.error || 'Update failed');
           }
         } else {
           // Submit new scheme
-          const response = await api.submitPlan(user.email, schemeData);
-          
-          // Unwrap the response (backend wraps in {status, data, timestamp})
-          result = response.data || response;
+          result = await withSubmit('Submitting scheme...', async () => {
+            const response = await api.submitPlan(user.email, schemeData);
+            return response?.data || response; // Unwrap {status,data,timestamp}
+          });
         }
         
         // Check if validation failed (only for new submissions)
