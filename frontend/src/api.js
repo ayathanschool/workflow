@@ -1481,6 +1481,15 @@ export async function getDailySubmissionMetrics(daysBack = 30) {
   return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
 }
 
+// Get class/subject performance analytics (HM only)
+export async function getClassSubjectPerformance() {
+  const q = new URLSearchParams({
+    action: 'getClassSubjectPerformance'
+  });
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  return result?.data || result; // Expect { success, classMetrics: [...] }
+}
+
 // Get comprehensive HM analytics dashboard (HM only)
 export async function getHMAnalyticsDashboard() {
   const q = new URLSearchParams({
