@@ -335,12 +335,14 @@ function _calculateGradeFromBoundaries(percentage, className) {
     const gbHeaders = _headers(gbSh);
     const boundaries = _rows(gbSh).map(r => _indexByHeader(r, gbHeaders));
     
-    // Find boundaries for this standard group - normalize comparison
-    const applicableBoundaries = boundaries.filter(b => {
-      const boundaryGroup = String(b.standardGroup || '').trim().toLowerCase();
-      const targetGroup = standardGroup.trim().toLowerCase();
-      return boundaryGroup === targetGroup;
-    });
+    // Find boundaries for this standard group - normalize labels ('Std 9-12' vs '9-12')
+    const normalizeGroup = g => String(g || '')
+      .toLowerCase()
+      .replace(/std\s*/g, '')
+      .replace(/\s+/g, '')
+      .trim();
+    const targetGroup = normalizeGroup(standardGroup);
+    const applicableBoundaries = boundaries.filter(b => normalizeGroup(b.standardGroup) === targetGroup);
     
     Logger.log(`[Grade Calculation] Found ${applicableBoundaries.length} boundaries for ${standardGroup}`);
     
@@ -393,11 +395,11 @@ function _standardGroup(cls) {
   const classNum = parseInt(cleanClass) || 0;
   
   if (classNum >= 1 && classNum <= 4) {
-    return 'Std 1-4';
+    return '1-4';
   } else if (classNum >= 5 && classNum <= 8) {
-    return 'Std 5-8';
+    return '5-8';
   } else if (classNum >= 9 && classNum <= 12) {
-    return 'Std 9-12';  // Combined group for classes 9-12
+    return '9-12';  // Combined group for classes 9-12
   }
   
   return 'Default';
@@ -408,7 +410,7 @@ function _standardGroup(cls) {
  */
 function _classHasInternalMarks(cls) {
   const standardGroup = _standardGroup(cls);
-  return ['Std 9-12'].includes(standardGroup);  // Use combined group
+  return ['9-12'].includes(standardGroup);  // Use combined group
 }
 
 /**

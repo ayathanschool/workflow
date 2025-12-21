@@ -145,60 +145,67 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     if (percentage === 'Absent' || percentage === null || percentage === undefined) {
       return 'Absent';
     }
-    
-    console.log('🎓 calculateGrade called:', { 
-      percentage, 
-      className, 
-      gradeBoundariesLoaded, 
-      boundariesCount: gradeBoundaries.length 
+
+    // Normalize percentage (handle strings like "76%")
+    const pct = typeof percentage === 'string' ? parseFloat(percentage) : Number(percentage);
+    if (isNaN(pct)) return 'E';
+
+    console.log('🎓 calculateGrade called:', {
+      percentage: pct,
+      className,
+      gradeBoundariesLoaded,
+      boundariesCount: gradeBoundaries.length
     });
-    
+
     if (!gradeBoundariesLoaded || !gradeBoundaries.length) {
       console.log('⚠️ Using fallback grading - boundaries not loaded');
-      // Fallback - use simple grades without + for safety
-      if (percentage >= 80) return 'A';
-      if (percentage >= 60) return 'B';
-      if (percentage >= 40) return 'C';
-      if (percentage >= 30) return 'D';
+      if (pct >= 80) return 'A';
+      if (pct >= 60) return 'B';
+      if (pct >= 40) return 'C';
+      if (pct >= 30) return 'D';
       return 'E';
     }
 
-    // Determine standard group
+    // Determine standard group as canonical range labels: '1-4', '5-8', '9-12'
     const getStandardGroup = (cls) => {
       if (!cls) return '';
       const match = String(cls).match(/(\d+)/);
       if (!match) return '';
       const num = Number(match[1]);
       if (isNaN(num)) return '';
-      if (num >= 1 && num <= 4) return 'Std 1-4';
-      if (num >= 5 && num <= 8) return 'Std 5-8';
-      if (num >= 9 && num <= 12) return 'Std 9-12';  // Combined group for 9-12
+      if (num >= 1 && num <= 4) return '1-4';
+      if (num >= 5 && num <= 8) return '5-8';
+      if (num >= 9 && num <= 12) return '9-12';
       return '';
     };
 
     const stdGroup = getStandardGroup(className);
-    console.log('📚 Standard group determined:', { className, stdGroup });
-    
-    // Find appropriate grade boundary - use case-insensitive comparison
+    const normalizeGroup = (g) => String(g || '')
+      .toLowerCase()
+      .replace(/std\s*/g, '')
+      .replace(/\s+/g, '')
+      .trim();
+
+    const targetGroup = normalizeGroup(stdGroup);
+    console.log('📚 Standard group determined:', { className, stdGroup: targetGroup });
+
+    // Filter boundaries by normalized group label (supports 'Std 9-12' and '9-12')
     const boundaries = gradeBoundaries
-      .filter(b => {
-        const boundaryGroup = String(b.standardGroup || '').trim().toLowerCase();
-        const targetGroup = String(stdGroup || '').trim().toLowerCase();
-        return boundaryGroup === targetGroup;
-      })
-      .sort((a, b) => b.minPercentage - a.minPercentage); // Sort descending
+      .filter(b => normalizeGroup(b.standardGroup) === targetGroup)
+      .sort((a, b) => Number(b.minPercentage) - Number(a.minPercentage));
 
     console.log('🔍 Filtered boundaries:', boundaries);
 
     for (const boundary of boundaries) {
-      if (percentage >= boundary.minPercentage && percentage <= boundary.maxPercentage) {
-        console.log('✅ Grade found:', boundary.grade, `(${percentage}% in range ${boundary.minPercentage}-${boundary.maxPercentage}%)`);
+      const minP = Number(boundary.minPercentage);
+      const maxP = Number(boundary.maxPercentage);
+      if (!isNaN(minP) && !isNaN(maxP) && pct >= minP && pct <= maxP) {
+        console.log('✅ Grade found:', boundary.grade, `(${pct}% in range ${minP}-${maxP}%)`);
         return boundary.grade;
       }
     }
 
     console.log('⚠️ No matching boundary, using lowest grade');
-    // Return lowest grade if no boundary found
     return boundaries.length > 0 ? boundaries[boundaries.length - 1].grade : 'E';
   }, [gradeBoundaries, gradeBoundariesLoaded]);
   const clearCache = useCallback(() => {

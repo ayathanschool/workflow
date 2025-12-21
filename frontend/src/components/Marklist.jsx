@@ -28,6 +28,8 @@ const Marklist = ({ user }) => {
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState("");
   const [error, setError] = useState(null);
+  const [examTypes, setExamTypes] = useState([]);
+  const [selectedExamTypes, setSelectedExamTypes] = useState([]);
 
   // Get roles from user object
   const userRoles = user?.roles || [];
@@ -78,6 +80,23 @@ const Marklist = ({ user }) => {
     }
   }, [user, isHM]);
 
+  // Preload available exam types for filtering
+  useEffect(() => {
+    const loadExamTypes = async () => {
+      try {
+        const allExams = await api.getAllExams();
+        const types = [...new Set((allExams || []).map(e => e.examType).filter(Boolean))].sort();
+        setExamTypes(types);
+        setSelectedExamTypes(types);
+      } catch (err) {
+        console.warn("Failed to load exam types:", err);
+        setExamTypes([]);
+        setSelectedExamTypes([]);
+      }
+    };
+    loadExamTypes();
+  }, []);
+
   // Load students when class is selected
   useEffect(() => {
     const loadStudents = async () => {
@@ -124,10 +143,15 @@ const Marklist = ({ user }) => {
       
       console.log('👤 Found student:', student);
       
-      // Fetch all exam types and get marks for each
+      // Determine exam types to include
       setLoadingProgress("Loading exam types...");
-      const allExams = await api.getAllExams();
-      const uniqueExamTypes = [...new Set(allExams.map(e => e.examType))].filter(Boolean);
+      let uniqueExamTypes = selectedExamTypes && selectedExamTypes.length > 0
+        ? selectedExamTypes
+        : [];
+      if (uniqueExamTypes.length === 0) {
+        const allExams = await api.getAllExams();
+        uniqueExamTypes = [...new Set((allExams || []).map(e => e.examType))].filter(Boolean).sort();
+      }
       
       console.log('📋 Fetching marklist for exam types:', uniqueExamTypes);
       setLoadingProgress(`Loading ${uniqueExamTypes.length} exam types...`);
@@ -208,6 +232,33 @@ const Marklist = ({ user }) => {
     }
   };
 
+  const exportCSV = () => {
+    if (!reportData || !reportData.examTypeGroups) return;
+    const rows = [];
+    rows.push(["Student", reportData.student?.Name || ""].join(","));
+    rows.push(["Class", reportData.student?.Class || ""].join(","));
+    rows.push(["AdmNo", reportData.student?.AdmNo || ""].join(","));
+    rows.push([]);
+    rows.push(["Exam Type", "Subject", "CE", "TE", "Total", "Grade"].join(","));
+    Object.entries(reportData.examTypeGroups).forEach(([examType, examData]) => {
+      (examData.subjects || []).forEach(subject => {
+        const ce = subject.ce ?? "";
+        const te = subject.te ?? "";
+        const total = subject.total ?? "";
+        const grade = subject.grade ?? "";
+        rows.push([examType, subject.name || "", ce, te, total, grade].join(","));
+      });
+    });
+    const csvContent = rows.map(r => Array.isArray(r) ? r : [r]).map(r => r.join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `marklist_${reportData.student?.AdmNo || "student"}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (!user || !hasAccess) {
     return (
       <div className="flex flex-col items-center justify-center min-h-64 text-gray-500">
@@ -269,13 +320,45 @@ const Marklist = ({ user }) => {
           </div>
         </div>
 
+        {examTypes.length > 0 && (
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Exam Types</label>
+            <div className="flex flex-wrap gap-2">
+              {examTypes.map((type) => {
+                const checked = selectedExamTypes.includes(type);
+                return (
+                  <label key={type} className="inline-flex items-center bg-gray-50 dark:bg-gray-700 px-3 py-1 rounded border dark:border-gray-600 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mr-2"
+                      checked={checked}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedExamTypes([...selectedExamTypes, type]);
+                        } else {
+                          setSelectedExamTypes(selectedExamTypes.filter(t => t !== type));
+                        }
+                      }}
+                    />
+                    <span className="text-gray-700 dark:text-gray-200">{type}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">{selectedExamTypes.length} selected</p>
+          </div>
+        )}
+
         <div className="flex items-center gap-4">
           <button onClick={generateMarklist} disabled={!selectedClass || !selectedStudent || loading} className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
             {loading ? (loadingProgress || "Generating...") : "Generate Marklist"}
           </button>
 
           {reportData && (
-            <button onClick={() => window.print()} className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">🖨️ Print Marklist</button>
+            <>
+              <button onClick={() => window.print()} className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">🖨️ Print Marklist</button>
+              <button onClick={exportCSV} className="px-6 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-800">⬇️ Export CSV</button>
+            </>
           )}
         </div>
 
@@ -299,7 +382,7 @@ const Marklist = ({ user }) => {
               return (
                 <p className="text-sm text-blue-600 dark:text-blue-400 mt-2">
                   📊 Assessment Type: {hasInternalMarks ? "CE (Internal) + TE (External)" : "External Marks Only"} 
-                  {hasInternalMarks ? " • STD 8,9,10 Format" : " • STD 1-7 Format"}
+                  {hasInternalMarks ? " • Classes 8-10 Format" : " • Classes 1-7 Format"}
                 </p>
               );
             })()}
@@ -319,7 +402,23 @@ const Marklist = ({ user }) => {
               
               return (
                 <div className="space-y-6">
-                  {Object.entries(reportData.examTypeGroups).map(([examType, examData]) => (
+                  {Object.entries(reportData.examTypeGroups).map(([examType, examData]) => {
+                    // Sort subjects by name for consistent display
+                    const sortedSubjects = (examData.subjects || []).slice().sort((a, b) => String(a.name||'').localeCompare(String(b.name||'')));
+                    // Compute totals
+                    const totals = (() => {
+                      let ceSum = 0, teSum = 0, totalSum = 0;
+                      sortedSubjects.forEach(s => {
+                        const ce = Number(s.ce) || 0;
+                        const te = Number(s.te) || 0;
+                        const tot = Number(s.total) || (ce + te);
+                        ceSum += ce;
+                        teSum += te;
+                        totalSum += tot;
+                      });
+                      return { ceSum, teSum, totalSum };
+                    })();
+                    return (
                     <div key={examType} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
                       {/* Exam Type Header */}
                       <div className="bg-blue-50 dark:bg-blue-900 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
@@ -347,8 +446,8 @@ const Marklist = ({ user }) => {
                           </tr>
                         </thead>
                         <tbody>
-                          {examData.subjects && examData.subjects.length > 0 ? (
-                            examData.subjects.map((subject, index) => {
+                          {sortedSubjects && sortedSubjects.length > 0 ? (
+                            sortedSubjects.map((subject, index) => {
                               return (
                                 <tr key={index}>
                                   <td className="border border-gray-300 dark:border-gray-600 px-4 py-2">{subject.name || "Unknown Subject"}</td>
@@ -378,10 +477,24 @@ const Marklist = ({ user }) => {
                               </td>
                             </tr>
                           )}
+                          {/* Totals Row */}
+                          {sortedSubjects.length > 0 && (
+                            <tr>
+                              <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 font-semibold">Totals</td>
+                              {hasInternalMarks && (
+                                <>
+                                  <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center font-semibold">{totals.ceSum}</td>
+                                  <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center font-semibold">{totals.teSum}</td>
+                                </>
+                              )}
+                              <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center font-semibold">{totals.totalSum}</td>
+                              <td className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-center" />
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
-                  ))}
+                  );})}
                 </div>
               );
             })()}

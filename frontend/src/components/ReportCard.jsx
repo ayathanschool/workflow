@@ -33,6 +33,7 @@ const ReportCard = ({ user }) => {
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState("");
   const [error, setError] = useState(null);
+  const [examTypes, setExamTypes] = useState([]);
 
   // Get roles from user object
   const userRoles = user?.roles || [];
@@ -112,6 +113,7 @@ const ReportCard = ({ user }) => {
         
         const uniqueExams = Array.from(uniqueExamTypes.values());
         setExams(uniqueExams);
+        setExamTypes(uniqueExams.map(e => e.examType).sort());
       } catch (err) {
         console.error("Error loading exams:", err);
         setError("Failed to load exams. Please try again.");
@@ -357,7 +359,37 @@ const ReportCard = ({ user }) => {
           </button>
 
           {reportData && (
-            <button onClick={() => window.print()} className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">🖨️ Print Report</button>
+            <>
+              <button onClick={() => window.print()} className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">🖨️ Print Report</button>
+              <button onClick={() => {
+                if (!reportData || !reportData.examTypeGroups) return;
+                const types = Object.keys(reportData.examTypeGroups);
+                const header = ["Subject", ...types];
+                const allSubjects = new Set();
+                Object.values(reportData.examTypeGroups).forEach(examData => {
+                  (examData.subjects || []).forEach(subject => allSubjects.add(subject.name));
+                });
+                const subjects = Array.from(allSubjects).sort();
+                const rows = [header.join(",")];
+                subjects.forEach(subjectName => {
+                  const row = [subjectName];
+                  types.forEach(t => {
+                    const examData = reportData.examTypeGroups[t];
+                    const subjectData = (examData.subjects || []).find(s => s.name === subjectName);
+                    row.push(subjectData?.grade || "N/A");
+                  });
+                  rows.push(row.join(","));
+                });
+                const csv = rows.join("\n");
+                const blob = new Blob([csv], { type: "text/csv" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `grades_${reportData.student?.AdmNo || "student"}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }} className="px-6 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-800">⬇️ Export Grades CSV</button>
+            </>
           )}
         </div>
 
@@ -381,7 +413,7 @@ const ReportCard = ({ user }) => {
               return (
                 <p className="text-sm text-blue-600 dark:text-blue-400 mt-2">
                   📊 Assessment Type: {hasInternalMarks ? "CE (Internal) + TE (External)" : "External Marks Only"} 
-                  {hasInternalMarks ? " • STD 8,9,10 Format" : " • STD 1-7 Format"}
+                  {hasInternalMarks ? " • Classes 8-10 Format" : " • Classes 1-7 Format"}
                 </p>
               );
             })()}
