@@ -12,7 +12,12 @@ function createExam(data) {
     appLog('INFO', 'createExam', { data: data });
     
     const creatorEmail = (data.email||'').toLowerCase().trim();
-    const examClass = data.class || '';
+    // Normalize class name: remove "STD" or "Std" prefix and extra spaces
+    const examClass = String(data.class || '')
+      .trim()
+      .replace(/^std\s*/gi, '')
+      .replace(/\s+/g, '')
+      .toUpperCase();
     const examSubject = data.subject || '';
     
     if (!creatorEmail) {
@@ -45,7 +50,7 @@ function createExam(data) {
     const externalMax = parseInt(data.externalMax) || 0;
     const totalMax = internalMax + externalMax;
     
-    const examName = `${data.examType} - ${data.class} - ${data.subject}`;
+    const examName = `${data.examType} - ${examClass} - ${data.subject}`;
     
     // Handle hasInternalMarks - accept both boolean and string
     const hasInternal = (
@@ -58,7 +63,7 @@ function createExam(data) {
       examId,
       creatorEmail,
       creatorName,
-      data.class || '',
+      examClass,  // Use normalized class name
       data.subject || '',
       data.examType || '',
       hasInternal,
@@ -84,7 +89,7 @@ function createExam(data) {
       userRole: 'Teacher/HM',
       afterData: {
         examId: examId,
-        class: data.class,
+        class: examClass,  // Use normalized class name
         subject: data.subject,
         examType: data.examType,
         totalMax: totalMax
@@ -108,7 +113,12 @@ function createBulkExams(data) {
     appLog('INFO', 'createBulkExams', { data: data });
     
     const creatorEmail = (data.email || '').toLowerCase().trim();
-    const examClass = data.class || '';
+    // Normalize class name: remove "STD" or "Std" prefix and extra spaces
+    const examClass = String(data.class || '')
+      .trim()
+      .replace(/^std\s*/gi, '')
+      .replace(/\s+/g, '')
+      .toUpperCase();
     const subjectExams = data.subjectExams || [];
     
     if (!creatorEmail) {
