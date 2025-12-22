@@ -892,7 +892,8 @@ const App = () => {
                     studentsAboveAverage = totalAboveAverage;
                     studentsNeedFocus = totalNeedFocus;
                     
-                    console.log('📊 Class-wise Performance:', classPerformance);
+                    // Removed verbose console log to reduce noise in dev
+                    // console.debug('📊 Class-wise Performance:', classPerformance);
                   }
                 } catch (err) {
                   console.warn('Unable to fetch performance data:', err);
@@ -967,14 +968,6 @@ const App = () => {
           <HMDashboardView insights={insights} />
   ) : user && hasAnyRole(['teacher','class teacher','daily reporting teachers']) ? (
           <>
-            {/* Missing Lesson Plans Alert - Teacher View */}
-            <Suspense fallback={<div className="animate-pulse bg-gray-100 h-32 rounded-lg"></div>}>
-              <MissingLessonPlansAlert 
-                user={user} 
-                onPrepareClick={() => setActiveView('lesson-planning')}
-              />
-            </Suspense>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4">
               <StatsCard
                 icon={<School />}
@@ -1027,6 +1020,13 @@ const App = () => {
                 </>
               )}
             </div>
+            {/* Missing Lesson Plans Alert - Teacher View (moved below stats) */}
+            <Suspense fallback={<div className="animate-pulse bg-gray-100 h-32 rounded-lg"></div>}>
+              <MissingLessonPlansAlert 
+                user={user} 
+                onPrepareClick={() => setActiveView('lesson-planning')}
+              />
+            </Suspense>
             
             {/* Detailed Teaching Assignment - Shows specific classes and subjects */}
             {(insights.teachingClasses.length > 0 || insights.teachingSubjects.length > 0) && (

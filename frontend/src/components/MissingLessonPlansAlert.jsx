@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AlertTriangle, Calendar, Clock, X, ChevronDown, ChevronUp } from 'lucide-react';
 import * as api from '../api';
 
@@ -33,36 +33,65 @@ export default function MissingLessonPlansAlert({ user, onPrepareClick }) {
   const [loading, setLoading] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isDismissed, setIsDismissed] = useState(false);
+  const isFetchingRef = useRef(false);
+  const lastKeyRef = useRef('');
+  const intervalRef = useRef(null);
 
   useEffect(() => {
-    if (user?.email) {
-      loadMissingLessonPlans();
-      
-      // Refresh every 5 minutes
-      const interval = setInterval(loadMissingLessonPlans, 5 * 60 * 1000);
-      return () => clearInterval(interval);
+    if (!user?.email) return;
+    const key = `missing:${user.email}`;
+    let cancelled = false;
+
+    const doFetch = async () => {
+      if (isFetchingRef.current && lastKeyRef.current === key) return;
+      isFetchingRef.current = true;
+      lastKeyRef.current = key;
+      try {
+        await loadMissingLessonPlans(cancelled);
+      } finally {
+        isFetchingRef.current = false;
+      }
+    };
+
+    // Clear any previous interval before setting a new one
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
+
+    doFetch();
+    // Refresh every 5 minutes
+    intervalRef.current = setInterval(doFetch, 5 * 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
   }, [user?.email]);
 
-  const loadMissingLessonPlans = async () => {
+  const loadMissingLessonPlans = async (cancelled = false) => {
     try {
       setLoading(true);
       
       // USE MOCK DATA in development mode
       if (ENABLE_MOCK) {
-        console.log('🧪 Using MOCK data for MissingLessonPlansAlert');
+        console.debug('🧪 Using MOCK data for MissingLessonPlansAlert');
         setMissingData(MOCK_DATA);
         setIsExpanded(true); // Auto-expand for testing
         setLoading(false);
         return;
       }
-      
-      console.log('📡 Fetching real missing lesson plans for:', user.email);
+      if (cancelled) return;
+      console.debug('📡 Fetching real missing lesson plans for:', user.email);
       const result = await api.getMissingLessonPlans(user.email, 7); // 7 days ahead
-      console.log('📊 API Response:', result);
+      if (cancelled) return;
+      console.debug('📊 API Response:', result);
       
       if (result.success) {
-        console.log('✅ Missing plans found:', result.missingCount);
+        console.debug('✅ Missing plans found:', result.missingCount);
         setMissingData(result);
         // Auto-expand if there are critical or high priority items
         if (result.byCriticality.critical > 0 || result.byCriticality.high > 0) {
@@ -74,7 +103,7 @@ export default function MissingLessonPlansAlert({ user, onPrepareClick }) {
     } catch (error) {
       console.error('💥 Error loading missing lesson plans:', error);
     } finally {
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     }
   };
 
