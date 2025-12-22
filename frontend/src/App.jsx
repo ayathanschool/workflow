@@ -829,9 +829,9 @@ const App = () => {
                         
                         // Debug: Log first few marks to see their structure
                         if (className === 'STD 1A' && marks.length > 0) {
-                          console.log(`[${className}] Total marks fetched:`, marks.length);
-                          console.log(`[${className}] First mark sample:`, marks[0]);
-                          console.log(`[${className}] Exam class:`, className);
+                          console.debug(`[${className}] Total marks fetched:`, marks.length);
+                          console.debug(`[${className}] First mark sample:`, marks[0]);
+                          console.debug(`[${className}] Exam class:`, className);
                         }
                         
                         // Filter marks to only include students from this specific class
@@ -859,8 +859,8 @@ const App = () => {
                         });
                         
                         if (className === 'STD 1A') {
-                          console.log(`[${className}] Marks after filtering:`, studentMarks.length);
-                          console.log(`[${className}] Skipped marks (wrong class):`, skippedMarks);
+                          console.debug(`[${className}] Marks after filtering:`, studentMarks.length);
+                          console.debug(`[${className}] Skipped marks (wrong class):`, skippedMarks);
                         }
                         
                         if (studentMarks.length > 0) {
@@ -3749,7 +3749,7 @@ const App = () => {
   };
 
   const HMDashboardView = ({ insights }) => {
-    console.log('🚀 HMDashboardView rendering with insights:', insights);
+    console.debug('🚀 HMDashboardView rendering with insights:', insights);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [dailyReportsData, setDailyReportsData] = useState({ reports: [], stats: {} });
     const [autoRefresh, setAutoRefresh] = useState(true);
@@ -3808,23 +3808,23 @@ const App = () => {
     async function loadTodayReports() {
       try {
         const today = new Date().toISOString().split('T')[0];
-        console.log('📊 Loading daily reports for:', today);
+        console.debug('📊 Loading daily reports for:', today);
         const response = await api.getDailyReportsForDate(today);
         const data = response?.data || response;
-        console.log('📊 Daily reports response:', data);
-        console.log('📊 Reports array:', data.reports);
-        console.log('📊 Reports count:', data.reports?.length || 0);
-        console.log('📊 Stats:', data.stats);
+        console.debug('📊 Daily reports response:', data);
+        console.debug('📊 Reports array:', data.reports);
+        console.debug('📊 Reports count:', data.reports?.length || 0);
+        console.debug('📊 Stats:', data.stats);
         
         if (data.reports && data.reports.length > 0) {
-          console.log('📊 Sample report:', data.reports[0]);
+          console.debug('📊 Sample report:', data.reports[0]);
           // Group by period to see distribution
           const byPeriod = {};
           data.reports.forEach(r => {
             const p = r.period;
             byPeriod[p] = (byPeriod[p] || 0) + 1;
           });
-          console.log('📊 Reports by period:', byPeriod);
+          console.debug('📊 Reports by period:', byPeriod);
         } else {
           console.warn('⚠️ NO REPORTS FOUND - Check backend logs for timetable data');
         }
@@ -5390,10 +5390,10 @@ const App = () => {
 
     const handleApproveLesson = async (lpId, status) => {
       try {
-        console.log('🔵 Single approval - lpId:', lpId, 'status:', status);
+        console.debug('🔵 Single approval - lpId:', lpId, 'status:', status);
         setRowSubmitting(prev => ({ ...prev, [lpId]: true }));
         const response = await api.updateLessonPlanStatus(lpId, status);
-        console.log('🔵 Single approval response:', response);
+        console.debug('🔵 Single approval response:', response);
         
         // Check for error in response
         const result = response.data || response;
@@ -8096,7 +8096,7 @@ const App = () => {
       const fetchClassData = async () => {
         if (!className) return;
         
-        console.log('[ClassDataView] Fetching data for class:', className);
+        console.debug('[ClassDataView] Fetching data for class:', className);
         setLoading(true);
         setError(null);
         

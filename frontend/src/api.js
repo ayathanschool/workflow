@@ -27,6 +27,21 @@ const devLog = (...args) => { if (__DEV_LOG__) console.log('[api]', ...args); };
 const apiCache = new Map();
 const pendingRequests = new Map();
 
+function withInFlight(key, factory) {
+  if (pendingRequests.has(key)) {
+    return pendingRequests.get(key);
+  }
+  const p = (async () => {
+    try {
+      return await factory();
+    } finally {
+      pendingRequests.delete(key);
+    }
+  })();
+  pendingRequests.set(key, p);
+  return p;
+}
+
 // Cache duration presets - mapped to new cache manager
 const CACHE_DURATION = CacheTTL.MEDIUM;        // 5 minutes
 const SHORT_CACHE_DURATION = CacheTTL.SHORT;   // 2 minutes
@@ -52,45 +67,50 @@ function setCacheEntry(key, data, duration = CACHE_DURATION) {
 async function getJSON(url, cacheDuration = CACHE_DURATION) {
   // Skip caching for NO_CACHE requests
   if (cacheDuration === NO_CACHE) {
-    devLog('GET (no cache)', url);
-    try {
-      const res = await fetch(url, { method: 'GET' });
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status} ${text}`);
+    const inflightKey = `NO_CACHE:${url}`;
+    return withInFlight(inflightKey, async () => {
+      devLog('GET (no cache)', url);
+      try {
+        const res = await fetch(url, { method: 'GET' });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`HTTP ${res.status} ${text}`);
+        }
+        return res.json();
+      } catch (err) {
+        console.error('API GET failed', url, err);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url } }));
+        }
+        throw new Error(`Failed to fetch ${url}: ${String(err && err.message ? err.message : err)}`);
       }
-      return res.json();
-    } catch (err) {
-      console.error('API GET failed', url, err);
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url } }));
-      }
-      throw new Error(`Failed to fetch ${url}: ${String(err && err.message ? err.message : err)}`);
-    }
+    });
   }
 
   const cacheKey = getCacheKey(url);
 
   // Use advanced cache manager with background refresh
-  return cacheManager.fetchWithCache(
-    cacheKey,
-    async () => {
-      devLog('GET', url);
-      const res = await fetch(url, { method: 'GET' });
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status} ${text}`);
+  return withInFlight(cacheKey, () =>
+    cacheManager.fetchWithCache(
+      cacheKey,
+      async () => {
+        devLog('GET', url);
+        const res = await fetch(url, { method: 'GET' });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`HTTP ${res.status} ${text}`);
+        }
+        return res.json();
+      },
+      {
+        ttl: cacheDuration,
+        acceptStale: true, // Show stale data while refreshing
+        onRefresh: (freshData) => {
+          // Optional: notify components that fresh data arrived
+          devLog('Background refresh completed for', url);
+        }
       }
-      return res.json();
-    },
-    {
-      ttl: cacheDuration,
-      acceptStale: true, // Show stale data while refreshing
-      onRefresh: (freshData) => {
-        // Optional: notify components that fresh data arrived
-        devLog('Background refresh completed for', url);
-      }
-    }
+    )
   ).catch(err => {
     console.error('API GET failed', url, err);
     if (typeof window !== 'undefined') {
