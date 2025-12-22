@@ -709,7 +709,7 @@ function getStudentPerformance(cls) {
     const marksHeaders = _headers(marksSh);
     const allMarks = _rows(marksSh).map(r => _indexByHeader(r, marksHeaders));
     
-    // Calculate performance for each student
+    // Calculate performance for each student with term-wise breakdown
     const studentPerformance = students.map(student => {
       const studentMarks = allMarks.filter(mark => mark.admNo === student.admNo);
       
@@ -732,7 +732,17 @@ function getStudentPerformance(cls) {
               totalMarks: 0,
               maxMarks: 0,
               examCount: 0,
-              percentage: 0
+              percentage: 0,
+              terms: {}  // Add term-wise breakdown
+            };
+          }
+          
+          // Add term-wise data
+          if (!subjectPerformance[exam.subject].terms[exam.examType]) {
+            subjectPerformance[exam.subject].terms[exam.examType] = {
+              marks: total,
+              maxMarks: examMax,
+              percentage: examMax > 0 ? Math.round((total / examMax) * 100) : 0
             };
           }
           

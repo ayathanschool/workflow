@@ -9,8 +9,12 @@ import {
   Calendar,
   BookOpen,
   AlertCircle,
-  CheckCircle
-} from 'lucide-react'; // Removed unused icons: Trash2, Edit, Plus, Download, Upload
+  CheckCircle,
+  CheckSquare,
+  LayoutList,
+  GraduationCap,
+  ClipboardCheck
+} from 'lucide-react';
 import * as api from '../api';
 import { useNotifications } from '../contexts/NotificationContext';
 
@@ -74,7 +78,7 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
       onClick={onClick}
       className="flex items-start p-4 bg-white rounded-lg shadow hover:shadow-md transition-shadow text-left w-full"
     >
-      <div className={`p-2 rounded-lg ${color} mr-4`}>
+      <div className={`p-2 rounded-lg ${color} mr-4 flex-shrink-0`}>
         <Icon className="w-5 h-5 text-white" />
       </div>
       <div>
@@ -82,6 +86,18 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
         <p className="text-sm text-gray-600 mt-1">{description}</p>
       </div>
     </button>
+  );
+
+  const ActionSection = ({ title, icon: Icon, children }) => (
+    <div className="bg-white rounded-lg shadow p-6 mb-6">
+      <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+        <Icon className="w-5 h-5 text-gray-700" />
+        {title}
+      </h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {children}
+      </div>
+    </div>
   );
 
   return (
@@ -123,51 +139,75 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
         />
       </div>
 
-      {/* Quick Actions */}
-      <div className="bg-white rounded-lg shadow p-6 mb-8">
-        <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-          <Settings className="w-5 h-5" />
-          Quick Actions
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <QuickAction
-            icon={Users}
-            title="Manage Users"
-            description="Add, edit, or remove users from the system"
-            color="bg-blue-500"
-            onClick={() => onNavigate && onNavigate('users')}
-          />
-          <QuickAction
-            icon={Database}
-            title="Exam Management"
-            description="Create, edit, and delete exams"
-            color="bg-purple-500"
-            onClick={() => onNavigate && onNavigate('exam-marks')}
-          />
-          <QuickAction
-            icon={BookOpen}
-            title="Lesson Plans"
-            description="View and manage all lesson plans"
-            color="bg-green-500"
-            onClick={() => onNavigate && onNavigate('lesson-plans')}
-          />
-          <QuickAction
-            icon={FileText}
-            title="Daily Reports"
-            description="View and manage all daily reports"
-            color="bg-orange-500"
-            onClick={() => onNavigate && onNavigate('reports')}
-          />
-          
-          <QuickAction
-            icon={Calendar}
-            title="Timetable Management"
-            description="View and manage school timetables"
-            color="bg-teal-500"
-            onClick={() => onNavigate && onNavigate('full-timetable')}
-          />
-        </div>
-      </div>
+      {/* Grouped Actions by Category */}
+      
+      {/* Approvals Section */}
+      <ActionSection title="Approvals & Reviews" icon={CheckSquare}>
+        <QuickAction
+          icon={LayoutList}
+          title="Scheme Approvals"
+          description="Review and approve scheme of work submissions"
+          color="bg-indigo-500"
+          onClick={() => onNavigate && onNavigate('scheme-approvals')}
+        />
+        <QuickAction
+          icon={ClipboardCheck}
+          title="Lesson Plan Approvals"
+          description="Review and approve lesson plan submissions"
+          color="bg-purple-500"
+          onClick={() => onNavigate && onNavigate('lesson-approvals')}
+        />
+      </ActionSection>
+
+      {/* Academic Management Section */}
+      <ActionSection title="Academic Management" icon={GraduationCap}>
+        <QuickAction
+          icon={Database}
+          title="Exam Management"
+          description="Create, edit, and delete exams"
+          color="bg-blue-500"
+          onClick={() => onNavigate && onNavigate('exam-marks')}
+        />
+        <QuickAction
+          icon={BookOpen}
+          title="Lesson Plans"
+          description="View and manage all lesson plans"
+          color="bg-green-500"
+          onClick={() => onNavigate && onNavigate('lesson-plans')}
+        />
+        <QuickAction
+          icon={FileText}
+          title="Daily Reports"
+          description="View and manage all daily reports"
+          color="bg-orange-500"
+          onClick={() => onNavigate && onNavigate('reports')}
+        />
+        <QuickAction
+          icon={Calendar}
+          title="Timetable Management"
+          description="View and manage school timetables"
+          color="bg-teal-500"
+          onClick={() => onNavigate && onNavigate('full-timetable')}
+        />
+      </ActionSection>
+
+      {/* System Administration Section */}
+      <ActionSection title="System Administration" icon={Settings}>
+        <QuickAction
+          icon={Users}
+          title="Manage Users"
+          description="Add, edit, or remove users from the system"
+          color="bg-red-500"
+          onClick={() => onNavigate && onNavigate('users')}
+        />
+        <QuickAction
+          icon={Shield}
+          title="System Settings"
+          description="Configure system-wide settings and preferences"
+          color="bg-gray-600"
+          onClick={() => onNavigate && onNavigate('settings')}
+        />
+      </ActionSection>
 
       {/* System Status */}
       <div className="bg-white rounded-lg shadow p-6">

@@ -956,7 +956,14 @@ const App = () => {
           </div>
         </div>
 
-  {user && hasRole('h m') ? (
+  {/* Check Super Admin FIRST - highest priority */}
+  {user?.roles && (user.roles.includes('super admin') || user.roles.includes('superadmin') || user.roles.includes('super_admin')) ? (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6">
+            <Suspense fallback={<div className="flex items-center justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>}>
+              <SuperAdminDashboard user={user} onNavigate={setActiveView} />
+            </Suspense>
+          </div>
+  ) : user && hasRole('h m') ? (
           <HMDashboardView insights={insights} />
   ) : user && hasAnyRole(['teacher','class teacher','daily reporting teachers']) ? (
           <>
@@ -1108,17 +1115,8 @@ const App = () => {
           </>
         ) : (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6">
-            {/* Check if user is Super Admin */}
-            {user?.roles && (user.roles.includes('super admin') || user.roles.includes('superadmin') || user.roles.includes('super_admin')) ? (
-              <Suspense fallback={<div className="flex items-center justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>}>
-                <SuperAdminDashboard user={user} onNavigate={setActiveView} />
-              </Suspense>
-            ) : (
-              <>
-                <h2 className="text-lg md:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Welcome, {user?.name}</h2>
-                <p className="text-gray-600 dark:text-gray-400">Use the navigation menu to access your school workflow tools.</p>
-              </>
-            )}
+            <h2 className="text-lg md:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Welcome, {user?.name}</h2>
+            <p className="text-gray-600 dark:text-gray-400">Use the navigation menu to access your school workflow tools.</p>
           </div>
         )}
       </div>
@@ -8083,19 +8081,310 @@ const App = () => {
 
   // Class Data View (Class Teacher only)
   const ClassDataView = () => {
-    // Display a simple placeholder until class data endpoints are available.
-    const className = user?.classTeacherFor || '';
+    // Fix: Ensure className is a string, not an array
+    const rawClassName = user?.classTeacherFor || '';
+    const className = Array.isArray(rawClassName) ? rawClassName[0] : rawClassName;
+    
+    const [loading, setLoading] = useState(true);
+    const [students, setStudents] = useState([]);
+    const [performance, setPerformance] = useState(null);
+    const [exams, setExams] = useState([]);
+    const [error, setError] = useState(null);
+    const [expandedStudents, setExpandedStudents] = useState({});
+
+    useEffect(() => {
+      const fetchClassData = async () => {
+        if (!className) return;
+        
+        console.log('[ClassDataView] Fetching data for class:', className);
+        setLoading(true);
+        setError(null);
+        
+        try {
+          // Fetch students
+          const studentsData = await api.getStudents(className);
+          setStudents(Array.isArray(studentsData) ? studentsData : []);
+
+          // Fetch performance data
+          const perfData = await api.getStudentPerformance(className);
+          setPerformance(perfData);
+
+          // Fetch exams for this class
+          const examsData = await api.getExams(className);
+          // Filter exams for this specific class only
+          const classExams = Array.isArray(examsData) 
+            ? examsData.filter(exam => exam.class === className)
+            : [];
+          setExams(classExams);
+        } catch (err) {
+          console.error('[ClassDataView] Error fetching class data:', err);
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      fetchClassData();
+    }, [className]);
+
+    const toggleStudent = (admNo) => {
+      setExpandedStudents(prev => ({
+        ...prev,
+        [admNo]: !prev[admNo]
+      }));
+    };
+
+    if (!className) {
+      return (
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <p className="text-gray-600">No class assigned as class teacher.</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (loading) {
+      return (
+        <div className="space-y-6">
+          <h1 className="text-2xl font-bold text-gray-900">Class Data – {className}</h1>
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <p className="text-gray-600">Loading class data...</p>
+          </div>
+        </div>
+      );
+    }
+
+    const performanceStudents = performance?.students || [];
+    const analytics = performance?.analytics || {};
+
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-900">Class Data{className ? ` – ${className}` : ''}</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Class Data – {className}</h1>
         </div>
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <p className="text-gray-600">
-            Detailed class data, performance summaries, lesson plan progress and daily report summaries
-            will appear here once the relevant data is available.
-          </p>
+
+        {/* Debug Info */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
+          <p className="font-medium text-blue-900">Debug Info:</p>
+          <p className="text-blue-700">Class Name: <span className="font-mono">{className}</span></p>
+          <p className="text-blue-700">Students Found: {students.length}</p>
+          <p className="text-blue-700">Exams Found: {exams.length}</p>
+          <p className="text-blue-700">Check browser console for detailed logs</p>
+          {error && <p className="text-red-600 mt-2">Error: {error}</p>}
         </div>
+
+        {/* Class Overview Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h3 className="text-sm font-medium text-gray-600 mb-2">Total Students</h3>
+            <p className="text-3xl font-bold text-blue-600">{students.length}</p>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h3 className="text-sm font-medium text-gray-600 mb-2">Exams Conducted</h3>
+            <p className="text-3xl font-bold text-green-600">{exams.length}</p>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h3 className="text-sm font-medium text-gray-600 mb-2">Class Average</h3>
+            <p className="text-3xl font-bold text-purple-600">
+              {analytics.averagePercentage || 0}%
+            </p>
+          </div>
+        </div>
+
+        {/* Performance Summary */}
+        {analytics.totalStudents > 0 && (
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Performance Summary</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center">
+                <p className="text-sm text-gray-600">Highest</p>
+                <p className="text-2xl font-bold text-green-600">{analytics.highestPercentage}%</p>
+              </div>
+              <div className="text-center">
+                <p className="text-sm text-gray-600">Lowest</p>
+                <p className="text-2xl font-bold text-red-600">{analytics.lowestPercentage}%</p>
+              </div>
+              <div className="text-center">
+                <p className="text-sm text-gray-600">Pass</p>
+                <p className="text-2xl font-bold text-green-600">{analytics.passCount}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-sm text-gray-600">Fail</p>
+                <p className="text-2xl font-bold text-red-600">{analytics.failCount}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Student Performance with Term-wise Subject Breakdown */}
+        {performanceStudents.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Student Performance - Term-wise</h2>
+            <div className="space-y-3">
+              {performanceStudents.map(student => {
+                const isExpanded = expandedStudents[student.admNo];
+                
+                // Get all exam marks for this student grouped by subject and exam type
+                const classExamsForStudent = exams.filter(exam => exam.class === className);
+                const studentExamMarks = {};
+                
+                // Build structure: { subject: { examType: { marks, maxMarks, percentage } } }
+                classExamsForStudent.forEach(exam => {
+                  const subjectPerf = student.subjectPerformance?.[exam.subject];
+                  if (subjectPerf) {
+                    if (!studentExamMarks[exam.subject]) {
+                      studentExamMarks[exam.subject] = {};
+                    }
+                    // For now, aggregate by subject (we'll enhance backend to give term-wise data)
+                    if (!studentExamMarks[exam.subject][exam.examType]) {
+                      studentExamMarks[exam.subject][exam.examType] = {
+                        totalMarks: 0,
+                        maxMarks: 0,
+                        percentage: 0,
+                        count: 0
+                      };
+                    }
+                  }
+                });
+                
+                // Calculate term-wise data from subjectPerformance
+                // Note: Backend aggregates all exams per subject, we show overall for now
+                const subjects = Object.keys(student.subjectPerformance || {});
+                
+                return (
+                  <div key={student.admNo} className="border border-gray-200 rounded-lg overflow-hidden">
+                    {/* Student Header - Always Visible */}
+                    <div 
+                      className="flex justify-between items-center p-4 bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors"
+                      onClick={() => toggleStudent(student.admNo)}
+                    >
+                      <div className="flex items-center gap-4 flex-1">
+                        <button className="text-gray-600 hover:text-gray-900 transition-transform">
+                          <svg 
+                            className={`w-5 h-5 transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                            fill="none" 
+                            stroke="currentColor" 
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          </svg>
+                        </button>
+                        <div>
+                          <h3 className="font-semibold text-gray-900 text-lg">{student.name}</h3>
+                          <p className="text-sm text-gray-600">Adm No: {student.admNo}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-6">
+                        <div className="text-center">
+                          <div className="text-xs text-gray-600 mb-1">Marks</div>
+                          <div className="text-sm font-medium text-gray-900">
+                            {student.totalMarks}/{student.maxMarks}
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xs text-gray-600 mb-1">Percentage</div>
+                          <div className={`text-2xl font-bold ${
+                            student.percentage >= 75 ? 'text-green-600' :
+                            student.percentage >= 50 ? 'text-blue-600' :
+                            student.percentage >= 40 ? 'text-yellow-600' :
+                            'text-red-600'
+                          }`}>
+                            {student.percentage}%
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xs text-gray-600 mb-1">Grade</div>
+                          <div className={`text-xl font-bold ${
+                            ['A+', 'A', 'B+'].includes(student.grade) ? 'text-green-600' :
+                            ['B', 'C+', 'C'].includes(student.grade) ? 'text-blue-600' :
+                            student.grade === 'D' ? 'text-yellow-600' :
+                            'text-red-600'
+                          }`}>
+                            {student.grade}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Subject & Term Breakdown - Collapsible */}
+                    {isExpanded && subjects.length > 0 && (
+                      <div className="p-4 bg-white border-t border-gray-200">
+                        <div className="space-y-4">
+                          {subjects.map(subject => {
+                            const subjectPerf = student.subjectPerformance[subject];
+                            const terms = subjectPerf.terms || {};
+                            const termKeys = Object.keys(terms);
+                            
+                            return (
+                              <div key={subject} className="border border-gray-300 rounded-lg p-3 bg-gray-50">
+                                <div className="flex justify-between items-center mb-3">
+                                  <h4 className="font-semibold text-gray-900 text-base">{subject}</h4>
+                                  <div className="text-right">
+                                    <div className="text-xs text-gray-600">Overall</div>
+                                    <div className={`text-lg font-bold ${
+                                      subjectPerf.percentage >= 75 ? 'text-green-600' :
+                                      subjectPerf.percentage >= 50 ? 'text-blue-600' :
+                                      subjectPerf.percentage >= 40 ? 'text-yellow-600' :
+                                      'text-red-600'
+                                    }`}>
+                                      {subjectPerf.percentage}%
+                                    </div>
+                                    <div className="text-xs text-gray-600">
+                                      {subjectPerf.totalMarks}/{subjectPerf.maxMarks}
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                {/* Term-wise breakdown */}
+                                {termKeys.length > 0 && (
+                                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                                    {termKeys.map(termType => {
+                                      const termData = terms[termType];
+                                      return (
+                                        <div key={termType} className="bg-white rounded p-2 border border-gray-200">
+                                          <div className="text-xs font-medium text-gray-700 mb-1">
+                                            {termType}
+                                          </div>
+                                          <div className="flex justify-between items-center">
+                                            <div className="text-xs text-gray-600">
+                                              {termData.marks}/{termData.maxMarks}
+                                            </div>
+                                            <div className={`text-sm font-bold ${
+                                              termData.percentage >= 75 ? 'text-green-600' :
+                                              termData.percentage >= 50 ? 'text-blue-600' :
+                                              termData.percentage >= 40 ? 'text-yellow-600' :
+                                              'text-red-600'
+                                            }`}>
+                                              {termData.percentage}%
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Empty State */}
+        {students.length === 0 && exams.length === 0 && (
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <p className="text-gray-600 text-center">
+              No data available yet. Students and exam data will appear here once added.
+            </p>
+          </div>
+        )}
       </div>
     );
   };
