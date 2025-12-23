@@ -18,6 +18,11 @@ const classHasInternalMarks = (cls) => {
   }
 };
 
+const displayClass = (cls) => {
+  const v = Array.isArray(cls) ? cls[0] : cls;
+  return String(v ?? '').trim().replace(/^STD\s*/i, '').trim();
+};
+
 const Marklist = ({ user }) => {
   
   const [selectedClass, setSelectedClass] = useState("");
@@ -281,7 +286,7 @@ const Marklist = ({ user }) => {
         )}
         {isClassTeacher && !isHM && user?.classTeacherFor && (
           <p className="text-sm text-green-600 dark:text-green-400 mt-2">
-            🔑 Class Teacher Access: You can view students from {user.classTeacherFor}
+            🔑 Class Teacher Access: You can view students from {displayClass(user.classTeacherFor)}
           </p>
         )}
       </div>
@@ -295,7 +300,7 @@ const Marklist = ({ user }) => {
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Select Class</label>
             <select value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
               <option value="">Choose a class...</option>
-              {classes.map((cls) => (<option key={cls} value={cls}>{cls}</option>))}
+              {classes.map((cls) => (<option key={cls} value={cls}>{displayClass(cls)}</option>))}
             </select>
             <p className="text-xs text-gray-500 mt-1">{classes.length} classes available</p>
           </div>
@@ -315,7 +320,7 @@ const Marklist = ({ user }) => {
               })}
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              {loading && selectedClass ? "Loading students..." : `${students.length} students in ${selectedClass || 'selected class'}`}
+              {loading && selectedClass ? "Loading students..." : `${students.length} students in ${displayClass(selectedClass || 'selected class')}`}
             </p>
           </div>
         </div>
@@ -374,7 +379,7 @@ const Marklist = ({ user }) => {
           <div className="mb-6">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{reportData.student?.Name}</h2>
             <p className="text-gray-600 dark:text-gray-400">
-              Class: {reportData.student?.Class} | Admission No: {reportData.student?.AdmNo}
+              Class: {displayClass(reportData.student?.Class)} | Admission No: {reportData.student?.AdmNo}
             </p>
             {(() => {
               const studentClass = reportData.student?.Class || selectedClass;

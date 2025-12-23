@@ -189,22 +189,37 @@ function getExams(params) {
   const sh = _getSheet('Exams');
   const headers = _headers(sh);
   const list = _rows(sh).map(r => _indexByHeader(r, headers));
+
+  // Normalize helpers so filters work even if some sheets store "STD 10A" and others store "10A"
+  const normClass = function(v) {
+    return String(v || '')
+      .toLowerCase()
+      .trim()
+      .replace(/^std\s*/g, '')
+      .replace(/\s+/g, '');
+  };
+  const normText = function(v) {
+    return String(v || '').toLowerCase().trim();
+  };
   
   let filtered = list;
   
   // Filter by class if provided
   if (params.class) {
-    filtered = filtered.filter(exam => exam.class === params.class);
+    const target = normClass(params.class);
+    filtered = filtered.filter(exam => normClass(exam.class) === target);
   }
   
   // Filter by subject if provided
   if (params.subject) {
-    filtered = filtered.filter(exam => exam.subject === params.subject);
+    const target = normText(params.subject);
+    filtered = filtered.filter(exam => normText(exam.subject) === target);
   }
   
   // Filter by exam type if provided
   if (params.examType) {
-    filtered = filtered.filter(exam => exam.examType === params.examType);
+    const target = normText(params.examType);
+    filtered = filtered.filter(exam => normText(exam.examType) === target);
   }
   
   return filtered;

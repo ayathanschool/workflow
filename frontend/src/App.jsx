@@ -76,6 +76,7 @@ const HMDailyOversight = lazy(() => import('./components/HMDailyOversightEnhance
 const SuperAdminDashboard = lazy(() => import('./components/SuperAdminDashboard'));
 const UserManagement = lazy(() => import('./components/UserManagement'));
 const AuditLog = lazy(() => import('./components/AuditLog'));
+const AdminDataEditor = lazy(() => import('./components/AdminDataEditor'));
 
 // Keep lightweight components as regular imports
 import { periodToTimeString, todayIST, formatDateForInput, formatLocalDate } from './utils/dateUtils';
@@ -194,7 +195,19 @@ const App = () => {
   // Strip "STD " prefix from class names for display
   const stripStdPrefix = (className) => {
     if (!className) return '';
-    return String(className).replace(/^STD\s+/i, '');
+    const v = Array.isArray(className) ? className[0] : className;
+    return String(v).trim().replace(/^STD\s*/i, '').trim();
+  };
+
+  // Subject display helper (keeps stored subject values untouched)
+  const subjectDisplayName = (subject) => {
+    const s = String(subject || '').trim();
+    if (!s) return '';
+
+    // Prefer sheet-style abbreviation where commonly used
+    if (/^english\s+grammar$/i.test(s)) return 'Eng G';
+
+    return s;
   };
 
   const withSubmit = async (message, fn) => {
@@ -463,6 +476,7 @@ const App = () => {
         { id: 'timetable', label: 'Timetable', icon: Calendar },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
         { id: 'class-data', label: 'Class Data', icon: UserCheck },
+        { id: 'admin-data', label: 'Admin Data', icon: Edit2 },
         { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
         { id: 'exam-marks', label: 'Exam Management', icon: Award },
         { id: 'report-card', label: 'Report Cards', icon: FileCheck },
@@ -753,6 +767,9 @@ const App = () => {
             const teachingSubjects = Array.isArray(user.subjects) ? user.subjects : [];
             const classCount = teachingClasses.length;
             const subjectCount = teachingSubjects.length;
+
+            // Normalize class names for API calls and comparisons (handles users saved as "STD 10A")
+            const normClassKey = (s) => stripStdPrefix(String(s || '')).trim().toLowerCase().replace(/\s+/g, '');
             // Pre-populate counts to avoid initial blank UI
             setInsights(prev => ({
               ...prev,
@@ -771,11 +788,14 @@ const App = () => {
             if (hasRole('class teacher') && teachingClasses.length > 0) {
               try {
                 // Fetch students for each class and store count per class
-                const studentPromises = teachingClasses.map(cls => api.getStudents(cls));
+                const studentPromises = teachingClasses.map(cls => api.getStudents(stripStdPrefix(cls)));
                 const studentsPerClass = await Promise.all(studentPromises);
                 teachingClasses.forEach((cls, idx) => {
                   const students = studentsPerClass[idx];
-                  classStudentCounts[cls] = Array.isArray(students) ? students.length : 0;
+                  const count = Array.isArray(students) ? students.length : 0;
+                  // Store under both raw and stripped keys to avoid lookup mismatches elsewhere
+                  classStudentCounts[cls] = count;
+                  classStudentCounts[stripStdPrefix(cls)] = count;
                 });
                 
                 // Calculate academic performance for class teacher's classes
@@ -796,7 +816,7 @@ const App = () => {
                   // Get all exams to find latest exam for class teacher's classes
                   const allExams = await api.getExams();
                   const relevantExams = Array.isArray(allExams) 
-                    ? allExams.filter(exam => teachingClasses.includes(exam.class))
+                    ? allExams.filter(exam => teachingClasses.some(tc => normClassKey(tc) === normClassKey(exam.class)))
                     : [];
                   
                   if (relevantExams.length > 0) {
@@ -940,7 +960,7 @@ const App = () => {
     }, [user?.email]);
 
     return (
-      <div className="space-y-4 md:space-y-6">
+      <div className="max-w-7xl mx-auto space-y-4 md:space-y-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
           <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
           <div className="flex items-center space-x-4">
@@ -965,10 +985,10 @@ const App = () => {
               <SuperAdminDashboard user={user} onNavigate={setActiveView} />
             </Suspense>
           </div>
-  ) : user && hasRole('h m') ? (
-          <HMDashboardView insights={insights} />
-  ) : user && hasAnyRole(['teacher','class teacher','daily reporting teachers']) ? (
-          <>
+    ) : user && hasRole('h m') ? (
+      <HMDashboardView insights={insights} />
+    ) : user && hasAnyRole(['teacher','class teacher','daily reporting teachers']) ? (
+      <div className="space-y-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4">
               <StatsCard
                 icon={<School />}
@@ -1042,7 +1062,7 @@ const App = () => {
                           const studentCount = insights.classStudentCounts[cls];
                           return (
                             <span key={idx} className="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium flex items-center gap-2">
-                              <span>{cls}</span>
+                              <span>{stripStdPrefix(cls)}</span>
                               {studentCount !== undefined && (
                                 <span className="px-2 py-0.5 bg-blue-100 rounded-full text-xs">
                                   {studentCount} {studentCount === 1 ? 'student' : 'students'}
@@ -1056,11 +1076,11 @@ const App = () => {
                   )}
                   {insights.teachingSubjects.length > 0 && (
                     <div>
-                      <p className="text-sm font-medium text-gray-600 mb-2">Subjects</p>
+                      <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">Subjects</p>
                       <div className="flex flex-wrap gap-2">
                         {insights.teachingSubjects.map((subject, idx) => (
-                          <span key={idx} className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-sm font-medium">
-                            {subject}
+                          <span key={idx} className="px-3 py-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 rounded-full text-sm font-medium">
+                            {subjectDisplayName(subject)}
                           </span>
                         ))}
                       </div>
@@ -1077,15 +1097,15 @@ const App = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
                   {Object.entries(insights.classPerformance).map(([className, perf]) => (
                     <div key={className} className="border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-lg p-3 md:p-4">
-                      <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">{className}</h4>
+                      <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">{stripStdPrefix(className)}</h4>
                       <div className="space-y-2">
                         <div className="flex justify-between items-center">
                           <span className="text-sm text-gray-600 dark:text-gray-400">Class Average:</span>
                           <span className="text-sm font-semibold text-blue-600">{perf.avgPercentage}%</span>
                         </div>
                         <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-600">Total Students:</span>
-                          <span className="text-sm font-semibold">{perf.totalStudents}</span>
+                          <span className="text-sm text-gray-600 dark:text-gray-400">Total Students:</span>
+                          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{perf.totalStudents}</span>
                         </div>
                         {perf.studentsWithMarks && perf.studentsWithMarks !== perf.totalStudents && (
                           <div className="flex justify-between items-center text-amber-600">
@@ -1113,7 +1133,7 @@ const App = () => {
                 </div>
               </div>
             )}
-          </>
+          </div>
         ) : (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6">
             <h2 className="text-lg md:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Welcome, {user?.name}</h2>
@@ -1172,9 +1192,9 @@ const App = () => {
 
     return (
       <>
-        {/* Mobile sidebar */}
+        {/* Drawer sidebar (auto-hidden by default; works on all screen sizes) */}
         {sidebarOpen && (
-          <div className="fixed inset-0 z-[60] lg:hidden">
+          <div className="fixed inset-0 z-[60]">
             <div
               className="fixed inset-0 bg-gray-600 bg-opacity-75 transition-opacity z-[65]"
               onClick={() => {
@@ -1182,24 +1202,25 @@ const App = () => {
                 setSidebarOpen(false);
               }}
             />
-            <div 
-              className="fixed inset-y-0 left-0 flex flex-col max-w-xs w-full bg-white dark:bg-gray-800 z-[70] shadow-xl"
+            <div
+              className="fixed inset-y-0 left-0 flex flex-col w-72 max-w-[85vw] bg-white dark:bg-gray-800 z-[70] shadow-xl"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="absolute top-0 right-0 -mr-12 pt-2">
+              <div className="flex items-center justify-between h-16 flex-shrink-0 px-4 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex items-center">
+                  <School className="h-7 w-7 text-blue-600" />
+                  <span className="ml-2 text-lg font-semibold text-gray-900 dark:text-white">SchoolFlow</span>
+                </div>
                 <button
                   onClick={() => setSidebarOpen(false)}
-                  className="ml-1 flex items-center justify-center h-10 w-10 rounded-full focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white"
+                  className="p-2 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-700 transition-colors"
+                  aria-label="Close menu"
                 >
-                  <X className="h-6 w-6 text-white" />
+                  <X className="h-5 w-5" />
                 </button>
               </div>
-              <div className="flex-1 h-0 pt-5 pb-4 overflow-y-auto">
-                <div className="flex-shrink-0 flex items-center px-4">
-                  <School className="h-8 w-8 text-blue-600" />
-                  <span className="ml-2 text-xl font-bold text-gray-900 dark:text-white">SchoolFlow</span>
-                </div>
-                <nav className="mt-5 px-2 space-y-1">
+              <div className="flex-1 overflow-y-auto py-3">
+                <nav className="px-2 space-y-1">
                   {navigationItems.map((item) => {
                     const Icon = item.icon;
                     return (
@@ -1213,42 +1234,9 @@ const App = () => {
                         }}
                         className={`${
                           activeView === item.id
-                            ? 'bg-blue-100 text-blue-600'
-                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white'
-                        } group flex items-center px-2 py-2 text-base font-medium rounded-md w-full text-left transition-colors duration-200`}
-                      >
-                        <Icon className="mr-4 h-6 w-6" />
-                        {item.label}
-                      </button>
-                    );
-                  })}
-                </nav>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Desktop sidebar */}
-        <div className="hidden lg:flex lg:flex-shrink-0">
-          <div className="flex flex-col w-64">
-            <div className="flex flex-col h-0 flex-1 border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 transition-colors duration-300">
-              <div className="flex items-center h-16 flex-shrink-0 px-4 bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
-                <School className="h-8 w-8 text-blue-600" />
-                <span className="ml-2 text-xl font-bold text-gray-900 dark:text-white">SchoolFlow</span>
-              </div>
-              <div className="flex-1 flex flex-col overflow-y-auto">
-                <nav className="flex-1 px-2 py-4 space-y-1 bg-white dark:bg-gray-800 transition-colors duration-300">
-                  {navigationItems.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={() => setActiveView(item.id)}
-                        className={`${
-                          activeView === item.id
-                            ? 'bg-blue-100 text-blue-600'
-                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white'
-                        } group flex items-center px-2 py-2 text-sm font-medium rounded-md w-full text-left transition-colors duration-200`}
+                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200'
+                            : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-200 dark:hover:bg-gray-700 dark:hover:text-white'
+                        } group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left transition-colors duration-200`}
                       >
                         <Icon className="mr-3 h-5 w-5" />
                         {item.label}
@@ -1259,7 +1247,7 @@ const App = () => {
               </div>
             </div>
           </div>
-        </div>
+        )}
       </>
     );
   };
@@ -1271,7 +1259,7 @@ const App = () => {
         <div className="flex items-center">
           <button
             onClick={() => { setSidebarOpen(true); setSidebarOpenedAt(Date.now()); }}
-            className="lg:hidden mr-3 p-2 rounded-md transition-colors duration-200 text-gray-400 hover:text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-300 dark:hover:bg-gray-700"
+            className="mr-3 p-2 rounded-md transition-colors duration-200 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-700"
           >
             <Menu className="h-6 w-6" />
           </button>
@@ -1395,6 +1383,8 @@ const App = () => {
                 return <Marklist user={user} />;
               case 'class-data':
                 return <ClassDataView />;
+              case 'admin-data':
+                return <AdminDataEditor user={user} />;
               case 'class-students':
                 return <ClassStudentsView />;
               case 'daily-reports-management':
@@ -1965,8 +1955,8 @@ const App = () => {
                 >
                   <option value="all">All Classes</option>
                   {availableClasses.map(cls => (
-                    <option key={cls} value={cls}>{cls}</option>
-                  ))}
+                      <option key={cls} value={cls}>{stripStdPrefix(cls)}</option>
+                    ))}
                 </select>
                 
                 <select
@@ -2767,7 +2757,7 @@ const App = () => {
                 >
                   <option value="">All Classes</option>
                   {[...new Set(lessonPlans.map(plan => plan.class))].sort().map(cls => (
-                    <option key={cls} value={cls}>{cls}</option>
+                    <option key={cls} value={cls}>{stripStdPrefix(cls)}</option>
                   ))}
                 </select>
               </div>
@@ -3945,34 +3935,43 @@ const App = () => {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Headmaster Dashboard - Daily Oversight</h1>
-          <p className="text-sm text-gray-600 mt-1">
-            Live monitoring • {currentTime.toLocaleDateString()} • {currentTime.toLocaleTimeString()} 
-            {currentPeriod && ` • Current Period: ${currentPeriod}`}
-          </p>
-        </div>
-        <div className="flex space-x-3">
-          <button 
-            onClick={() => setAutoRefresh(!autoRefresh)}
-            className={`px-4 py-2 rounded-lg flex items-center ${autoRefresh ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
-            {autoRefresh ? 'Auto-Refresh ON' : 'Auto-Refresh OFF'}
-          </button>
-          <button 
-            onClick={() => setActiveView('daily-oversight')}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700"
-          >
-            <ClipboardCheck className="h-4 w-4 mr-2" />
-            Detailed View
-          </button>
-          <button className="bg-gray-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-gray-700">
-            <Download className="h-4 w-4 mr-2" />
-            Export Report
-          </button>
+    <div className="max-w-7xl mx-auto space-y-6">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <ClipboardCheck className="w-7 h-7 text-gray-800 dark:text-gray-100" />
+              <h1 className="text-2xl md:text-3xl font-semibold text-gray-900 dark:text-gray-100">Headmaster</h1>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+              Live monitoring • {currentTime.toLocaleDateString()} • {currentTime.toLocaleTimeString()}
+              {currentPeriod && ` • Current Period: ${currentPeriod}`}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => setAutoRefresh(!autoRefresh)}
+              className={`px-4 py-2 rounded-lg flex items-center border transition-colors ${
+                autoRefresh
+                  ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border-green-200 dark:border-green-900/40'
+                  : 'bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700'
+              }`}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
+              {autoRefresh ? 'Auto-Refresh ON' : 'Auto-Refresh OFF'}
+            </button>
+            <button
+              onClick={() => setActiveView('daily-oversight')}
+              className="bg-gray-900 dark:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center hover:bg-gray-800 dark:hover:bg-gray-600 border border-transparent"
+            >
+              <ClipboardCheck className="h-4 w-4 mr-2" />
+              Detailed View
+            </button>
+            <button className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-4 py-2 rounded-lg flex items-center hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700">
+              <Download className="h-4 w-4 mr-2" />
+              Export Report
+            </button>
+          </div>
         </div>
       </div>
 
@@ -3983,7 +3982,7 @@ const App = () => {
 
       {/* Critical Alerts Banner */}
       {criticalAlerts.length > 0 && (
-        <div className="bg-gradient-to-r from-red-50 to-orange-50 border-l-4 border-red-500 p-4 rounded-lg shadow-sm">
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/40 rounded-xl p-4 flex items-start gap-3">
           <div className="flex items-start">
             <div className="flex-shrink-0">
               <AlertCircle className="h-6 w-6 text-red-500" />
@@ -4006,7 +4005,7 @@ const App = () => {
       )}
 
       {/* Real-Time Activity Monitor */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-semibold text-gray-900">📊 Live Class Schedule <span className="text-sm font-normal text-blue-600">[{new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})}]</span></h2>
           <span className="text-xs text-gray-500">
@@ -6736,7 +6735,7 @@ const App = () => {
                 <option value="">All Classes</option>
                 {allClasses.map((cls, idx) => (
                   <option key={`class-${idx}`} value={cls}>
-                    {cls}
+                    {stripStdPrefix(cls)}
                   </option>
                 ))}
               </select>
@@ -6766,7 +6765,7 @@ const App = () => {
                     <tr key={`timetable-${slot.period}-${slot.class}-${index}`} 
                         className={slot.isSubstitution ? 'bg-yellow-50' : (index % 2 === 0 ? 'bg-white' : 'bg-gray-50')}>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{slot.period}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{slot.class}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{stripStdPrefix(slot.class)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{slot.subject}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {slot.isSubstitution ? (
@@ -6960,7 +6959,7 @@ const App = () => {
                     >
                       <option value="">Select Class</option>
                       {allClasses.map((cls, idx) => (
-                        <option key={`form-class-${idx}`} value={cls}>{cls}</option>
+                        <option key={`form-class-${idx}`} value={cls}>{stripStdPrefix(cls)}</option>
                       ))}
                     </select>
                   </div>
@@ -7491,7 +7490,7 @@ const App = () => {
       setShowMarksForm(true);
       try {
         const [students, existingMarks, boundaries] = await Promise.all([
-          api.getStudents(exam.class),
+          api.getStudents(stripStdPrefix(exam.class)),
           api.getExamMarks(exam.examId),
           api.getGradeBoundaries()
         ]);
@@ -7659,7 +7658,7 @@ const App = () => {
   // Filter exams for marks entry (teacher/class teacher) if not HM.
   // Use a stronger normalization that removes spaces and non-alphanumeric
   // characters so values like "6 A" and "6A" match reliably.
-  const normKey = (s) => (s || '').toString().toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+  const normKey = (s) => (s || '').toString().toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '').replace(/^std/, '');
   // Use appNormalize defined at the top level of the app
   const userRolesNorm = (user?.roles || []).map(r => appNormalize(r));
   const userClassesSet = new Set((user?.classes || []).map(c => normKey(c)));
@@ -7669,7 +7668,7 @@ const App = () => {
 
   const examsForTeacher = exams.filter(ex => {
     if (!user) return false;
-    if (userRolesNorm.includes('h m')) return true;
+    if (hasRole('h m')) return true;
     const exClass = normKey(ex.class);
     const exSubject = normKey(ex.subject);
     const teachesClass = userClassesSet.has(exClass);
@@ -7688,7 +7687,7 @@ const App = () => {
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">Exam Management</h1>
           <div className="flex space-x-3">
-            {user && (userRolesNorm || []).includes('h m') && (
+            {user && hasRole('h m') && (
               <button
                 onClick={() => setShowExamForm(true)}
                 className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700"
@@ -8142,8 +8141,9 @@ const App = () => {
           // Fetch exams for this class
           const examsData = await api.getExams(selectedClass);
           // Filter exams for this specific class only
+          const selNorm = stripStdPrefix(selectedClass).trim().toLowerCase().replace(/\s+/g, '');
           const classExams = Array.isArray(examsData) 
-            ? examsData.filter(exam => exam.class === selectedClass)
+            ? examsData.filter(exam => stripStdPrefix(exam.class).trim().toLowerCase().replace(/\s+/g, '') === selNorm)
             : [];
           setExams(classExams);
         } catch (err) {
@@ -8188,7 +8188,7 @@ const App = () => {
       return (
         <div className="space-y-6">
           <h1 className="text-2xl font-bold text-gray-900">
-            Class Data – {selectedClass}
+            Class Data – {stripStdPrefix(selectedClass)}
           </h1>
           <div className="bg-white rounded-xl shadow-sm p-6">
             <p className="text-gray-600">Loading class data...</p>
@@ -8204,7 +8204,7 @@ const App = () => {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">
-            Class Data {selectedClass && `– ${selectedClass}`}
+            Class Data {selectedClass && `– ${stripStdPrefix(selectedClass)}`}
           </h1>
           
           {/* Class Selector for Super Admin/HM */}
@@ -8216,7 +8216,7 @@ const App = () => {
             >
               <option value="">Select Class</option>
               {availableClasses.map(cls => (
-                <option key={cls} value={cls}>{cls}</option>
+                <option key={cls} value={cls}>{stripStdPrefix(cls)}</option>
               ))}
             </select>
           )}
@@ -8225,7 +8225,7 @@ const App = () => {
         {/* Debug Info */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
           <p className="font-medium text-blue-900">Debug Info:</p>
-          <p className="text-blue-700">Class Name: <span className="font-mono">{selectedClass}</span></p>
+          <p className="text-blue-700">Class Name: <span className="font-mono">{stripStdPrefix(selectedClass)}</span></p>
           <p className="text-blue-700">Students Found: {students.length}</p>
           <p className="text-blue-700">Exams Found: {exams.length}</p>
           <p className="text-blue-700">Check browser console for detailed logs</p>
@@ -8284,7 +8284,8 @@ const App = () => {
                 const isExpanded = expandedStudents[student.admNo];
                 
                 // Get all exam marks for this student grouped by subject and exam type
-                const classExamsForStudent = exams.filter(exam => exam.class === selectedClass);
+                const selNorm = stripStdPrefix(selectedClass).trim().toLowerCase().replace(/\s+/g, '');
+                const classExamsForStudent = exams.filter(exam => stripStdPrefix(exam.class).trim().toLowerCase().replace(/\s+/g, '') === selNorm);
                 const studentExamMarks = {};
                 
                 // Build structure: { subject: { examType: { marks, maxMarks, percentage } } }

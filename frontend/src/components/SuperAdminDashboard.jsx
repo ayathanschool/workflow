@@ -1,19 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { 
   Users, 
   Shield, 
-  Database,
   Activity,
-  Settings,
-  FileText,
   Calendar,
-  BookOpen,
   AlertCircle,
   CheckCircle,
   CheckSquare,
   LayoutList,
   GraduationCap,
-  ClipboardCheck
+  ClipboardCheck,
+  Edit2,
+  FileCheck,
+  DollarSign
 } from 'lucide-react';
 import * as api from '../api';
 import { useNotifications } from '../contexts/NotificationContext';
@@ -23,11 +22,14 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalExams: 0,
-    totalLessonPlans: 0,
-    totalReports: 0,
     totalSchemes: 0
   });
   const [loading, setLoading] = useState(false);
+
+  const isSuperAdmin = useMemo(() => {
+    const roles = user?.roles || [];
+    return roles.includes('super admin') || roles.includes('superadmin') || roles.includes('super_admin');
+  }, [user]);
 
   useEffect(() => {
     loadStats();
@@ -45,8 +47,6 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
       setStats({
         totalUsers: users?.length || 0,
         totalExams: exams?.length || 0,
-        totalLessonPlans: 0,
-        totalReports: 0,
         totalSchemes: 0
       });
     } catch (err) {
@@ -56,42 +56,45 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
     }
   };
 
-  const StatCard = ({ icon: Icon, title, value, color, onClick }) => (
-    <div 
-      className={`bg-white rounded-lg shadow p-6 cursor-pointer hover:shadow-lg transition-shadow ${onClick ? 'hover:scale-105 transform' : ''}`}
+  const StatCard = ({ icon: Icon, title, value, onClick }) => (
+    <button
+      type="button"
       onClick={onClick}
+      className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 text-left hover:shadow-md transition-shadow"
     >
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-gray-500 text-sm font-medium">{title}</p>
-          <p className="text-3xl font-bold mt-2">{value}</p>
+          <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">{title}</p>
+          <p className="text-3xl font-semibold text-gray-900 dark:text-gray-100 mt-2">
+            {loading ? '…' : value}
+          </p>
         </div>
-        <div className={`p-3 rounded-full ${color}`}>
-          <Icon className="w-6 h-6 text-white" />
+        <div className="h-10 w-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+          <Icon className="h-5 w-5 text-gray-700 dark:text-gray-200" />
         </div>
       </div>
-    </div>
+    </button>
   );
 
-  const QuickAction = ({ icon: Icon, title, description, onClick, color }) => (
+  const QuickAction = ({ icon: Icon, title, description, onClick }) => (
     <button
       onClick={onClick}
-      className="flex items-start p-4 bg-white rounded-lg shadow hover:shadow-md transition-shadow text-left w-full"
+      className="flex items-start p-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow text-left w-full"
     >
-      <div className={`p-2 rounded-lg ${color} mr-4 flex-shrink-0`}>
-        <Icon className="w-5 h-5 text-white" />
+      <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-700 mr-4 flex-shrink-0">
+        <Icon className="w-5 h-5 text-gray-700 dark:text-gray-200" />
       </div>
       <div>
-        <h3 className="font-semibold text-gray-900">{title}</h3>
-        <p className="text-sm text-gray-600 mt-1">{description}</p>
+        <h3 className="font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{description}</p>
       </div>
     </button>
   );
 
   const ActionSection = ({ title, icon: Icon, children }) => (
-    <div className="bg-white rounded-lg shadow p-6 mb-6">
-      <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-        <Icon className="w-5 h-5 text-gray-700" />
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+        <Icon className="w-5 h-5 text-gray-700 dark:text-gray-200" />
         {title}
       </h2>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -101,156 +104,124 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
   );
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-2 mb-2">
-          <Shield className="w-8 h-8 text-red-600" />
-          <h1 className="text-3xl font-bold text-gray-900">Super Admin Dashboard</h1>
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Shield className="w-7 h-7 text-gray-800 dark:text-gray-100" />
+              <h1 className="text-2xl md:text-3xl font-semibold text-gray-900 dark:text-gray-100">Super Admin</h1>
+            </div>
+            <p className="text-gray-600 dark:text-gray-400 mt-2">
+              System overview and administrative tools
+            </p>
+          </div>
+          <div className="text-right">
+            <div className="text-sm text-gray-500 dark:text-gray-400">Signed in as</div>
+            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{user?.name || user?.email}</div>
+          </div>
         </div>
-        <p className="text-gray-600">Complete system control and management</p>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard
           icon={Users}
-          title="Total Users"
+          title="Users"
           value={stats.totalUsers}
-          color="bg-blue-500"
-        />
-        <StatCard
-          icon={FileText}
-          title="Total Exams"
-          value={stats.totalExams}
-          color="bg-green-500"
-        />
-        <StatCard
-          icon={BookOpen}
-          title="Lesson Plans"
-          value={stats.totalLessonPlans}
-          color="bg-purple-500"
-        />
-        <StatCard
-          icon={Calendar}
-          title="Daily Reports"
-          value={stats.totalReports}
-          color="bg-orange-500"
-        />
-      </div>
-
-      {/* Grouped Actions by Category */}
-      
-      {/* Approvals Section */}
-      <ActionSection title="Approvals & Reviews" icon={CheckSquare}>
-        <QuickAction
-          icon={LayoutList}
-          title="Scheme Approvals"
-          description="Review and approve scheme of work submissions"
-          color="bg-indigo-500"
-          onClick={() => onNavigate && onNavigate('scheme-approvals')}
-        />
-        <QuickAction
-          icon={ClipboardCheck}
-          title="Lesson Plan Approvals"
-          description="Review and approve lesson plan submissions"
-          color="bg-purple-500"
-          onClick={() => onNavigate && onNavigate('lesson-approvals')}
-        />
-      </ActionSection>
-
-      {/* Academic Management Section */}
-      <ActionSection title="Academic Management" icon={GraduationCap}>
-        <QuickAction
-          icon={Database}
-          title="Exam Management"
-          description="Create, edit, and delete exams"
-          color="bg-blue-500"
-          onClick={() => onNavigate && onNavigate('exam-marks')}
-        />
-        <QuickAction
-          icon={BookOpen}
-          title="Lesson Plans"
-          description="View and manage all lesson plans"
-          color="bg-green-500"
-          onClick={() => onNavigate && onNavigate('lesson-plans')}
-        />
-        <QuickAction
-          icon={FileText}
-          title="Daily Reports"
-          description="View and manage all daily reports"
-          color="bg-orange-500"
-          onClick={() => onNavigate && onNavigate('reports')}
-        />
-        <QuickAction
-          icon={Calendar}
-          title="Timetable Management"
-          description="View and manage school timetables"
-          color="bg-teal-500"
-          onClick={() => onNavigate && onNavigate('full-timetable')}
-        />
-      </ActionSection>
-
-      {/* System Administration Section */}
-      <ActionSection title="System Administration" icon={Settings}>
-        <QuickAction
-          icon={Users}
-          title="Manage Users"
-          description="Add, edit, or remove users from the system"
-          color="bg-red-500"
           onClick={() => onNavigate && onNavigate('users')}
         />
-        <QuickAction
-          icon={Shield}
-          title="System Settings"
-          description="Configure system-wide settings and preferences"
-          color="bg-gray-600"
-          onClick={() => onNavigate && onNavigate('settings')}
+        <StatCard
+          icon={FileCheck}
+          title="Exams"
+          value={stats.totalExams}
+          onClick={() => onNavigate && onNavigate('exam-marks')}
         />
-      </ActionSection>
+        <StatCard
+          icon={DollarSign}
+          title="Fee Collection"
+          value="Open"
+          onClick={() => onNavigate && onNavigate('fee-collection')}
+        />
+      </div>
+
+      {/* Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ActionSection title="Approvals" icon={CheckSquare}>
+          <QuickAction
+            icon={LayoutList}
+            title="Scheme Approvals"
+            description="Review and approve scheme of work submissions"
+            onClick={() => onNavigate && onNavigate('scheme-approvals')}
+          />
+          <QuickAction
+            icon={ClipboardCheck}
+            title="Lesson Plan Approvals"
+            description="Review and approve lesson plan submissions"
+            onClick={() => onNavigate && onNavigate('lesson-approvals')}
+          />
+        </ActionSection>
+
+        <ActionSection title="Administration" icon={GraduationCap}>
+          <QuickAction
+            icon={Edit2}
+            title="Admin Data"
+            description="Edit system master data (Sheets)"
+            onClick={() => onNavigate && onNavigate('admin-data')}
+          />
+          <QuickAction
+            icon={Calendar}
+            title="Timetable"
+            description="View full timetable"
+            onClick={() => onNavigate && onNavigate('full-timetable')}
+          />
+        </ActionSection>
+      </div>
 
       {/* System Status */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-          <Activity className="w-5 h-5" />
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+          <Activity className="w-5 h-5 text-gray-700 dark:text-gray-200" />
           System Status
         </h2>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center gap-2">
               <CheckCircle className="w-5 h-5 text-green-600" />
-              <span className="font-medium">Apps Script Backend</span>
+              <span className="font-medium text-gray-900 dark:text-gray-100">Backend</span>
             </div>
-            <span className="text-green-600 text-sm font-semibold">Online</span>
+            <span className="text-green-700 dark:text-green-400 text-sm font-semibold">Online</span>
           </div>
-          <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+          <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center gap-2">
               <CheckCircle className="w-5 h-5 text-green-600" />
-              <span className="font-medium">Google Sheets Database</span>
+              <span className="font-medium text-gray-900 dark:text-gray-100">Database</span>
             </div>
-            <span className="text-green-600 text-sm font-semibold">Connected</span>
+            <span className="text-green-700 dark:text-green-400 text-sm font-semibold">Connected</span>
           </div>
-          <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+          <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
             <div className="flex items-center gap-2">
               <CheckCircle className="w-5 h-5 text-green-600" />
-              <span className="font-medium">User Authentication</span>
+              <span className="font-medium text-gray-900 dark:text-gray-100">Auth</span>
             </div>
-            <span className="text-green-600 text-sm font-semibold">Active</span>
+            <span className="text-green-700 dark:text-green-400 text-sm font-semibold">Active</span>
           </div>
         </div>
       </div>
 
       {/* Warning Banner */}
-      <div className="mt-8 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-        <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-        <div>
-          <h3 className="font-semibold text-red-900">Super Admin Access</h3>
-          <p className="text-sm text-red-700 mt-1">
-            You have unrestricted access to all system functions. Please use these privileges responsibly. 
-            All actions are logged for security and audit purposes.
-          </p>
+      {isSuperAdmin && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/40 rounded-xl p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <h3 className="font-semibold text-red-900 dark:text-red-200">Super Admin Access</h3>
+            <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+              Changes can affect the whole school system. Actions are audit-logged.
+            </p>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

@@ -658,6 +658,49 @@
         }
         return _respond(verifyGoogleLogin(token));
       }
+
+      // === ADMIN DATA ROUTES (Super Admin only) ===
+      // Additive endpoints to manage sheet data from the frontend.
+      // Existing functions/routes are not modified.
+      if (action === 'admin.listSheets') {
+        const email = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!isSuperAdmin(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
+        return _respond(_adminListSheets());
+      }
+
+      if (action === 'admin.getSheet') {
+        const email = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!isSuperAdmin(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
+        return _respond(_adminGetSheet(data.sheetName));
+      }
+
+      if (action === 'admin.appendRow') {
+        const email = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!isSuperAdmin(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
+        return _respond(_adminAppendRow(data.sheetName, data.row || {}, email, data.name || ''));
+      }
+
+      if (action === 'admin.updateRow') {
+        const email = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!isSuperAdmin(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
+        return _respond(_adminUpdateRow(data.sheetName, data.rowNumber, data.row || {}, email, data.name || ''));
+      }
+
+      if (action === 'admin.deleteRow') {
+        const email = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!isSuperAdmin(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
+        return _respond(_adminDeleteRow(data.sheetName, data.rowNumber, email, data.name || ''));
+      }
       
       // === EXAM ROUTES ===
       if (action === 'createExam') {
@@ -3190,6 +3233,191 @@
     } catch (error) {
       Logger.log('Error getting app settings: ' + error.message);
       return _respond({ success: false, error: error.message });
+    }
+  }
+
+  // === ADMIN DATA HELPERS (Super Admin only) ===
+  // NOTE: These helpers are used by additive routes (admin.*) and do not change existing behavior.
+  function _adminAllowedSheets() {
+    try {
+      return Object.keys(SHEETS || {});
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function _adminAssertAllowedSheet(sheetName) {
+    const name = String(sheetName || '').trim();
+    if (!name) throw new Error('Missing sheetName');
+    const allowed = _adminAllowedSheets();
+    if (allowed.indexOf(name) === -1) {
+      throw new Error('Sheet not allowed: ' + name);
+    }
+    return name;
+  }
+
+  function _adminListSheets() {
+    const allowed = _adminAllowedSheets();
+    const ss = _ss();
+    const existing = ss.getSheets().map(s => s.getName());
+    return {
+      success: true,
+      sheets: allowed.map(name => ({
+        name: name,
+        exists: existing.indexOf(name) !== -1
+      }))
+    };
+  }
+
+  function _adminGetSheet(sheetName) {
+    try {
+      const name = _adminAssertAllowedSheet(sheetName);
+      const sh = _getSheet(name);
+      // Ensure known schema headers exist (additive only)
+      if (SHEETS && SHEETS[name]) {
+        _ensureHeaders(sh, SHEETS[name]);
+      }
+
+      const headers = _headers(sh);
+      const values = sh.getDataRange().getValues();
+      const outRows = [];
+      for (let i = 1; i < values.length; i++) {
+        const rowArr = values[i];
+        const rowObj = _indexByHeader(rowArr, headers);
+        rowObj.__rowNumber = i + 1; // sheet row number
+        outRows.push(rowObj);
+      }
+      return {
+        success: true,
+        sheetName: name,
+        headers: headers,
+        rowCount: outRows.length,
+        rows: outRows
+      };
+    } catch (e) {
+      return { success: false, error: e && e.message ? e.message : String(e) };
+    }
+  }
+
+  function _adminAppendRow(sheetName, row, userEmail, userName) {
+    try {
+      const name = _adminAssertAllowedSheet(sheetName);
+      const sh = _getSheet(name);
+      if (SHEETS && SHEETS[name]) {
+        _ensureHeaders(sh, SHEETS[name]);
+      }
+      const headers = _headers(sh);
+      const newRow = headers.map(h => {
+        const key = String(h || '').trim();
+        if (!key) return '';
+        const v = row && Object.prototype.hasOwnProperty.call(row, key) ? row[key] : '';
+        return v === null || v === undefined ? '' : v;
+      });
+      sh.appendRow(newRow);
+      const newRowNumber = sh.getLastRow();
+
+      try {
+        logAudit({
+          action: AUDIT_ACTIONS.CREATE,
+          entityType: name,
+          entityId: `${name}#${newRowNumber}`,
+          userEmail: userEmail || '',
+          userName: userName || userEmail || '',
+          userRole: 'Super Admin',
+          afterData: row || {},
+          description: `Admin appended row to ${name}`,
+          severity: AUDIT_SEVERITY.WARNING
+        });
+      } catch (auditErr) { /* ignore audit failures */ }
+
+      return { success: true, sheetName: name, rowNumber: newRowNumber };
+    } catch (e) {
+      return { success: false, error: e && e.message ? e.message : String(e) };
+    }
+  }
+
+  function _adminUpdateRow(sheetName, rowNumber, row, userEmail, userName) {
+    try {
+      const name = _adminAssertAllowedSheet(sheetName);
+      const rn = Number(rowNumber);
+      if (!rn || rn < 2) throw new Error('Invalid rowNumber');
+      const sh = _getSheet(name);
+      if (SHEETS && SHEETS[name]) {
+        _ensureHeaders(sh, SHEETS[name]);
+      }
+      const headers = _headers(sh);
+      const lastRow = sh.getLastRow();
+      if (rn > lastRow) throw new Error('rowNumber out of range');
+
+      const beforeArr = sh.getRange(rn, 1, 1, headers.length || 1).getValues()[0];
+      const beforeObj = _indexByHeader(beforeArr, headers);
+
+      // Update only known headers; ignore unknown keys
+      headers.forEach((h, idx) => {
+        const key = String(h || '').trim();
+        if (!key) return;
+        if (row && Object.prototype.hasOwnProperty.call(row, key)) {
+          const v = row[key];
+          sh.getRange(rn, idx + 1).setValue(v === null || v === undefined ? '' : v);
+        }
+      });
+
+      const afterArr = sh.getRange(rn, 1, 1, headers.length || 1).getValues()[0];
+      const afterObj = _indexByHeader(afterArr, headers);
+
+      try {
+        logAudit({
+          action: AUDIT_ACTIONS.UPDATE,
+          entityType: name,
+          entityId: `${name}#${rn}`,
+          userEmail: userEmail || '',
+          userName: userName || userEmail || '',
+          userRole: 'Super Admin',
+          beforeData: beforeObj,
+          afterData: afterObj,
+          description: `Admin updated row ${rn} in ${name}`,
+          severity: AUDIT_SEVERITY.WARNING
+        });
+      } catch (auditErr) { /* ignore audit failures */ }
+
+      return { success: true, sheetName: name, rowNumber: rn };
+    } catch (e) {
+      return { success: false, error: e && e.message ? e.message : String(e) };
+    }
+  }
+
+  function _adminDeleteRow(sheetName, rowNumber, userEmail, userName) {
+    try {
+      const name = _adminAssertAllowedSheet(sheetName);
+      const rn = Number(rowNumber);
+      if (!rn || rn < 2) throw new Error('Invalid rowNumber');
+      const sh = _getSheet(name);
+      const headers = _headers(sh);
+      const lastRow = sh.getLastRow();
+      if (rn > lastRow) throw new Error('rowNumber out of range');
+
+      const beforeArr = sh.getRange(rn, 1, 1, headers.length || 1).getValues()[0];
+      const beforeObj = _indexByHeader(beforeArr, headers);
+
+      sh.deleteRow(rn);
+
+      try {
+        logAudit({
+          action: AUDIT_ACTIONS.DELETE,
+          entityType: name,
+          entityId: `${name}#${rn}`,
+          userEmail: userEmail || '',
+          userName: userName || userEmail || '',
+          userRole: 'Super Admin',
+          beforeData: beforeObj,
+          description: `Admin deleted row ${rn} from ${name}`,
+          severity: AUDIT_SEVERITY.CRITICAL
+        });
+      } catch (auditErr) { /* ignore audit failures */ }
+
+      return { success: true, sheetName: name, rowNumber: rn };
+    } catch (e) {
+      return { success: false, error: e && e.message ? e.message : String(e) };
     }
   }
 

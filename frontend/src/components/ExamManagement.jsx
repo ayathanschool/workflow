@@ -8,6 +8,10 @@ import ClassTeacherOnePage from './ClassTeacherOnePage.jsx';
 const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
   // Get notification functions
   const { success, error: _error, warning, info: _info } = useNotifications();
+  const displayClass = (cls) => {
+    const v = Array.isArray(cls) ? cls[0] : cls;
+    return String(v ?? '').trim().replace(/^STD\s*/i, '').trim();
+  };
   // Helper function to determine if exam has internal marks
   const examHasInternalMarks = (exam) => {
     if (!exam) return false;
@@ -1825,7 +1829,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                 >
                   <option value="">Select Class</option>
                   {availableClasses.map((cls) => (
-                    <option key={cls} value={cls}>{cls}</option>
+                    <option key={cls} value={cls}>{displayClass(cls)}</option>
                   ))}
                 </select>
               </div>
@@ -1966,7 +1970,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                     >
                       <option value="">Select Class</option>
                       {availableClasses.map((cls) => (
-                        <option key={cls} value={cls}>{cls}</option>
+                        <option key={cls} value={cls}>{displayClass(cls)}</option>
                       ))}
                     </select>
                   </>
@@ -2176,13 +2180,13 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                   {/* If user is a class teacher, highlight their assigned class */}
                   {user && user.classTeacherFor && normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher') && (
                     <option value={user.classTeacherFor} style={{fontWeight: 'bold', backgroundColor: '#e6f2ff'}}>
-                      {user.classTeacherFor} (My Class)
+                      {displayClass(user.classTeacherFor)} (My Class)
                     </option>
                   )}
                   {availableClasses
                     .filter(cls => cls !== user?.classTeacherFor) // Remove duplicates
                     .map(cls => (
-                      <option key={cls} value={cls}>{cls}</option>
+                      <option key={cls} value={cls}>{displayClass(cls)}</option>
                     ))}
                 </select>
               </div>
@@ -2303,7 +2307,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                       <td className="px-6 py-4 whitespace-nowrap font-medium">
                         {exam.examId}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">{exam.class}</td>
+                      <td className="px-6 py-4 whitespace-nowrap">{displayClass(exam.class)}</td>
                       <td className="px-6 py-4 whitespace-nowrap">{exam.subject}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         {exam.date && exam.date !== '1950-01-01' && exam.date !== '1999-12-31' ? 
@@ -2371,7 +2375,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                 <div key={exam.examId} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1">
-                      <h3 className="text-base font-semibold text-gray-900">{exam.examName || `${exam.examType} - ${exam.class} - ${exam.subject}`}</h3>
+                      <h3 className="text-base font-semibold text-gray-900">{exam.examName || `${exam.examType} - ${displayClass(exam.class)} - ${exam.subject}`}</h3>
                       {accessBadge && <div className="mt-1">{accessBadge}</div>}
                     </div>
                   </div>
@@ -2379,7 +2383,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                   <div className="grid grid-cols-2 gap-3 text-sm mb-3">
                     <div>
                       <span className="text-gray-500 block">Class</span>
-                      <span className="font-medium text-gray-900">{exam.class}</span>
+                      <span className="font-medium text-gray-900">{displayClass(exam.class)}</span>
                     </div>
                     <div>
                       <span className="text-gray-500 block">Subject</span>
@@ -2489,7 +2493,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
             )}
             
             <h2 className="text-xl font-semibold mb-4 flex justify-between items-center">
-              <span>Enter Marks: {selectedExam.examName || `${selectedExam.examType} - ${selectedExam.class} - ${selectedExam.subject}`}</span>
+              <span>Enter Marks: {selectedExam.examName || `${selectedExam.examType} - ${displayClass(selectedExam.class)} - ${selectedExam.subject}`}</span>
               <div className="flex items-center gap-2">
                 <button 
                   onClick={refreshExamData}
@@ -2626,7 +2630,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                   >
                     <option value="">Select Class</option>
                     {availableClasses.map((cls) => (
-                      <option key={cls} value={cls}>{cls}</option>
+                      <option key={cls} value={cls}>{displayClass(cls)}</option>
                     ))}
                   </select>
                 </div>

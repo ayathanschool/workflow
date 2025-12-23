@@ -23,6 +23,15 @@ export { invalidateCache }; // Export for components to use
 const __DEV_LOG__ = !!import.meta.env.DEV && (import.meta.env.VITE_VERBOSE_API === 'true');
 const devLog = (...args) => { if (__DEV_LOG__) console.log('[api]', ...args); };
 
+function normalizeClassParam(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  return raw
+    .replace(/^std\s*/i, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
 // Legacy cache system (keep for backward compatibility, but new code should use cacheManager)
 const apiCache = new Map();
 const pendingRequests = new Map();
@@ -718,6 +727,44 @@ export async function getAppSettings() {
   return res || {};
 }
 
+// === Admin Data Editor (Super Admin only) ===
+export async function adminListSheets(email) {
+  const payload = { action: 'admin.listSheets', email: email || '' };
+  const result = await postJSON(`${BASE_URL}?action=admin.listSheets`, payload);
+  return result?.data || result || {};
+}
+
+export async function adminGetSheet(email, sheetName) {
+  const payload = { action: 'admin.getSheet', email: email || '', sheetName: sheetName || '' };
+  const result = await postJSON(`${BASE_URL}?action=admin.getSheet`, payload);
+  return result?.data || result || {};
+}
+
+export async function adminAppendRow(email, name, sheetName, row) {
+  const payload = { action: 'admin.appendRow', email: email || '', name: name || '', sheetName: sheetName || '', row: row || {} };
+  const result = await postJSON(`${BASE_URL}?action=admin.appendRow`, payload);
+  return result?.data || result || {};
+}
+
+export async function adminUpdateRow(email, name, sheetName, rowNumber, row) {
+  const payload = {
+    action: 'admin.updateRow',
+    email: email || '',
+    name: name || '',
+    sheetName: sheetName || '',
+    rowNumber: rowNumber,
+    row: row || {}
+  };
+  const result = await postJSON(`${BASE_URL}?action=admin.updateRow`, payload);
+  return result?.data || result || {};
+}
+
+export async function adminDeleteRow(email, name, sheetName, rowNumber) {
+  const payload = { action: 'admin.deleteRow', email: email || '', name: name || '', sheetName: sheetName || '', rowNumber: rowNumber };
+  const result = await postJSON(`${BASE_URL}?action=admin.deleteRow`, payload);
+  return result?.data || result || {};
+}
+
 // Exams API
 
 // Retrieve a list of exams.  Optional filters (class, subject, examType) can
@@ -736,7 +783,7 @@ export async function getExams(options = {}) {
 
   const q = new URLSearchParams({
     action: 'getExams',
-    class: cls,
+    class: normalizeClassParam(cls),
     subject,
     examType,
     ...(teacherEmail ? { teacherEmail } : {}),
@@ -753,19 +800,25 @@ export async function getExams(options = {}) {
 // creatorName, class, subject, examType, internalMax, externalMax,
 // totalMax and date.  Returns { ok: true, examId } on success.
 export async function createExam(email, examData) {
-  return postJSON(`${BASE_URL}?action=createExam`, { email, ...examData })
+  const normalized = { ...(examData || {}) };
+  if ('class' in normalized) normalized.class = normalizeClassParam(normalized.class);
+  return postJSON(`${BASE_URL}?action=createExam`, { email, ...normalized })
 }
 
 // Create exam with custom ID (for bulk upload)
 export async function createExamWithId(email, examData) {
-  return postJSON(`${BASE_URL}?action=createExamWithId`, { email, ...examData })
+  const normalized = { ...(examData || {}) };
+  if ('class' in normalized) normalized.class = normalizeClassParam(normalized.class);
+  return postJSON(`${BASE_URL}?action=createExamWithId`, { email, ...normalized })
 }
 
 // Create multiple exams at once for different subjects with the same grading settings.
 // Payload should include class, examType, hasInternalMarks, internalMax, externalMax, 
 // and an array of subject+date pairs.
 export async function createBulkExams(email, bulkExamData) {
-  return postJSON(`${BASE_URL}?action=createBulkExams`, { email, ...bulkExamData })
+  const normalized = { ...(bulkExamData || {}) };
+  if ('class' in normalized) normalized.class = normalizeClassParam(normalized.class);
+  return postJSON(`${BASE_URL}?action=createBulkExams`, { email, ...normalized })
 }
 
 // Delete an exam (Super Admin only)
@@ -1254,7 +1307,7 @@ export async function getSubjects() {
 // Get a list of students.  If a class is supplied, return only students in
 // that class; otherwise return all students.
 export async function getStudents(cls = '') {
-  const q = new URLSearchParams({ action: 'getStudents', class: cls })
+  const q = new URLSearchParams({ action: 'getStudents', class: normalizeClassParam(cls) })
   const result = await getJSON(`${BASE_URL}?${q.toString()}`)
   return result?.data || result || []
 }
@@ -1275,7 +1328,7 @@ export async function getGradeBoundaries() {
 
 // Fetch subjects for a specific class from ClassSubjects sheet
 export async function getClassSubjects(className) {
-  const result = await getJSON(`${BASE_URL}?action=getClassSubjects&class=${encodeURIComponent(className)}`, CACHE_DURATION);
+  const result = await getJSON(`${BASE_URL}?action=getClassSubjects&class=${encodeURIComponent(normalizeClassParam(className))}`, CACHE_DURATION);
   return result?.data || result;
 }
 
