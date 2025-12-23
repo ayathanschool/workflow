@@ -462,7 +462,7 @@ const App = () => {
         { id: 'audit-log', label: 'Audit Log', icon: Shield },
         { id: 'timetable', label: 'Timetable', icon: Calendar },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
-        { id: 'reports', label: 'Daily Reports', icon: FileText },
+        { id: 'class-data', label: 'Class Data', icon: UserCheck },
         { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
         { id: 'exam-marks', label: 'Exam Management', icon: Award },
         { id: 'report-card', label: 'Report Cards', icon: FileCheck },
@@ -522,6 +522,7 @@ const App = () => {
         { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
         { id: 'daily-oversight', label: 'Daily Oversight (Enhanced)', icon: ClipboardCheck },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
+        { id: 'class-data', label: 'Class Data', icon: UserCheck },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
         { id: 'smart-reminders', label: 'Smart Reminders', icon: Bell },
@@ -8081,10 +8082,20 @@ const App = () => {
 
   // Class Data View (Class Teacher only)
   const ClassDataView = () => {
+    // Check if user is Super Admin or HM - they can access all classes
+    const isSuperAdminOrHM = user?.roles && (
+      user.roles.includes('super admin') || 
+      user.roles.includes('superadmin') || 
+      user.roles.includes('super_admin') || 
+      user.roles.includes('h m')
+    );
+    
     // Fix: Ensure className is a string, not an array
     const rawClassName = user?.classTeacherFor || '';
-    const className = Array.isArray(rawClassName) ? rawClassName[0] : rawClassName;
+    const defaultClassName = Array.isArray(rawClassName) ? rawClassName[0] : rawClassName;
     
+    const [selectedClass, setSelectedClass] = useState(defaultClassName || '');
+    const [availableClasses, setAvailableClasses] = useState([]);
     const [loading, setLoading] = useState(true);
     const [students, setStudents] = useState([]);
     const [performance, setPerformance] = useState(null);
@@ -8092,28 +8103,47 @@ const App = () => {
     const [error, setError] = useState(null);
     const [expandedStudents, setExpandedStudents] = useState({});
 
+    // Fetch available classes for Super Admin/HM
+    useEffect(() => {
+      if (isSuperAdminOrHM) {
+        const fetchClasses = async () => {
+          try {
+            const studentsData = await api.getStudents('');
+            const classes = [...new Set(studentsData.map(s => s.class))].sort();
+            setAvailableClasses(classes);
+            if (!selectedClass && classes.length > 0) {
+              setSelectedClass(classes[0]);
+            }
+          } catch (err) {
+            console.error('Error fetching classes:', err);
+          }
+        };
+        fetchClasses();
+      }
+    }, [isSuperAdminOrHM]);
+
     useEffect(() => {
       const fetchClassData = async () => {
-        if (!className) return;
+        if (!selectedClass) return;
         
-        console.debug('[ClassDataView] Fetching data for class:', className);
+        console.debug('[ClassDataView] Fetching data for class:', selectedClass);
         setLoading(true);
         setError(null);
         
         try {
           // Fetch students
-          const studentsData = await api.getStudents(className);
+          const studentsData = await api.getStudents(selectedClass);
           setStudents(Array.isArray(studentsData) ? studentsData : []);
 
           // Fetch performance data
-          const perfData = await api.getStudentPerformance(className);
+          const perfData = await api.getStudentPerformance(selectedClass);
           setPerformance(perfData);
 
           // Fetch exams for this class
-          const examsData = await api.getExams(className);
+          const examsData = await api.getExams(selectedClass);
           // Filter exams for this specific class only
           const classExams = Array.isArray(examsData) 
-            ? examsData.filter(exam => exam.class === className)
+            ? examsData.filter(exam => exam.class === selectedClass)
             : [];
           setExams(classExams);
         } catch (err) {
@@ -8125,7 +8155,7 @@ const App = () => {
       };
 
       fetchClassData();
-    }, [className]);
+    }, [selectedClass]);
 
     const toggleStudent = (admNo) => {
       setExpandedStudents(prev => ({
@@ -8134,7 +8164,7 @@ const App = () => {
       }));
     };
 
-    if (!className) {
+    if (!isSuperAdminOrHM && !defaultClassName) {
       return (
         <div className="space-y-6">
           <div className="bg-white rounded-xl shadow-sm p-6">
@@ -8144,10 +8174,22 @@ const App = () => {
       );
     }
 
+    if (isSuperAdminOrHM && availableClasses.length === 0) {
+      return (
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <p className="text-gray-600">Loading classes...</p>
+          </div>
+        </div>
+      );
+    }
+
     if (loading) {
       return (
         <div className="space-y-6">
-          <h1 className="text-2xl font-bold text-gray-900">Class Data – {className}</h1>
+          <h1 className="text-2xl font-bold text-gray-900">
+            Class Data – {selectedClass}
+          </h1>
           <div className="bg-white rounded-xl shadow-sm p-6">
             <p className="text-gray-600">Loading class data...</p>
           </div>
@@ -8161,13 +8203,29 @@ const App = () => {
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-900">Class Data – {className}</h1>
+          <h1 className="text-2xl font-bold text-gray-900">
+            Class Data {selectedClass && `– ${selectedClass}`}
+          </h1>
+          
+          {/* Class Selector for Super Admin/HM */}
+          {isSuperAdminOrHM && availableClasses.length > 0 && (
+            <select
+              value={selectedClass}
+              onChange={(e) => setSelectedClass(e.target.value)}
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">Select Class</option>
+              {availableClasses.map(cls => (
+                <option key={cls} value={cls}>{cls}</option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* Debug Info */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
           <p className="font-medium text-blue-900">Debug Info:</p>
-          <p className="text-blue-700">Class Name: <span className="font-mono">{className}</span></p>
+          <p className="text-blue-700">Class Name: <span className="font-mono">{selectedClass}</span></p>
           <p className="text-blue-700">Students Found: {students.length}</p>
           <p className="text-blue-700">Exams Found: {exams.length}</p>
           <p className="text-blue-700">Check browser console for detailed logs</p>
@@ -8226,7 +8284,7 @@ const App = () => {
                 const isExpanded = expandedStudents[student.admNo];
                 
                 // Get all exam marks for this student grouped by subject and exam type
-                const classExamsForStudent = exams.filter(exam => exam.class === className);
+                const classExamsForStudent = exams.filter(exam => exam.class === selectedClass);
                 const studentExamMarks = {};
                 
                 // Build structure: { subject: { examType: { marks, maxMarks, percentage } } }
