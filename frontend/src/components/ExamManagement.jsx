@@ -841,8 +841,24 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
           .map(e => e && e.examId)
           .filter(Boolean);
         if (ids.length > 0) {
-          const res = await api.getExamMarksEntryStatusBatch(ids);
           const byId = {};
+          const idsParamLen = ids.join(',').length;
+
+          // If we have many exams, the GET query string can exceed URL limits and
+          // the indicator shows blank/—. Fall back to server-side computation.
+          const shouldUseAll = ids.length > 80 || idsParamLen > 1500;
+          const res = shouldUseAll
+            ? await api.getExamMarksEntryStatusAll({
+                teacherEmail: user?.email || '',
+                role: userRole,
+                class: filters.class || '',
+                subject: filters.subject || '',
+                examType: filters.examType || '',
+                // avoid cached response when quickly reloading
+                _ts: Date.now()
+              })
+            : await api.getExamMarksEntryStatusBatch(ids);
+
           (res?.exams || []).forEach(row => {
             if (row && row.examId) byId[row.examId] = row;
           });
@@ -852,7 +868,25 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         }
       } catch (statusErr) {
         console.warn('Failed to load marks entry status:', statusErr);
-        setMarksEntryStatus({});
+        // Secondary fallback: try server-side status (often succeeds when batch fails)
+        try {
+          const res2 = await api.getExamMarksEntryStatusAll({
+            teacherEmail: user?.email || '',
+            role: userRole,
+            class: filters.class || '',
+            subject: filters.subject || '',
+            examType: filters.examType || '',
+            _ts: Date.now()
+          });
+          const byId2 = {};
+          (res2?.exams || []).forEach(row => {
+            if (row && row.examId) byId2[row.examId] = row;
+          });
+          setMarksEntryStatus(byId2);
+        } catch (fallbackErr) {
+          console.warn('Fallback marks entry status also failed:', fallbackErr);
+          setMarksEntryStatus({});
+        }
       }
     } catch (e) {
       console.error('Failed to reload exams', e);
