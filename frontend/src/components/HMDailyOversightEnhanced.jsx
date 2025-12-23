@@ -1,7 +1,7 @@
 // HMDailyOversightEnhanced.jsx - Enhanced HM Dashboard with Session Progress Analytics
 import { Clock, RefreshCw, AlertTriangle, ChevronDown, ChevronRight, CheckCircle, Undo2, FileText, ClipboardCheck, ChevronUp } from 'lucide-react';
 import React, { useState, useEffect, useMemo } from 'react';
-import { getDailyReportsForDate, getLessonPlansForDate, getClassSubjectPerformance, getSyllabusPaceTracking, getMissingSubmissions, verifyDailyReport, reopenDailyReport, notifyMissingSubmissions, getDailyReadinessStatus, getHMDailyOversightData } from '../api';
+import { getDailyReportsForDate, getLessonPlansForDate, getClassSubjectPerformance, getSyllabusPaceTracking, getMissingSubmissions, verifyDailyReport, reopenDailyReport, notifyMissingSubmissions, getDailyReadinessStatus, getHMDailyOversightData, getExamMarksEntryPending } from '../api';
 import { todayIST, formatLocalDate, nowIST } from '../utils/dateUtils';
 
 const HMDailyOversightEnhanced = ({ user }) => {
@@ -62,6 +62,9 @@ const HMDailyOversightEnhanced = ({ user }) => {
   const [showLessonPlanDetails, setShowLessonPlanDetails] = useState(false);
   const [showReportDetails, setShowReportDetails] = useState(false);
 
+  // Exam marks entry pending list (all exams)
+  const [examPending, setExamPending] = useState({ loading: false, rows: [] });
+
   useEffect(() => {
     loadDailyReports();
     loadLessonPlans();
@@ -70,7 +73,19 @@ const HMDailyOversightEnhanced = ({ user }) => {
     loadMissing();
     loadReadinessStatus(); // Load readiness status
     loadMerged(); // Load plan vs actual merged
+    loadExamPending();
   }, [date]);
+
+  async function loadExamPending() {
+    try {
+      setExamPending({ loading: true, rows: [] });
+      const res = await getExamMarksEntryPending({ limit: 20 });
+      setExamPending({ loading: false, rows: res?.pending || [] });
+    } catch (e) {
+      console.warn('Failed to load HM exam pending:', e);
+      setExamPending({ loading: false, rows: [] });
+    }
+  }
 
   // Load class/subject performance analytics
   async function loadClassSubjectPerformance() {
@@ -161,7 +176,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
 
   const handleAutoRefresh = async () => {
     setIsRefreshing(true);
-    await Promise.all([loadDailyReports(true), loadLessonPlans(true), loadReadinessStatus()]);
+    await Promise.all([loadDailyReports(true), loadLessonPlans(true), loadReadinessStatus(), loadExamPending()]);
     setIsRefreshing(false);
   };
 
@@ -557,6 +572,8 @@ const HMDailyOversightEnhanced = ({ user }) => {
   const filteredAnalytics = getFilteredAnalytics();
   const filteredPaceTrackingSubjects = getFilteredPaceTracking();
 
+  const pendingExamCount = useMemo(() => (examPending.rows || []).length, [examPending.rows]);
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6">
@@ -593,6 +610,54 @@ const HMDailyOversightEnhanced = ({ user }) => {
           </div>
         </div>
       )}
+
+      {/* Exam Marks Entry Pending (All Exams) */}
+      <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Exam Marks Entry Pending</h3>
+            <p className="text-xs text-gray-600">Shows only subjects with pending marks (pending=0 will not show)</p>
+          </div>
+          <div className="flex gap-2">
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+              Pending Exams: {examPending.loading ? '…' : pendingExamCount}
+            </span>
+          </div>
+        </div>
+
+        {examPending.loading ? (
+          <div className="mt-3 text-sm text-gray-500">Loading…</div>
+        ) : (examPending.rows || []).length === 0 ? (
+          <div className="mt-3 text-sm text-gray-500">No pending exam marks. ✅</div>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr className="text-left text-gray-500">
+                  <th className="py-2 pr-3">Class</th>
+                  <th className="py-2 pr-3">Subject</th>
+                  <th className="py-2 pr-3">Marks</th>
+                  <th className="py-2 pr-3">Pending</th>
+                </tr>
+              </thead>
+              <tbody>
+                {examPending.rows.slice(0, 8).map(r => (
+                  <tr key={r.examId} className="border-t">
+                    <td className="py-2 pr-3">{r.class || ''}</td>
+                    <td className="py-2 pr-3">{r.subject || ''}</td>
+                    <td className="py-2 pr-3">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                        {(r.enteredCount ?? 0)}/{(r.totalStudents ?? 0)}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3">{r.missingCount ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Real-Time Controls Header */}
       <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6">

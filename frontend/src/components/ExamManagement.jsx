@@ -110,6 +110,9 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
   const [viewExamMarks, setViewExamMarks] = useState(null);
   const [examMarks, setExamMarks] = useState([]);
   const [showClassTeacherView, setShowClassTeacherView] = useState(false);
+
+  // Marks entry indicator: examId -> { enteredCount, totalStudents, complete, ... }
+  const [marksEntryStatus, setMarksEntryStatus] = useState({});
   
   // Performance optimization: Cache frequently accessed data
   const [studentsCache, setStudentsCache] = useState(new Map());
@@ -831,6 +834,26 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       
       console.log('📊 Exams loaded:', list?.length || 0, 'exams for role:', userRole);
       setExams(Array.isArray(list) ? list : []);
+
+      // Load marks-entry progress in one batch (non-blocking indicator)
+      try {
+        const ids = (Array.isArray(list) ? list : [])
+          .map(e => e && e.examId)
+          .filter(Boolean);
+        if (ids.length > 0) {
+          const res = await api.getExamMarksEntryStatusBatch(ids);
+          const byId = {};
+          (res?.exams || []).forEach(row => {
+            if (row && row.examId) byId[row.examId] = row;
+          });
+          setMarksEntryStatus(byId);
+        } else {
+          setMarksEntryStatus({});
+        }
+      } catch (statusErr) {
+        console.warn('Failed to load marks entry status:', statusErr);
+        setMarksEntryStatus({});
+      }
     } catch (e) {
       console.error('Failed to reload exams', e);
       setApiError('Failed to load exams: ' + (e.message || e));
@@ -2271,6 +2294,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Max Marks</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Marks Entered</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
@@ -2315,6 +2339,25 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                           formatShortDate(new Date())}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">{exam.totalMax}</td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {(() => {
+                          const st = marksEntryStatus[exam.examId];
+                          if (!st) return <span className="text-xs text-gray-400">—</span>;
+                          const ok = !!st.complete;
+                          const label = `${st.enteredCount ?? 0}/${st.totalStudents ?? 0}`;
+                          return (
+                            <span
+                              className={
+                                "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium " +
+                                (ok ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800")
+                              }
+                              title={ok ? "All students marked" : `${st.missingCount ?? 0} missing`}
+                            >
+                              {label}
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center space-x-2">
                           {accessBadge}
@@ -2377,6 +2420,24 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                     <div className="flex-1">
                       <h3 className="text-base font-semibold text-gray-900">{exam.examName || `${exam.examType} - ${displayClass(exam.class)} - ${exam.subject}`}</h3>
                       {accessBadge && <div className="mt-1">{accessBadge}</div>}
+                      {(() => {
+                        const st = marksEntryStatus[exam.examId];
+                        if (!st) return null;
+                        const ok = !!st.complete;
+                        return (
+                          <div className="mt-2">
+                            <span
+                              className={
+                                "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium " +
+                                (ok ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800")
+                              }
+                              title={ok ? "All students marked" : `${st.missingCount ?? 0} missing`}
+                            >
+                              Marks: {st.enteredCount ?? 0}/{st.totalStudents ?? 0}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                   

@@ -68,6 +68,7 @@ const MissingLessonPlansAlert = lazy(() => import('./components/MissingLessonPla
 const HMMissingLessonPlansOverview = lazy(() => import('./components/HMMissingLessonPlansOverview'));
 const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodSubstitutionView'));
 const ExamManagement = lazy(() => import('./components/ExamManagement'));
+const ExamMarksEntryStatusDetails = lazy(() => import('./components/ExamMarksEntryStatusDetails'));
 const ReportCard = lazy(() => import('./components/ReportCard'));
 const Marklist = lazy(() => import('./components/Marklist'));
 const SchemeLessonPlanning = lazy(() => import('./components/SchemeLessonPlanning'));
@@ -479,6 +480,7 @@ const App = () => {
         { id: 'admin-data', label: 'Admin Data', icon: Edit2 },
         { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
         { id: 'exam-marks', label: 'Exam Management', icon: Award },
+        { id: 'exam-marks-status', label: 'Exam Marks Status', icon: Award },
         { id: 'report-card', label: 'Report Cards', icon: FileCheck },
         { id: 'marklist', label: 'Marklist', icon: FileText },
         { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
@@ -510,6 +512,7 @@ const App = () => {
       // Teachers and class teachers can also manage exams: view available exams,
       // enter marks for their classes and subjects, and view marks.
       items.push({ id: 'exam-marks', label: 'Exam Marks', icon: Award });
+      items.push({ id: 'exam-marks-status', label: 'Exam Marks Status', icon: Award });
       items.push({ id: 'report-card', label: 'Report Card', icon: FileText });
       items.push({ id: 'marklist', label: 'Marklist', icon: FileText });
     }
@@ -541,6 +544,7 @@ const App = () => {
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
         { id: 'smart-reminders', label: 'Smart Reminders', icon: Bell },
         { id: 'exam-marks', label: 'Exam Marks', icon: Award },
+        { id: 'exam-marks-status', label: 'Exam Marks Status', icon: Award },
         { id: 'report-card', label: 'Report Card', icon: FileText },
         { id: 'marklist', label: 'Marklist', icon: FileText },
         { id: 'fee-collection', label: 'Fee Collection', icon: DollarSign }
@@ -1377,6 +1381,8 @@ const App = () => {
                 return <AuditLog user={user} />;
               case 'exam-marks':
                 return <ExamManagement user={user} withSubmit={withSubmit} />;
+              case 'exam-marks-status':
+                return <ExamMarksEntryStatusDetails user={user} />;
               case 'report-card':
                 return <ReportCard user={user} />;
               case 'marklist':

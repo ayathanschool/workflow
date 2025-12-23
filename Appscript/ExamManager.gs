@@ -231,9 +231,11 @@ function getExams(params) {
 function submitExamMarks(data) {
   const examId = data.examId || '';
   const marks = Array.isArray(data.marks) ? data.marks : [];
+  const teacherEmail = String(data.teacherEmail || data.email || '').toLowerCase().trim();
   
   if (!examId) return { error: 'Missing examId' };
   if (marks.length === 0) return { error: 'No marks data provided' };
+  if (!teacherEmail) return { error: 'Missing teacherEmail' };
   
   // Get exam details
   const examSh = _getSheet('Exams');
@@ -242,6 +244,12 @@ function submitExamMarks(data) {
   const exam = exams.find(e => e.examId === examId);
   
   if (!exam) return { error: 'Exam not found' };
+
+  // Permission check: align with exam creation rules (HM/SuperAdmin allowed; class teacher for class allowed; subject teachers allowed)
+  if (!userCanCreateExam(teacherEmail, String(exam.class || ''), String(exam.subject || ''))) {
+    appLog('ERROR', 'submitExamMarks', 'Permission denied for ' + teacherEmail + ' on ' + exam.class + ' ' + exam.subject);
+    return { error: 'You do not have permission to submit marks for this exam' };
+  }
   
   const marksSh = _getSheet('ExamMarks');
   _ensureHeaders(marksSh, SHEETS.ExamMarks);
@@ -307,6 +315,326 @@ function getExamMarks(examId) {
   const list = _rows(sh).map(r => _indexByHeader(r, headers));
   
   return list.filter(mark => mark.examId === examId);
+}
+
+/**
+ * Get classwise marks entry status for a batch of exams.
+ * Returns entered/total counts per examId to show an indicator in UI.
+ *
+ * @param {string[]} examIds
+ * @returns {{success:boolean, exams:Array<{examId:string, class:string, enteredCount:number, totalStudents:number, missingCount:number, complete:boolean}>}}
+ */
+function getExamMarksEntryStatusBatch(examIds) {
+  try {
+    const ids = (Array.isArray(examIds) ? examIds : [])
+      .map(x => String(x || '').trim())
+      .filter(Boolean);
+
+    if (ids.length === 0) {
+      return { success: true, exams: [] };
+    }
+
+    const normClass = function(v) {
+      return String(v || '')
+        .toLowerCase()
+        .trim()
+        .replace(/^std\s*/g, '')
+        .replace(/\s+/g, '')
+        .replace(/[^a-z0-9]/g, '');
+    };
+    const normAdmNo = function(v) {
+      return String(v || '').trim().toLowerCase();
+    };
+
+    const idSet = new Set(ids);
+
+    // Map examId -> class (normalized + raw)
+    const examsSh = _getSheet('Exams');
+    _ensureHeaders(examsSh, SHEETS.Exams);
+    const examsHeaders = _headers(examsSh);
+    const examsList = _rows(examsSh).map(r => _indexByHeader(r, examsHeaders));
+
+    const examMetaById = {};
+    for (const ex of examsList) {
+      const exId = String(ex.examId || '').trim();
+      if (!exId || !idSet.has(exId)) continue;
+      const exClassRaw = String(ex.class || '').trim();
+      examMetaById[exId] = {
+        examId: exId,
+        classRaw: exClassRaw,
+        classNorm: normClass(exClassRaw)
+      };
+    }
+
+    // Build student sets per class
+    const studentsSh = _getSheet('Students');
+    _ensureHeaders(studentsSh, SHEETS.Students);
+    const studentsHeaders = _headers(studentsSh);
+    const studentsList = _rows(studentsSh).map(r => _indexByHeader(r, studentsHeaders));
+
+    /** @type {Object<string, Set<string>>} */
+    const studentsByClass = {};
+    for (const st of studentsList) {
+      const clsNorm = normClass(st.class);
+      const adm = normAdmNo(st.admNo);
+      if (!clsNorm || !adm) continue;
+      if (!studentsByClass[clsNorm]) studentsByClass[clsNorm] = new Set();
+      studentsByClass[clsNorm].add(adm);
+    }
+
+    // Count entered marks per examId (unique students)
+    const marksSh = _getSheet('ExamMarks');
+    _ensureHeaders(marksSh, SHEETS.ExamMarks);
+    const marksHeaders = _headers(marksSh);
+    const marksList = _rows(marksSh).map(r => _indexByHeader(r, marksHeaders));
+
+    /** @type {Object<string, Set<string>>} */
+    const enteredByExamId = {};
+    for (const mk of marksList) {
+      const exId = String(mk.examId || '').trim();
+      if (!exId || !idSet.has(exId)) continue;
+      const meta = examMetaById[exId];
+      if (!meta) continue;
+
+      const adm = normAdmNo(mk.admNo);
+      if (!adm) continue;
+
+      const expectedSet = studentsByClass[meta.classNorm];
+      if (!expectedSet || !expectedSet.has(adm)) continue;
+
+      // Treat 0 as entered ("0" should count). Empty string means not entered.
+      const hasAnyScore = (
+        String(mk.total ?? '').trim() !== '' ||
+        String(mk.ce ?? '').trim() !== '' ||
+        String(mk.te ?? '').trim() !== ''
+      );
+      if (!hasAnyScore) continue;
+
+      if (!enteredByExamId[exId]) enteredByExamId[exId] = new Set();
+      enteredByExamId[exId].add(adm);
+    }
+
+    const result = [];
+    for (const exId of ids) {
+      const meta = examMetaById[exId] || { examId: exId, classRaw: '', classNorm: '' };
+      const expectedSet = meta.classNorm ? (studentsByClass[meta.classNorm] || new Set()) : new Set();
+      const enteredSet = enteredByExamId[exId] || new Set();
+      const totalStudents = expectedSet.size;
+      const enteredCount = enteredSet.size;
+      const missingCount = Math.max(0, totalStudents - enteredCount);
+      const complete = totalStudents > 0 && enteredCount >= totalStudents;
+
+      result.push({
+        examId: exId,
+        class: meta.classRaw || '',
+        enteredCount,
+        totalStudents,
+        missingCount,
+        complete
+      });
+    }
+
+    return { success: true, exams: result };
+  } catch (error) {
+    appLog('ERROR', 'getExamMarksEntryStatusBatch', 'Error: ' + error.message);
+    return { success: false, exams: [], error: error.message };
+  }
+}
+
+/**
+ * Get marks entry status for all exams (optionally filtered by class).
+ * This avoids sending large examIds lists from frontend.
+ *
+ * @param {{class?:string, examType?:string, subject?:string, limit?:number, teacherEmail?:string, role?:string}=} params
+ * @returns {{success:boolean, exams:Array<{examId:string, class:string, subject:string, examType:string, examName:string, date:string, createdAt:string, enteredCount:number, totalStudents:number, missingCount:number, complete:boolean}>}}
+ */
+function getExamMarksEntryStatusAll(params) {
+  try {
+    const p = params || {};
+    const limit = Number(p.limit || 0) || 0;
+    const teacherEmail = String(p.teacherEmail || '').toLowerCase().trim();
+
+    const normClass = function(v) {
+      return String(v || '')
+        .toLowerCase()
+        .trim()
+        .replace(/^std\s*/g, '')
+        .replace(/\s+/g, '')
+        .replace(/[^a-z0-9]/g, '');
+    };
+    const normAdmNo = function(v) {
+      return String(v || '').trim().toLowerCase();
+    };
+    const classFilterNorm = p.class ? normClass(p.class) : '';
+    const examTypeFilter = String(p.examType || '').trim().toLowerCase();
+    const subjectFilter = String(p.subject || '').trim().toLowerCase();
+
+    // Decide if we should filter by teacher permissions
+    const roleLower = String(p.role || '').toLowerCase();
+    const isPrivilegedRole = (
+      roleLower.includes('super') ||
+      roleLower.includes('admin') ||
+      roleLower.includes('hm') ||
+      roleLower.includes('h m') ||
+      roleLower.includes('headmaster') ||
+      roleLower.includes('head master')
+    );
+    const filterByTeacher = !!teacherEmail && !isPrivilegedRole;
+
+    const normalizeClassForPermission = function(v) {
+      return String(v || '')
+        .trim()
+        .replace(/^std\s*/gi, '')
+        .replace(/\s+/g, '')
+        .toUpperCase();
+    };
+
+    // Read exams and optionally filter by class
+    const examsSh = _getSheet('Exams');
+    _ensureHeaders(examsSh, SHEETS.Exams);
+    const examsHeaders = _headers(examsSh);
+    const examsList = _rows(examsSh).map(r => _indexByHeader(r, examsHeaders));
+
+    const examMetaById = {};
+    const examIds = [];
+    for (const ex of examsList) {
+      const exId = String(ex.examId || '').trim();
+      if (!exId) continue;
+      const exClassRaw = String(ex.class || '').trim();
+      const exClassNorm = normClass(exClassRaw);
+      if (classFilterNorm && exClassNorm !== classFilterNorm) continue;
+
+      const exSubject = String(ex.subject || '').trim();
+      const exExamType = String(ex.examType || '').trim();
+      if (subjectFilter && exSubject.toLowerCase() !== subjectFilter) continue;
+      if (examTypeFilter && exExamType.toLowerCase() !== examTypeFilter) continue;
+
+      if (filterByTeacher) {
+        const permClass = normalizeClassForPermission(exClassRaw);
+        if (!userCanCreateExam(teacherEmail, permClass, exSubject)) continue;
+      }
+
+      examMetaById[exId] = {
+        examId: exId,
+        classRaw: exClassRaw,
+        classNorm: exClassNorm,
+        subject: exSubject,
+        examType: exExamType,
+        examName: String(ex.examName || '').trim(),
+        date: String(ex.date || '').trim(),
+        createdAt: String(ex.createdAt || ex.date || '').trim()
+      };
+      examIds.push(exId);
+    }
+
+    if (examIds.length === 0) {
+      return { success: true, exams: [] };
+    }
+
+    const examIdSet = new Set(examIds);
+
+    // Build student sets per class
+    const studentsSh = _getSheet('Students');
+    _ensureHeaders(studentsSh, SHEETS.Students);
+    const studentsHeaders = _headers(studentsSh);
+    const studentsList = _rows(studentsSh).map(r => _indexByHeader(r, studentsHeaders));
+
+    /** @type {Object<string, Set<string>>} */
+    const studentsByClass = {};
+    for (const st of studentsList) {
+      const clsNorm = normClass(st.class);
+      const adm = normAdmNo(st.admNo);
+      if (!clsNorm || !adm) continue;
+      if (!studentsByClass[clsNorm]) studentsByClass[clsNorm] = new Set();
+      studentsByClass[clsNorm].add(adm);
+    }
+
+    // Count entered marks per examId (unique students)
+    const marksSh = _getSheet('ExamMarks');
+    _ensureHeaders(marksSh, SHEETS.ExamMarks);
+    const marksHeaders = _headers(marksSh);
+    const marksList = _rows(marksSh).map(r => _indexByHeader(r, marksHeaders));
+
+    /** @type {Object<string, Set<string>>} */
+    const enteredByExamId = {};
+    for (const mk of marksList) {
+      const exId = String(mk.examId || '').trim();
+      if (!exId || !examIdSet.has(exId)) continue;
+      const meta = examMetaById[exId];
+      if (!meta) continue;
+
+      const adm = normAdmNo(mk.admNo);
+      if (!adm) continue;
+
+      const expectedSet = studentsByClass[meta.classNorm];
+      if (!expectedSet || !expectedSet.has(adm)) continue;
+
+      const hasAnyScore = (
+        String(mk.total ?? '').trim() !== '' ||
+        String(mk.ce ?? '').trim() !== '' ||
+        String(mk.te ?? '').trim() !== ''
+      );
+      if (!hasAnyScore) continue;
+
+      if (!enteredByExamId[exId]) enteredByExamId[exId] = new Set();
+      enteredByExamId[exId].add(adm);
+    }
+
+    const result = [];
+    for (const exId of examIds) {
+      const meta = examMetaById[exId];
+      if (!meta) continue;
+      const expectedSet = meta.classNorm ? (studentsByClass[meta.classNorm] || new Set()) : new Set();
+      const enteredSet = enteredByExamId[exId] || new Set();
+      const totalStudents = expectedSet.size;
+      const enteredCount = enteredSet.size;
+      const missingCount = Math.max(0, totalStudents - enteredCount);
+      const complete = totalStudents > 0 && enteredCount >= totalStudents;
+
+      result.push({
+        examId: exId,
+        class: meta.classRaw || '',
+        subject: meta.subject || '',
+        examType: meta.examType || '',
+        examName: meta.examName || '',
+        date: meta.date || '',
+        createdAt: meta.createdAt || '',
+        enteredCount,
+        totalStudents,
+        missingCount,
+        complete
+      });
+    }
+
+    // Sort: pending first, then by missingCount desc, then newest
+    result.sort((a, b) => {
+      const ap = (a.missingCount || 0) > 0 ? 1 : 0;
+      const bp = (b.missingCount || 0) > 0 ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      const am = Number(a.missingCount || 0);
+      const bm = Number(b.missingCount || 0);
+      if (am !== bm) return bm - am;
+      return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+    });
+
+    const limited = (limit > 0) ? result.slice(0, limit) : result;
+    return { success: true, exams: limited };
+  } catch (error) {
+    appLog('ERROR', 'getExamMarksEntryStatusAll', 'Error: ' + error.message);
+    return { success: false, exams: [], error: error.message };
+  }
+}
+
+/**
+ * Get ONLY pending exams (missingCount > 0). If marks are fully entered for a class+subject exam, pending becomes 0.
+ *
+ * @param {{class?:string, examType?:string, subject?:string, limit?:number, teacherEmail?:string, role?:string}=} params
+ */
+function getExamMarksEntryPending(params) {
+  const res = getExamMarksEntryStatusAll(params || {});
+  if (!res || !res.success) return res;
+  const pending = (res.exams || []).filter(r => (r.totalStudents || 0) > 0 && (r.missingCount || 0) > 0);
+  return { success: true, pending: pending };
 }
 
 /**

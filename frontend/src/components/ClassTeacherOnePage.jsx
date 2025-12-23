@@ -12,6 +12,8 @@ const ClassTeacherOnePage = ({ user }) => {
   const [error, setError] = useState('');
   const [matrix, setMatrix] = useState({}); // { admNo: { studentName, byExam: { examType: { total, grade, percentage } } } }
 
+  const [pendingExamMarks, setPendingExamMarks] = useState({ loading: false, rows: [] });
+
   const hasAccess = useMemo(() => {
     const roles = (user?.roles || []).map(r => String(r).toLowerCase());
     return roles.some(r => r.includes('class teacher') || r === 'classteacher');
@@ -27,8 +29,23 @@ const ClassTeacherOnePage = ({ user }) => {
           api.getStudents(className),
           api.getAllExams()
         ]);
-        const types = [...new Set((allExams || [])
-          .filter(e => String(e.class||'').trim() === String(className).trim())
+        // Pending-only list for this class (server-side)
+        try {
+          setPendingExamMarks({ loading: true, rows: [] });
+          const res = await api.getExamMarksEntryPending({
+            class: className,
+            limit: 50,
+            teacherEmail: user?.email || '',
+            role: (user?.roles || []).join(',')
+          });
+          setPendingExamMarks({ loading: false, rows: res?.pending || [] });
+        } catch (e) {
+          console.warn('Failed to load class pending exam marks:', e);
+          setPendingExamMarks({ loading: false, rows: [] });
+        }
+
+        const forClass = (allExams || []).filter(e => String(e.class||'').trim() === String(className).trim());
+        const types = [...new Set(forClass
           .map(e => e.examType)
           .filter(Boolean)
         )].sort();
@@ -43,6 +60,8 @@ const ClassTeacherOnePage = ({ user }) => {
     };
     init();
   }, [className]);
+
+  const pendingCount = useMemo(() => (pendingExamMarks.rows || []).length, [pendingExamMarks.rows]);
 
   const generateMatrix = async () => {
     if (!className || students.length === 0 || selectedExamTypes.length === 0) return;
@@ -128,6 +147,53 @@ const ClassTeacherOnePage = ({ user }) => {
       <div>
         <h2 className="text-xl font-semibold">Class One-Page View</h2>
         <p className="text-sm text-gray-600">{className} • Students: {students.length}</p>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Exam Marks Entry Pending</h3>
+            <p className="text-xs text-gray-600">Only subjects with pending marks are shown (pending=0 means completed)</p>
+          </div>
+          <div className="flex gap-2">
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+              Pending Exams: {pendingExamMarks.loading ? '…' : pendingCount}
+            </span>
+          </div>
+        </div>
+
+        {pendingExamMarks.loading ? (
+          <div className="mt-3 text-sm text-gray-500">Loading…</div>
+        ) : (pendingExamMarks.rows || []).length === 0 ? (
+          <div className="mt-3 text-sm text-gray-500">No pending marks for {className}. ✅</div>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr className="text-left text-gray-500">
+                  <th className="py-2 pr-3">Exam</th>
+                  <th className="py-2 pr-3">Subject</th>
+                  <th className="py-2 pr-3">Marks</th>
+                  <th className="py-2 pr-3">Pending</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingExamMarks.rows.slice(0, 10).map(r => (
+                  <tr key={r.examId} className="border-t">
+                    <td className="py-2 pr-3">{r.examType || r.examId}</td>
+                    <td className="py-2 pr-3">{r.subject || ''}</td>
+                    <td className="py-2 pr-3">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                        {(r.enteredCount ?? 0)}/{(r.totalStudents ?? 0)}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3">{r.missingCount ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {examTypes.length > 0 && (

@@ -827,6 +827,55 @@ export async function deleteExam(email, examId) {
   return result?.data || result;
 }
 
+// Get marks entry progress (entered/total) for a set of exams.
+export async function getExamMarksEntryStatusBatch(examIds = []) {
+  const ids = Array.isArray(examIds) ? examIds.filter(Boolean).map(String) : [];
+  const q = new URLSearchParams({
+    action: 'getExamMarksEntryStatusBatch',
+    examIds: ids.join(',')
+  });
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`);
+  return result?.data || result || { success: false, exams: [] };
+}
+
+// Get marks entry status for ALL exams (server-side computed). Optionally filter by class.
+export async function getExamMarksEntryStatusAll(options = {}) {
+  const cls = options?.class || '';
+  const examType = options?.examType || '';
+  const subject = options?.subject || '';
+  const teacherEmail = options?.teacherEmail || '';
+  const role = options?.role || '';
+  const limit = options?.limit || '';
+  const q = new URLSearchParams({ action: 'getExamMarksEntryStatusAll' });
+  if (cls) q.append('class', normalizeClassParam(cls));
+  if (examType) q.append('examType', String(examType));
+  if (subject) q.append('subject', String(subject));
+  if (teacherEmail) q.append('teacherEmail', String(teacherEmail));
+  if (role) q.append('role', String(role));
+  if (limit) q.append('limit', String(limit));
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`);
+  return result?.data || result || { success: false, exams: [] };
+}
+
+// Get ONLY pending exams (missing marks > 0). Optionally filter by class.
+export async function getExamMarksEntryPending(options = {}) {
+  const cls = options?.class || '';
+  const examType = options?.examType || '';
+  const subject = options?.subject || '';
+  const teacherEmail = options?.teacherEmail || '';
+  const role = options?.role || '';
+  const limit = options?.limit || '';
+  const q = new URLSearchParams({ action: 'getExamMarksEntryPending' });
+  if (cls) q.append('class', normalizeClassParam(cls));
+  if (examType) q.append('examType', String(examType));
+  if (subject) q.append('subject', String(subject));
+  if (teacherEmail) q.append('teacherEmail', String(teacherEmail));
+  if (role) q.append('role', String(role));
+  if (limit) q.append('limit', String(limit));
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`);
+  return result?.data || result || { success: false, pending: [] };
+}
+
 // Delete a daily report (Super Admin only)
 export async function deleteReport(email, reportId) {
   const result = await postJSON(`${BASE_URL}?action=deleteReport`, { email, reportId });

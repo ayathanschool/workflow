@@ -26,6 +26,8 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
   });
   const [loading, setLoading] = useState(false);
 
+  const [pendingExamMarks, setPendingExamMarks] = useState({ loading: false, rows: [] });
+
   const isSuperAdmin = useMemo(() => {
     const roles = user?.roles || [];
     return roles.includes('super admin') || roles.includes('superadmin') || roles.includes('super_admin');
@@ -49,12 +51,24 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
         totalExams: exams?.length || 0,
         totalSchemes: 0
       });
+
+      // Pending-only list (server-side computed for all exams)
+      try {
+        setPendingExamMarks({ loading: true, rows: [] });
+        const res = await api.getExamMarksEntryPending({ limit: 20 });
+        setPendingExamMarks({ loading: false, rows: res?.pending || [] });
+      } catch (e) {
+        console.warn('Failed to load pending exam marks:', e);
+        setPendingExamMarks({ loading: false, rows: [] });
+      }
     } catch (err) {
       console.error('Error loading stats:', err);
     } finally {
       setLoading(false);
     }
   };
+
+  const pendingCount = useMemo(() => (pendingExamMarks.rows || []).length, [pendingExamMarks.rows]);
 
   const StatCard = ({ icon: Icon, title, value, onClick }) => (
     <button
@@ -208,6 +222,66 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
             <span className="text-green-700 dark:text-green-400 text-sm font-semibold">Active</span>
           </div>
         </div>
+      </div>
+
+      {/* Exam Marks Entry Pending */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Exam Marks Entry Pending</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Shows only exams where pending &gt; 0 (if a subject is fully entered, it will not appear here)</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate && onNavigate('exam-marks')}
+            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Open Exams
+          </button>
+        </div>
+
+        <div className="flex flex-wrap gap-2 mb-4">
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+            Pending Exams: {pendingExamMarks.loading ? '…' : pendingCount}
+          </span>
+        </div>
+
+        {pendingExamMarks.loading ? (
+          <div className="text-sm text-gray-500 dark:text-gray-400">Loading pending list…</div>
+        ) : (pendingExamMarks.rows || []).length === 0 ? (
+          <div className="text-sm text-gray-500 dark:text-gray-400">No pending exam marks. ✅</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-gray-500 dark:text-gray-400">
+                  <th className="py-2 pr-4">Exam</th>
+                  <th className="py-2 pr-4">Class</th>
+                  <th className="py-2 pr-4">Subject</th>
+                  <th className="py-2 pr-4">Marks</th>
+                  <th className="py-2 pr-4">Pending</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingExamMarks.rows.slice(0, 10).map((r) => {
+                  return (
+                    <tr key={r.examId} className="border-t border-gray-100 dark:border-gray-700">
+                      <td className="py-2 pr-4 text-gray-800 dark:text-gray-200">{r.examType || r.examId}</td>
+                      <td className="py-2 pr-4 text-gray-800 dark:text-gray-200">{r.class || ''}</td>
+                      <td className="py-2 pr-4 text-gray-800 dark:text-gray-200">{r.subject || ''}</td>
+                      <td className="py-2 pr-4">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                          {(r.enteredCount ?? 0)}/{(r.totalStudents ?? 0)}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-4 text-gray-700 dark:text-gray-300">{r.missingCount ?? 0}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Warning Banner */}

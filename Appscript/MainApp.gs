@@ -220,6 +220,35 @@
         const examId = e.parameter.examId || '';
         return _respond(getExamMarks(examId));
       }
+
+      if (action === 'getExamMarksEntryStatusBatch') {
+        const raw = String(e.parameter.examIds || '');
+        const examIds = raw
+          .split(',')
+          .map(s => String(s || '').trim())
+          .filter(s => s.length > 0);
+        return _respond(getExamMarksEntryStatusBatch(examIds));
+      }
+
+      if (action === 'getExamMarksEntryStatusAll') {
+        const cls = e.parameter.class || '';
+        const examType = e.parameter.examType || '';
+        const subject = e.parameter.subject || '';
+        const limit = e.parameter.limit || '';
+        const teacherEmail = e.parameter.teacherEmail || '';
+        const role = e.parameter.role || '';
+        return _respond(getExamMarksEntryStatusAll({ class: cls, examType: examType, subject: subject, limit: limit, teacherEmail: teacherEmail, role: role }));
+      }
+
+      if (action === 'getExamMarksEntryPending') {
+        const cls = e.parameter.class || '';
+        const examType = e.parameter.examType || '';
+        const subject = e.parameter.subject || '';
+        const limit = e.parameter.limit || '';
+        const teacherEmail = e.parameter.teacherEmail || '';
+        const role = e.parameter.role || '';
+        return _respond(getExamMarksEntryPending({ class: cls, examType: examType, subject: subject, limit: limit, teacherEmail: teacherEmail, role: role }));
+      }
       
       if (action === 'getGradeTypes') {
         return _respond(getGradeTypes());
