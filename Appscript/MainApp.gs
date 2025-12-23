@@ -229,6 +229,11 @@
         return _respond(getClassSubjects(e.parameter.class));
       }
       
+      // DEBUG: Test endpoint for ClassSubjects
+      if (action === 'testGetClassSubjects') {
+        return _respond(testGetClassSubjectsAPI());
+      }
+      
       if (action === 'getGradeBoundaries') {
         return _respond(getGradeBoundaries());
       }

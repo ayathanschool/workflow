@@ -406,6 +406,8 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
 
         // Always source subjects from ClassSubjects for exams
         const res = await api.getClassSubjects(selectedClass);
+        console.log('📋 Raw API response:', res);
+        console.log('📋 Response type:', typeof res, Array.isArray(res) ? 'is array' : 'is object');
         let finalSubjects = [];
 
         const norm = (s) => (s || '').toString().trim().toLowerCase().replace(/std\s*/gi, '').replace(/\s+/g, '');
@@ -413,16 +415,21 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
 
         // Case 1: { subjects: [...] }
         if (res && Array.isArray(res.subjects)) {
+          console.log('📋 Case 1: res.subjects array, count:', res.subjects.length);
+          console.log('📋 res.subjects:', res.subjects);
           finalSubjects = res.subjects;
         // Case 2: { data: { subjects: [...] } }
         } else if (Array.isArray(res?.data?.subjects)) {
+          console.log('📋 Case 2: res.data.subjects array, count:', res.data.subjects.length);
           finalSubjects = res.data.subjects;
         // Case 3: API returned array directly
         } else if (Array.isArray(res)) {
           if (res.length > 0 && typeof res[0] === 'string') {
+            console.log('📋 Case 3a: Array of strings, count:', res.length);
             // Array of subject strings
             finalSubjects = res;
           } else if (typeof res[0] === 'object') {
+            console.log('📋 Case 3b: Array of objects, parsing...');
             // Array of rows from ClassSubjects sheet: filter by class and extract subject
             const subjectsSet = new Set();
             res.forEach(row => {
@@ -436,7 +443,14 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
           }
         }
 
+        console.log('📋 Before filter/sort, finalSubjects count:', finalSubjects.length);
+        console.log('📋 Before filter/sort, finalSubjects:', finalSubjects);
+        const beforeFilter = finalSubjects.length;
         finalSubjects = Array.isArray(finalSubjects) ? finalSubjects.filter(Boolean).sort() : [];
+        console.log('📋 After filter/sort, count:', finalSubjects.length);
+        if (beforeFilter !== finalSubjects.length) {
+          console.warn(`⚠️ Lost ${beforeFilter - finalSubjects.length} subjects during filter!`);
+        }
         console.log(`✅ Loaded ${finalSubjects.length} subjects from ClassSubjects for ${selectedClass}`);
         setAvailableSubjects(finalSubjects);
       } catch (error) {

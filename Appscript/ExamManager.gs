@@ -438,40 +438,91 @@ function getGradeTypes() {
  */
 function getClassSubjects(className) {
   try {
+    appLog('INFO', 'getClassSubjects', 'Fetching subjects for class: ' + className);
+    
     if (!className) {
       return { success: false, error: 'Class name is required' };
     }
     
     // Try to get from ClassSubjects sheet first
     const classSubjectsSh = _getSheet('ClassSubjects');
+    appLog('INFO', 'getClassSubjects', 'ClassSubjects sheet found: ' + (classSubjectsSh ? 'Yes' : 'No'));
+    
     if (classSubjectsSh && classSubjectsSh.getLastRow() > 1) {
-      _ensureHeaders(classSubjectsSh, SHEETS.ClassSubjects);
       const headers = _headers(classSubjectsSh);
       const rows = _rows(classSubjectsSh).map(r => _indexByHeader(r, headers));
       
+      appLog('INFO', 'getClassSubjects', 'ClassSubjects rows found: ' + rows.length);
+      appLog('INFO', 'getClassSubjects', 'Headers: ' + JSON.stringify(headers));
+      
       // Find matching class (case-insensitive, flexible matching)
       const normalizedClass = String(className).trim().toLowerCase().replace(/std\s*/gi, '').replace(/\s+/g, '');
-      const classRow = rows.find(row => {
-        const rowClass = String(row.class || '').trim().toLowerCase().replace(/std\s*/gi, '').replace(/\s+/g, '');
-        return rowClass === normalizedClass;
-      });
+      appLog('INFO', 'getClassSubjects', 'Normalized class: ' + normalizedClass);
       
-      if (classRow && classRow.subjects) {
-        // Parse comma-separated subjects
-        const subjects = String(classRow.subjects)
-          .split(',')
-          .map(s => s.trim())
-          .filter(s => s.length > 0);
+      // Check if sheet has 'subjects' (comma-separated) or 'subject' (one per row) column
+      const hasSubjectsColumn = headers.includes('subjects');
+      const hasSubjectColumn = headers.includes('subject');
+      
+      appLog('INFO', 'getClassSubjects', 'Has subjects column: ' + hasSubjectsColumn + ', Has subject column: ' + hasSubjectColumn);
+      
+      if (hasSubjectsColumn) {
+        // Denormalized format: one row per class with comma-separated subjects
+        const classRow = rows.find(row => {
+          const rowClass = String(row.class || '').trim().toLowerCase().replace(/std\s*/gi, '').replace(/\s+/g, '');
+          return rowClass === normalizedClass;
+        });
         
-        return { 
-          success: true, 
-          subjects: subjects,
-          source: 'ClassSubjects'
-        };
+        if (classRow && classRow.subjects) {
+          appLog('INFO', 'getClassSubjects', 'Found matching row (denormalized), subjects raw: ' + classRow.subjects);
+          
+          const subjects = String(classRow.subjects)
+            .split(',')
+            .map(s => s.trim())
+            .filter(s => s.length > 0);
+          
+          appLog('INFO', 'getClassSubjects', 'Final subjects: ' + JSON.stringify(subjects));
+          
+          return { 
+            success: true, 
+            subjects: subjects,
+            source: 'ClassSubjects',
+            count: subjects.length
+          };
+        }
+      } else if (hasSubjectColumn) {
+        // Normalized format: one row per class-subject pair
+        const subjects = [];
+        
+        rows.forEach(row => {
+          const rowClass = String(row.class || '').trim().toLowerCase().replace(/std\s*/gi, '').replace(/\s+/g, '');
+          if (rowClass === normalizedClass && row.subject) {
+            const subj = String(row.subject).trim();
+            if (subj && !subjects.includes(subj)) {
+              subjects.push(subj);
+            }
+          }
+        });
+        
+        if (subjects.length > 0) {
+          appLog('INFO', 'getClassSubjects', 'Found ' + subjects.length + ' subjects (normalized format)');
+          appLog('INFO', 'getClassSubjects', 'Final subjects: ' + JSON.stringify(subjects));
+          
+          return { 
+            success: true, 
+            subjects: subjects,
+            source: 'ClassSubjects',
+            count: subjects.length
+          };
+        }
       }
+      
+      appLog('WARN', 'getClassSubjects', 'No matching subjects found in ClassSubjects, falling back to Timetable');
+    } else {
+      appLog('WARN', 'getClassSubjects', 'ClassSubjects sheet not available or empty, falling back to Timetable');
     }
     
     // Fallback: Get from Timetable
+    appLog('INFO', 'getClassSubjects', 'Fetching from Timetable as fallback');
     const timetableSh = _getSheet('Timetable');
     const timetableHeaders = _headers(timetableSh);
     const timetableRows = _rows(timetableSh).map(r => _indexByHeader(r, timetableHeaders));
@@ -486,6 +537,8 @@ function getClassSubjects(className) {
       }
     });
     
+    appLog('INFO', 'getClassSubjects', 'Timetable subjects: ' + JSON.stringify(Array.from(subjects)));
+    
     return { 
       success: true, 
       subjects: Array.from(subjects),
@@ -493,6 +546,7 @@ function getClassSubjects(className) {
     };
     
   } catch (err) {
+    appLog('ERROR', 'getClassSubjects', 'Exception: ' + err.message);
     return { 
       success: false, 
       error: 'Failed to get class subjects: ' + err.message 
@@ -964,4 +1018,46 @@ function deleteExamMarks(examId) {
     appLog('ERROR', 'deleteExamMarks', 'Error: ' + error.message);
     return 0;
   }
+}
+
+/**
+ * DEBUG FUNCTION: Test ClassSubjects sheet reading
+ * Run this manually to see what's in the ClassSubjects sheet
+ */
+function testClassSubjects() {
+  try {
+    const sh = _getSheet('ClassSubjects');
+    if (!sh) {
+      Logger.log('❌ ClassSubjects sheet not found!');
+      return;
+    }
+    
+    Logger.log('✅ ClassSubjects sheet found');
+    Logger.log('Last row: ' + sh.getLastRow());
+    
+    const headers = _headers(sh);
+    const rows = _rows(sh).map(r => _indexByHeader(r, headers));
+    
+    Logger.log('Total rows: ' + rows.length);
+    Logger.log('Headers: ' + JSON.stringify(headers));
+    
+    // Test the actual getClassSubjects function
+    Logger.log('\n=== Testing getClassSubjects("10A") ===');
+    const result = getClassSubjects('10A');
+    Logger.log('Result: ' + JSON.stringify(result));
+    
+    return result;
+    
+  } catch (error) {
+    Logger.log('❌ Error: ' + error.message);
+    return { error: error.message };
+  }
+}
+
+/**
+ * TEST ENDPOINT: Direct API test for getClassSubjects
+ * Call this from the frontend to bypass any caching
+ */
+function testGetClassSubjectsAPI() {
+  return getClassSubjects('10A');
 }
