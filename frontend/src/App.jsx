@@ -512,7 +512,10 @@ const App = () => {
       // Teachers and class teachers can also manage exams: view available exams,
       // enter marks for their classes and subjects, and view marks.
       items.push({ id: 'exam-marks', label: 'Exam Marks', icon: Award });
-      items.push({ id: 'exam-marks-status', label: 'Exam Marks Status', icon: Award });
+      // Exam Marks Status (details page) should not be available for Class Teachers.
+      if (!hasRole('class teacher')) {
+        items.push({ id: 'exam-marks-status', label: 'Exam Marks Status', icon: Award });
+      }
       items.push({ id: 'report-card', label: 'Report Card', icon: FileText });
       items.push({ id: 'marklist', label: 'Marklist', icon: FileText });
     }
@@ -1382,6 +1385,7 @@ const App = () => {
               case 'exam-marks':
                 return <ExamManagement user={user} withSubmit={withSubmit} />;
               case 'exam-marks-status':
+                if (hasRole('class teacher')) return <Dashboard />;
                 return <ExamMarksEntryStatusDetails user={user} />;
               case 'report-card':
                 return <ReportCard user={user} />;
