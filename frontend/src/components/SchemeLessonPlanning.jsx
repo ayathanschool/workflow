@@ -612,11 +612,11 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                     e.stopPropagation();
                                     handleBulkPrepareClick(scheme, chapter);
                                   }}
-                                  className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors inline-flex items-center gap-1"
-                                  title="Prepare all sessions at once"
+                                  className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors inline-flex items-center gap-2 shadow-sm hover:shadow-md"
+                                  title="Prepare all sessions at once (bulk preparation)"
                                 >
-                                  <Plus className="w-3 h-3" />
-                                  Prepare All ({chapter.totalSessions})
+                                  <Plus className="w-4 h-4" />
+                                  Prepare All ({chapter.totalSessions} Sessions)
                                 </button>
                               )}
                             </div>
@@ -630,35 +630,31 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                               <div
                                 key={`${scheme.schemeId}-${chapter.chapterNumber}-${session.sessionNumber}`}
                                 onClick={() => {
-                                  // In bulk-only mode, handle session clicks
-                                  if (isBulkOnlyMode) {
-                                    const normalizedStatus = String(session.status || '').toLowerCase();
-                                    if (['planned', 'pending review', 'ready', 'cascaded', 'reported'].includes(normalizedStatus)) {
-                                      // Show view-only modal with session details
-                                      setViewSessionData({ scheme, chapter, session });
-                                      setShowViewModal(true);
-                                    } else {
-                                      // Check if this is an extended session (auto-generated)
-                                      // Extended sessions have sessionName starting with "Extended Session" or isExtended flag
-                                      const isExtendedSession = session.sessionName?.includes('Extended') || 
-                                                               session.isExtended === true ||
-                                                               session.sessionNumber > chapter.numberOfSessions;
-                                      
-                                      // Allow single session preparation ONLY for extended sessions
-                                      if (isExtendedSession) {
-                                        handleSessionClick(scheme, chapter, session);
-                                      } else {
-                                        // For regular sessions, redirect to bulk preparation
-                                        setBulkPrepData({ scheme, chapter });
-                                        setShowBulkModal(true);
-                                      }
-                                    }
+                                  const normalizedStatus = String(session.status || '').toLowerCase();
+                                  
+                                  // If session is already planned/reported/etc, show view modal
+                                  if (['planned', 'pending review', 'ready', 'cascaded', 'reported'].includes(normalizedStatus)) {
+                                    setViewSessionData({ scheme, chapter, session });
+                                    setShowViewModal(true);
                                     return;
                                   }
                                   
-                                  const normalizedStatus = String(session.status || '').toLowerCase();
-                                  if (!['cancelled', 'reported'].includes(normalizedStatus)) {
+                                  // Check if cancelled - do nothing
+                                  if (normalizedStatus === 'cancelled') {
+                                    return;
+                                  }
+                                  
+                                  // For not-planned sessions, check if extended
+                                  const isExtendedSession = session.sessionName?.includes('Extended') || 
+                                                           session.isExtended === true ||
+                                                           session.sessionNumber > chapter.numberOfSessions;
+                                  
+                                  if (isExtendedSession) {
+                                    // Allow single session preparation for extended periods only
                                     handleSessionClick(scheme, chapter, session);
+                                  } else {
+                                    // Block single session for normal sessions, show alert
+                                    alert('Single session preparation is not allowed.\n\nPlease use "Prepare All" button above to prepare all sessions in this chapter at once.');
                                   }
                                 }}
                                 className={`p-3 rounded transition-colors ${String(session.status || '').toLowerCase() === 'reported'

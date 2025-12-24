@@ -742,15 +742,22 @@ const App = () => {
       }
     };
 
-    // Ref to guarantee single dashboard fetch per mount even if state updates quickly
-    const dashboardFetchRef = useRef(false);
+    // Ref to avoid duplicate dashboard fetches, but still allow re-fetch when user details load/refresh
+    const dashboardFetchKeyRef = useRef('');
 
     useEffect(() => {
       async function fetchDashboardData() {
-        // Run only once
-        if (dashboardFetchRef.current) return;
         if (!user?.email) return;
-        dashboardFetchRef.current = true;
+
+        const rolesKey = Array.isArray(user?.roles) ? user.roles.map(r => String(r || '').toLowerCase().trim()).sort().join(',') : '';
+        const classesKey = Array.isArray(user?.classes) ? user.classes.join(',') : String(user?.classes || '');
+        const subjectsKey = Array.isArray(user?.subjects) ? user.subjects.join(',') : String(user?.subjects || '');
+        const ctKey = Array.isArray(user?.classTeacherFor) ? user.classTeacherFor.join(',') : String(user?.classTeacherFor || '');
+        const fetchKey = `${user.email}|${rolesKey}|${classesKey}|${subjectsKey}|${ctKey}`;
+
+        // Skip if we've already fetched for the same effective user data
+        if (dashboardFetchKeyRef.current === fetchKey) return;
+        dashboardFetchKeyRef.current = fetchKey;
         try {
           setDashboardLoading(true);
           // Headmaster view: use HM insights and classes count
@@ -770,8 +777,20 @@ const App = () => {
             setInsights(newInsights);
           } else if (hasAnyRole(['teacher','class teacher','daily reporting teachers'])) {
             // Teacher view: compute classes and subjects from user object
-            const teachingClasses = Array.isArray(user.classes) ? user.classes : [];
-            const teachingSubjects = Array.isArray(user.subjects) ? user.subjects : [];
+            // Some users (notably class teachers) may not have `user.classes` populated; fall back to classTeacherFor.
+            const teachingClassesFromUser = Array.isArray(user?.classes)
+              ? user.classes
+              : (user?.classes ? String(user.classes).split(',').map(s => s.trim()).filter(Boolean) : []);
+            const classTeacherFor = Array.isArray(user?.classTeacherFor)
+              ? user.classTeacherFor
+              : (user?.classTeacherFor ? [user.classTeacherFor] : []);
+            const teachingClasses = (teachingClassesFromUser.length > 0)
+              ? teachingClassesFromUser
+              : (hasRole('class teacher') ? classTeacherFor : []);
+
+            const teachingSubjects = Array.isArray(user?.subjects)
+              ? user.subjects
+              : (user?.subjects ? String(user.subjects).split(',').map(s => s.trim()).filter(Boolean) : []);
             const classCount = teachingClasses.length;
             const subjectCount = teachingSubjects.length;
 
@@ -794,6 +813,9 @@ const App = () => {
             
             if (hasRole('class teacher') && teachingClasses.length > 0) {
               try {
+                if (import.meta?.env?.DEV) {
+                  console.log('📊 Dashboard: fetching class performance for classes:', teachingClasses);
+                }
                 // Fetch students for each class and store count per class
                 const studentPromises = teachingClasses.map(cls => api.getStudents(stripStdPrefix(cls)));
                 const studentsPerClass = await Promise.all(studentPromises);
@@ -808,40 +830,76 @@ const App = () => {
                 // Calculate academic performance for class teacher's classes
                 try {
                   // Initialize classPerformance with all teaching classes (even without marks)
+                  // Use normalized keys to avoid mismatch when exams return different class format
                   teachingClasses.forEach(className => {
-                    if (!classPerformance[className]) {
-                      classPerformance[className] = {
+                    const normKey = normClassKey(className);
+                    if (!classPerformance[normKey]) {
+                      classPerformance[normKey] = {
                         aboveAverage: 0,
                         needFocus: 0,
                         avgPercentage: 0,
                         totalStudents: classStudentCounts[className] || 0,
-                        studentsWithMarks: 0
+                        studentsWithMarks: 0,
+                        displayName: className // Store original for display
                       };
                     }
                   });
                   
-                  // Get all exams to find latest exam for class teacher's classes
-                  const allExams = await api.getExams();
-                  const relevantExams = Array.isArray(allExams) 
-                    ? allExams.filter(exam => teachingClasses.some(tc => normClassKey(tc) === normClassKey(exam.class)))
-                    : [];
-                  
-                  if (relevantExams.length > 0) {
-                    // Get marks for the most recent exam of each class
-                    const examsByClass = {};
-                    relevantExams.forEach(exam => {
-                      if (!examsByClass[exam.class] || new Date(exam.date) > new Date(examsByClass[exam.class].date)) {
-                        examsByClass[exam.class] = exam;
-                      }
+                  // IMPORTANT: Class-wise performance should consider *all* exams for the class teacher's classes,
+                  // and pick the newest exam that actually has marks entered.
+                  // This avoids getting stuck on newer exams with no marks for some classes (e.g., 6A/7A).
+                  const examsArray = [];
+                  const allMarksArrays = [];
+
+                  const perClassData = await Promise.all(
+                    teachingClasses.map(async (cls) => {
+                      const [exams, status] = await Promise.all([
+                        api.getExams({ class: cls, _ts: Date.now() }).catch(() => []),
+                        api.getExamMarksEntryStatusAll({ class: cls, limit: 200 }).catch(() => ({ success: false, exams: [] }))
+                      ]);
+                      return {
+                        cls,
+                        exams: Array.isArray(exams) ? exams : [],
+                        statusRows: status && Array.isArray(status.exams) ? status.exams : []
+                      };
+                    })
+                  );
+
+                  for (const item of perClassData) {
+                    const normCls = normClassKey(item.cls);
+                    const statusById = {};
+                    (item.statusRows || []).forEach(r => {
+                      if (r && r.examId) statusById[String(r.examId)] = r;
                     });
+
+                    const sortedExams = (item.exams || [])
+                      .filter(ex => normClassKey(ex?.class) === normCls)
+                      .slice()
+                      .sort((a, b) => {
+                        const da = new Date(a?.date || a?.createdAt || 0);
+                        const db = new Date(b?.date || b?.createdAt || 0);
+                        const ta = isNaN(da.getTime()) ? -Infinity : da.getTime();
+                        const tb = isNaN(db.getTime()) ? -Infinity : db.getTime();
+                        return tb - ta;
+                      });
+
+                    const chosenExam = sortedExams.find(ex => Number(statusById[String(ex.examId)]?.enteredCount || 0) > 0) || null;
+                    if (!chosenExam) {
+                      if (import.meta?.env?.DEV) {
+                        console.log('📊 No marks yet for class:', item.cls, {
+                          exams: sortedExams.length,
+                          statusRows: (item.statusRows || []).length
+                        });
+                      }
+                      continue;
+                    }
+
+                    const chosenMarks = await api.getExamMarks(chosenExam.examId).catch(() => []);
+                    examsArray.push(chosenExam);
+                    allMarksArrays.push(Array.isArray(chosenMarks) ? chosenMarks : []);
+                  }
                     
-                    // Fetch marks for each class's latest exam
-                    const examsArray = Object.values(examsByClass);
-                    const marksPromises = examsArray.map(exam => 
-                      api.getExamMarks(exam.examId).catch(() => [])
-                    );
-                    const allMarksArrays = await Promise.all(marksPromises);
-                    
+                  if (examsArray.length > 0) {
                     // Build performance data per class
                     // Use the outer classPerformance variable instead of declaring new one
                     let totalAboveAverage = 0;
@@ -850,31 +908,35 @@ const App = () => {
                     examsArray.forEach((exam, idx) => {
                       const marks = allMarksArrays[idx];
                       const className = exam.class;
+                      const normKey = normClassKey(className);
                       
                       if (Array.isArray(marks) && marks.length > 0) {
                         const studentMarks = [];
                         let skippedMarks = 0;
                         
-                        // Debug: Log first few marks to see their structure
-                        if (className === 'STD 1A' && marks.length > 0) {
-                          console.debug(`[${className}] Total marks fetched:`, marks.length);
-                          console.debug(`[${className}] First mark sample:`, marks[0]);
-                          console.debug(`[${className}] Exam class:`, className);
-                        }
-                        
                         // Filter marks to only include students from this specific class
                         marks.forEach(mark => {
-                          // Skip marks that don't match this class
-                          if (mark.class && mark.class !== className) {
+                          // Skip marks that don't match this class (normalize both for comparison)
+                          if (mark.class && normClassKey(mark.class) !== normKey) {
                             skippedMarks++;
                             return;
                           }
                           
-                          if (mark && (mark.total != null || mark.ce != null || mark.te != null)) {
+                          const totalVal = (mark && (mark.total ?? mark.Total)) ?? '';
+                          const ceVal = (mark && (mark.ce ?? mark.CE)) ?? '';
+                          const teVal = (mark && (mark.te ?? mark.TE)) ?? '';
+
+                          if (mark && (totalVal != null || ceVal != null || teVal != null)) {
                             // Calculate total from ce + te if total not present
-                            const total = parseFloat(mark.total) || 
-                                        (parseFloat(mark.ce || 0) + parseFloat(mark.te || 0));
-                            const max = parseFloat(exam.totalMax || exam.internalMax + exam.externalMax || 100);
+                            const totalNum = Number(totalVal);
+                            const ceNum = Number(ceVal || 0);
+                            const teNum = Number(teVal || 0);
+                            const total = (Number.isFinite(totalNum) && String(totalVal).trim() !== '') ? totalNum : (ceNum + teNum);
+
+                            const totalMaxNum = Number(exam?.totalMax);
+                            const max = (Number.isFinite(totalMaxNum) && totalMaxNum > 0)
+                              ? totalMaxNum
+                              : ((Number(exam?.internalMax) || 0) + (Number(exam?.externalMax) || 0) || 100);
                             
                             if (total >= 0 && max > 0) {
                               studentMarks.push({
@@ -885,11 +947,6 @@ const App = () => {
                             }
                           }
                         });
-                        
-                        if (className === 'STD 1A') {
-                          console.debug(`[${className}] Marks after filtering:`, studentMarks.length);
-                          console.debug(`[${className}] Skipped marks (wrong class):`, skippedMarks);
-                        }
                         
                         if (studentMarks.length > 0) {
                           // Calculate class average
@@ -903,12 +960,14 @@ const App = () => {
                           // Use actual roster count if available, otherwise exam marks count
                           const actualTotal = classStudentCounts[className] || studentMarks.length;
                           
-                          classPerformance[className] = {
+                          // Store using normalized key for consistent lookup
+                          classPerformance[normKey] = {
                             aboveAverage,
                             needFocus,
                             avgPercentage: Math.round(avgPercentage),
                             totalStudents: actualTotal,
-                            studentsWithMarks: studentMarks.length
+                            studentsWithMarks: studentMarks.length,
+                            displayName: className
                           };
                           
                           totalAboveAverage += aboveAverage;
@@ -920,8 +979,16 @@ const App = () => {
                     studentsAboveAverage = totalAboveAverage;
                     studentsNeedFocus = totalNeedFocus;
                     
-                    // Removed verbose console log to reduce noise in dev
-                    // console.debug('📊 Class-wise Performance:', classPerformance);
+                    // Debug: show what we stored in classPerformance
+                    if (import.meta?.env?.DEV) {
+                      console.log('📊 Class-wise Performance after processing:', {
+                        keys: Object.keys(classPerformance),
+                        data: classPerformance,
+                        teachingClasses,
+                        totalAboveAverage,
+                        totalNeedFocus
+                      });
+                    }
                   }
                 } catch (err) {
                   console.warn('Unable to fetch performance data:', err);
@@ -964,7 +1031,13 @@ const App = () => {
       }
       
       if (user?.email) fetchDashboardData();
-    }, [user?.email]);
+    }, [
+      user?.email,
+      Array.isArray(user?.roles) ? user.roles.join('|') : String(user?.roles || ''),
+      Array.isArray(user?.classes) ? user.classes.join('|') : String(user?.classes || ''),
+      Array.isArray(user?.subjects) ? user.subjects.join('|') : String(user?.subjects || ''),
+      Array.isArray(user?.classTeacherFor) ? user.classTeacherFor.join('|') : String(user?.classTeacherFor || '')
+    ]);
 
     return (
       <div className="max-w-7xl mx-auto space-y-4 md:space-y-6">
@@ -1102,19 +1175,19 @@ const App = () => {
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
                 <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Class-wise Performance</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
-                  {Object.entries(insights.classPerformance).map(([className, perf]) => (
-                    <div key={className} className="border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-lg p-3 md:p-4">
-                      <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">{stripStdPrefix(className)}</h4>
+                  {Object.entries(insights.classPerformance).map(([normKey, perf]) => (
+                    <div key={normKey} className="border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-lg p-3 md:p-4">
+                      <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">{stripStdPrefix(perf.displayName || normKey)}</h4>
                       <div className="space-y-2">
                         <div className="flex justify-between items-center">
                           <span className="text-sm text-gray-600 dark:text-gray-400">Class Average:</span>
-                          <span className="text-sm font-semibold text-blue-600">{perf.avgPercentage}%</span>
+                          <span className="text-sm font-semibold text-blue-600">{Number(perf.studentsWithMarks || 0) === 0 ? '-' : `${perf.avgPercentage}%`}</span>
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-sm text-gray-600 dark:text-gray-400">Total Students:</span>
                           <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{perf.totalStudents}</span>
                         </div>
-                        {perf.studentsWithMarks && perf.studentsWithMarks !== perf.totalStudents && (
+                        {perf.studentsWithMarks !== undefined && perf.studentsWithMarks !== perf.totalStudents && (
                           <div className="flex justify-between items-center text-amber-600">
                             <span className="text-xs">Students with marks:</span>
                             <span className="text-xs font-semibold">{perf.studentsWithMarks}</span>
