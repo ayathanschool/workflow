@@ -31,16 +31,8 @@ function createExam(data) {
       return { error: 'You do not have permission to create an exam for this class and subject' };
     }
     
-    // Get or create the Exams sheet
-    appLog('INFO', 'createExam', 'Attempting to get/create Exams sheet');
     const sh = _getSheet('Exams');
-    appLog('INFO', 'createExam', 'Sheet retrieved: ' + sh.getName() + ', Last Row: ' + sh.getLastRow());
-    
-    // Ensure headers are set
-    appLog('INFO', 'createExam', 'Ensuring headers');
     _ensureHeaders(sh, SHEETS.Exams);
-    appLog('INFO', 'createExam', 'Headers ensured, Last Row: ' + sh.getLastRow());
-    
     const now = new Date().toISOString();
     
     const examId = _generateUniqueExamId(data.examType, data.class, data.subject);
@@ -83,21 +75,9 @@ function createExam(data) {
       examName
     ];
     
-    appLog('INFO', 'createExam', 'Appending row to Exams sheet. Data: ' + JSON.stringify(examData));
-    const rowsBefore = sh.getLastRow();
+    appLog('INFO', 'createExam', 'Appending row to Exams sheet');
     sh.appendRow(examData);
-    const rowsAfter = sh.getLastRow();
-    appLog('INFO', 'createExam', 'Row appended. Rows before: ' + rowsBefore + ', Rows after: ' + rowsAfter);
-    
-    // Verify the row was actually written
-    if (rowsAfter > rowsBefore) {
-      appLog('INFO', 'createExam', 'Exam created successfully: ' + examId + ' at row ' + rowsAfter);
-    } else {
-      appLog('ERROR', 'createExam', 'Row count did not increase! Data may not have been written.');
-    }
-    
-    // Invalidate exam caches since data changed
-    invalidateCache('exams');
+    appLog('INFO', 'createExam', 'Exam created successfully: ' + examId);
     
     // Audit log: Exam creation
     logAudit({
@@ -206,25 +186,6 @@ function createBulkExams(data) {
  * Get all exams (with optional filtering)
  */
 function getExams(params) {
-  // Generate cache key based on filters
-  const cacheKey = generateCacheKey('exams', {
-    class: params.class,
-    subject: params.subject,
-    examType: params.examType,
-    teacherEmail: params.teacherEmail,
-    role: params.role
-  });
-  
-  // Use cached data if available (5 minute TTL)
-  return getCachedData(cacheKey, function() {
-    return _fetchExams(params);
-  }, CACHE_TTL.MEDIUM);
-}
-
-/**
- * Internal function to fetch exams from sheet
- */
-function _fetchExams(params) {
   const sh = _getSheet('Exams');
   const headers = _headers(sh);
   const list = _rows(sh).map(r => _indexByHeader(r, headers));
@@ -305,9 +266,6 @@ function submitExamMarks(data) {
     
     Logger.log(`[Marks Submission] Student: ${studentMark.studentName}, CE: ${ce}, TE: ${te}, Total: ${total}/${exam.totalMax}, Percentage: ${percentage.toFixed(2)}%, Grade: ${grade}`);
     
-    // Invalidate cache for this exam
-    invalidateCache('exam_marks_examid:' + examId);
-    
     const markData = [
       examId,
       exam.class,
@@ -352,13 +310,6 @@ function submitExamMarks(data) {
  * Get exam marks for a specific exam
  */
 function getExamMarks(examId) {
-  const cacheKey = generateCacheKey('exam_marks', { examId: examId });
-  return getCachedData(cacheKey, function() {
-    return _fetchExamMarks(examId);
-  }, CACHE_TTL.MEDIUM);
-}
-
-function _fetchExamMarks(examId) {
   const sh = _getSheet('ExamMarks');
   const headers = _headers(sh);
   const list = _rows(sh).map(r => _indexByHeader(r, headers));
@@ -975,47 +926,6 @@ function getStudents(cls = '') {
   } catch (error) {
     Logger.log('Error in getStudents: ' + error.message);
     return [];
-  }
-}
-
-/**
- * Get students for multiple classes in one call (batch operation)
- * Performance: Reduces N API calls to 1 call
- * @param {Array} classes - Array of class names
- * @returns {Object} Object with class names as keys and student arrays as values
- */
-function getStudentsBatch(classes) {
-  try {
-    const sh = _getSheet('Students');
-    _ensureHeaders(sh, SHEETS.Students);
-    const headers = _headers(sh);
-    const allStudents = _rows(sh).map(r => _indexByHeader(r, headers));
-    
-    const result = {};
-    
-    if (!Array.isArray(classes)) {
-      Logger.log('getStudentsBatch: classes parameter is not an array');
-      return result;
-    }
-    
-    // Normalize class names for comparison
-    const normalizeClass = function(cls) {
-      return String(cls || '').replace(/^std\s*/i, '').trim().toLowerCase();
-    };
-    
-    classes.forEach(function(cls) {
-      const normalized = normalizeClass(cls);
-      result[cls] = allStudents.filter(function(s) {
-        return normalizeClass(s.class) === normalized;
-      });
-    });
-    
-    Logger.log(`getStudentsBatch: Returned students for ${classes.length} classes`);
-    
-    return result;
-  } catch (error) {
-    Logger.log('Error in getStudentsBatch: ' + error.message);
-    return {};
   }
 }
 

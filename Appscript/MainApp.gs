@@ -166,28 +166,6 @@
           }
         });
       }
-      
-      // Debug: Check cache status
-      if (action === 'debugCache') {
-        try {
-          const cache = CacheService.getScriptCache();
-          const keysJson = cache.get('_cache_keys') || '[]';
-          const keys = JSON.parse(keysJson);
-          
-          return _respond({
-            success: true,
-            totalKeys: keys.length,
-            keys: keys.slice(0, 20), // First 20 keys
-            message: 'Cache is working. Keys are being tracked.'
-          });
-        } catch (err) {
-          return _respond({
-            success: false,
-            error: err.message,
-            message: 'Cache system error'
-          });
-        }
-      }
 
       // === AUTHENTICATION ROUTES ===
       if (action === 'login') {
@@ -300,51 +278,6 @@
         return _respond(getExams(e.parameter));
       }
       
-      if (action === 'debugExamsSheet') {
-        // Debug endpoint to check Exams sheet state
-        try {
-          const sh = _getSheet('Exams');
-          const headers = _headers(sh);
-          const rows = _rows(sh);
-          return _respond({
-            sheetExists: true,
-            sheetName: sh.getName(),
-            lastRow: sh.getLastRow(),
-            lastColumn: sh.getLastColumn(),
-            headers: headers,
-            rowCount: rows.length,
-            sampleData: rows.slice(0, 3) // First 3 rows
-          });
-        } catch (err) {
-          return _respond({ error: err.message, stack: err.stack });
-        }
-      }
-      
-      if (action === 'warmCache') {
-        // Warm up caches to improve initial load performance
-        try {
-          appLog('INFO', 'warmCache', 'Starting cache warming');
-          
-          // Pre-load frequently accessed data
-          getFullTimetable();
-          getExams({});
-          
-          appLog('INFO', 'warmCache', 'Cache warming complete');
-          return _respond({ success: true, message: 'Cache warmed successfully' });
-        } catch (err) {
-          return _respond({ error: err.message });
-        }
-      }
-      
-      if (action === 'clearCache') {
-        // Super Admin only
-        const email = (e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ error: 'Permission denied. Super Admin access required.' });
-        }
-        return _respond(clearAllCache());
-      }
-      
       if (action === 'getExamMarks') {
         const examId = e.parameter.examId || '';
         return _respond(getExamMarks(examId));
@@ -400,13 +333,6 @@
       if (action === 'getStudents') {
         const cls = e.parameter.class || '';
         return _respond(getStudents(cls));
-      }
-      
-      if (action === 'getStudentsBatch') {
-        // PERFORMANCE: Batch fetch students for multiple classes
-        const classesParam = e.parameter.classes || '';
-        const classes = classesParam.split(',').map(c => c.trim()).filter(Boolean);
-        return _respond(getStudentsBatch(classes));
       }
       
       if (action === 'getStudentReportCard') {
@@ -870,26 +796,6 @@
       // === EXAM ROUTES ===
       if (action === 'createExam') {
         return _respond(createExam(data));
-      }
-      
-      if (action === 'debugExamsSheet') {
-        // Debug endpoint to check Exams sheet state
-        try {
-          const sh = _getSheet('Exams');
-          const headers = _headers(sh);
-          const rows = _rows(sh);
-          return _respond({
-            sheetExists: true,
-            sheetName: sh.getName(),
-            lastRow: sh.getLastRow(),
-            lastColumn: sh.getLastColumn(),
-            headers: headers,
-            rowCount: rows.length,
-            sampleData: rows.slice(0, 3) // First 3 rows
-          });
-        } catch (err) {
-          return _respond({ error: err.message, stack: err.stack });
-        }
       }
       
       if (action === 'createBulkExams') {
@@ -2263,29 +2169,16 @@
         return _respond({ error: 'Email required' });
       }
       
-      // Cache key based on email
-      const cacheKey = `teacher_schemes_${email.toLowerCase()}`;
+      const sh = _getSheet('Schemes');
+      const headers = _headers(sh);
+      const schemes = _rows(sh).map(row => _indexByHeader(row, headers))
+        .filter(scheme => (scheme.teacherEmail || '').toLowerCase() === email.toLowerCase());
       
-      // Try to get from cache (MEDIUM TTL - 5 minutes)
-      const cached = getCachedData(cacheKey, () => _fetchTeacherSchemes(email), CACHE_TTL.MEDIUM);
-      
-      return _respond(cached);
+      return _respond(schemes);
     } catch (error) {
       Logger.log('Error getting teacher schemes: ' + error.message);
       return _respond({ error: error.message });
     }
-  }
-  
-  /**
-   * Fetch teacher schemes from sheet (private helper for caching)
-   */
-  function _fetchTeacherSchemes(email) {
-    const sh = _getSheet('Schemes');
-    const headers = _headers(sh);
-    const schemes = _rows(sh).map(row => _indexByHeader(row, headers))
-      .filter(scheme => (scheme.teacherEmail || '').toLowerCase() === email.toLowerCase());
-    
-    return schemes;
   }
 
   /**
@@ -2299,63 +2192,44 @@
         return _respond({ error: 'Email required' });
       }
       
-      // Build cache key including filters
-      const filters = [
-        params.subject || '',
-        params.class || '',
-        params.status || '',
-        params.search || ''
-      ].join('_').toLowerCase();
-      const cacheKey = `teacher_lessonplans_${email.toLowerCase()}_${filters}`;
+      const sh = _getSheet('LessonPlans');
+      const headers = _headers(sh);
+      let lessonPlans = _rows(sh).map(row => _indexByHeader(row, headers))
+        .filter(plan => (plan.teacherEmail || '').toLowerCase() === email.toLowerCase());
       
-      // Try to get from cache (MEDIUM TTL - 5 minutes)
-      const cached = getCachedData(cacheKey, () => _fetchTeacherLessonPlans(email, params), CACHE_TTL.MEDIUM);
+      // Apply optional filters
+      if (params.subject && params.subject.trim()) {
+        lessonPlans = lessonPlans.filter(plan => 
+          (plan.subject || '').toLowerCase() === params.subject.toLowerCase()
+        );
+      }
       
-      return _respond(cached);
+      if (params.class && params.class.trim()) {
+        lessonPlans = lessonPlans.filter(plan => 
+          (plan.class || '').toLowerCase() === params.class.toLowerCase()
+        );
+      }
+      
+      if (params.status && params.status.trim()) {
+        lessonPlans = lessonPlans.filter(plan => 
+          (plan.status || '').toLowerCase() === params.status.toLowerCase()
+        );
+      }
+      
+      if (params.search && params.search.trim()) {
+        const searchLower = params.search.toLowerCase();
+        lessonPlans = lessonPlans.filter(plan =>
+          (plan.chapter || '').toLowerCase().includes(searchLower) ||
+          (plan.subject || '').toLowerCase().includes(searchLower) ||
+          (plan.class || '').toLowerCase().includes(searchLower)
+        );
+      }
+      
+      return _respond(lessonPlans);
     } catch (error) {
       Logger.log('Error getting teacher lesson plans: ' + error.message);
       return _respond({ error: error.message });
     }
-  }
-  
-  /**
-   * Fetch teacher lesson plans from sheet (private helper for caching)
-   */
-  function _fetchTeacherLessonPlans(email, params) {
-    const sh = _getSheet('LessonPlans');
-    const headers = _headers(sh);
-    let lessonPlans = _rows(sh).map(row => _indexByHeader(row, headers))
-      .filter(plan => (plan.teacherEmail || '').toLowerCase() === email.toLowerCase());
-    
-    // Apply optional filters
-    if (params.subject && params.subject.trim()) {
-      lessonPlans = lessonPlans.filter(plan => 
-        (plan.subject || '').toLowerCase() === params.subject.toLowerCase()
-      );
-    }
-    
-    if (params.class && params.class.trim()) {
-      lessonPlans = lessonPlans.filter(plan => 
-        (plan.class || '').toLowerCase() === params.class.toLowerCase()
-      );
-    }
-    
-    if (params.status && params.status.trim()) {
-      lessonPlans = lessonPlans.filter(plan => 
-        (plan.status || '').toLowerCase() === params.status.toLowerCase()
-      );
-    }
-    
-    if (params.search && params.search.trim()) {
-      const searchLower = params.search.toLowerCase();
-      lessonPlans = lessonPlans.filter(plan =>
-        (plan.chapter || '').toLowerCase().includes(searchLower) ||
-        (plan.subject || '').toLowerCase().includes(searchLower) ||
-        (plan.class || '').toLowerCase().includes(searchLower)
-      );
-    }
-    
-    return lessonPlans;
   }
 
   /**
@@ -2649,72 +2523,59 @@
       }
       
       const queryDate = _normalizeQueryDate(date);
-      
-      // PERFORMANCE: Cache with SHORT TTL - lesson plans can change
-      const cacheKey = 'planned_lessons_' + email + '_' + queryDate;
-      return _respond(getCachedData(cacheKey, function() {
-        return _fetchPlannedLessonsForDate(email, queryDate);
-      }, CACHE_TTL.SHORT));
-      
-    } catch (error) {
-      Logger.log('[BATCH] Error: ' + error.message);
-      return _respond({ success: false, error: error.message });
-    }
-  }
-  
-  function _fetchPlannedLessonsForDate(email, queryDate) {
-    // Block lesson planning on non-teaching days (exams/holidays/events) from AcademicCalendar
-    // Check if queryDate falls within any ExamsHolidaysEventsStart to ExamsHolidaysEventsEnd range
-    let isNonTeachingDay = false;
-    let nonTeachingReason = '';
-    try {
-      const calendarData = _getCachedSheetData('AcademicCalendar');
-      const rows = calendarData && calendarData.data ? calendarData.data : [];
-      const qd = queryDate; // already ISO yyyy-MM-dd in IST
 
-      for (let i = 0; i < rows.length && !isNonTeachingDay; i++) {
-        const r = rows[i] || {};
-        
-        // Check if date falls within ExamsHolidaysEventsStart to ExamsHolidaysEventsEnd range
-        const blockStart = r.ExamsHolidaysEventsStart ? _isoDateIST(_coerceToDate(r.ExamsHolidaysEventsStart)) : null;
-        const blockEnd = r.ExamsHolidaysEventsEnd ? _isoDateIST(_coerceToDate(r.ExamsHolidaysEventsEnd)) : null;
-        
-        if (blockStart && blockEnd && qd >= blockStart && qd <= blockEnd) {
-          isNonTeachingDay = true;
-          nonTeachingReason = 'Blocked Period (Exam/Holiday/Event)';
-          break;
+      // Block lesson planning on non-teaching days (exams/holidays/events) from AcademicCalendar
+      // Check if queryDate falls within any ExamsHolidaysEventsStart to ExamsHolidaysEventsEnd range
+      let isNonTeachingDay = false;
+      let nonTeachingReason = '';
+      try {
+        const calendarData = _getCachedSheetData('AcademicCalendar');
+        const rows = calendarData && calendarData.data ? calendarData.data : [];
+        const qd = queryDate; // already ISO yyyy-MM-dd in IST
+
+        for (let i = 0; i < rows.length && !isNonTeachingDay; i++) {
+          const r = rows[i] || {};
+          
+          // Check if date falls within ExamsHolidaysEventsStart to ExamsHolidaysEventsEnd range
+          const blockStart = r.ExamsHolidaysEventsStart ? _isoDateIST(_coerceToDate(r.ExamsHolidaysEventsStart)) : null;
+          const blockEnd = r.ExamsHolidaysEventsEnd ? _isoDateIST(_coerceToDate(r.ExamsHolidaysEventsEnd)) : null;
+          
+          if (blockStart && blockEnd && qd >= blockStart && qd <= blockEnd) {
+            isNonTeachingDay = true;
+            nonTeachingReason = 'Blocked Period (Exam/Holiday/Event)';
+            break;
+          }
         }
+      } catch (calErr) {
+        Logger.log(`[BATCH] AcademicCalendar check failed: ${calErr && calErr.message}`);
       }
-    } catch (calErr) {
-      Logger.log(`[BATCH] AcademicCalendar check failed: ${calErr && calErr.message}`);
-    }
 
-    if (isNonTeachingDay) {
-      Logger.log(`[BATCH] ${queryDate} marked as non-teaching (${nonTeachingReason}); blocking lesson plans.`);
-      return {
-        success: true,
-        email: email,
-        date: queryDate,
-        isNonTeachingDay: true,
-        reason: nonTeachingReason,
-        lessonsByPeriod: {},
-        count: 0
-      };
-    }
-    
-    // Get all lesson plans for this date
-    const sh = _getSheet('LessonPlans');
-    const headers = _headers(sh);
-    const allLessonPlans = _rows(sh).map(row => _indexByHeader(row, headers));
-    
-    Logger.log(`[BATCH] Total lesson plans in sheet: ${allLessonPlans.length}`);
-    
-    // Filter for Ready status and matching date
-    const matchingPlans = allLessonPlans.filter(plan => {
-      let selectedDateVal = plan.selectedDate || plan.date;
+      if (isNonTeachingDay) {
+        Logger.log(`[BATCH] ${queryDate} marked as non-teaching (${nonTeachingReason}); blocking lesson plans.`);
+        return _respond({
+          success: true,
+          email: email,
+          date: queryDate,
+          isNonTeachingDay: true,
+          reason: nonTeachingReason,
+          lessonsByPeriod: {},
+          count: 0
+        });
+      }
       
-      // FALLBACK: Parse date from uniqueKey if selectedDate is missing
-      // uniqueKey format: "email|YYYY-MM-DD|period"
+      // Get all lesson plans for this date
+      const sh = _getSheet('LessonPlans');
+      const headers = _headers(sh);
+      const allLessonPlans = _rows(sh).map(row => _indexByHeader(row, headers));
+      
+      Logger.log(`[BATCH] Total lesson plans in sheet: ${allLessonPlans.length}`);
+      
+      // Filter for Ready status and matching date
+      const matchingPlans = allLessonPlans.filter(plan => {
+        let selectedDateVal = plan.selectedDate || plan.date;
+        
+        // FALLBACK: Parse date from uniqueKey if selectedDate is missing
+        // uniqueKey format: "email|YYYY-MM-DD|period"
         if (!selectedDateVal && plan.uniqueKey) {
           const parts = String(plan.uniqueKey).split('|');
           if (parts.length >= 2) {
@@ -2771,12 +2632,20 @@
         Logger.log(`[BATCH] Mapped lesson ${plan.lpId} to ${periodKey}`);
       });
       
-    return {
-      success: true,
-      date: queryDate,
-      lessonsByPeriod: lessonsByPeriod,
-      totalPlans: matchingPlans.length
-    };
+      return _respond({
+        success: true,
+        date: queryDate,
+        lessonsByPeriod: lessonsByPeriod,
+        totalPlans: matchingPlans.length
+      });
+      
+    } catch (error) {
+      Logger.log(`[BATCH] Error getting planned lessons: ${error.message}`);
+      return _respond({ 
+        success: false, 
+        error: error.message 
+      });
+    }
   }
 
   function _handleGetPlannedLessonForPeriod(params) {
@@ -2904,62 +2773,54 @@
       const email = (params.email || '').toLowerCase().trim();
       const date = params.date || _todayISO();
       
-      // PERFORMANCE: Cache with SHORT TTL - reports change during the day
-      const cacheKey = 'teacher_reports_' + email + '_' + date;
-      return _respond(getCachedData(cacheKey, function() {
-        return _fetchTeacherDailyReportsForDate(email, date);
-      }, CACHE_TTL.SHORT));
+      Logger.log(`=== GETTING TEACHER DAILY REPORTS ===`);
+      Logger.log(`Email: ${email}, Date: ${date}`);
+      
+      if (!email) {
+        Logger.log('ERROR: Teacher email is required');
+        return _respond({ success: false, error: 'Teacher email is required' });
+      }
+      
+      // Get daily reports for this teacher and date
+      const drSh = _getSheet('DailyReports');
+      const drHeaders = _headers(drSh);
+      const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
+      
+      Logger.log(`Total reports in sheet: ${allReports.length}`);
+      
+      const reports = allReports.filter(report => {
+        // Skip invalid reports
+        if (!report || !report.date || !report.teacherEmail) return false;
+        
+        // Use IST helper to normalize report date - handles Date objects, strings, numbers
+        const reportDate = _isoDateIST(report.date);
+        
+        const reportEmail = String(report.teacherEmail || '').toLowerCase().trim();
+        const queryDate = _normalizeQueryDate(date);  // Use helper to normalize query date
+        const dateMatch = reportDate === queryDate;
+        const emailMatch = reportEmail === email;
+        
+        if (emailMatch) {
+          Logger.log(`Report for ${reportEmail} on ${reportDate} (type: ${typeof report.date}): dateMatch=${dateMatch}, emailMatch=${emailMatch}, queryDate=${queryDate}`);
+        }
+        
+        return dateMatch && emailMatch;
+      }).map(report => ({
+        ...report,
+        status: 'Submitted'  // Add status field so frontend knows this report is submitted
+      }));
+      
+      Logger.log(`=== RETURNING ${reports.length} REPORTS FOR ${email} ON ${date} ===`);
+      if (reports.length > 0) {
+        Logger.log(`Sample report: ${JSON.stringify(reports[0])}`);
+      }
+      
+      return _respond(reports);
       
     } catch (error) {
       Logger.log('Error getting teacher daily reports: ' + error.message);
       return _respond({ success: false, error: error.message });
     }
-  }
-  
-  function _fetchTeacherDailyReportsForDate(email, date) {
-    Logger.log(`=== GETTING TEACHER DAILY REPORTS ===`);
-    Logger.log(`Email: ${email}, Date: ${date}`);
-    
-    if (!email) {
-      Logger.log('ERROR: Teacher email is required');
-      return { success: false, error: 'Teacher email is required' };
-    }
-    
-    // Get daily reports for this teacher and date
-    const drSh = _getSheet('DailyReports');
-    const drHeaders = _headers(drSh);
-    const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
-    
-    Logger.log(`Total reports in sheet: ${allReports.length}`);
-    
-    const reports = allReports.filter(report => {
-      // Skip invalid reports
-      if (!report || !report.date || !report.teacherEmail) return false;
-      
-      // Use IST helper to normalize report date - handles Date objects, strings, numbers
-      const reportDate = _isoDateIST(report.date);
-      
-      const reportEmail = String(report.teacherEmail || '').toLowerCase().trim();
-      const queryDate = _normalizeQueryDate(date);  // Use helper to normalize query date
-      const dateMatch = reportDate === queryDate;
-      const emailMatch = reportEmail === email;
-      
-      if (emailMatch) {
-        Logger.log(`Report for ${reportEmail} on ${reportDate} (type: ${typeof report.date}): dateMatch=${dateMatch}, emailMatch=${emailMatch}, queryDate=${queryDate}`);
-      }
-      
-      return dateMatch && emailMatch;
-    }).map(report => ({
-      ...report,
-      status: 'Submitted'  // Add status field so frontend knows this report is submitted
-    }));
-    
-    Logger.log(`=== RETURNING ${reports.length} REPORTS FOR ${email} ON ${date} ===`);
-    if (reports.length > 0) {
-      Logger.log(`Sample report: ${JSON.stringify(reports[0])}`);
-    }
-    
-    return reports;
   }
 
   /**
@@ -6392,13 +6253,6 @@
    * @returns {Object} - List of periods without lesson plans
    */
   function getMissingLessonPlans(teacherEmail, daysAhead = 7) {
-    const cacheKey = generateCacheKey('missing_plans', { email: teacherEmail, days: daysAhead });
-    return getCachedData(cacheKey, function() {
-      return _fetchMissingLessonPlans(teacherEmail, daysAhead);
-    }, CACHE_TTL.SHORT);
-  }
-
-  function _fetchMissingLessonPlans(teacherEmail, daysAhead) {
     try {
       Logger.log(`Getting missing lesson plans for ${teacherEmail}, ${daysAhead} days ahead`);
       
@@ -6567,21 +6421,6 @@
    * @returns {Array} - Filtered daily reports
    */
   function getDailyReports(teacher = '', fromDate = '', toDate = '', cls = '', subject = '') {
-    // Cache daily reports for 1 minute
-    const cacheKey = generateCacheKey('daily_reports', {
-      teacher: teacher,
-      fromDate: fromDate,
-      toDate: toDate,
-      class: cls,
-      subject: subject
-    });
-    
-    return getCachedData(cacheKey, function() {
-      return _fetchDailyReports(teacher, fromDate, toDate, cls, subject);
-    }, CACHE_TTL.SHORT);
-  }
-  
-  function _fetchDailyReports(teacher = '', fromDate = '', toDate = '', cls = '', subject = '') {
     try {
       Logger.log(`getDailyReports: teacher=${teacher}, fromDate=${fromDate}, toDate=${toDate}, class=${cls}, subject=${subject}`);
       
