@@ -1,5 +1,5 @@
 // src/components/SubstitutionModule.jsx
-import { Plus, Calendar, User, RefreshCw, Monitor } from 'lucide-react';
+import { Plus, Calendar, User, RefreshCw, Monitor, Share2 } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import * as api from '../api';
 import { useTheme } from '../contexts/ThemeContext';
@@ -93,6 +93,58 @@ export default function SubstitutionModule() {
     } finally {
       setRefreshing(false);
     }
+  }
+  
+  // Generate WhatsApp message with today's substitutions
+  function shareToWhatsApp() {
+    if (substitutions.length === 0) {
+      alert('No substitutions to share for this date');
+      return;
+    }
+    
+    // Format substitutions into a readable message
+    const formattedDate = new Date(date).toLocaleDateString('en-IN', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+    
+    let message = `📋 *Substitution Schedule*\n📅 ${formattedDate}\n\n`;
+    
+    // Group by period
+    const byPeriod = {};
+    substitutions.forEach(sub => {
+      if (!byPeriod[sub.period]) {
+        byPeriod[sub.period] = [];
+      }
+      byPeriod[sub.period].push(sub);
+    });
+    
+    // Sort periods
+    const sortedPeriods = Object.keys(byPeriod).sort((a, b) => Number(a) - Number(b));
+    
+    sortedPeriods.forEach(period => {
+      message += `⏰ *Period ${period}*\n`;
+      byPeriod[period].forEach(sub => {
+        message += `• ${sub.class} - ${sub.substituteSubject || sub.regularSubject}\n`;
+        message += `  👤 ${sub.substituteTeacher}\n`;
+        if (sub.note) {
+          message += `  📝 ${sub.note}\n`;
+        }
+      });
+      message += `\n`;
+    });
+    
+    message += `_Total Substitutions: ${substitutions.length}_\n`;
+    message += `\n✅ *Please check your schedule and arrive 5 minutes early*`;
+    
+    // Encode message for WhatsApp
+    const encodedMessage = encodeURIComponent(message);
+    const whatsappUrl = `https://wa.me/?text=${encodedMessage}`;
+    
+    // Open WhatsApp
+    window.open(whatsappUrl, '_blank');
   }
   
   // Fetch substitutions for the date when component loads (even without absent teacher selected)
@@ -384,9 +436,19 @@ export default function SubstitutionModule() {
   
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <h1 className={`text-2xl font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'} transition-colors duration-300`}>Substitutions</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          <button 
+            onClick={shareToWhatsApp}
+            className="bg-green-600 dark:bg-green-700 text-white rounded-lg px-4 py-2 flex items-center hover:bg-green-700 dark:hover:bg-green-800 transition-colors duration-300 btn-animate shadow-lg font-semibold"
+            title="Share substitutions via WhatsApp"
+            disabled={substitutions.length === 0}
+            style={{ minWidth: '160px' }}
+          >
+            <Share2 className="h-5 w-5 mr-2" />
+            Share WhatsApp
+          </button>
           <button 
             onClick={handleRefresh}
             className="bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 flex items-center hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-300 btn-animate"

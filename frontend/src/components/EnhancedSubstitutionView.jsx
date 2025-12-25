@@ -1,4 +1,4 @@
-import { Calendar, RefreshCw, UserPlus, FileText, FileSpreadsheet, Eye, EyeOff, Monitor } from 'lucide-react';
+import { Calendar, RefreshCw, UserPlus, FileText, FileSpreadsheet, Eye, EyeOff, Monitor, Share2 } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as api from '../api';
 import { useNotifications } from '../contexts/NotificationContext';
@@ -277,6 +277,58 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
     await fetchTimetableData();
     await fetchSubstitutionData();
   }, [selectedDate]);
+
+  // Share substitutions to WhatsApp
+  const shareToWhatsApp = () => {
+    if (substitutionData.length === 0) {
+      alert('No substitutions to share for this date');
+      return;
+    }
+    
+    // Format substitutions into a readable message
+    const formattedDate = new Date(selectedDate).toLocaleDateString('en-IN', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+    
+    let message = `📋 *Substitution Schedule*\n📅 ${formattedDate}\n\n`;
+    
+    // Group by period
+    const byPeriod = {};
+    substitutionData.forEach(sub => {
+      if (!byPeriod[sub.period]) {
+        byPeriod[sub.period] = [];
+      }
+      byPeriod[sub.period].push(sub);
+    });
+    
+    // Sort periods
+    const sortedPeriods = Object.keys(byPeriod).sort((a, b) => Number(a) - Number(b));
+    
+    sortedPeriods.forEach(period => {
+      message += `⏰ *Period ${period}*\n`;
+      byPeriod[period].forEach(sub => {
+        message += `• ${sub.class} - ${sub.substituteSubject || sub.regularSubject}\n`;
+        message += `  👤 ${sub.substituteTeacher}\n`;
+        if (sub.note) {
+          message += `  📝 ${sub.note}\n`;
+        }
+      });
+      message += `\n`;
+    });
+    
+    message += `_Total Substitutions: ${substitutionData.length}_\n`;
+    message += `\n✅ *Please check your schedule and arrive 5 minutes early*`;
+    
+    // Encode message for WhatsApp
+    const encodedMessage = encodeURIComponent(message);
+    const whatsappUrl = `https://wa.me/?text=${encodedMessage}`;
+    
+    // Open WhatsApp
+    window.open(whatsappUrl, '_blank');
+  };
 
   // We now receive periodTimes from props, so we don't need to fetch them
 
@@ -664,6 +716,15 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
           Substitution Management
         </h2>
         <div className="flex gap-2">
+          <button
+            onClick={shareToWhatsApp}
+            disabled={substitutionData.length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-semibold shadow-lg"
+            title="Share substitutions via WhatsApp"
+          >
+            <Share2 className="w-5 h-5" />
+            Share WhatsApp
+          </button>
           <button
             onClick={refreshAllData}
             disabled={loading}
