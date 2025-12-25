@@ -8,6 +8,13 @@
  * Get a teacher's weekly timetable (7 days starting from today)
  */
 function getTeacherWeeklyTimetable(identifier) {
+  // Cache with LONG TTL - timetable structure rarely changes
+  return getCachedData('teacher_weekly_' + String(identifier).toLowerCase(), function() {
+    return _fetchTeacherWeeklyTimetable(identifier);
+  }, CACHE_TTL.LONG);
+}
+
+function _fetchTeacherWeeklyTimetable(identifier) {
   // Create array of next 7 days
   const TZ = 'Asia/Kolkata';
   const days = [];
@@ -59,6 +66,15 @@ function getTeacherWeeklyTimetable(identifier) {
  * - Substitution periods where they're the substitute teacher
  */
 function getTeacherDailyTimetable(identifier, date) {
+  // Cache with SHORT TTL - includes substitutions which can change during the day
+  const normalizedDate = _isoDateString(date);
+  const cacheKey = 'teacher_daily_' + String(identifier).toLowerCase() + '_' + normalizedDate;
+  return getCachedData(cacheKey, function() {
+    return _fetchTeacherDailyTimetable(identifier, date);
+  }, CACHE_TTL.SHORT);
+}
+
+function _fetchTeacherDailyTimetable(identifier, date) {
   const normalizedDate = _isoDateString(date);
   const dayName = _dayName(normalizedDate);
   const idLower = identifier.toLowerCase();
@@ -146,6 +162,15 @@ function getTeacherDailyTimetable(identifier, date) {
  */
 function getDailyTimetableWithSubstitutions(date) {
   const normalizedDate = _isoDateString(date);
+  
+  // PERFORMANCE: Cache with SHORT TTL - substitutions change during the day
+  const cacheKey = 'daily_timetable_' + normalizedDate;
+  return getCachedData(cacheKey, function() {
+    return _fetchDailyTimetableWithSubstitutions(normalizedDate);
+  }, CACHE_TTL.SHORT);
+}
+
+function _fetchDailyTimetableWithSubstitutions(normalizedDate) {
   const dayName = _dayName(normalizedDate);
   
   Logger.log(`[getDailyTimetableWithSubstitutions] Date: ${normalizedDate}, DayName: ${dayName}`);
@@ -472,6 +497,13 @@ function getAvailableTeachers(date, period) {
  * Sheet columns: class, dayOfWeek, period, subject, teacherEmail, teacherName
  */
 function getFullTimetable() {
+  // Use cached timetable data (15 minute TTL - rarely changes)
+  return getCachedData('timetable_full', function() {
+    return _fetchFullTimetable();
+  }, CACHE_TTL.LONG);
+}
+
+function _fetchFullTimetable() {
   const sh = _getSheet('Timetable');
   const headers = _headers(sh);
   const timetable = _rows(sh).map(r => _indexByHeader(r, headers));

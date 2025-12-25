@@ -81,6 +81,8 @@ const AdminDataEditor = lazy(() => import('./components/AdminDataEditor'));
 
 // Keep lightweight components as regular imports
 import { periodToTimeString, todayIST, formatDateForInput, formatLocalDate } from './utils/dateUtils';
+import PerformanceDebugger from './components/PerformanceDebugger';
+import { warmupCache, warmupBackendCache } from './utils/cacheWarmup';
 // moved 'lucide-react' import above to satisfy import ordering
 
 // Common utility functions to avoid duplication
@@ -445,6 +447,12 @@ const App = () => {
   // Prefetch common data when user logs in
   useEffect(() => {
     if (user) {
+      // Warm up backend cache first
+      warmupBackendCache();
+      
+      // Then warm up frontend cache based on user role
+      warmupCache(user);
+      
       // Prefetch common data in parallel to warm up cache - with error handling
       Promise.all([
         api.getAllClasses().catch((err) => { console.warn('Failed to prefetch classes:', err); return []; }),
@@ -577,101 +585,8 @@ const App = () => {
     shownNotificationIdsRef.current = shownNotificationIds;
   }, [shownNotificationIds]);
   
-  // Load substitution notifications for current user and add to NotificationCenter
-  const loadSubstitutionNotifications = useCallback(async () => {
-    if (!user?.email) return;
-    
-    try {
-      const response = await api.getSubstitutionNotifications(user.email);
-      
-      let notificationsList = [];
-      
-      // Handle different response formats
-      if (Array.isArray(response)) {
-        notificationsList = response;
-      } else if (response && response.notifications) {
-        notificationsList = response.notifications;
-      } else if (response && Array.isArray(response.data)) {
-        notificationsList = response.data;
-      }
-      
-      // Store for teacher dashboard display
-      setSubstitutionNotifications(notificationsList);
-      
-    // Add unacknowledged notifications to NotificationCenter (only if not already shown)
-    notificationsList.forEach(notification => {
-      const isUnacknowledged = String(notification.acknowledged || '').toLowerCase() !== 'true';
-      const notAlreadyShown = !shownNotificationIdsRef.current.has(notification.id);
-      
-      if (isUnacknowledged && notAlreadyShown) {
-        // Parse the notification data
-        let notifData = {};
-        try {
-          notifData = JSON.parse(notification.data || '{}');
-        } catch (e) {
-          console.warn('Failed to parse notification data:', e);
-        }
-        
-        // Add to notification center
-        info(
-          notification.title || 'Substitution Assignment',
-          notification.message || `Period ${notifData.period} - Class ${notifData.class}`,
-          {
-            autoClose: false, // Don't auto-close substitution notifications
-            actions: [
-              {
-                label: 'Acknowledge',
-                handler: () => acknowledgeNotification(notification.id)
-              }
-            ],
-            metadata: {
-              type: 'substitution',
-              notificationId: notification.id,
-              ...notifData
-            }
-          }
-        );
-        
-        // Mark as shown (guarded so we don't trigger extra renders for same id)
-        setShownNotificationIds(prev => {
-          if (prev.has(notification.id)) return prev;
-          const next = new Set(prev);
-          next.add(notification.id);
-          return next;
-        });
-      }
-    });
-    
-  } catch (error) {
-    console.error('Error loading substitution notifications:', error);
-  }
-}, [user?.email, info]);  const acknowledgeNotification = useCallback(async (notificationId) => {
-    try {
-      await api.acknowledgeSubstitutionNotification(user.email, notificationId);
-      success('Acknowledged', 'Substitution assignment acknowledged successfully');
-      
-      // Remove from state
-      setSubstitutionNotifications(prev => 
-        prev.filter(n => n.id !== notificationId)
-      );
-      
-      // Reload to refresh data
-      loadSubstitutionNotifications();
-    } catch (error) {
-      console.error('Error acknowledging notification:', error);
-      error('Error', 'Failed to acknowledge notification');
-    }
-  }, [user?.email, success, error, loadSubstitutionNotifications]);
-  
-  // Poll for substitution notifications
-  useEffect(() => {
-    if (user?.email) {
-      loadSubstitutionNotifications();
-      // Poll for new notifications every 2 minutes
-      const interval = setInterval(loadSubstitutionNotifications, 2 * 60 * 1000);
-      return () => clearInterval(interval);
-    }
-  }, [user?.email, loadSubstitutionNotifications]);
+  // REMOVED: Substitution notification polling - replaced with WhatsApp PDF sharing by HM
+  // Teachers now receive daily substitution PDF via WhatsApp group instead of individual notifications
   
   // Dashboard component
   const Dashboard = ({ 
@@ -809,190 +724,16 @@ const App = () => {
             let classStudentCounts = {};
             let studentsAboveAverage = 0;
             let studentsNeedFocus = 0;
-            let classPerformance = {};
-            
             if (hasRole('class teacher') && teachingClasses.length > 0) {
               try {
-                if (import.meta?.env?.DEV) {
-                  console.log('📊 Dashboard: fetching class performance for classes:', teachingClasses);
-                }
-                // Fetch students for each class and store count per class
-                const studentPromises = teachingClasses.map(cls => api.getStudents(stripStdPrefix(cls)));
-                const studentsPerClass = await Promise.all(studentPromises);
-                teachingClasses.forEach((cls, idx) => {
-                  const students = studentsPerClass[idx];
+                // PERFORMANCE: Batch fetch students for all classes in ONE API call
+                const studentsBatch = await api.getStudentsBatch(teachingClasses);
+                teachingClasses.forEach((cls) => {
+                  const students = studentsBatch[cls] || [];
                   const count = Array.isArray(students) ? students.length : 0;
-                  // Store under both raw and stripped keys to avoid lookup mismatches elsewhere
                   classStudentCounts[cls] = count;
                   classStudentCounts[stripStdPrefix(cls)] = count;
                 });
-                
-                // Calculate academic performance for class teacher's classes
-                try {
-                  // Initialize classPerformance with all teaching classes (even without marks)
-                  // Use normalized keys to avoid mismatch when exams return different class format
-                  teachingClasses.forEach(className => {
-                    const normKey = normClassKey(className);
-                    if (!classPerformance[normKey]) {
-                      classPerformance[normKey] = {
-                        aboveAverage: 0,
-                        needFocus: 0,
-                        avgPercentage: 0,
-                        totalStudents: classStudentCounts[className] || 0,
-                        studentsWithMarks: 0,
-                        displayName: className // Store original for display
-                      };
-                    }
-                  });
-                  
-                  // IMPORTANT: Class-wise performance should consider *all* exams for the class teacher's classes,
-                  // and pick the newest exam that actually has marks entered.
-                  // This avoids getting stuck on newer exams with no marks for some classes (e.g., 6A/7A).
-                  const examsArray = [];
-                  const allMarksArrays = [];
-
-                  const perClassData = await Promise.all(
-                    teachingClasses.map(async (cls) => {
-                      const [exams, status] = await Promise.all([
-                        api.getExams({ class: cls, _ts: Date.now() }).catch(() => []),
-                        api.getExamMarksEntryStatusAll({ class: cls, limit: 200 }).catch(() => ({ success: false, exams: [] }))
-                      ]);
-                      return {
-                        cls,
-                        exams: Array.isArray(exams) ? exams : [],
-                        statusRows: status && Array.isArray(status.exams) ? status.exams : []
-                      };
-                    })
-                  );
-
-                  for (const item of perClassData) {
-                    const normCls = normClassKey(item.cls);
-                    const statusById = {};
-                    (item.statusRows || []).forEach(r => {
-                      if (r && r.examId) statusById[String(r.examId)] = r;
-                    });
-
-                    const sortedExams = (item.exams || [])
-                      .filter(ex => normClassKey(ex?.class) === normCls)
-                      .slice()
-                      .sort((a, b) => {
-                        const da = new Date(a?.date || a?.createdAt || 0);
-                        const db = new Date(b?.date || b?.createdAt || 0);
-                        const ta = isNaN(da.getTime()) ? -Infinity : da.getTime();
-                        const tb = isNaN(db.getTime()) ? -Infinity : db.getTime();
-                        return tb - ta;
-                      });
-
-                    const chosenExam = sortedExams.find(ex => Number(statusById[String(ex.examId)]?.enteredCount || 0) > 0) || null;
-                    if (!chosenExam) {
-                      if (import.meta?.env?.DEV) {
-                        console.log('📊 No marks yet for class:', item.cls, {
-                          exams: sortedExams.length,
-                          statusRows: (item.statusRows || []).length
-                        });
-                      }
-                      continue;
-                    }
-
-                    const chosenMarks = await api.getExamMarks(chosenExam.examId).catch(() => []);
-                    examsArray.push(chosenExam);
-                    allMarksArrays.push(Array.isArray(chosenMarks) ? chosenMarks : []);
-                  }
-                    
-                  if (examsArray.length > 0) {
-                    // Build performance data per class
-                    // Use the outer classPerformance variable instead of declaring new one
-                    let totalAboveAverage = 0;
-                    let totalNeedFocus = 0;
-                    
-                    examsArray.forEach((exam, idx) => {
-                      const marks = allMarksArrays[idx];
-                      const className = exam.class;
-                      const normKey = normClassKey(className);
-                      
-                      if (Array.isArray(marks) && marks.length > 0) {
-                        const studentMarks = [];
-                        let skippedMarks = 0;
-                        
-                        // Filter marks to only include students from this specific class
-                        marks.forEach(mark => {
-                          // Skip marks that don't match this class (normalize both for comparison)
-                          if (mark.class && normClassKey(mark.class) !== normKey) {
-                            skippedMarks++;
-                            return;
-                          }
-                          
-                          const totalVal = (mark && (mark.total ?? mark.Total)) ?? '';
-                          const ceVal = (mark && (mark.ce ?? mark.CE)) ?? '';
-                          const teVal = (mark && (mark.te ?? mark.TE)) ?? '';
-
-                          if (mark && (totalVal != null || ceVal != null || teVal != null)) {
-                            // Calculate total from ce + te if total not present
-                            const totalNum = Number(totalVal);
-                            const ceNum = Number(ceVal || 0);
-                            const teNum = Number(teVal || 0);
-                            const total = (Number.isFinite(totalNum) && String(totalVal).trim() !== '') ? totalNum : (ceNum + teNum);
-
-                            const totalMaxNum = Number(exam?.totalMax);
-                            const max = (Number.isFinite(totalMaxNum) && totalMaxNum > 0)
-                              ? totalMaxNum
-                              : ((Number(exam?.internalMax) || 0) + (Number(exam?.externalMax) || 0) || 100);
-                            
-                            if (total >= 0 && max > 0) {
-                              studentMarks.push({
-                                total: total,
-                                max: max,
-                                percentage: (total / max) * 100
-                              });
-                            }
-                          }
-                        });
-                        
-                        if (studentMarks.length > 0) {
-                          // Calculate class average
-                          const percentages = studentMarks.map(m => m.percentage);
-                          const avgPercentage = percentages.reduce((sum, p) => sum + p, 0) / percentages.length;
-                          
-                          // Categorize students for this class
-                          const aboveAverage = percentages.filter(p => p >= avgPercentage).length;
-                          const needFocus = percentages.filter(p => p < 50).length;
-                          
-                          // Use actual roster count if available, otherwise exam marks count
-                          const actualTotal = classStudentCounts[className] || studentMarks.length;
-                          
-                          // Store using normalized key for consistent lookup
-                          classPerformance[normKey] = {
-                            aboveAverage,
-                            needFocus,
-                            avgPercentage: Math.round(avgPercentage),
-                            totalStudents: actualTotal,
-                            studentsWithMarks: studentMarks.length,
-                            displayName: className
-                          };
-                          
-                          totalAboveAverage += aboveAverage;
-                          totalNeedFocus += needFocus;
-                        }
-                      }
-                    });
-                    
-                    studentsAboveAverage = totalAboveAverage;
-                    studentsNeedFocus = totalNeedFocus;
-                    
-                    // Debug: show what we stored in classPerformance
-                    if (import.meta?.env?.DEV) {
-                      console.log('📊 Class-wise Performance after processing:', {
-                        keys: Object.keys(classPerformance),
-                        data: classPerformance,
-                        teachingClasses,
-                        totalAboveAverage,
-                        totalNeedFocus
-                      });
-                    }
-                  }
-                } catch (err) {
-                  console.warn('Unable to fetch performance data:', err);
-                }
               } catch (err) {
                 console.warn('Unable to fetch student counts:', err);
               }
@@ -1017,10 +758,8 @@ const App = () => {
               lessonCount: 0,
               teacherCount: 0,
               pendingReports,
-              classStudentCounts,
-              studentsAboveAverage,
-              studentsNeedFocus,
-              classPerformance
+              classStudentCounts
+              // REMOVED: studentsAboveAverage, studentsNeedFocus, classPerformance (exam data)
             }));
           }
         } catch (err) {
@@ -1095,32 +834,9 @@ const App = () => {
                 onClick={() => setActiveView('reports')}
               />
               
-              {hasRole('class teacher') && (
-                <>
-                  <StatsCard
-                    icon={<Award />}
-                    iconColor="green"
-                    title="Above Average"
-                    value={insights.studentsAboveAverage}
-                    subtitle="Performing well"
-                    trend={insights.studentsAboveAverage > 0 ? {
-                      direction: 'up',
-                      value: `${Math.round((insights.studentsAboveAverage / Math.max(1, insights.studentsAboveAverage + insights.studentsNeedFocus)) * 100)}%`,
-                      label: 'of class'
-                    } : undefined}
-                  />
-                  
-                  <StatsCard
-                    icon={<AlertCircle />}
-                    iconColor="orange"
-                    title="Need Focus"
-                    value={insights.studentsNeedFocus}
-                    subtitle="Require attention"
-                    variant="bordered"
-                  />
-                </>
-              )}
+              {/* REMOVED: Exam performance cards - not needed for class teacher dashboard */}
             </div>
+            
             {/* Missing Lesson Plans Alert - Teacher View (moved below stats) */}
             <Suspense fallback={<div className="animate-pulse bg-gray-100 h-32 rounded-lg"></div>}>
               <MissingLessonPlansAlert 
@@ -1170,49 +886,7 @@ const App = () => {
               </div>
             )}
             
-            {/* Class-wise Performance Breakdown - Only for class teachers */}
-            {hasRole('class teacher') && insights.classPerformance && Object.keys(insights.classPerformance).length > 0 && (
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
-                <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Class-wise Performance</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
-                  {Object.entries(insights.classPerformance).map(([normKey, perf]) => (
-                    <div key={normKey} className="border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-lg p-3 md:p-4">
-                      <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">{stripStdPrefix(perf.displayName || normKey)}</h4>
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-600 dark:text-gray-400">Class Average:</span>
-                          <span className="text-sm font-semibold text-blue-600">{Number(perf.studentsWithMarks || 0) === 0 ? '-' : `${perf.avgPercentage}%`}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-600 dark:text-gray-400">Total Students:</span>
-                          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{perf.totalStudents}</span>
-                        </div>
-                        {perf.studentsWithMarks !== undefined && perf.studentsWithMarks !== perf.totalStudents && (
-                          <div className="flex justify-between items-center text-amber-600">
-                            <span className="text-xs">Students with marks:</span>
-                            <span className="text-xs font-semibold">{perf.studentsWithMarks}</span>
-                          </div>
-                        )}
-                        <div className="border-t pt-2 mt-2">
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="text-xs text-emerald-600 flex items-center gap-1">
-                              <Award className="w-3 h-3" /> Above Average
-                            </span>
-                            <span className="text-sm font-bold text-emerald-600">{perf.aboveAverage}</span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-xs text-amber-600 flex items-center gap-1">
-                              <AlertCircle className="w-3 h-3" /> Need Focus
-                            </span>
-                            <span className="text-sm font-bold text-amber-600">{perf.needFocus}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* REMOVED: Class-wise Performance Breakdown - Not needed for dashboard */}
           </div>
         ) : (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6">
@@ -1488,6 +1162,7 @@ const App = () => {
   // Schemes of Work View
   const SchemesView = () => {
     const [schemes, setSchemes] = useState([]);
+    const [loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
     const [editingScheme, setEditingScheme] = useState(null);
     const [deletingScheme, setDeletingScheme] = useState(null);
@@ -1752,6 +1427,7 @@ const App = () => {
     useEffect(() => {
       async function fetchSchemes() {
         try {
+          setLoading(true);
           if (!user) return;
           const list = await api.getTeacherSchemes(user.email);
           // Sort by createdAt descending (latest first)
@@ -1762,7 +1438,9 @@ const App = () => {
           }) : [];
           setSchemes(sorted);
         } catch (err) {
-          console.error(err);
+          console.error('Error fetching schemes:', err);
+        } finally {
+          setLoading(false);
         }
       }
       fetchSchemes();
@@ -1770,6 +1448,12 @@ const App = () => {
 
     return (
       <div className="space-y-6">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
+        ) : (
+          <>
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">Schemes of Work</h1>
           <button
@@ -2206,6 +1890,8 @@ const App = () => {
             </table>
           </div>
         </div>
+        </>
+        )}
       </div>
     );
   };
@@ -2216,6 +1902,7 @@ const App = () => {
     const [lessonPlans, setLessonPlans] = useState([]);
     const [approvedSchemes, setApprovedSchemes] = useState([]);
     const [selectedSlot, setSelectedSlot] = useState(null);
+    const [loading, setLoading] = useState(true);
     const [showPreparationForm, setShowPreparationForm] = useState(false);
     const [deletingPlan, setDeletingPlan] = useState(null);
     const [preparationData, setPreparationData] = useState({
@@ -2309,6 +1996,7 @@ const App = () => {
     useEffect(() => {
       async function fetchData() {
         try {
+          setLoading(true);
           if (!user) return;
           // Weekly timetable for the teacher
           const timetableData = await api.getTeacherWeeklyTimetable(user.email);
@@ -2320,25 +2008,15 @@ const App = () => {
           // Load data silently
           // Fetch all schemes submitted by this teacher and filter to approved
           try {
-            // Use the teacher's own schemes (this was the original working approach)
+            // Use the teacher's own schemes (single API call - removed duplicate)
             const teacherSchemes = await api.getTeacherSchemes(user.email);
             const approved = Array.isArray(teacherSchemes)
               ? teacherSchemes.filter(s => String(s.status || '').toLowerCase() === 'approved')
               : [];
             setApprovedSchemes(approved);
           } catch (err) {
-            console.warn('Error loading approved schemes:', err);
-            // Fall back to teacher's own schemes if getAllApprovedSchemes fails
-            try {
-              const teacherSchemes = await api.getTeacherSchemes(user.email);
-              const approved = Array.isArray(teacherSchemes)
-                ? teacherSchemes.filter(s => String(s.status || '').toLowerCase() === 'approved')
-                : [];
-              setApprovedSchemes(approved);
-            } catch (innerErr) {
-              console.warn('Error loading teacher schemes:', innerErr);
-              setApprovedSchemes([]);
-            }
+            console.warn('Error loading teacher schemes:', err);
+            setApprovedSchemes([]);
           }
           
           // Fetch app settings LAST so it's freshest when we check rules below
@@ -2351,6 +2029,8 @@ const App = () => {
           setSettingsLoaded(true);
         } catch (err) {
           console.error(err);
+        } finally {
+          setLoading(false);
         }
       }
       fetchData();
@@ -2633,6 +2313,12 @@ const App = () => {
 
     return (
       <div className="space-y-6">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
+        ) : (
+          <>
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">Lesson Plans</h1>
           <div className="flex space-x-3">
@@ -3190,9 +2876,11 @@ const App = () => {
                 </table>
               </div>
             </>
-          )
+          );
           })()}
         </div>
+        </>
+        )}
       </div>
     );
   };
@@ -9997,6 +9685,7 @@ const App = () => {
         </div>
         <PWAInstallBanner />
         <PWAControls />
+        <PerformanceDebugger />
       </div>
     );
   } catch (err) {
@@ -10012,7 +9701,7 @@ const App = () => {
       </div>
     );
   }
-}
+};
 
 // Main App component wrapped with NotificationProvider
 const AppWithNotifications = () => {

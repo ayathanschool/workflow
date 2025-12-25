@@ -7,14 +7,19 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $files = @(
+    "MainApp.gs",
+    "ExamManager.gs",
+    "CacheService.gs",
     "Config.gs",
     "SheetHelpers.gs", 
-    "SchemeLessonManager.gs"
+    "SchemeLessonManager.gs",
+    "TimetableManager.gs",
+    "SubstitutionManager.gs"
 )
 
 Write-Host "Files to deploy:" -ForegroundColor Yellow
 foreach ($file in $files) {
-    $path = Join-Path "D:\Backup app\enhanceflow\Appscript" $file
+    $path = Join-Path "Appscript" $file
     if (Test-Path $path) {
         $lines = (Get-Content $path | Measure-Object -Line).Lines
         Write-Host "  ✓ $file ($lines lines)" -ForegroundColor Green
@@ -34,7 +39,7 @@ Write-Host "2. For EACH file above:" -ForegroundColor White
 Write-Host "   a) Find the file in left panel" -ForegroundColor Gray
 Write-Host "   b) Select ALL content (Ctrl+A)" -ForegroundColor Gray
 Write-Host "   c) Delete it" -ForegroundColor Gray
-Write-Host "   d) Open local file from: D:\Backup app\enhanceflow\Appscript\" -ForegroundColor Gray
+Write-Host "   d) Open local file from: Appscript\" -ForegroundColor Gray
 Write-Host "   e) Copy ALL content (Ctrl+A, Ctrl+C)" -ForegroundColor Gray
 Write-Host "   f) Paste into Apps Script editor (Ctrl+V)" -ForegroundColor Gray
 Write-Host "   g) Save (Ctrl+S)" -ForegroundColor Gray
@@ -42,7 +47,7 @@ Write-Host ""
 Write-Host "3. Deploy NEW version:" -ForegroundColor White
 Write-Host "   - Click 'Deploy' → 'New deployment'" -ForegroundColor Gray
 Write-Host "   - Type: Web app" -ForegroundColor Gray
-Write-Host "   - Description: 'Fixed period filtering + debug logs'" -ForegroundColor Gray
+Write-Host "   - Description: 'Backend caching system - 10x faster responses'" -ForegroundColor Gray
 Write-Host "   - Execute as: Me" -ForegroundColor Gray
 Write-Host "   - Access: Anyone" -ForegroundColor Gray
 Write-Host "   - Click 'Deploy'" -ForegroundColor Gray
@@ -60,7 +65,7 @@ Write-Host ""
 $response = Read-Host "Open these files in Notepad for easy copying? (y/n)"
 if ($response -eq 'y' -or $response -eq 'Y') {
     foreach ($file in $files) {
-        $path = Join-Path "D:\Backup app\enhanceflow\Appscript" $file
+        $path = Join-Path "Appscript" $file
         if (Test-Path $path) {
             Start-Process notepad.exe $path
             Start-Sleep -Milliseconds 500

@@ -541,6 +541,13 @@ function _calculateLessonPlanningDateRange() {
  * Get approved schemes for a teacher with chapter/session breakdown
  */
 function getApprovedSchemesForLessonPlanning(teacherEmail) {
+  const cacheKey = generateCacheKey('approved_schemes', { email: teacherEmail });
+  return getCachedData(cacheKey, function() {
+    return _fetchApprovedSchemesForLessonPlanning(teacherEmail);
+  }, CACHE_TTL.MEDIUM);
+}
+
+function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
   try {
     Logger.log(`Getting approved schemes for lesson planning: ${teacherEmail}`);
     

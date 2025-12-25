@@ -836,11 +836,57 @@ export default function DailyReportModern({ user }) {
         </div>
       </div>
 
-      {/* Loading State */}
+      {/* Enhanced Loading State with Skeleton */}
       {loading && (
-        <div className="max-w-5xl mx-auto text-center py-12">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent"></div>
-          <p className="mt-4 text-gray-600">Loading your timetable...</p>
+        <div className="max-w-5xl mx-auto space-y-4">
+          {/* Loading Header */}
+          <div className="bg-white rounded-2xl shadow-lg p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
+              <div>
+                <div className="h-5 w-40 bg-gray-200 rounded animate-pulse"></div>
+                <div className="h-3 w-64 bg-gray-100 rounded animate-pulse mt-2"></div>
+              </div>
+            </div>
+            <div className="space-y-2 text-sm text-gray-600">
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-blue-500 animate-pulse"></div>
+                <span>Loading timetable for {displayDate}...</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-green-500 animate-pulse"></div>
+                <span>Fetching existing reports...</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-purple-500 animate-pulse"></div>
+                <span>Loading planned lessons...</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-amber-500 animate-pulse"></div>
+                <span>Checking substitutions...</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Skeleton Period Cards */}
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="bg-white rounded-2xl shadow-lg p-6 animate-pulse">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full bg-gray-200"></div>
+                  <div>
+                    <div className="h-5 w-32 bg-gray-200 rounded mb-2"></div>
+                    <div className="h-4 w-48 bg-gray-100 rounded"></div>
+                  </div>
+                </div>
+                <div className="h-9 w-24 bg-gray-200 rounded-lg"></div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="h-20 bg-gray-100 rounded-lg"></div>
+                <div className="h-20 bg-gray-100 rounded-lg"></div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
