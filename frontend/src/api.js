@@ -17,6 +17,8 @@ export function getBaseUrl() {
 
 // Import advanced caching system
 import { cacheManager, CacheTTL, invalidateCache } from './utils/cacheManager.js';
+import { enhancedCache } from './utils/apiCache.js';
+import { perfMonitor } from './utils/performanceMonitor.js';
 export { invalidateCache }; // Export for components to use
 
 // Lightweight logger: disabled in production build to avoid noise
@@ -74,6 +76,9 @@ function setCacheEntry(key, data, duration = CACHE_DURATION) {
 }
 
 async function getJSON(url, cacheDuration = CACHE_DURATION) {
+  const startMark = `api-get-${Date.now()}`;
+  perfMonitor.mark(startMark);
+  
   // Skip caching for NO_CACHE requests
   if (cacheDuration === NO_CACHE) {
     const inflightKey = `NO_CACHE:${url}`;
@@ -85,7 +90,9 @@ async function getJSON(url, cacheDuration = CACHE_DURATION) {
           const text = await res.text().catch(() => '');
           throw new Error(`HTTP ${res.status} ${text}`);
         }
-        return res.json();
+        const data = await res.json();
+        perfMonitor.measure(startMark, `GET ${url.split('?')[0]}`);
+        return data;
       } catch (err) {
         console.error('API GET failed', url, err);
         if (typeof window !== 'undefined') {
@@ -96,70 +103,85 @@ async function getJSON(url, cacheDuration = CACHE_DURATION) {
     });
   }
 
-  const cacheKey = getCacheKey(url);
+  // Check if we have a cached response
+  const cached = enhancedCache.get(url, 'GET');
+  if (cached) {
+    perfMonitor.measure(startMark, `GET (cached) ${url.split('?')[0]}`);
+    return cached;
+  }
+  
+  // Check if request is already in-flight (deduplication)
+  const pending = enhancedCache.getPendingRequest(url, 'GET');
+  if (pending) {
+    devLog('GET (dedupe)', url);
+    perfMonitor.measure(startMark, `GET (deduped) ${url.split('?')[0]}`);
+    return pending;
+  }
 
-  // Use advanced cache manager with background refresh
-  return withInFlight(cacheKey, () =>
-    cacheManager.fetchWithCache(
-      cacheKey,
-      async () => {
-        devLog('GET', url);
-        const res = await fetch(url, { method: 'GET' });
-        if (!res.ok) {
-          const text = await res.text().catch(() => '');
-          throw new Error(`HTTP ${res.status} ${text}`);
-        }
-        return res.json();
-      },
-      {
-        ttl: cacheDuration,
-        acceptStale: true, // Show stale data while refreshing
-        onRefresh: (freshData) => {
-          // Optional: notify components that fresh data arrived
-          devLog('Background refresh completed for', url);
-        }
+  // Make new request and register it as pending
+  const requestPromise = (async () => {
+    try {
+      devLog('GET (fetch)', url);
+      const res = await fetch(url, { method: 'GET' });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status} ${text}`);
       }
-    )
-  ).catch(err => {
-    console.error('API GET failed', url, err);
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url } }));
+      const data = await res.json();
+      
+      // Cache the result
+      enhancedCache.set(url, data, 'GET');
+      perfMonitor.measure(startMark, `GET (fresh) ${url.split('?')[0]}`);
+      
+      return data;
+    } catch (err) {
+      console.error('API GET failed', url, err);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url } }));
+      }
+      throw new Error(`Failed to fetch ${url}: ${String(err && err.message ? err.message : err)}`);
     }
-    throw new Error(`Failed to fetch ${url}: ${String(err && err.message ? err.message : err)}`);
-  });
+  })();
+  
+  // Register as pending and return
+  return enhancedCache.setPendingRequest(url, requestPromise, 'GET');
 }
 
 async function postJSON(url, payload) {
-  // Smart cache invalidation using advanced cache manager
+  const startMark = `api-post-${Date.now()}`;
+  perfMonitor.mark(startMark);
+  
+  // Smart cache invalidation using enhanced cache
   const action = payload?.action || '';
 
   if (action.includes('submit') || action.includes('create') || action.includes('update') || action.includes('delete')) {
     // Clear all caches related to the action using pattern matching
     if (action.includes('DailyReport')) {
-      cacheManager.deletePattern('getDailyReport');
-      cacheManager.deletePattern('getTeacherDailyData');
-      cacheManager.deletePattern('getPlannedLessons');
-      invalidateCache.onLessonPlanChange(); // Also invalidate lesson plans
+      enhancedCache.clearPattern('getDailyReport');
+      enhancedCache.clearPattern('getTeacherDailyData');
+      enhancedCache.clearPattern('getPlannedLessons');
+      enhancedCache.clearPattern('getLessonPlan');
     }
     if (action.includes('LessonPlan') || action.includes('SchemeLessonPlan')) {
-      invalidateCache.onLessonPlanChange();
-      cacheManager.deletePattern('getApprovedSchemes');
-      cacheManager.deletePattern('getAvailablePeriods');
+      enhancedCache.clearPattern('getLessonPlan');
+      enhancedCache.clearPattern('getApprovedSchemes');
+      enhancedCache.clearPattern('getAvailablePeriods');
     }
     if (action.includes('Substitution') || action === 'assignSubstitution') {
-      invalidateCache.onSubstitutionChange();
-      cacheManager.deletePattern('VacantSlots');
-      cacheManager.deletePattern('FreeTeachers');
-      cacheManager.deletePattern('AvailableTeachers');
+      enhancedCache.clearPattern('Substitution');
+      enhancedCache.clearPattern('VacantSlots');
+      enhancedCache.clearPattern('FreeTeachers');
+      enhancedCache.clearPattern('AvailableTeachers');
+      enhancedCache.clearPattern('Timetable');
     }
     if (action.includes('Exam') || action.includes('Marks')) {
-      cacheManager.deletePattern('Exam');
-      cacheManager.deletePattern('Marks');
-      cacheManager.deletePattern('ReportCard');
+      enhancedCache.clearPattern('Exam');
+      enhancedCache.clearPattern('Marks');
+      enhancedCache.clearPattern('ReportCard');
     }
     if (action.includes('Scheme')) {
-      invalidateCache.onSchemeChange();
-      cacheManager.deletePattern('getAllApprovedSchemes');
+      enhancedCache.clearPattern('Scheme');
+      enhancedCache.clearPattern('getAllApprovedSchemes');
     }
   }
 
@@ -173,7 +195,8 @@ async function postJSON(url, payload) {
         'Content-Type': 'text/plain;charset=utf-8'
       },
       body
-    })
+    });
+    
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       const err = new Error(`HTTP ${res.status} ${text}`);
@@ -182,7 +205,10 @@ async function postJSON(url, payload) {
       }
       throw err;
     }
-    return await res.json()
+    
+    const data = await res.json();
+    perfMonitor.measure(startMark, `POST ${action || 'unknown'}`);
+    return data;
   } catch (err) {
     console.error('API POST failed', url, err);
     if (typeof window !== 'undefined') {
@@ -1361,6 +1387,20 @@ export async function getStudents(cls = '') {
   return result?.data || result || []
 }
 
+// PERFORMANCE: Batch fetch students for multiple classes (reduces N API calls to 1)
+export async function getStudentsBatch(classes = []) {
+  if (!Array.isArray(classes) || classes.length === 0) {
+    return {};
+  }
+  const normalizedClasses = classes.map(cls => normalizeClassParam(cls));
+  const q = new URLSearchParams({ 
+    action: 'getStudentsBatch', 
+    classes: normalizedClasses.join(',')
+  });
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`);
+  return result?.data || result || {};
+}
+
 // Retrieve exam grade types from the GradeTypes sheet.  Each entry contains
 // examType and the maximum marks.  Useful for populating dynamic exam
 // creation forms.
@@ -1431,11 +1471,13 @@ export async function sendCustomNotification(userEmail, title, message, priority
 }
 
 // Get substitution notifications for the current user
+// PERFORMANCE: Changed from POST to GET for caching
 export async function getSubstitutionNotifications(userEmail) {
-  const response = await postJSON(BASE_URL, {
+  const q = new URLSearchParams({ 
     action: 'getSubstitutionNotifications',
     email: userEmail
   });
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
 
   // Backend returns { status, data: { success, notifications, count }, timestamp }
   // After postJSON unwrapping: { success, notifications, count }

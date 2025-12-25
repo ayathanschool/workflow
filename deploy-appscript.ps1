@@ -7,9 +7,14 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $files = @(
+    "MainApp.gs",
+    "ExamManager.gs",
+    "CacheService.gs",
     "Config.gs",
-    "SheetHelpers.gs", 
-    "SchemeLessonManager.gs"
+    "SheetHelpers.gs",
+    "SchemeLessonManager.gs",
+    "TimetableManager.gs",
+    "SubstitutionManager.gs"
 )
 
 Write-Host "Files to deploy:" -ForegroundColor Yellow

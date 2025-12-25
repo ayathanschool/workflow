@@ -75,6 +75,10 @@ function assignSubstitution(data) {
     // Don't fail substitution if cascade fails
   }
   
+  // Invalidate substitution caches since data changed
+  invalidateCache('substitutions');
+  invalidateCache('timetable'); // Also invalidate timetable cache
+  
   return { 
     submitted: true, 
     cascadeInfo: cascadeResult 
@@ -87,6 +91,14 @@ function assignSubstitution(data) {
 function getSubstitutionsForDate(date) {
   const normalizedDate = _isoDateString(date);
   
+  // Cache substitutions for 1 minute (changes frequently)
+  const cacheKey = generateCacheKey('substitutions', { date: normalizedDate });
+  return getCachedData(cacheKey, function() {
+    return _fetchSubstitutionsForDate(normalizedDate);
+  }, CACHE_TTL.SHORT);
+}
+
+function _fetchSubstitutionsForDate(normalizedDate) {
   const sh = _getSheet('Substitutions');
   const headers = _headers(sh);
   const allRows = _rows(sh).map(r => _indexByHeader(r, headers));
@@ -324,7 +336,10 @@ function acknowledgeSubstitution(notificationId, teacherEmail) {
  * Alias for getTeacherSubstitutionNotifications for frontend compatibility
  */
 function getSubstitutionNotifications(teacherEmail) {
-  return getTeacherSubstitutionNotifications(teacherEmail);
+  const cacheKey = generateCacheKey('sub_notifications', { email: teacherEmail });
+  return getCachedData(cacheKey, function() {
+    return getTeacherSubstitutionNotifications(teacherEmail);
+  }, CACHE_TTL.SHORT);
 }
 
 /**
@@ -394,6 +409,9 @@ function acknowledgeSubstitutionAssignment(data) {
         sh.getRange(i + 1, acknowledgedColIndex).setValue('TRUE');
         sh.getRange(i + 1, acknowledgedByColIndex).setValue(data.teacherEmail);
         sh.getRange(i + 1, acknowledgedAtColIndex).setValue(new Date().toISOString());
+        
+        // Invalidate cache for this teacher
+        invalidateCache('sub_notifications_email:' + teacherEmail);
         
         Logger.log(`[acknowledgeSubstitutionAssignment] Successfully acknowledged`);
         

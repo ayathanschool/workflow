@@ -32,10 +32,19 @@ class EnhancedApiCache {
   constructor() {
     this.cache = new Map();
     this.pendingRequests = new Map();
+    this.requestCounts = new Map(); // Track request frequency
+    this.lastAccessTime = new Map(); // Track when each endpoint was last accessed
     this.loadFromLocalStorage();
 
     // Set up cache cleanup interval
     this.cleanupInterval = setInterval(() => this.cleanupExpiredEntries(), 5 * 60 * 1000);
+    
+    // Performance monitoring
+    this.stats = {
+      hits: 0,
+      misses: 0,
+      deduped: 0
+    };
   }
 
   // Determine cache duration based on endpoint
@@ -68,13 +77,21 @@ class EnhancedApiCache {
     const key = this.getCacheKey(url, method, body);
     const entry = this.cache.get(key);
     
-    if (!entry) return null;
+    if (!entry) {
+      this.stats.misses++;
+      return null;
+    }
     
     // Check if expired
     if (Date.now() > entry.expiry) {
       this.cache.delete(key);
+      this.stats.misses++;
       return null;
     }
+    
+    // Track cache hit and update access time
+    this.stats.hits++;
+    this.lastAccessTime.set(key, Date.now());
     
     return entry.data;
   }
@@ -100,10 +117,21 @@ class EnhancedApiCache {
     return this.pendingRequests.has(this.getCacheKey(url, method, body));
   }
 
-  // Set a pending request
+  // Set a pending request with auto-cleanup
   setPendingRequest(url, requestPromise, method = 'GET', body = null) {
-    this.pendingRequests.set(this.getCacheKey(url, method, body), requestPromise);
-    return requestPromise;
+    const key = this.getCacheKey(url, method, body);
+    
+    // Track request count for monitoring
+    const count = (this.requestCounts.get(key) || 0) + 1;
+    this.requestCounts.set(key, count);
+    
+    // Wrap promise to auto-cleanup when done
+    const wrappedPromise = requestPromise.finally(() => {
+      this.clearPendingRequest(url, method, body);
+    });
+    
+    this.pendingRequests.set(key, wrappedPromise);
+    return wrappedPromise;
   }
 
   // Clear a pending request
@@ -111,9 +139,13 @@ class EnhancedApiCache {
     this.pendingRequests.delete(this.getCacheKey(url, method, body));
   }
 
-  // Get a pending request
+  // Get a pending request (for request deduplication)
   getPendingRequest(url, method = 'GET', body = null) {
-    return this.pendingRequests.get(this.getCacheKey(url, method, body));
+    const pending = this.pendingRequests.get(this.getCacheKey(url, method, body));
+    if (pending) {
+      this.stats.deduped++;
+    }
+    return pending;
   }
 
   // Clear cache entries that match a pattern
@@ -243,6 +275,27 @@ class EnhancedApiCache {
     } catch (err) {
       console.warn('[Cache] Failed to load from localStorage:', err);
     }
+  }
+  
+  // Get cache performance statistics
+  getStats() {
+    const hitRate = this.stats.hits + this.stats.misses > 0
+      ? (this.stats.hits / (this.stats.hits + this.stats.misses) * 100).toFixed(1)
+      : 0;
+    
+    return {
+      size: this.cache.size,
+      hits: this.stats.hits,
+      misses: this.stats.misses,
+      deduped: this.stats.deduped,
+      hitRate: `${hitRate}%`,
+      pending: this.pendingRequests.size
+    };
+  }
+  
+  // Reset stats (useful for testing)
+  resetStats() {
+    this.stats = { hits: 0, misses: 0, deduped: 0 };
   }
   
   // Clean up resources when done
