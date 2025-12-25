@@ -436,17 +436,17 @@ export default function SubstitutionModule() {
   
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+      <div className="flex justify-between items-center">
         <h1 className={`text-2xl font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'} transition-colors duration-300`}>Substitutions</h1>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           <button 
             onClick={shareToWhatsApp}
-            className="bg-green-600 dark:bg-green-700 text-white rounded-lg px-4 py-2 flex items-center hover:bg-green-700 dark:hover:bg-green-800 transition-colors duration-300 btn-animate shadow-sm"
+            className="bg-green-600 dark:bg-green-700 text-white rounded-lg px-4 py-2 flex items-center hover:bg-green-700 dark:hover:bg-green-800 transition-colors duration-300 btn-animate"
             title="Share substitutions via WhatsApp"
             disabled={substitutions.length === 0}
           >
             <Share2 className="h-4 w-4 mr-2" />
-            <span className="whitespace-nowrap">Share WhatsApp</span>
+            Share WhatsApp
           </button>
           <button 
             onClick={handleRefresh}
