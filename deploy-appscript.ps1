@@ -3,8 +3,11 @@
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  AppScript Deployment Helper" -ForegroundColor Cyan
+Write-Host "  WITH CACHING SYSTEM" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
+
+$appscriptPath = "d:\www\wwww\Appscript"
 
 $files = @(
     "MainApp.gs",
@@ -18,14 +21,24 @@ $files = @(
 )
 
 Write-Host "Files to deploy:" -ForegroundColor Yellow
+$allFilesExist = $true
 foreach ($file in $files) {
-    $path = Join-Path "D:\Backup app\enhanceflow\Appscript" $file
+    $path = Join-Path $appscriptPath $file
     if (Test-Path $path) {
         $lines = (Get-Content $path | Measure-Object -Line).Lines
         Write-Host "  ✓ $file ($lines lines)" -ForegroundColor Green
     } else {
         Write-Host "  ✗ $file (NOT FOUND)" -ForegroundColor Red
+        $allFilesExist = $false
     }
+}
+
+if (-not $allFilesExist) {
+    Write-Host ""
+    Write-Host "ERROR: Some files are missing!" -ForegroundColor Red
+    Write-Host "Please check the path: $appscriptPath" -ForegroundColor Yellow
+    Read-Host "Press Enter to exit"
+    exit
 }
 
 Write-Host ""
@@ -39,7 +52,7 @@ Write-Host "2. For EACH file above:" -ForegroundColor White
 Write-Host "   a) Find the file in left panel" -ForegroundColor Gray
 Write-Host "   b) Select ALL content (Ctrl+A)" -ForegroundColor Gray
 Write-Host "   c) Delete it" -ForegroundColor Gray
-Write-Host "   d) Open local file from: D:\Backup app\enhanceflow\Appscript\" -ForegroundColor Gray
+Write-Host "   d) Open local file from: $appscriptPath\" -ForegroundColor Gray
 Write-Host "   e) Copy ALL content (Ctrl+A, Ctrl+C)" -ForegroundColor Gray
 Write-Host "   f) Paste into Apps Script editor (Ctrl+V)" -ForegroundColor Gray
 Write-Host "   g) Save (Ctrl+S)" -ForegroundColor Gray
@@ -47,16 +60,17 @@ Write-Host ""
 Write-Host "3. Deploy NEW version:" -ForegroundColor White
 Write-Host "   - Click 'Deploy' → 'New deployment'" -ForegroundColor Gray
 Write-Host "   - Type: Web app" -ForegroundColor Gray
-Write-Host "   - Description: 'Fixed period filtering + debug logs'" -ForegroundColor Gray
+Write-Host "   - Description: 'With caching system - 90% faster'" -ForegroundColor Gray
 Write-Host "   - Execute as: Me" -ForegroundColor Gray
 Write-Host "   - Access: Anyone" -ForegroundColor Gray
 Write-Host "   - Click 'Deploy'" -ForegroundColor Gray
 Write-Host ""
 Write-Host "4. Copy the NEW deployment URL" -ForegroundColor White
 Write-Host ""
-Write-Host "5. Update .env file:" -ForegroundColor White
-Write-Host "   File: D:\Backup app\enhanceflow\frontend\.env" -ForegroundColor Gray
-Write-Host "   Replace VITE_API_BASE_URL with new URL" -ForegroundColor Gray
+Write-Host "5. Update .env files:" -ForegroundColor White
+Write-Host "   File 1: d:\www\wwww\frontend\.env" -ForegroundColor Gray
+Write-Host "   File 2: d:\www\wwww\frontend\.env.local" -ForegroundColor Gray
+Write-Host "   Replace VITE_API_BASE_URL with new URL in BOTH files" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
@@ -65,7 +79,7 @@ Write-Host ""
 $response = Read-Host "Open these files in Notepad for easy copying? (y/n)"
 if ($response -eq 'y' -or $response -eq 'Y') {
     foreach ($file in $files) {
-        $path = Join-Path "D:\Backup app\enhanceflow\Appscript" $file
+        $path = Join-Path $appscriptPath $file
         if (Test-Path $path) {
             Start-Process notepad.exe $path
             Start-Sleep -Milliseconds 500

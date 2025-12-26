@@ -855,7 +855,7 @@ const App = () => {
                   const perClassData = await Promise.all(
                     teachingClasses.map(async (cls) => {
                       const [exams, status] = await Promise.all([
-                        api.getExams({ class: cls, _ts: Date.now() }).catch(() => []),
+                        api.getExams({ class: cls}).catch(() => []),
                         api.getExamMarksEntryStatusAll({ class: cls, limit: 200 }).catch(() => ({ success: false, exams: [] }))
                       ]);
                       return {
@@ -7586,7 +7586,6 @@ const App = () => {
           teacherEmail: user?.email || undefined,
           role: user?.role || undefined,
           // prevent CDN/browser cache on Apps Script
-          _ts: Date.now()
         });
         setExams(Array.isArray(list) ? list : []);
       } catch (e) {

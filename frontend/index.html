@@ -167,16 +167,15 @@
             viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, viewport-fit=cover');
           }
           
-          // Force layout recalculation for Samsung tablets
-          document.body.style.height = '100vh';
-          document.body.style.width = '100vw';
-          document.documentElement.style.height = '100vh';
-          document.documentElement.style.width = '100vw';
-          
-          // Trigger resize event
-          window.dispatchEvent(new Event('resize'));
-        }, 100);
-      }
+        // Force layout recalculation for Samsung tablets
+document.body.style.height = '100vh';
+document.body.style.width = '100vw';
+document.documentElement.style.height = '100vh';
+document.documentElement.style.width = '100vw';
+
+// Trigger resize event   ← (comment remains, but no code)
+}, 100);
+}
       
       // Samsung-specific orientation detection
       function detectAndFixOrientation() {
