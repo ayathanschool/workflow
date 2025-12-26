@@ -475,13 +475,11 @@ const App = () => {
       items.push(
         { id: 'users', label: 'User Management', icon: Users },
         { id: 'audit-log', label: 'Audit Log', icon: Shield },
-        { id: 'timetable', label: 'Timetable', icon: Calendar },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
         { id: 'class-data', label: 'Class Data', icon: UserCheck },
         { id: 'admin-data', label: 'Admin Data', icon: Edit2 },
         { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
         { id: 'exam-marks', label: 'Exam Management', icon: Award },
-        { id: 'exam-marks-status', label: 'Exam Marks Status', icon: Award },
         { id: 'report-card', label: 'Report Cards', icon: FileCheck },
         { id: 'marklist', label: 'Marklist', icon: FileText },
         { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
@@ -513,10 +511,6 @@ const App = () => {
       // Teachers and class teachers can also manage exams: view available exams,
       // enter marks for their classes and subjects, and view marks.
       items.push({ id: 'exam-marks', label: 'Exam Marks', icon: Award });
-      // Exam Marks Status (details page) should not be available for Class Teachers.
-      if (!hasRole('class teacher')) {
-        items.push({ id: 'exam-marks-status', label: 'Exam Marks Status', icon: Award });
-      }
       items.push({ id: 'report-card', label: 'Report Card', icon: FileText });
       items.push({ id: 'marklist', label: 'Marklist', icon: FileText });
     }
@@ -548,7 +542,6 @@ const App = () => {
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
         { id: 'smart-reminders', label: 'Smart Reminders', icon: Bell },
         { id: 'exam-marks', label: 'Exam Marks', icon: Award },
-        { id: 'exam-marks-status', label: 'Exam Marks Status', icon: Award },
         { id: 'report-card', label: 'Report Card', icon: FileText },
         { id: 'marklist', label: 'Marklist', icon: FileText },
         { id: 'fee-collection', label: 'Fee Collection', icon: DollarSign }

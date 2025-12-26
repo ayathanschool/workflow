@@ -1,12 +1,12 @@
 // DailyReportModern.jsx - Redesigned Daily Reporting with Smooth UX
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import {
+	getTeacherDailyData,
   getTeacherDailyTimetable,
   getTeacherDailyReportsForDate,
   submitDailyReport,
   checkChapterCompletion,
   getPlannedLessonsForDate,
-  getSubstitutionsForDate,
   getTeacherWeeklyTimetable
 } from "./api";
 import { todayIST } from "./utils/dateUtils";
@@ -92,13 +92,22 @@ export default function DailyReportModern({ user }) {
     setMessage({ text: "", type: "" });
 
     try {
-      // Load timetable and existing reports in parallel
-      const [timetableRes, reportsRes, plansRes, subsAll] = await Promise.all([
-        getTeacherDailyTimetable(email, date),
-        getTeacherDailyReportsForDate(email, date),
-        getPlannedLessonsForDate(email, date),
-        getSubstitutionsForDate(date, { noCache: true })
-      ]);
+      // FAST PATH (1 request): use the batch endpoint (timetable + reports) when available.
+      // Fallback to legacy endpoints if the deployment doesn't have it yet.
+      let timetableRes, reportsRes, plansRes;
+      try {
+        const daily = await getTeacherDailyData(email, date);
+        timetableRes = daily?.timetableWithReports || daily?.timetable || daily;
+        reportsRes = { data: Array.isArray(daily?.reports) ? daily.reports : [] };
+        plansRes = await getPlannedLessonsForDate(email, date);
+      } catch (batchErr) {
+        // Legacy (3 requests)
+        [timetableRes, reportsRes, plansRes] = await Promise.all([
+          getTeacherDailyTimetable(email, date),
+          getTeacherDailyReportsForDate(email, date),
+          getPlannedLessonsForDate(email, date)
+        ]);
+      }
 
       // Handle different response structures
       let timetableData;
@@ -175,25 +184,8 @@ export default function DailyReportModern({ user }) {
       const reportsData = Array.isArray(reportsRes?.data) ? reportsRes.data : (Array.isArray(reportsRes) ? reportsRes : []);
       const plansData = plansRes?.data || plansRes || { lessonsByPeriod: {} };
 
-      // Merge substitution assignments for this teacher into periods list
-      const mySubs = Array.isArray(subsAll) ? subsAll.filter(s => String(s.substituteTeacher || '').toLowerCase() === String(email).toLowerCase()) : [];
-      const subPeriods = mySubs.map(s => ({
-        period: s.period,
-        class: s.class,
-        subject: s.substituteSubject || s.regularSubject || '',
-        startTime: '',
-        endTime: '',
-        isSubstitution: true,
-        absentTeacher: s.absentTeacher || '',
-        regularSubject: s.regularSubject || '',
-        substituteSubject: s.substituteSubject || ''
-      }));
-
-      // Avoid duplicates if somehow a timetable entry exists for same key
-      const ttKeys = new Set((timetableData || []).map(p => `${p.period}|${p.class}|${p.subject}`));
-      const merged = [...timetableData, ...subPeriods.filter(p => !ttKeys.has(`${p.period}|${p.class}|${p.subject}`))];
-
-      setPeriods(merged);
+      // Timetable already includes substitution periods (backend merges them)
+      setPeriods(timetableData);
       
       // Map existing reports by period key
       const reportsMap = {};
@@ -250,10 +242,14 @@ export default function DailyReportModern({ user }) {
 
   // Load data when date or user changes
   useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  // Auto-save drafts to localStorage
+    if (!email || !date) return;
+    // Debounce to avoid firing multiple requests when the user quickly changes dates
+    const t = setTimeout(() => {
+      loadData();
+    }, 200);
+    return () => clearTimeout(t);
+  }, [loadData, email, date]);
+// Auto-save drafts to localStorage
   useEffect(() => {
     const saved = localStorage.getItem(`dailyReportDrafts_${email}_${date}`);
     if (saved) {

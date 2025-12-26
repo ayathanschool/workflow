@@ -1,4 +1,4 @@
-import { Plus, RefreshCw, Upload, Download, ChevronUp, ChevronDown } from 'lucide-react';
+import { Plus, RefreshCw, Upload, Download, ChevronUp, ChevronDown, Share2 } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as api from '../api';
 import { useNotifications } from '../contexts/NotificationContext';
@@ -87,7 +87,8 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
   const [filters, setFilters] = useState({
     class: '',
     subject: '',
-    examType: ''
+    examType: '',
+    completionStatus: '' // all, pending, partial, complete
   });
   
   // Loading state
@@ -896,6 +897,45 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     }
   };
 
+  // WhatsApp share function for pending exams
+  const shareToWhatsApp = () => {
+    // Get all pending/partial exams
+    const pendingExams = filteredExams.filter(exam => {
+      const st = marksEntryStatus[exam.examId];
+      if (!st) return false;
+      const entered = st.enteredCount || 0;
+      const total = st.totalStudents || 0;
+      return entered < total; // pending or partial
+    });
+
+    if (pendingExams.length === 0) {
+      warning('No pending exams to share');
+      return;
+    }
+
+    // Format message
+    let message = '📋 *Pending Exam Marks - Reminder*\n\n';
+    
+    pendingExams.forEach(exam => {
+      const st = marksEntryStatus[exam.examId];
+      const entered = st?.enteredCount || 0;
+      const total = st?.totalStudents || 0;
+      const pending = total - entered;
+      const icon = entered === 0 ? '🔴' : '🟡';
+      const status = entered === 0 ? 'Pending' : 'Partial';
+      
+      message += `${icon} *${exam.examId}*\n`;
+      message += `   ${displayClass(exam.class)} - ${exam.subject}\n`;
+      message += `   Status: ${status} (${pending} pending)\n\n`;
+    });
+    
+    message += `Please complete marks entry at your earliest.\n`;
+    message += `Total Pending: ${pendingExams.length} exam${pendingExams.length > 1 ? 's' : ''}`;
+
+    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
+    window.open(url, '_blank');
+  };
+
   // Use a stronger normalization that removes spaces and non-alphanumeric
   // characters so values like "6 A" and "6A" match reliably.
   const normKey = useCallback((s) => (s || '').toString().toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, ''), []);
@@ -988,8 +1028,35 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       result = result.filter(ex => normKey(ex.examType) === normKey(filters.examType));
     }
     
+    // Apply completion status filter
+    if (filters.completionStatus) {
+      result = result.filter(ex => {
+        const st = marksEntryStatus[ex.examId];
+        if (!st) return filters.completionStatus === 'pending'; // No status = pending
+        
+        const entered = st.enteredCount || 0;
+        const total = st.totalStudents || 0;
+        
+        if (filters.completionStatus === 'pending') {
+          return entered === 0;
+        } else if (filters.completionStatus === 'partial') {
+          return entered > 0 && entered < total;
+        } else if (filters.completionStatus === 'complete') {
+          return total > 0 && entered >= total;
+        }
+        return true;
+      });
+    }
+    
+    // Sort by creation date descending (newest first)
+    result = result.sort((a, b) => {
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return dateB - dateA;
+    });
+    
     return result;
-  }, [examsForTeacher, filters, normKey]);
+  }, [examsForTeacher, filters, normKey, marksEntryStatus]);
 
   // Open marks form for a specific exam with caching optimization
   const openMarksForm = useCallback(async (exam) => {
@@ -2211,15 +2278,28 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         <div className="bg-white rounded-xl shadow-sm p-6">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-semibold">Available Exams</h2>
-            {isLoading && (
-              <div className="flex items-center text-blue-600">
-                <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Loading...
-              </div>
-            )}
+            <div className="flex items-center gap-3">
+              {/* WhatsApp Share Button for HM/Super Admin */}
+              {(isSuperAdmin || normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'))) && (
+                <button
+                  onClick={shareToWhatsApp}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
+                  title="Share pending exams list via WhatsApp"
+                >
+                  <Share2 className="w-4 h-4" />
+                  Share Pending
+                </button>
+              )}
+              {isLoading && (
+                <div className="flex items-center text-blue-600">
+                  <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Loading...
+                </div>
+              )}
+            </div>
           </div>
           
           {/* Filter Bar */}
@@ -2283,9 +2363,26 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
               </div>
             </div>
             
+            <div className="flex-1 min-w-full md:min-w-[180px]">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Completion Status</label>
+              <div className="relative">
+                <select
+                  value={filters.completionStatus}
+                  onChange={(e) => setFilters({...filters, completionStatus: e.target.value})}
+                  className="w-full pl-3 pr-10 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  disabled={isLoading}
+                >
+                  <option value="">All Statuses</option>
+                  <option value="pending">🔴 Pending</option>
+                  <option value="partial">🟡 Partial</option>
+                  <option value="complete">🟢 Complete</option>
+                </select>
+              </div>
+            </div>
+            
             <div className="flex gap-2 w-full md:w-auto md:items-end">
               <button
-                onClick={() => setFilters({class: '', subject: '', examType: ''})}
+                onClick={() => setFilters({class: '', subject: '', examType: '', completionStatus: ''})}
                 className="flex-1 md:flex-initial px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"
                 disabled={isLoading}
               >
@@ -2377,18 +2474,35 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                         {(() => {
                           const st = marksEntryStatus[exam.examId];
                           if (!st) return <span className="text-xs text-gray-400">—</span>;
-                          const ok = !!st.complete;
-                          const label = `${st.enteredCount ?? 0}/${st.totalStudents ?? 0}`;
+                          const entered = st.enteredCount ?? 0;
+                          const total = st.totalStudents ?? 0;
+                          const label = `${entered}/${total}`;
+                          
+                          let bgColor, textColor, statusText;
+                          if (entered === 0) {
+                            // Pending - Red
+                            bgColor = "bg-red-100";
+                            textColor = "text-red-800";
+                            statusText = "Pending";
+                          } else if (entered < total) {
+                            // Partial - Yellow
+                            bgColor = "bg-yellow-100";
+                            textColor = "text-yellow-800";
+                            statusText = "Partial";
+                          } else {
+                            // Complete - Green
+                            bgColor = "bg-green-100";
+                            textColor = "text-green-800";
+                            statusText = "Complete";
+                          }
+                          
                           return (
-                            <span
-                              className={
-                                "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium " +
-                                (ok ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800")
-                              }
-                              title={ok ? "All students marked" : `${st.missingCount ?? 0} missing`}
-                            >
-                              {label}
-                            </span>
+                            <div className="flex flex-col gap-1">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${bgColor} ${textColor}`}>
+                                {label}
+                              </span>
+                              <span className={`text-xs ${textColor}`}>{statusText}</span>
+                            </div>
                           );
                         })()}
                       </td>

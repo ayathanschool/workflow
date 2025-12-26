@@ -1,6 +1,54 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import * as api from '../api';
 
+// Helper to build matrix from batch API response
+function buildMatrixFromBatch(students, batchRes, selectedExamTypes) {
+  const m = {};
+
+  // init base with student list (so UI can render even if some exams missing)
+  (students || []).forEach(s => {
+    const admNo = String(s.admNo || s.admissionNo || s.adm || '').trim();
+    if (!admNo) return;
+    m[admNo] = {
+      studentName: s.name || s.studentName || '',
+      byExam: {}
+    };
+  });
+
+  const data = (batchRes && batchRes.data) || {};
+
+  (selectedExamTypes || []).forEach(examType => {
+    const one = data[examType] || {};
+    // depending on your backend return, the class list could be in different keys
+    const list =
+      one.students ||
+      one.data ||
+      one.reportCards ||
+      one.items ||
+      [];
+
+    (list || []).forEach(row => {
+      const admNo = String(row.admNo || row.admissionNo || row.adm || '').trim();
+      if (!admNo) return;
+
+      if (!m[admNo]) {
+        m[admNo] = { studentName: row.name || row.studentName || '', byExam: {} };
+      }
+
+      m[admNo].byExam[examType] = {
+        total: Number(row.total ?? row.totalMarks ?? 0),
+        grade: row.grade ?? row.finalGrade ?? '',
+        percentage: Number(row.percentage ?? row.percent ?? 0)
+      };
+
+      // keep best studentName available
+      if (!m[admNo].studentName) m[admNo].studentName = row.name || row.studentName || '';
+    });
+  });
+
+  return m;
+}
+
 // One-page class view: matrix of students x exam types with grade/total
 const ClassTeacherOnePage = ({ user }) => {
   const className = user?.classTeacherFor || '';
@@ -45,52 +93,69 @@ const ClassTeacherOnePage = ({ user }) => {
     init();
   }, [className]);
 
-  const generateMatrix = async () => {
+  // Auto-load matrix when students or exam types change
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMatrix() {
+      try {
+        if (!students || students.length === 0) return;
+        if (!selectedExamTypes || selectedExamTypes.length === 0) {
+          setMatrix({});
+          return;
+        }
+
+        setLoading(true);
+        setError('');
+
+        const res = await api.getReportCardsBatch(className, selectedExamTypes);
+
+        if (cancelled) return;
+
+        if (res && res.ok) {
+          const m = buildMatrixFromBatch(students, res, selectedExamTypes);
+          setMatrix(m);
+        } else {
+          console.error('getReportCardsBatch failed', res);
+          setMatrix({});
+        }
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) {
+          setError('Failed to load matrix: ' + (err.message || 'Unknown error'));
+          setMatrix({});
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadMatrix();
+    return () => { cancelled = true; };
+  }, [students, selectedExamTypes, className]);
+
+  // Manual refresh function (keep as backup/refresh button)
+  const refreshMatrix = async () => {
     if (!className || students.length === 0 || selectedExamTypes.length === 0) return;
     try {
       setLoading(true);
       setError('');
-      const totalCalls = students.length * selectedExamTypes.length;
-      setProgress({ current: 0, total: totalCalls });
-      const nextMatrix = {};
 
-      // Build all report calls in parallel
-      const tasks = [];
-      students.forEach(s => {
-        const admNo = s.admNo || s.AdmNo || s.ID || s.id;
-        if (!admNo) return;
-        if (!nextMatrix[admNo]) {
-          nextMatrix[admNo] = { studentName: s.name || s.Name || 'Unknown', byExam: {} };
-        }
-        selectedExamTypes.forEach(exType => {
-          tasks.push((async () => {
-            try {
-              const data = await api.getStudentReportCard(exType, String(admNo), className);
-              const studentRecord = Array.isArray(data?.students) ? data.students.find(st => String(st.admNo) === String(admNo)) : null;
-              if (studentRecord) {
-                nextMatrix[admNo].byExam[exType] = {
-                  total: studentRecord.totalMarks || 0,
-                  grade: studentRecord.grade || 'N/A',
-                  percentage: studentRecord.percentage || 0
-                };
-              } else {
-                nextMatrix[admNo].byExam[exType] = { total: 0, grade: 'N/A', percentage: 0 };
-              }
-            } finally {
-              setProgress(prev => ({ current: prev.current + 1, total: prev.total }));
-            }
-          })());
-        });
-      });
+      const batchRes = await api.getReportCardsBatch(className, selectedExamTypes);
+      
+      if (!batchRes || !batchRes.ok) {
+        throw new Error(batchRes?.error || 'Batch fetch failed');
+      }
 
-      await Promise.all(tasks);
+      const nextMatrix = buildMatrixFromBatch(students, batchRes, selectedExamTypes);
       setMatrix(nextMatrix);
     } catch (err) {
-      setError('Failed to build matrix: ' + (err.message || 'Unknown error'));
+      setError('Failed to refresh matrix: ' + (err.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }
   };
+
 
   const exportCSV = () => {
     const rows = [];
@@ -161,8 +226,8 @@ const ClassTeacherOnePage = ({ user }) => {
       )}
 
       <div className="flex gap-2">
-        <button onClick={generateMatrix} disabled={loading || selectedExamTypes.length === 0} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-          {loading ? 'Building…' : 'Generate View'}
+        <button onClick={refreshMatrix} disabled={loading || selectedExamTypes.length === 0} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+          {loading ? 'Refreshing…' : 'Refresh Data'}
         </button>
         {admNos.length > 0 && (
           <button onClick={exportCSV} className="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-800">Export CSV</button>

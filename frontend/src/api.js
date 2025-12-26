@@ -473,7 +473,7 @@ export async function getPlannedLessonsForDate(email, date) {
     email,
     date
   });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
   return result?.data || result || { success: false, lessonsByPeriod: {} };
 }
 
@@ -1314,6 +1314,18 @@ export async function getStudentReportCard(examType, admNo = '', cls = '') {
   return result?.data || result || {};
 }
 
+// Batch fetch report cards for entire class and multiple exam types
+export async function getReportCardsBatch(cls, examTypes = []) {
+  const examTypesParam = (examTypes || []).join(',');
+  const q = new URLSearchParams({
+    action: 'getReportCardsBatch',
+    class: cls,
+    examTypes: examTypesParam
+  });
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, CACHE_DURATION);
+  return result;
+}
+
 // Administrative API
 // Fetch all plans (schemes and lesson plans) with optional filters.
 // Parameters: teacher (email or part of name), class, subject, status.
@@ -1733,7 +1745,7 @@ export async function getMissingLessonPlans(teacherEmail, daysAhead = 7) {
     teacherEmail,
     daysAhead
   });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
   return result?.data || result;
 }
 
@@ -1742,7 +1754,7 @@ export async function getAllMissingLessonPlans(daysAhead = 7) {
     action: 'getAllMissingLessonPlans',
     daysAhead
   });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
   return result?.data || result;
 }
 

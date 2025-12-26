@@ -133,8 +133,13 @@
     const action = (e.parameter.action || '').trim();
     try {
       _clearRequestCache(); // PERFORMANCE: Clear cache at start of each request
-      _bootstrapSheets();
-            // === AUTH: Google ID token verification via GET (avoids preflight) ===
+      // Run bootstrap ONLY when explicitly requested (bootstrap is expensive)
+      if (action === 'admin.bootstrap') {
+        _bootstrapSheets();
+        return _respond({ success: true, message: 'Bootstrap completed' });
+      }
+
+// === AUTH: Google ID token verification via GET (avoids preflight) ===
             if (action === 'auth.verify') {
               var token = (e.parameter.token || e.parameter.id_token || e.parameter.idToken || '').trim();
               if (!token) {
@@ -297,7 +302,9 @@
       
       // === EXAM ROUTES ===
       if (action === 'getExams') {
-        return _respond(getExams(e.parameter));
+        const key = generateCacheKey('getExams', e.parameter);
+        const dataOut = getCachedData(key, function() { return getExams(e.parameter); }, CACHE_TTL.MEDIUM);
+        return _respond(dataOut);
       }
       
       if (action === 'debugExamsSheet') {
@@ -356,7 +363,11 @@
           .split(',')
           .map(s => String(s || '').trim())
           .filter(s => s.length > 0);
-        return _respond(getExamMarksEntryStatusBatch(examIds));
+        
+        // Cache for 2 minutes (marks status changes frequently)
+        const key = generateCacheKey('examMarksStatusBatch', { ids: examIds.sort().join(',') });
+        const dataOut = getCachedData(key, function() { return getExamMarksEntryStatusBatch(examIds); }, CACHE_TTL.SHORT);
+        return _respond(dataOut);
       }
 
       if (action === 'getExamMarksEntryStatusAll') {
@@ -366,7 +377,13 @@
         const limit = e.parameter.limit || '';
         const teacherEmail = e.parameter.teacherEmail || '';
         const role = e.parameter.role || '';
-        return _respond(getExamMarksEntryStatusAll({ class: cls, examType: examType, subject: subject, limit: limit, teacherEmail: teacherEmail, role: role }));
+        
+        // Cache for 2 minutes
+        const key = generateCacheKey('examMarksStatusAll', { class: cls, examType: examType, subject: subject, teacherEmail: teacherEmail, role: role });
+        const dataOut = getCachedData(key, function() { 
+          return getExamMarksEntryStatusAll({ class: cls, examType: examType, subject: subject, limit: limit, teacherEmail: teacherEmail, role: role }); 
+        }, CACHE_TTL.SHORT);
+        return _respond(dataOut);
       }
 
       if (action === 'getExamMarksEntryPending') {
@@ -376,7 +393,13 @@
         const limit = e.parameter.limit || '';
         const teacherEmail = e.parameter.teacherEmail || '';
         const role = e.parameter.role || '';
-        return _respond(getExamMarksEntryPending({ class: cls, examType: examType, subject: subject, limit: limit, teacherEmail: teacherEmail, role: role }));
+        
+        // Cache for 2 minutes
+        const key = generateCacheKey('examMarksPending', { class: cls, examType: examType, subject: subject, teacherEmail: teacherEmail, role: role });
+        const dataOut = getCachedData(key, function() {
+          return getExamMarksEntryPending({ class: cls, examType: examType, subject: subject, limit: limit, teacherEmail: teacherEmail, role: role });
+        }, CACHE_TTL.SHORT);
+        return _respond(dataOut);
       }
       
       if (action === 'getGradeTypes') {
@@ -414,6 +437,34 @@
         const admNo = e.parameter.admNo || '';
         const cls = e.parameter.class || '';
         return _respond(getStudentReportCard(examType, admNo, cls));
+      }
+      
+      // === CLASS TEACHER PERFORMANCE: Batch report cards for class ===
+      if (action === 'getReportCardsBatch') {
+        const cls = String(e.parameter.class || '').trim();
+        const raw = String(e.parameter.examTypes || '');
+        const examTypes = raw.split(',').map(s => s.trim()).filter(Boolean);
+
+        if (!cls) return _respond({ ok: false, error: 'missing_class' });
+        if (examTypes.length === 0) return _respond({ ok: false, error: 'missing_examTypes' });
+
+        // Optional: cache for speed (10 minutes)
+        const cache = CacheService.getScriptCache();
+        const cacheKey = `rc_batch_v1:${cls}:${examTypes.join('|')}`;
+        const cached = cache.get(cacheKey);
+        if (cached) return _respond(JSON.parse(cached));
+
+        const out = {};
+        for (var i = 0; i < examTypes.length; i++) {
+          const examType = examTypes[i];
+
+          // IMPORTANT: pass admNo as '' to fetch whole class in one go
+          out[examType] = getStudentReportCard(examType, '', cls);
+        }
+
+        const payload = { ok: true, class: cls, examTypes: examTypes, data: out };
+        try { cache.put(cacheKey, JSON.stringify(payload), 600); } catch (ee) {}
+        return _respond(payload);
       }
       
       // === FEE COLLECTION ROUTES ===
@@ -559,7 +610,11 @@
       
       // === DAILY REPORT ROUTES ===
       if (action === 'getTeacherDailyReportsForDate') {
-        return _handleGetTeacherDailyReportsForDate(e.parameter);
+        const email = String(e.parameter.email || '').toLowerCase().trim();
+        const date = String(e.parameter.date || _todayISO()).trim();
+        const key = generateCacheKey('getTeacherDailyReportsForDate', { email: email, date: date });
+        const dataOut = getCachedData(key, function() { return _handleGetTeacherDailyReportsForDate(e.parameter); }, CACHE_TTL.SHORT);
+        return _respond(dataOut);
       }
       
       if (action === 'checkCascadingIssues') {
@@ -589,12 +644,16 @@
       if (action === 'getMissingLessonPlans') {
         const teacherEmail = e.parameter.teacherEmail || '';
         const daysAhead = parseInt(e.parameter.daysAhead || 7);
-        return _respond(getMissingLessonPlans(teacherEmail, daysAhead));
+        const key = generateCacheKey('getMissingLessonPlans', { teacherEmail: String(teacherEmail).toLowerCase().trim(), daysAhead: daysAhead });
+        const dataOut = getCachedData(key, function() { return getMissingLessonPlans(teacherEmail, daysAhead); }, CACHE_TTL.SHORT);
+        return _respond(dataOut);
       }
       
       if (action === 'getAllMissingLessonPlans') {
         const daysAhead = parseInt(e.parameter.daysAhead || 7);
-        return _respond(getAllMissingLessonPlans(daysAhead));
+        const key = generateCacheKey('getAllMissingLessonPlans', { daysAhead: daysAhead });
+        const dataOut = getCachedData(key, function() { return getAllMissingLessonPlans(daysAhead); }, CACHE_TTL.SHORT);
+        return _respond(dataOut);
       }
 
       // HM merged Plan vs Actual for a date (timetable + plans + reports)
@@ -799,12 +858,16 @@
     
     try {
       _clearRequestCache(); // PERFORMANCE: Clear cache at start of each request
-      _bootstrapSheets();
-      
-      // === AUTHENTICATION ROUTES ===
-      if (action === 'googleLogin') {
-        return handleGoogleLogin(data);
+      // Run bootstrap ONLY when explicitly requested (bootstrap is expensive)
+      if (action === 'admin.bootstrap') {
+        _bootstrapSheets();
+        return _respond({ success: true, message: 'Bootstrap completed' });
       }
+
+// === AUTHENTICATION ROUTES ===
+    if (action === 'googleLogin') {
+  return handleGoogleLogin(data); // handleGoogleLogin already returns _respond(...)
+}
       if (action === 'auth.verify') {
         // Accept token from Authorization header (Bearer) or payload
         var authHeader = (e && e.parameter && e.parameter.Authorization) || (e && e.postData && e.postData.type && e.postData.contents && (e.postData.contents.match(/Authorization":"([^"]+)/) || [])[1]) || '';
