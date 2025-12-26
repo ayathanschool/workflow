@@ -959,6 +959,10 @@
         return _respond(createBulkExams(data));
       }
       
+      if (action === 'updateExam') {
+        return _respond(updateExam(data));
+      }
+      
       if (action === 'deleteExam') {
         // Super Admin only
         if (!_isSuperAdminSafe(data.email)) {

@@ -401,8 +401,8 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
           : normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'));
         const isClassTeacher = normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher');
 
-        // Determine target class: prefer bulk representative class, then exam form class, else class-teacher's class, else filter selection
-        const selectedClass = (bulkExamFormData.class || examFormData.class || (isClassTeacher ? user?.classTeacherFor : filters.class) || '')
+        // Determine target class: prefer edit form, bulk form, exam form, class-teacher's class, or filter selection
+        const selectedClass = (editExamData?.class || bulkExamFormData.class || examFormData.class || (isClassTeacher ? user?.classTeacherFor : filters.class) || '')
           .toString()
           .trim();
 
@@ -470,7 +470,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     }
 
     fetchAllSubjects();
-  }, [user, hasRole, normalizedRoles, bulkExamFormData.class, examFormData.class, filters.class]);
+  }, [user, hasRole, normalizedRoles, editExamData?.class, bulkExamFormData.class, examFormData.class, filters.class]);
 
   // Handlers for Exam Creation
   const handleExamFormChange = (field, value) => {
@@ -835,64 +835,50 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       
       console.log('📊 Exams loaded:', list?.length || 0, 'exams for role:', userRole);
       setExams(Array.isArray(list) ? list : []);
+      
+      // CRITICAL: Clear loading state immediately after exams load
+      // Marks status can load in the background without blocking UI
+      setIsLoading(false);
 
-      // Load marks-entry progress in one batch (non-blocking indicator)
-      try {
-        const ids = (Array.isArray(list) ? list : [])
-          .map(e => e && e.examId)
-          .filter(Boolean);
-        if (ids.length > 0) {
-          const byId = {};
-          const idsParamLen = ids.join(',').length;
+      // Load marks-entry progress in background (non-blocking)
+      const ids = (Array.isArray(list) ? list : [])
+        .map(e => e && e.examId)
+        .filter(Boolean);
+      
+      if (ids.length > 0) {
+        // Fire and forget - don't await or block UI
+        (async () => {
+          try {
+            const byId = {};
+            const idsParamLen = ids.join(',').length;
+            const shouldUseAll = ids.length > 80 || idsParamLen > 1500;
+            
+            const res = shouldUseAll
+              ? await api.getExamMarksEntryStatusAll({
+                  teacherEmail: user?.email || '',
+                  role: userRole,
+                  class: filters.class || '',
+                  subject: filters.subject || '',
+                  examType: filters.examType || '',
+                  _ts: Date.now()
+                })
+              : await api.getExamMarksEntryStatusBatch(ids);
 
-          // If we have many exams, the GET query string can exceed URL limits and
-          // the indicator shows blank/—. Fall back to server-side computation.
-          const shouldUseAll = ids.length > 80 || idsParamLen > 1500;
-          const res = shouldUseAll
-            ? await api.getExamMarksEntryStatusAll({
-                teacherEmail: user?.email || '',
-                role: userRole,
-                class: filters.class || '',
-                subject: filters.subject || '',
-                examType: filters.examType || '',
-                // avoid cached response when quickly reloading
-                _ts: Date.now()
-              })
-            : await api.getExamMarksEntryStatusBatch(ids);
-
-          (res?.exams || []).forEach(row => {
-            if (row && row.examId) byId[row.examId] = row;
-          });
-          setMarksEntryStatus(byId);
-        } else {
-          setMarksEntryStatus({});
-        }
-      } catch (statusErr) {
-        console.warn('Failed to load marks entry status:', statusErr);
-        // Secondary fallback: try server-side status (often succeeds when batch fails)
-        try {
-          const res2 = await api.getExamMarksEntryStatusAll({
-            teacherEmail: user?.email || '',
-            role: userRole,
-            class: filters.class || '',
-            subject: filters.subject || '',
-            examType: filters.examType || '',
-            _ts: Date.now()
-          });
-          const byId2 = {};
-          (res2?.exams || []).forEach(row => {
-            if (row && row.examId) byId2[row.examId] = row;
-          });
-          setMarksEntryStatus(byId2);
-        } catch (fallbackErr) {
-          console.warn('Fallback marks entry status also failed:', fallbackErr);
-          setMarksEntryStatus({});
-        }
+            (res?.exams || []).forEach(row => {
+              if (row && row.examId) byId[row.examId] = row;
+            });
+            setMarksEntryStatus(byId);
+          } catch (err) {
+            console.warn('Background marks status load failed:', err);
+            setMarksEntryStatus({});
+          }
+        })();
+      } else {
+        setMarksEntryStatus({});
       }
     } catch (e) {
       console.error('Failed to reload exams', e);
       setApiError('Failed to load exams: ' + (e.message || e));
-    } finally {
       setIsLoading(false);
     }
   };
@@ -2363,22 +2349,25 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
               </div>
             </div>
             
-            <div className="flex-1 min-w-full md:min-w-[180px]">
-              <label className="block text-xs font-medium text-gray-700 mb-1">Completion Status</label>
-              <div className="relative">
-                <select
-                  value={filters.completionStatus}
-                  onChange={(e) => setFilters({...filters, completionStatus: e.target.value})}
-                  className="w-full pl-3 pr-10 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  disabled={isLoading}
-                >
-                  <option value="">All Statuses</option>
-                  <option value="pending">🔴 Pending</option>
-                  <option value="partial">🟡 Partial</option>
-                  <option value="complete">🟢 Complete</option>
-                </select>
+            {/* Completion Status Filter - HM and Super Admin only */}
+            {(isSuperAdmin || normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'))) && (
+              <div className="flex-1 min-w-full md:min-w-[180px]">
+                <label className="block text-xs font-medium text-gray-700 mb-1">Completion Status</label>
+                <div className="relative">
+                  <select
+                    value={filters.completionStatus}
+                    onChange={(e) => setFilters({...filters, completionStatus: e.target.value})}
+                    className="w-full pl-3 pr-10 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    disabled={isLoading}
+                  >
+                    <option value="">All Statuses</option>
+                    <option value="pending">🔴 Pending</option>
+                    <option value="partial">🟡 Partial</option>
+                    <option value="complete">🟢 Complete</option>
+                  </select>
+                </div>
               </div>
-            </div>
+            )}
             
             <div className="flex gap-2 w-full md:w-auto md:items-end">
               <button

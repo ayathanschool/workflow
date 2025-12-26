@@ -203,6 +203,152 @@ function createBulkExams(data) {
 }
 
 /**
+ * Update an existing exam
+ */
+function updateExam(data) {
+  try {
+    appLog('INFO', 'updateExam', { data: data });
+    
+    const userEmail = (data.userEmail || '').toLowerCase().trim();
+    const examId = data.examId || '';
+    
+    if (!userEmail) {
+      appLog('ERROR', 'updateExam', 'User email is required');
+      return { error: 'User email is required' };
+    }
+    
+    if (!examId) {
+      appLog('ERROR', 'updateExam', 'Exam ID is required');
+      return { error: 'Exam ID is required' };
+    }
+    
+    // Get the Exams sheet
+    const sh = _getSheet('Exams');
+    const headers = _headers(sh);
+    const rows = _rows(sh);
+    
+    // Find the exam row
+    const examIdCol = headers.indexOf('examId') + 1;
+    if (examIdCol === 0) {
+      return { error: 'examId column not found' };
+    }
+    
+    let targetRow = -1;
+    for (let i = 0; i < rows.length; i++) {
+      if (String(rows[i][examIdCol - 1]) === examId) {
+        targetRow = i + 2; // +2 because: 1-indexed and header row
+        break;
+      }
+    }
+    
+    if (targetRow === -1) {
+      appLog('ERROR', 'updateExam', 'Exam not found: ' + examId);
+      return { error: 'Exam not found' };
+    }
+    
+    // Get current exam data
+    const currentExam = _indexByHeader(rows[targetRow - 2], headers);
+    
+    // Check permission (only creator or admin can edit)
+    const isSuperAdmin = _isSuperAdminSafe(userEmail);
+    const isCreator = String(currentExam.creatorEmail || '').toLowerCase() === userEmail;
+    
+    if (!isSuperAdmin && !isCreator) {
+      appLog('ERROR', 'updateExam', 'Permission denied for ' + userEmail);
+      return { error: 'You do not have permission to edit this exam' };
+    }
+    
+    // Normalize class name
+    const examClass = String(data.class || currentExam.class || '')
+      .trim()
+      .replace(/^std\s*/gi, '')
+      .replace(/\s+/g, '')
+      .toUpperCase();
+    
+    // Handle hasInternalMarks
+    const hasInternal = (
+      data.hasInternalMarks === true || 
+      data.hasInternalMarks === 'true' || 
+      data.hasInternalMarks === 'TRUE'
+    ) ? 'TRUE' : 'FALSE';
+    
+    // Calculate marks - use provided values from frontend
+    const internalMax = hasInternal === 'TRUE' ? (parseInt(data.internalMax) || 0) : 0;
+    const externalMax = parseInt(data.externalMax) || 0;
+    const totalMax = parseInt(data.totalMax) || (internalMax + externalMax);
+    
+    const subject = data.subject || currentExam.subject;
+    const examType = data.examType || currentExam.examType;
+    const examName = `${examType} - ${examClass} - ${subject}`;
+    
+    // Update the row
+    const classCol = headers.indexOf('class') + 1;
+    const subjectCol = headers.indexOf('subject') + 1;
+    const examTypeCol = headers.indexOf('examType') + 1;
+    const hasInternalCol = headers.indexOf('hasInternalMarks') + 1;
+    const internalMaxCol = headers.indexOf('internalMax') + 1;
+    const externalMaxCol = headers.indexOf('externalMax') + 1;
+    const totalMaxCol = headers.indexOf('totalMax') + 1;
+    const dateCol = headers.indexOf('date') + 1;
+    const examNameCol = headers.indexOf('examName') + 1;
+    
+    if (classCol) sh.getRange(targetRow, classCol).setValue(examClass);
+    if (subjectCol) sh.getRange(targetRow, subjectCol).setValue(subject);
+    if (examTypeCol) sh.getRange(targetRow, examTypeCol).setValue(examType);
+    if (hasInternalCol) sh.getRange(targetRow, hasInternalCol).setValue(hasInternal);
+    if (internalMaxCol) sh.getRange(targetRow, internalMaxCol).setValue(internalMax);
+    if (externalMaxCol) sh.getRange(targetRow, externalMaxCol).setValue(externalMax);
+    if (totalMaxCol) sh.getRange(targetRow, totalMaxCol).setValue(totalMax);
+    if (dateCol) sh.getRange(targetRow, dateCol).setValue(data.date || currentExam.date);
+    if (examNameCol) sh.getRange(targetRow, examNameCol).setValue(examName);
+    
+    appLog('INFO', 'updateExam', 'Exam updated successfully: ' + examId + ' at row ' + targetRow);
+    
+    // Invalidate exam caches
+    invalidateCache('exams');
+    
+    // Audit log
+    const userSh = _getSheet('Users');
+    const userHeaders = _headers(userSh);
+    const users = _rows(userSh).map(r => _indexByHeader(r, userHeaders));
+    const user = users.find(u => String(u.email||'').toLowerCase() === userEmail);
+    const userName = user ? user.name : userEmail;
+    
+    logAudit({
+      action: AUDIT_ACTIONS.UPDATE,
+      entityType: AUDIT_ENTITIES.EXAM,
+      entityId: examId,
+      userEmail: userEmail,
+      userName: userName,
+      userRole: isSuperAdmin ? 'Super Admin' : 'Teacher/HM',
+      beforeData: {
+        class: currentExam.class,
+        subject: currentExam.subject,
+        examType: currentExam.examType,
+        totalMax: currentExam.totalMax,
+        internalMax: currentExam.internalMax,
+        externalMax: currentExam.externalMax
+      },
+      afterData: {
+        class: examClass,
+        subject: subject,
+        examType: examType,
+        totalMax: totalMax,
+        internalMax: internalMax,
+        externalMax: externalMax
+      },
+      description: `Exam updated: ${examName}`,
+      severity: AUDIT_SEVERITY.INFO
+    });
+    
+    return { ok: true, examId: examId };
+  } catch (err) {
+    appLog('ERROR', 'updateExam', 'Exception: ' + err.message);
+    return { error: 'Failed to update exam: ' + err.message };
+  }
+}
+
+/**
  * Get all exams (with optional filtering)
  */
 function getExams(params) {
