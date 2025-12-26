@@ -48,6 +48,7 @@ import LoadingSplash from './auth/LoadingSplash';
 import LoginForm from './auth/LoginForm';
 import AnimatedPage from './components/AnimatedPage';
 import NotificationCenter from './components/NotificationCenter';
+import PerformanceDebugger from './components/PerformanceDebugger';
 import StatsCard from './components/shared/StatsCard';
 import FeeCollectionModule from './components/FeeCollectionModule';
 import ModernFeeCollection from './components/FeeCollection/ModernFeeCollection';
@@ -1488,6 +1489,7 @@ const App = () => {
   // Schemes of Work View
   const SchemesView = () => {
     const [schemes, setSchemes] = useState([]);
+    const [loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
     const [editingScheme, setEditingScheme] = useState(null);
     const [deletingScheme, setDeletingScheme] = useState(null);
@@ -1753,6 +1755,7 @@ const App = () => {
       async function fetchSchemes() {
         try {
           if (!user) return;
+          setLoading(true);
           const list = await api.getTeacherSchemes(user.email);
           // Sort by createdAt descending (latest first)
           const sorted = Array.isArray(list) ? list.sort((a, b) => {
@@ -1763,6 +1766,8 @@ const App = () => {
           setSchemes(sorted);
         } catch (err) {
           console.error(err);
+        } finally {
+          setLoading(false);
         }
       }
       fetchSchemes();
@@ -1770,6 +1775,13 @@ const App = () => {
 
     return (
       <div className="space-y-6">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-12 space-y-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            <p className="text-gray-600 dark:text-gray-400">Loading schemes...</p>
+          </div>
+        ) : (
+          <>
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">Schemes of Work</h1>
           <button
@@ -2206,12 +2218,15 @@ const App = () => {
             </table>
           </div>
         </div>
+        </>
+        )}
       </div>
     );
   };
 
   // Lesson Plans View - Based on Timetable with Approved Schemes Dropdown
   const LessonPlansView = () => {
+    const [loading, setLoading] = useState(true);
     const [timetableSlots, setTimetableSlots] = useState([]);
     const [lessonPlans, setLessonPlans] = useState([]);
     const [approvedSchemes, setApprovedSchemes] = useState([]);
@@ -2308,6 +2323,7 @@ const App = () => {
     // Fetch real timetable slots, lesson plans, approved schemes, and app settings from the API
     useEffect(() => {
       async function fetchData() {
+        setLoading(true);
         try {
           if (!user) return;
           // Weekly timetable for the teacher
@@ -2351,6 +2367,8 @@ const App = () => {
           setSettingsLoaded(true);
         } catch (err) {
           console.error(err);
+        } finally {
+          setLoading(false);
         }
       }
       fetchData();
@@ -2633,15 +2651,22 @@ const App = () => {
 
     return (
       <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-900">Lesson Plans</h1>
-          <div className="flex space-x-3">
-            <button className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700">
-              <Download className="h-4 w-4 mr-2" />
-              Export
-            </button>
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-12 space-y-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            <p className="text-gray-600 dark:text-gray-400">Loading lesson plans...</p>
           </div>
-        </div>
+        ) : (
+          <>
+            <div className="flex justify-between items-center">
+              <h1 className="text-2xl font-bold text-gray-900">Lesson Plans</h1>
+              <div className="flex space-x-3">
+                <button className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700">
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                </button>
+              </div>
+            </div>
 
         {showPreparationForm && selectedSlot && (
           <div className="bg-white rounded-xl shadow-sm p-6">
@@ -3193,6 +3218,8 @@ const App = () => {
           )
           })()}
         </div>
+          </>
+        )}
       </div>
     );
   };
@@ -10019,6 +10046,7 @@ const AppWithNotifications = () => {
   return (
     <NotificationProvider>
       <App />
+      <PerformanceDebugger />
     </NotificationProvider>
   );
 };

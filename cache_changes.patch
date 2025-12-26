@@ -1,0 +1,824 @@
+diff --git a/Appscript/ExamManager.gs b/Appscript/ExamManager.gs
+index 185963d..ca47b5d 100644
+--- a/Appscript/ExamManager.gs
++++ b/Appscript/ExamManager.gs
+@@ -31,8 +31,16 @@ function createExam(data) {
+       return { error: 'You do not have permission to create an exam for this class and subject' };
+     }
+     
++    // Get or create the Exams sheet
++    appLog('INFO', 'createExam', 'Attempting to get/create Exams sheet');
+     const sh = _getSheet('Exams');
++    appLog('INFO', 'createExam', 'Sheet retrieved: ' + sh.getName() + ', Last Row: ' + sh.getLastRow());
++    
++    // Ensure headers are set
++    appLog('INFO', 'createExam', 'Ensuring headers');
+     _ensureHeaders(sh, SHEETS.Exams);
++    appLog('INFO', 'createExam', 'Headers ensured, Last Row: ' + sh.getLastRow());
++    
+     const now = new Date().toISOString();
+     
+     const examId = _generateUniqueExamId(data.examType, data.class, data.subject);
+@@ -75,9 +83,21 @@ function createExam(data) {
+       examName
+     ];
+     
+-    appLog('INFO', 'createExam', 'Appending row to Exams sheet');
++    appLog('INFO', 'createExam', 'Appending row to Exams sheet. Data: ' + JSON.stringify(examData));
++    const rowsBefore = sh.getLastRow();
+     sh.appendRow(examData);
+-    appLog('INFO', 'createExam', 'Exam created successfully: ' + examId);
++    const rowsAfter = sh.getLastRow();
++    appLog('INFO', 'createExam', 'Row appended. Rows before: ' + rowsBefore + ', Rows after: ' + rowsAfter);
++    
++    // Verify the row was actually written
++    if (rowsAfter > rowsBefore) {
++      appLog('INFO', 'createExam', 'Exam created successfully: ' + examId + ' at row ' + rowsAfter);
++    } else {
++      appLog('ERROR', 'createExam', 'Row count did not increase! Data may not have been written.');
++    }
++    
++    // Invalidate exam caches since data changed
++    invalidateCache('exams');
+     
+     // Audit log: Exam creation
+     logAudit({
+@@ -186,6 +206,25 @@ function createBulkExams(data) {
+  * Get all exams (with optional filtering)
+  */
+ function getExams(params) {
++  // Generate cache key based on filters
++  const cacheKey = generateCacheKey('exams', {
++    class: params.class,
++    subject: params.subject,
++    examType: params.examType,
++    teacherEmail: params.teacherEmail,
++    role: params.role
++  });
++  
++  // Use cached data if available (5 minute TTL)
++  return getCachedData(cacheKey, function() {
++    return _fetchExams(params);
++  }, CACHE_TTL.MEDIUM);
++}
++
++/**
++ * Internal function to fetch exams from sheet
++ */
++function _fetchExams(params) {
+   const sh = _getSheet('Exams');
+   const headers = _headers(sh);
+   const list = _rows(sh).map(r => _indexByHeader(r, headers));
+@@ -266,6 +305,9 @@ function submitExamMarks(data) {
+     
+     Logger.log(`[Marks Submission] Student: ${studentMark.studentName}, CE: ${ce}, TE: ${te}, Total: ${total}/${exam.totalMax}, Percentage: ${percentage.toFixed(2)}%, Grade: ${grade}`);
+     
++    // Invalidate cache for this exam
++    invalidateCache('exam_marks_examid:' + examId);
++    
+     const markData = [
+       examId,
+       exam.class,
+@@ -310,6 +352,13 @@ function submitExamMarks(data) {
+  * Get exam marks for a specific exam
+  */
+ function getExamMarks(examId) {
++  const cacheKey = generateCacheKey('exam_marks', { examId: examId });
++  return getCachedData(cacheKey, function() {
++    return _fetchExamMarks(examId);
++  }, CACHE_TTL.MEDIUM);
++}
++
++function _fetchExamMarks(examId) {
+   const sh = _getSheet('ExamMarks');
+   const headers = _headers(sh);
+   const list = _rows(sh).map(r => _indexByHeader(r, headers));
+@@ -929,6 +978,47 @@ function getStudents(cls = '') {
+   }
+ }
+ 
++/**
++ * Get students for multiple classes in one call (batch operation)
++ * Performance: Reduces N API calls to 1 call
++ * @param {Array} classes - Array of class names
++ * @returns {Object} Object with class names as keys and student arrays as values
++ */
++function getStudentsBatch(classes) {
++  try {
++    const sh = _getSheet('Students');
++    _ensureHeaders(sh, SHEETS.Students);
++    const headers = _headers(sh);
++    const allStudents = _rows(sh).map(r => _indexByHeader(r, headers));
++    
++    const result = {};
++    
++    if (!Array.isArray(classes)) {
++      Logger.log('getStudentsBatch: classes parameter is not an array');
++      return result;
++    }
++    
++    // Normalize class names for comparison
++    const normalizeClass = function(cls) {
++      return String(cls || '').replace(/^std\s*/i, '').trim().toLowerCase();
++    };
++    
++    classes.forEach(function(cls) {
++      const normalized = normalizeClass(cls);
++      result[cls] = allStudents.filter(function(s) {
++        return normalizeClass(s.class) === normalized;
++      });
++    });
++    
++    Logger.log(`getStudentsBatch: Returned students for ${classes.length} classes`);
++    
++    return result;
++  } catch (error) {
++    Logger.log('Error in getStudentsBatch: ' + error.message);
++    return {};
++  }
++}
++
+ /**
+  * Get student report card data for an exam type
+  * Returns exam results for students, used by ReportCard component
+diff --git a/Appscript/MainApp.gs b/Appscript/MainApp.gs
+index 48e0a04..97c4ae2 100644
+--- a/Appscript/MainApp.gs
++++ b/Appscript/MainApp.gs
+@@ -166,6 +166,28 @@
+           }
+         });
+       }
++      
++      // Debug: Check cache status
++      if (action === 'debugCache') {
++        try {
++          const cache = CacheService.getScriptCache();
++          const keysJson = cache.get('_cache_keys') || '[]';
++          const keys = JSON.parse(keysJson);
++          
++          return _respond({
++            success: true,
++            totalKeys: keys.length,
++            keys: keys.slice(0, 20), // First 20 keys
++            message: 'Cache is working. Keys are being tracked.'
++          });
++        } catch (err) {
++          return _respond({
++            success: false,
++            error: err.message,
++            message: 'Cache system error'
++          });
++        }
++      }
+ 
+       // === AUTHENTICATION ROUTES ===
+       if (action === 'login') {
+@@ -278,6 +300,51 @@
+         return _respond(getExams(e.parameter));
+       }
+       
++      if (action === 'debugExamsSheet') {
++        // Debug endpoint to check Exams sheet state
++        try {
++          const sh = _getSheet('Exams');
++          const headers = _headers(sh);
++          const rows = _rows(sh);
++          return _respond({
++            sheetExists: true,
++            sheetName: sh.getName(),
++            lastRow: sh.getLastRow(),
++            lastColumn: sh.getLastColumn(),
++            headers: headers,
++            rowCount: rows.length,
++            sampleData: rows.slice(0, 3) // First 3 rows
++          });
++        } catch (err) {
++          return _respond({ error: err.message, stack: err.stack });
++        }
++      }
++      
++      if (action === 'warmCache') {
++        // Warm up caches to improve initial load performance
++        try {
++          appLog('INFO', 'warmCache', 'Starting cache warming');
++          
++          // Pre-load frequently accessed data
++          getFullTimetable();
++          getExams({});
++          
++          appLog('INFO', 'warmCache', 'Cache warming complete');
++          return _respond({ success: true, message: 'Cache warmed successfully' });
++        } catch (err) {
++          return _respond({ error: err.message });
++        }
++      }
++      
++      if (action === 'clearCache') {
++        // Super Admin only
++        const email = (e.parameter.email || '').toLowerCase().trim();
++        if (!_isSuperAdminSafe(email)) {
++          return _respond({ error: 'Permission denied. Super Admin access required.' });
++        }
++        return _respond(clearAllCache());
++      }
++      
+       if (action === 'getExamMarks') {
+         const examId = e.parameter.examId || '';
+         return _respond(getExamMarks(examId));
+@@ -335,6 +402,13 @@
+         return _respond(getStudents(cls));
+       }
+       
++      if (action === 'getStudentsBatch') {
++        // PERFORMANCE: Batch fetch students for multiple classes
++        const classesParam = e.parameter.classes || '';
++        const classes = classesParam.split(',').map(c => c.trim()).filter(Boolean);
++        return _respond(getStudentsBatch(classes));
++      }
++      
+       if (action === 'getStudentReportCard') {
+         const examType = e.parameter.examType || '';
+         const admNo = e.parameter.admNo || '';
+@@ -798,6 +872,26 @@
+         return _respond(createExam(data));
+       }
+       
++      if (action === 'debugExamsSheet') {
++        // Debug endpoint to check Exams sheet state
++        try {
++          const sh = _getSheet('Exams');
++          const headers = _headers(sh);
++          const rows = _rows(sh);
++          return _respond({
++            sheetExists: true,
++            sheetName: sh.getName(),
++            lastRow: sh.getLastRow(),
++            lastColumn: sh.getLastColumn(),
++            headers: headers,
++            rowCount: rows.length,
++            sampleData: rows.slice(0, 3) // First 3 rows
++          });
++        } catch (err) {
++          return _respond({ error: err.message, stack: err.stack });
++        }
++      }
++      
+       if (action === 'createBulkExams') {
+         return _respond(createBulkExams(data));
+       }
+@@ -2169,17 +2263,30 @@
+         return _respond({ error: 'Email required' });
+       }
+       
+-      const sh = _getSheet('Schemes');
+-      const headers = _headers(sh);
+-      const schemes = _rows(sh).map(row => _indexByHeader(row, headers))
+-        .filter(scheme => (scheme.teacherEmail || '').toLowerCase() === email.toLowerCase());
++      // Cache key based on email
++      const cacheKey = `teacher_schemes_${email.toLowerCase()}`;
+       
+-      return _respond(schemes);
++      // Try to get from cache (MEDIUM TTL - 5 minutes)
++      const cached = getCachedData(cacheKey, () => _fetchTeacherSchemes(email), CACHE_TTL.MEDIUM);
++      
++      return _respond(cached);
+     } catch (error) {
+       Logger.log('Error getting teacher schemes: ' + error.message);
+       return _respond({ error: error.message });
+     }
+   }
++  
++  /**
++   * Fetch teacher schemes from sheet (private helper for caching)
++   */
++  function _fetchTeacherSchemes(email) {
++    const sh = _getSheet('Schemes');
++    const headers = _headers(sh);
++    const schemes = _rows(sh).map(row => _indexByHeader(row, headers))
++      .filter(scheme => (scheme.teacherEmail || '').toLowerCase() === email.toLowerCase());
++    
++    return schemes;
++  }
+ 
+   /**
+   * Handle GET teacher lesson plans
+@@ -2192,45 +2299,64 @@
+         return _respond({ error: 'Email required' });
+       }
+       
+-      const sh = _getSheet('LessonPlans');
+-      const headers = _headers(sh);
+-      let lessonPlans = _rows(sh).map(row => _indexByHeader(row, headers))
+-        .filter(plan => (plan.teacherEmail || '').toLowerCase() === email.toLowerCase());
++      // Build cache key including filters
++      const filters = [
++        params.subject || '',
++        params.class || '',
++        params.status || '',
++        params.search || ''
++      ].join('_').toLowerCase();
++      const cacheKey = `teacher_lessonplans_${email.toLowerCase()}_${filters}`;
+       
+-      // Apply optional filters
+-      if (params.subject && params.subject.trim()) {
+-        lessonPlans = lessonPlans.filter(plan => 
+-          (plan.subject || '').toLowerCase() === params.subject.toLowerCase()
+-        );
+-      }
++      // Try to get from cache (MEDIUM TTL - 5 minutes)
++      const cached = getCachedData(cacheKey, () => _fetchTeacherLessonPlans(email, params), CACHE_TTL.MEDIUM);
+       
+-      if (params.class && params.class.trim()) {
+-        lessonPlans = lessonPlans.filter(plan => 
+-          (plan.class || '').toLowerCase() === params.class.toLowerCase()
+-        );
+-      }
+-      
+-      if (params.status && params.status.trim()) {
+-        lessonPlans = lessonPlans.filter(plan => 
+-          (plan.status || '').toLowerCase() === params.status.toLowerCase()
+-        );
+-      }
+-      
+-      if (params.search && params.search.trim()) {
+-        const searchLower = params.search.toLowerCase();
+-        lessonPlans = lessonPlans.filter(plan =>
+-          (plan.chapter || '').toLowerCase().includes(searchLower) ||
+-          (plan.subject || '').toLowerCase().includes(searchLower) ||
+-          (plan.class || '').toLowerCase().includes(searchLower)
+-        );
+-      }
+-      
+-      return _respond(lessonPlans);
++      return _respond(cached);
+     } catch (error) {
+       Logger.log('Error getting teacher lesson plans: ' + error.message);
+       return _respond({ error: error.message });
+     }
+   }
++  
++  /**
++   * Fetch teacher lesson plans from sheet (private helper for caching)
++   */
++  function _fetchTeacherLessonPlans(email, params) {
++    const sh = _getSheet('LessonPlans');
++    const headers = _headers(sh);
++    let lessonPlans = _rows(sh).map(row => _indexByHeader(row, headers))
++      .filter(plan => (plan.teacherEmail || '').toLowerCase() === email.toLowerCase());
++    
++    // Apply optional filters
++    if (params.subject && params.subject.trim()) {
++      lessonPlans = lessonPlans.filter(plan => 
++        (plan.subject || '').toLowerCase() === params.subject.toLowerCase()
++      );
++    }
++    
++    if (params.class && params.class.trim()) {
++      lessonPlans = lessonPlans.filter(plan => 
++        (plan.class || '').toLowerCase() === params.class.toLowerCase()
++      );
++    }
++    
++    if (params.status && params.status.trim()) {
++      lessonPlans = lessonPlans.filter(plan => 
++        (plan.status || '').toLowerCase() === params.status.toLowerCase()
++      );
++    }
++    
++    if (params.search && params.search.trim()) {
++      const searchLower = params.search.toLowerCase();
++      lessonPlans = lessonPlans.filter(plan =>
++        (plan.chapter || '').toLowerCase().includes(searchLower) ||
++        (plan.subject || '').toLowerCase().includes(searchLower) ||
++        (plan.class || '').toLowerCase().includes(searchLower)
++      );
++    }
++    
++    return lessonPlans;
++  }
+ 
+   /**
+   * Handle GET pending schemes
+@@ -2523,59 +2649,72 @@
+       }
+       
+       const queryDate = _normalizeQueryDate(date);
++      
++      // PERFORMANCE: Cache with SHORT TTL - lesson plans can change
++      const cacheKey = 'planned_lessons_' + email + '_' + queryDate;
++      return _respond(getCachedData(cacheKey, function() {
++        return _fetchPlannedLessonsForDate(email, queryDate);
++      }, CACHE_TTL.SHORT));
++      
++    } catch (error) {
++      Logger.log('[BATCH] Error: ' + error.message);
++      return _respond({ success: false, error: error.message });
++    }
++  }
++  
++  function _fetchPlannedLessonsForDate(email, queryDate) {
++    // Block lesson planning on non-teaching days (exams/holidays/events) from AcademicCalendar
++    // Check if queryDate falls within any ExamsHolidaysEventsStart to ExamsHolidaysEventsEnd range
++    let isNonTeachingDay = false;
++    let nonTeachingReason = '';
++    try {
++      const calendarData = _getCachedSheetData('AcademicCalendar');
++      const rows = calendarData && calendarData.data ? calendarData.data : [];
++      const qd = queryDate; // already ISO yyyy-MM-dd in IST
+ 
+-      // Block lesson planning on non-teaching days (exams/holidays/events) from AcademicCalendar
+-      // Check if queryDate falls within any ExamsHolidaysEventsStart to ExamsHolidaysEventsEnd range
+-      let isNonTeachingDay = false;
+-      let nonTeachingReason = '';
+-      try {
+-        const calendarData = _getCachedSheetData('AcademicCalendar');
+-        const rows = calendarData && calendarData.data ? calendarData.data : [];
+-        const qd = queryDate; // already ISO yyyy-MM-dd in IST
+-
+-        for (let i = 0; i < rows.length && !isNonTeachingDay; i++) {
+-          const r = rows[i] || {};
+-          
+-          // Check if date falls within ExamsHolidaysEventsStart to ExamsHolidaysEventsEnd range
+-          const blockStart = r.ExamsHolidaysEventsStart ? _isoDateIST(_coerceToDate(r.ExamsHolidaysEventsStart)) : null;
+-          const blockEnd = r.ExamsHolidaysEventsEnd ? _isoDateIST(_coerceToDate(r.ExamsHolidaysEventsEnd)) : null;
+-          
+-          if (blockStart && blockEnd && qd >= blockStart && qd <= blockEnd) {
+-            isNonTeachingDay = true;
+-            nonTeachingReason = 'Blocked Period (Exam/Holiday/Event)';
+-            break;
+-          }
++      for (let i = 0; i < rows.length && !isNonTeachingDay; i++) {
++        const r = rows[i] || {};
++        
++        // Check if date falls within ExamsHolidaysEventsStart to ExamsHolidaysEventsEnd range
++        const blockStart = r.ExamsHolidaysEventsStart ? _isoDateIST(_coerceToDate(r.ExamsHolidaysEventsStart)) : null;
++        const blockEnd = r.ExamsHolidaysEventsEnd ? _isoDateIST(_coerceToDate(r.ExamsHolidaysEventsEnd)) : null;
++        
++        if (blockStart && blockEnd && qd >= blockStart && qd <= blockEnd) {
++          isNonTeachingDay = true;
++          nonTeachingReason = 'Blocked Period (Exam/Holiday/Event)';
++          break;
+         }
+-      } catch (calErr) {
+-        Logger.log(`[BATCH] AcademicCalendar check failed: ${calErr && calErr.message}`);
+       }
++    } catch (calErr) {
++      Logger.log(`[BATCH] AcademicCalendar check failed: ${calErr && calErr.message}`);
++    }
+ 
+-      if (isNonTeachingDay) {
+-        Logger.log(`[BATCH] ${queryDate} marked as non-teaching (${nonTeachingReason}); blocking lesson plans.`);
+-        return _respond({
+-          success: true,
+-          email: email,
+-          date: queryDate,
+-          isNonTeachingDay: true,
+-          reason: nonTeachingReason,
+-          lessonsByPeriod: {},
+-          count: 0
+-        });
+-      }
+-      
+-      // Get all lesson plans for this date
+-      const sh = _getSheet('LessonPlans');
+-      const headers = _headers(sh);
+-      const allLessonPlans = _rows(sh).map(row => _indexByHeader(row, headers));
+-      
+-      Logger.log(`[BATCH] Total lesson plans in sheet: ${allLessonPlans.length}`);
++    if (isNonTeachingDay) {
++      Logger.log(`[BATCH] ${queryDate} marked as non-teaching (${nonTeachingReason}); blocking lesson plans.`);
++      return {
++        success: true,
++        email: email,
++        date: queryDate,
++        isNonTeachingDay: true,
++        reason: nonTeachingReason,
++        lessonsByPeriod: {},
++        count: 0
++      };
++    }
++    
++    // Get all lesson plans for this date
++    const sh = _getSheet('LessonPlans');
++    const headers = _headers(sh);
++    const allLessonPlans = _rows(sh).map(row => _indexByHeader(row, headers));
++    
++    Logger.log(`[BATCH] Total lesson plans in sheet: ${allLessonPlans.length}`);
++    
++    // Filter for Ready status and matching date
++    const matchingPlans = allLessonPlans.filter(plan => {
++      let selectedDateVal = plan.selectedDate || plan.date;
+       
+-      // Filter for Ready status and matching date
+-      const matchingPlans = allLessonPlans.filter(plan => {
+-        let selectedDateVal = plan.selectedDate || plan.date;
+-        
+-        // FALLBACK: Parse date from uniqueKey if selectedDate is missing
+-        // uniqueKey format: "email|YYYY-MM-DD|period"
++      // FALLBACK: Parse date from uniqueKey if selectedDate is missing
++      // uniqueKey format: "email|YYYY-MM-DD|period"
+         if (!selectedDateVal && plan.uniqueKey) {
+           const parts = String(plan.uniqueKey).split('|');
+           if (parts.length >= 2) {
+@@ -2632,20 +2771,12 @@
+         Logger.log(`[BATCH] Mapped lesson ${plan.lpId} to ${periodKey}`);
+       });
+       
+-      return _respond({
+-        success: true,
+-        date: queryDate,
+-        lessonsByPeriod: lessonsByPeriod,
+-        totalPlans: matchingPlans.length
+-      });
+-      
+-    } catch (error) {
+-      Logger.log(`[BATCH] Error getting planned lessons: ${error.message}`);
+-      return _respond({ 
+-        success: false, 
+-        error: error.message 
+-      });
+-    }
++    return {
++      success: true,
++      date: queryDate,
++      lessonsByPeriod: lessonsByPeriod,
++      totalPlans: matchingPlans.length
++    };
+   }
+ 
+   function _handleGetPlannedLessonForPeriod(params) {
+@@ -2773,54 +2904,62 @@
+       const email = (params.email || '').toLowerCase().trim();
+       const date = params.date || _todayISO();
+       
+-      Logger.log(`=== GETTING TEACHER DAILY REPORTS ===`);
+-      Logger.log(`Email: ${email}, Date: ${date}`);
+-      
+-      if (!email) {
+-        Logger.log('ERROR: Teacher email is required');
+-        return _respond({ success: false, error: 'Teacher email is required' });
+-      }
++      // PERFORMANCE: Cache with SHORT TTL - reports change during the day
++      const cacheKey = 'teacher_reports_' + email + '_' + date;
++      return _respond(getCachedData(cacheKey, function() {
++        return _fetchTeacherDailyReportsForDate(email, date);
++      }, CACHE_TTL.SHORT));
+       
+-      // Get daily reports for this teacher and date
+-      const drSh = _getSheet('DailyReports');
+-      const drHeaders = _headers(drSh);
+-      const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
++    } catch (error) {
++      Logger.log('Error getting teacher daily reports: ' + error.message);
++      return _respond({ success: false, error: error.message });
++    }
++  }
++  
++  function _fetchTeacherDailyReportsForDate(email, date) {
++    Logger.log(`=== GETTING TEACHER DAILY REPORTS ===`);
++    Logger.log(`Email: ${email}, Date: ${date}`);
++    
++    if (!email) {
++      Logger.log('ERROR: Teacher email is required');
++      return { success: false, error: 'Teacher email is required' };
++    }
++    
++    // Get daily reports for this teacher and date
++    const drSh = _getSheet('DailyReports');
++    const drHeaders = _headers(drSh);
++    const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
++    
++    Logger.log(`Total reports in sheet: ${allReports.length}`);
++    
++    const reports = allReports.filter(report => {
++      // Skip invalid reports
++      if (!report || !report.date || !report.teacherEmail) return false;
+       
+-      Logger.log(`Total reports in sheet: ${allReports.length}`);
++      // Use IST helper to normalize report date - handles Date objects, strings, numbers
++      const reportDate = _isoDateIST(report.date);
+       
+-      const reports = allReports.filter(report => {
+-        // Skip invalid reports
+-        if (!report || !report.date || !report.teacherEmail) return false;
+-        
+-        // Use IST helper to normalize report date - handles Date objects, strings, numbers
+-        const reportDate = _isoDateIST(report.date);
+-        
+-        const reportEmail = String(report.teacherEmail || '').toLowerCase().trim();
+-        const queryDate = _normalizeQueryDate(date);  // Use helper to normalize query date
+-        const dateMatch = reportDate === queryDate;
+-        const emailMatch = reportEmail === email;
+-        
+-        if (emailMatch) {
+-          Logger.log(`Report for ${reportEmail} on ${reportDate} (type: ${typeof report.date}): dateMatch=${dateMatch}, emailMatch=${emailMatch}, queryDate=${queryDate}`);
+-        }
+-        
+-        return dateMatch && emailMatch;
+-      }).map(report => ({
+-        ...report,
+-        status: 'Submitted'  // Add status field so frontend knows this report is submitted
+-      }));
++      const reportEmail = String(report.teacherEmail || '').toLowerCase().trim();
++      const queryDate = _normalizeQueryDate(date);  // Use helper to normalize query date
++      const dateMatch = reportDate === queryDate;
++      const emailMatch = reportEmail === email;
+       
+-      Logger.log(`=== RETURNING ${reports.length} REPORTS FOR ${email} ON ${date} ===`);
+-      if (reports.length > 0) {
+-        Logger.log(`Sample report: ${JSON.stringify(reports[0])}`);
++      if (emailMatch) {
++        Logger.log(`Report for ${reportEmail} on ${reportDate} (type: ${typeof report.date}): dateMatch=${dateMatch}, emailMatch=${emailMatch}, queryDate=${queryDate}`);
+       }
+       
+-      return _respond(reports);
+-      
+-    } catch (error) {
+-      Logger.log('Error getting teacher daily reports: ' + error.message);
+-      return _respond({ success: false, error: error.message });
++      return dateMatch && emailMatch;
++    }).map(report => ({
++      ...report,
++      status: 'Submitted'  // Add status field so frontend knows this report is submitted
++    }));
++    
++    Logger.log(`=== RETURNING ${reports.length} REPORTS FOR ${email} ON ${date} ===`);
++    if (reports.length > 0) {
++      Logger.log(`Sample report: ${JSON.stringify(reports[0])}`);
+     }
++    
++    return reports;
+   }
+ 
+   /**
+@@ -6253,6 +6392,13 @@
+    * @returns {Object} - List of periods without lesson plans
+    */
+   function getMissingLessonPlans(teacherEmail, daysAhead = 7) {
++    const cacheKey = generateCacheKey('missing_plans', { email: teacherEmail, days: daysAhead });
++    return getCachedData(cacheKey, function() {
++      return _fetchMissingLessonPlans(teacherEmail, daysAhead);
++    }, CACHE_TTL.SHORT);
++  }
++
++  function _fetchMissingLessonPlans(teacherEmail, daysAhead) {
+     try {
+       Logger.log(`Getting missing lesson plans for ${teacherEmail}, ${daysAhead} days ahead`);
+       
+@@ -6421,6 +6567,21 @@
+    * @returns {Array} - Filtered daily reports
+    */
+   function getDailyReports(teacher = '', fromDate = '', toDate = '', cls = '', subject = '') {
++    // Cache daily reports for 1 minute
++    const cacheKey = generateCacheKey('daily_reports', {
++      teacher: teacher,
++      fromDate: fromDate,
++      toDate: toDate,
++      class: cls,
++      subject: subject
++    });
++    
++    return getCachedData(cacheKey, function() {
++      return _fetchDailyReports(teacher, fromDate, toDate, cls, subject);
++    }, CACHE_TTL.SHORT);
++  }
++  
++  function _fetchDailyReports(teacher = '', fromDate = '', toDate = '', cls = '', subject = '') {
+     try {
+       Logger.log(`getDailyReports: teacher=${teacher}, fromDate=${fromDate}, toDate=${toDate}, class=${cls}, subject=${subject}`);
+       
+diff --git a/Appscript/SchemeLessonManager.gs b/Appscript/SchemeLessonManager.gs
+index b0b1cb7..ac6de9a 100644
+--- a/Appscript/SchemeLessonManager.gs
++++ b/Appscript/SchemeLessonManager.gs
+@@ -541,6 +541,13 @@ function _calculateLessonPlanningDateRange() {
+  * Get approved schemes for a teacher with chapter/session breakdown
+  */
+ function getApprovedSchemesForLessonPlanning(teacherEmail) {
++  const cacheKey = generateCacheKey('approved_schemes', { email: teacherEmail });
++  return getCachedData(cacheKey, function() {
++    return _fetchApprovedSchemesForLessonPlanning(teacherEmail);
++  }, CACHE_TTL.MEDIUM);
++}
++
++function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
+   try {
+     Logger.log(`Getting approved schemes for lesson planning: ${teacherEmail}`);
+     
+diff --git a/Appscript/SubstitutionManager.gs b/Appscript/SubstitutionManager.gs
+index 3e2f2fb..c7046db 100644
+--- a/Appscript/SubstitutionManager.gs
++++ b/Appscript/SubstitutionManager.gs
+@@ -75,6 +75,10 @@ function assignSubstitution(data) {
+     // Don't fail substitution if cascade fails
+   }
+   
++  // Invalidate substitution caches since data changed
++  invalidateCache('substitutions');
++  invalidateCache('timetable'); // Also invalidate timetable cache
++  
+   return { 
+     submitted: true, 
+     cascadeInfo: cascadeResult 
+@@ -87,6 +91,14 @@ function assignSubstitution(data) {
+ function getSubstitutionsForDate(date) {
+   const normalizedDate = _isoDateString(date);
+   
++  // Cache substitutions for 1 minute (changes frequently)
++  const cacheKey = generateCacheKey('substitutions', { date: normalizedDate });
++  return getCachedData(cacheKey, function() {
++    return _fetchSubstitutionsForDate(normalizedDate);
++  }, CACHE_TTL.SHORT);
++}
++
++function _fetchSubstitutionsForDate(normalizedDate) {
+   const sh = _getSheet('Substitutions');
+   const headers = _headers(sh);
+   const allRows = _rows(sh).map(r => _indexByHeader(r, headers));
+@@ -324,7 +336,10 @@ function acknowledgeSubstitution(notificationId, teacherEmail) {
+  * Alias for getTeacherSubstitutionNotifications for frontend compatibility
+  */
+ function getSubstitutionNotifications(teacherEmail) {
+-  return getTeacherSubstitutionNotifications(teacherEmail);
++  const cacheKey = generateCacheKey('sub_notifications', { email: teacherEmail });
++  return getCachedData(cacheKey, function() {
++    return getTeacherSubstitutionNotifications(teacherEmail);
++  }, CACHE_TTL.SHORT);
+ }
+ 
+ /**
+@@ -395,6 +410,9 @@ function acknowledgeSubstitutionAssignment(data) {
+         sh.getRange(i + 1, acknowledgedByColIndex).setValue(data.teacherEmail);
+         sh.getRange(i + 1, acknowledgedAtColIndex).setValue(new Date().toISOString());
+         
++        // Invalidate cache for this teacher
++        invalidateCache('sub_notifications_email:' + teacherEmail);
++        
+         Logger.log(`[acknowledgeSubstitutionAssignment] Successfully acknowledged`);
+         
+         return { success: true, message: 'Substitution acknowledged successfully' };
+diff --git a/Appscript/TimetableManager.gs b/Appscript/TimetableManager.gs
+index 8bf0483..7314341 100644
+--- a/Appscript/TimetableManager.gs
++++ b/Appscript/TimetableManager.gs
+@@ -8,6 +8,13 @@
+  * Get a teacher's weekly timetable (7 days starting from today)
+  */
+ function getTeacherWeeklyTimetable(identifier) {
++  // Cache with LONG TTL - timetable structure rarely changes
++  return getCachedData('teacher_weekly_' + String(identifier).toLowerCase(), function() {
++    return _fetchTeacherWeeklyTimetable(identifier);
++  }, CACHE_TTL.LONG);
++}
++
++function _fetchTeacherWeeklyTimetable(identifier) {
+   // Create array of next 7 days
+   const TZ = 'Asia/Kolkata';
+   const days = [];
+@@ -59,6 +66,15 @@ function getTeacherWeeklyTimetable(identifier) {
+  * - Substitution periods where they're the substitute teacher
+  */
+ function getTeacherDailyTimetable(identifier, date) {
++  // Cache with SHORT TTL - includes substitutions which can change during the day
++  const normalizedDate = _isoDateString(date);
++  const cacheKey = 'teacher_daily_' + String(identifier).toLowerCase() + '_' + normalizedDate;
++  return getCachedData(cacheKey, function() {
++    return _fetchTeacherDailyTimetable(identifier, date);
++  }, CACHE_TTL.SHORT);
++}
++
++function _fetchTeacherDailyTimetable(identifier, date) {
+   const normalizedDate = _isoDateString(date);
+   const dayName = _dayName(normalizedDate);
+   const idLower = identifier.toLowerCase();
+@@ -146,6 +162,15 @@ function getTeacherDailyTimetable(identifier, date) {
+  */
+ function getDailyTimetableWithSubstitutions(date) {
+   const normalizedDate = _isoDateString(date);
++  
++  // PERFORMANCE: Cache with SHORT TTL - substitutions change during the day
++  const cacheKey = 'daily_timetable_' + normalizedDate;
++  return getCachedData(cacheKey, function() {
++    return _fetchDailyTimetableWithSubstitutions(normalizedDate);
++  }, CACHE_TTL.SHORT);
++}
++
++function _fetchDailyTimetableWithSubstitutions(normalizedDate) {
+   const dayName = _dayName(normalizedDate);
+   
+   Logger.log(`[getDailyTimetableWithSubstitutions] Date: ${normalizedDate}, DayName: ${dayName}`);
+@@ -472,6 +497,13 @@ function getAvailableTeachers(date, period) {
+  * Sheet columns: class, dayOfWeek, period, subject, teacherEmail, teacherName
+  */
+ function getFullTimetable() {
++  // Use cached timetable data (15 minute TTL - rarely changes)
++  return getCachedData('timetable_full', function() {
++    return _fetchFullTimetable();
++  }, CACHE_TTL.LONG);
++}
++
++function _fetchFullTimetable() {
+   const sh = _getSheet('Timetable');
+   const headers = _headers(sh);
+   const timetable = _rows(sh).map(r => _indexByHeader(r, headers));
