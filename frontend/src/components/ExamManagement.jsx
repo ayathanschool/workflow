@@ -913,7 +913,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       const icon = entered === 0 ? '🔴' : '🟡';
       const status = entered === 0 ? 'Pending' : 'Partial';
       
-      message += `${icon} *${exam.examId}*\n`;
+      message += `${icon} *${exam.examType}*\n`;
       message += `   ${displayClass(exam.class)} - ${exam.subject}\n`;
       message += `   Status: ${status} (${pending} pending)\n\n`;
     });
@@ -1878,7 +1878,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                     <table className="min-w-full text-xs">
                       <thead>
                         <tr className="border-b">
-                          <th className="text-left py-1 px-2">Exam ID</th>
+                          <th className="text-left py-1 px-2">Exam Type</th>
                           <th className="text-left py-1 px-2">Adm No</th>
                           <th className="text-left py-1 px-2">Student</th>
                           <th className="text-left py-1 px-2">Internal</th>
@@ -2452,7 +2452,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                   return (
                     <tr key={exam.examId} className={rowClassName}>
                       <td className="px-6 py-4 whitespace-nowrap font-medium">
-                        {exam.examId}
+                        {exam.examType}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">{displayClass(exam.class)}</td>
                       <td className="px-6 py-4 whitespace-nowrap">{exam.subject}</td>
