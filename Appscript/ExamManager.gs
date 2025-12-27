@@ -659,6 +659,26 @@ function getExamMarksEntryStatusBatch(examIds, params) {
         .toUpperCase();
     };
 
+    // Prepare teacher context for class-teacher permissions
+    const teacherCtx = {
+      hasClassTeacherRole: false,
+      classTeacherFor: []
+    };
+    if (filterByTeacher) {
+      const userSh = _getSheet('Users');
+      const userHeaders = _headers(userSh);
+      const users = _rows(userSh).map(r => _indexByHeader(r, userHeaders));
+      const user = users.find(u => String(u.email || '').toLowerCase() === teacherEmail);
+      if (user) {
+        const rolesLower = String(user.roles || '').toLowerCase();
+        teacherCtx.hasClassTeacherRole = rolesLower.includes('class teacher') || rolesLower.includes('classteacher');
+        teacherCtx.classTeacherFor = String(user.classTeacherFor || '')
+          .split(',')
+          .map(c => c.trim())
+          .filter(c => c.length > 0);
+      }
+    }
+
     // Map examId -> class (normalized + raw)
     const examsSh = _getSheet('Exams');
     _ensureHeaders(examsSh, SHEETS.Exams);
@@ -673,10 +693,21 @@ function getExamMarksEntryStatusBatch(examIds, params) {
       const exClassRaw = String(ex.class || '').trim();
       const exSubject = String(ex.subject || '').trim();
       
-      // Filter by teacher permissions for class teachers
+      // Filter by teacher permissions: allow if class teacher for this class OR subject teacher
       if (filterByTeacher) {
-        const permClass = normalizeClassForPermission(exClassRaw);
-        if (!userCanCreateExam(teacherEmail, permClass, exSubject)) continue;
+        const permClassUpper = normalizeClassForPermission(exClassRaw);
+        const examClassNormLower = normClass(exClassRaw);
+        const numOnly = function(s) { const m = String(s || '').match(/\d+/); return m ? m[0] : ''; };
+        const examClassNum = numOnly(exClassRaw);
+
+        const isClassTeacherForThis = teacherCtx.classTeacherFor.some(c => {
+          const cNorm = normClass(c);
+          const cNum = numOnly(c);
+          return cNorm === examClassNormLower || (examClassNum && cNum === examClassNum);
+        });
+
+        const isAllowed = isClassTeacherForThis || teacherCtx.hasClassTeacherRole || userCanCreateExam(teacherEmail, permClassUpper, exSubject);
+        if (!isAllowed) continue;
       }
       
       examMetaById[exId] = {
@@ -809,6 +840,26 @@ function getExamMarksEntryStatusAll(params) {
         .toUpperCase();
     };
 
+    // Prepare teacher context for class-teacher permissions
+    const teacherCtx = {
+      hasClassTeacherRole: false,
+      classTeacherFor: []
+    };
+    if (filterByTeacher) {
+      const userSh = _getSheet('Users');
+      const userHeaders = _headers(userSh);
+      const users = _rows(userSh).map(r => _indexByHeader(r, userHeaders));
+      const user = users.find(u => String(u.email || '').toLowerCase() === teacherEmail);
+      if (user) {
+        const rolesLower = String(user.roles || '').toLowerCase();
+        teacherCtx.hasClassTeacherRole = rolesLower.includes('class teacher') || rolesLower.includes('classteacher');
+        teacherCtx.classTeacherFor = String(user.classTeacherFor || '')
+          .split(',')
+          .map(c => c.trim())
+          .filter(c => c.length > 0);
+      }
+    }
+
     // Read exams and optionally filter by class
     const examsSh = _getSheet('Exams');
     _ensureHeaders(examsSh, SHEETS.Exams);
@@ -830,8 +881,19 @@ function getExamMarksEntryStatusAll(params) {
       if (examTypeFilter && exExamType.toLowerCase() !== examTypeFilter) continue;
 
       if (filterByTeacher) {
-        const permClass = normalizeClassForPermission(exClassRaw);
-        if (!userCanCreateExam(teacherEmail, permClass, exSubject)) continue;
+        const permClassUpper = normalizeClassForPermission(exClassRaw);
+        const examClassNormLower = exClassNorm;
+        const numOnly = function(s) { const m = String(s || '').match(/\d+/); return m ? m[0] : ''; };
+        const examClassNum = numOnly(exClassRaw);
+
+        const isClassTeacherForThis = teacherCtx.classTeacherFor.some(c => {
+          const cNorm = normClass(c);
+          const cNum = numOnly(c);
+          return cNorm === examClassNormLower || (examClassNum && cNum === examClassNum);
+        });
+
+        const isAllowed = isClassTeacherForThis || teacherCtx.hasClassTeacherRole || userCanCreateExam(teacherEmail, permClassUpper, exSubject);
+        if (!isAllowed) continue;
       }
 
       examMetaById[exId] = {
@@ -1058,6 +1120,43 @@ function _calculateGradeFallback(percentage) {
   if (percentage >= 40) return 'C';
   if (percentage >= 35) return 'D';
   return 'F';
+}
+
+/**
+ * Get the lowest grade label applicable for a class's standard group.
+ * Used to represent Absent as a fail grade in report cards.
+ * Preference: use the lowest boundary grade; fallback to 'E'.
+ */
+function _getLeastGradeForClass(className) {
+  try {
+    const standardGroup = _standardGroup(className);
+
+    const gbSh = _getSheet('GradeBoundaries');
+    _ensureHeaders(gbSh, SHEETS.GradeBoundaries);
+    const gbHeaders = _headers(gbSh);
+    const boundaries = _rows(gbSh).map(r => _indexByHeader(r, gbHeaders));
+
+    const normalizeGroup = g => String(g || '')
+      .toLowerCase()
+      .replace(/std\s*/g, '')
+      .replace(/\s+/g, '')
+      .trim();
+    const targetGroup = normalizeGroup(standardGroup);
+    const applicable = boundaries.filter(b => normalizeGroup(b.standardGroup) === targetGroup);
+
+    if (applicable.length > 0) {
+      // Sort by minPercentage ascending to get the lowest grade band
+      applicable.sort((a, b) => (Number(a.minPercentage) || 0) - (Number(b.minPercentage) || 0));
+      const lowest = applicable[0];
+      return lowest.grade || 'E';
+    }
+
+    // If no boundaries configured, prefer 'E' as the least grade label
+    return 'E';
+  } catch (error) {
+    Logger.log(`[Lowest Grade ERROR] ${error.toString()}`);
+    return 'E';
+  }
 }
 
 /**
@@ -1352,45 +1451,46 @@ function getStudentReportCard(examType, admNo = '', cls = '') {
             // ce = Continuous Evaluation (Internal marks)
             // te = Term Exam (External marks)
             const ce = Number(mark.ce || 0);
-            const te = Number(mark.te || 0);
+            const teStr = String(mark.te || '').trim().toUpperCase();
+            const isAbsent = (teStr === 'A' || teStr === 'ABSENT' || String(mark.grade || '').trim().toUpperCase() === 'ABSENT');
+            const teNumParsed = parseInt(mark.te);
+            const teNum = isNaN(teNumParsed) ? 0 : teNumParsed;
             const totalFromSheet = Number(mark.total || 0);
-            
-            // Direct assignment: ce is internal, te is external
+
+            // Direct assignment: ce is internal, te is external (unless Absent)
             let internal = ce;
-            let external = te;
-            
-            // If total exists but ce and te are both 0, use the stored total
+            let external = isAbsent ? 0 : teNum;
+
+            // If total exists but ce and te are both 0 (and not Absent), use the stored total
             // This handles legacy data where only total was stored
-            if (totalFromSheet > 0 && ce === 0 && te === 0) {
+            if (!isAbsent && totalFromSheet > 0 && ce === 0 && teNum === 0) {
               // For backward compatibility, treat legacy total as external marks
               external = totalFromSheet;
               internal = 0;
             }
-            
+
             const total = internal + external;
             const examMax = Number(exam.totalMax || exam.internalMax + exam.externalMax || 100);
-            
-            Logger.log(`  Subject ${exam.subject}: ce=${ce}, te=${te}, internal=${internal}, external=${external}, total=${total}, max=${examMax}, percentage=${examMax > 0 ? ((total / examMax) * 100).toFixed(2) : 0}%`);
-            
-            // Determine if this class has internal marks
+
+            const perc = examMax > 0 ? ((total / examMax) * 100) : 0;
             const hasInternalMarks = _classHasInternalMarks(student.class);
-            
-            // Calculate percentage for grade determination
-            const percentage = examMax > 0 ? (total / examMax) * 100 : 0;
-            
+            const gradeLabel = isAbsent ? _getLeastGradeForClass(student.class) : _calculateGradeFromBoundaries(perc, student.class);
+
+            Logger.log(`  Subject ${exam.subject}: ce=${ce}, te=${isAbsent ? 'A' : teNum}, internal=${internal}, external=${external}, total=${total}, max=${examMax}, percentage=${examMax > 0 ? (perc.toFixed(2)) : 0}%, grade=${gradeLabel}${isAbsent ? ' (Absent treated as fail)' : ''}`);
+
             // IMPORTANT: Use 'ce' and 'te' property names to match frontend expectations
             subjects[exam.subject] = {
-              ce: hasInternalMarks ? internal : null,  // null = don't display
-              te: external,  // Always show external marks
-              internal: hasInternalMarks ? internal : null,  // Backward compatibility
-              external: external,  // Backward compatibility
+              ce: hasInternalMarks ? internal : null,
+              te: isAbsent ? 'A' : external,
+              internal: hasInternalMarks ? internal : null,
+              external: external,
               total: total,
               maxMarks: examMax,
-              percentage: Math.round(percentage),
-              grade: _calculateGradeFromBoundaries(percentage, student.class),
+              percentage: Math.round(perc),
+              grade: gradeLabel,
               hasInternalMarks: hasInternalMarks
             };
-            
+
             totalMarks += total;
             maxMarks += examMax;
             subjectCount++;

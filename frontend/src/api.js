@@ -36,6 +36,27 @@ function normalizeClassParam(value) {
 
 // Legacy cache system (keep for backward compatibility, but new code should use cacheManager)
 const apiCache = new Map();
+
+// ---- Local in-memory TTL cache (per tab) for very hot endpoints ----
+// Helps prevent repeated bursts of identical requests causing spinner loops.
+const __localTTLCache = new Map(); // key -> { ts, data, promise }
+function __localTTLGet(key, ttlMs) {
+  const v = __localTTLCache.get(key);
+  if (!v) return null;
+  if (v.data !== undefined && (Date.now() - v.ts) <= ttlMs) return v.data;
+  return null;
+}
+function __localTTLGetPromise(key) {
+  const v = __localTTLCache.get(key);
+  return v && v.promise ? v.promise : null;
+}
+function __localTTLSetPromise(key, promise) {
+  __localTTLCache.set(key, { ts: Date.now(), promise });
+}
+function __localTTLSetData(key, data) {
+  __localTTLCache.set(key, { ts: Date.now(), data });
+}
+
 const pendingRequests = new Map();
 
 function withInFlight(key, factory) {
@@ -854,15 +875,12 @@ export async function deleteExam(email, examId) {
 }
 
 // Get marks entry progress (entered/total) for a set of exams.
-export async function getExamMarksEntryStatusBatch(examIds = [], options = {}) {
+export async function getExamMarksEntryStatusBatch(examIds = []) {
   const ids = Array.isArray(examIds) ? examIds.filter(Boolean).map(String) : [];
   const q = new URLSearchParams({
     action: 'getExamMarksEntryStatusBatch',
     examIds: ids.join(',')
   });
-  // Add teacher filtering for class teachers
-  if (options.teacherEmail) q.append('teacherEmail', String(options.teacherEmail));
-  if (options.role) q.append('role', String(options.role));
   const result = await getJSON(`${BASE_URL}?${q.toString()}`);
   return result?.data || result || { success: false, exams: [] };
 }
@@ -1272,10 +1290,35 @@ export async function submitExamMarks(data) {
 }
 
 // Retrieve all marks for a given examId.  Returns an array of mark records.
-export async function getExamMarks(examId) {
-  const q = new URLSearchParams({ action: 'getExamMarks', examId })
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`)
-  return result?.data || result || []
+export async function getExamMarks(examId, options = {}) {
+  const key = `examMarks:${String(examId || 'all')}`;
+  const ttlMs = Number(options.cacheTTL || 30000); // default 30s
+  const cached = __localTTLGet(key, ttlMs);
+  if (cached !== null) return cached;
+
+  const inFlight = __localTTLGetPromise(key);
+  if (inFlight) return inFlight;
+
+  const q = new URLSearchParams({ action: 'getExamMarks', examId });
+  const p = (async () => {
+    const result = await getJSON(`${BASE_URL}?${q.toString()}`);
+    const data = result?.data || result || [];
+    __localTTLSetData(key, data);
+    return data;
+  })();
+
+  __localTTLSetPromise(key, p);
+  try {
+    return await p;
+  } finally {
+    // if it failed, remove promise entry so retries are possible
+    const v = __localTTLCache.get(key);
+    if (v && v.promise) {
+      // keep data if set; otherwise clear
+      if (v.data === undefined) __localTTLCache.delete(key);
+      else __localTTLSetData(key, v.data);
+    }
+  }
 }
 
 // Get all exams - using working getExams function directly
@@ -1321,67 +1364,6 @@ export async function getStudentReportCard(examType, admNo = '', cls = '') {
 // Fetch all plans (schemes and lesson plans) with optional filters.
 // Parameters: teacher (email or part of name), class, subject, status.
 // Fetch all approved schemes across the school, used to populate teacher dropdowns
-export async function getReportCardsBatch(className, examTypes, students) {
-  const cls = String(className || '').trim();
-  const types = Array.isArray(examTypes) ? examTypes.filter(Boolean) : [];
-  if (!cls) throw new Error('Missing className');
-  if (types.length === 0) return {};
-
-  // If students not provided, fetch once
-  let stu = Array.isArray(students) ? students : null;
-  if (!stu) {
-    try {
-      stu = await getStudents(cls);
-    } catch (e) {
-      stu = [];
-    }
-  }
-  const byAdm = new Map((stu || []).map(s => [String(s.admNo || s.admissionNo || '').trim(), s]));
-  const admNos = (stu || []).map(s => String(s.admNo || s.admissionNo || '').trim()).filter(Boolean);
-
-  // Simple concurrency limiter
-  async function mapLimit(items, limit, fn) {
-    const out = new Array(items.length);
-    let i = 0;
-    const workers = Array(Math.min(limit, items.length)).fill(0).map(async () => {
-      while (i < items.length) {
-        const idx = i++;
-        out[idx] = await fn(items[idx], idx);
-      }
-    });
-    await Promise.all(workers);
-    return out;
-  }
-
-  const result = {};
-  for (const examType of types) {
-    const rows = await mapLimit(admNos, 6, async (admNo) => {
-      try {
-        const rc = await getStudentReportCard(examType, admNo, cls);
-        const r = rc && (rc.data || rc.report || rc.result || rc);
-        const summary = (r && (r.summary || r.totals || r.overall)) || r || {};
-        const total =
-          Number(summary.total ?? summary.grandTotal ?? summary.overallTotal ?? summary.totalMarks ?? summary.totalScore ?? 0) || 0;
-        const percentage =
-          Number(summary.percentage ?? summary.overallPercentage ?? summary.percent ?? 0) || 0;
-        const grade =
-          String(summary.grade ?? summary.overallGrade ?? summary.finalGrade ?? '').trim();
-
-        const s = byAdm.get(admNo) || {};
-        const name = String(s.name || s.studentName || s.student || '').trim();
-        return { admNo, name, total, grade, percentage };
-      } catch (e) {
-        const s = byAdm.get(admNo) || {};
-        const name = String(s.name || s.studentName || '').trim();
-        return { admNo, name, total: 0, grade: '', percentage: 0, error: String(e && e.message ? e.message : e) };
-      }
-    });
-    result[examType] = rows;
-  }
-  return result;
-}
-
-
 export async function getAllApprovedSchemes() {
   try {
     const res = await getJSON(`${BASE_URL}?action=getAllPlans&status=Approved`);
