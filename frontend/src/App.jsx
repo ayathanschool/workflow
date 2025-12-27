@@ -66,6 +66,7 @@ const DailyReportModern = lazy(() => import('./DailyReportModern'));
 const MissingLessonPlansAlert = lazy(() => import('./components/MissingLessonPlansAlert'));
 const HMMissingLessonPlansOverview = lazy(() => import('./components/HMMissingLessonPlansOverview'));
 const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodSubstitutionView'));
+const AssessmentsManager = lazy(() => import('./components/AssessmentsManager'));
 const ExamManagement = lazy(() => import('./components/ExamManagement'));
 const ReportCard = lazy(() => import('./components/ReportCard'));
 const Marklist = lazy(() => import('./components/Marklist'));
@@ -473,9 +474,7 @@ const App = () => {
         { id: 'class-data', label: 'Class Data', icon: UserCheck },
         { id: 'admin-data', label: 'Admin Data', icon: Edit2 },
         { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
-        { id: 'exam-marks', label: 'Exam Management', icon: Award },
-        { id: 'report-card', label: 'Report Cards', icon: FileCheck },
-        { id: 'marklist', label: 'Marklist', icon: FileText },
+        { id: 'assessments', label: 'Assessments', icon: Award },
         { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
         { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
@@ -503,9 +502,7 @@ const App = () => {
       );
       // Teachers and class teachers can also manage exams: view available exams,
       // enter marks for their classes and subjects, and view marks.
-      items.push({ id: 'exam-marks', label: 'Exam Marks', icon: Award });
-      items.push({ id: 'report-card', label: 'Report Card', icon: FileText });
-      items.push({ id: 'marklist', label: 'Marklist', icon: FileText });
+      items.push({ id: 'assessments', label: 'Assessments', icon: Award });
     }
 
     // Daily reporting teachers should have access to daily reports functionality
@@ -533,9 +530,7 @@ const App = () => {
         { id: 'class-data', label: 'Class Data', icon: UserCheck },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
-        { id: 'exam-marks', label: 'Exam Marks', icon: Award },
-        { id: 'report-card', label: 'Report Card', icon: FileText },
-        { id: 'marklist', label: 'Marklist', icon: FileText },
+        { id: 'assessments', label: 'Assessments', icon: Award },
         { id: 'fee-collection', label: 'Fee Collection', icon: DollarSign }
       );
       // Additional management views for the headmaster
@@ -546,7 +541,7 @@ const App = () => {
 
     // Students can view their report cards
     if (hasAnyRole(['student'])) {
-      items.push({ id: 'report-card', label: 'My Report Card', icon: FileText });
+      items.push({ id: 'assessments', label: 'My Report Card', icon: FileText });
     }
 
     return items;
@@ -1359,12 +1354,34 @@ const App = () => {
                 return <UserManagement user={user} />;
               case 'audit-log':
                 return <AuditLog user={user} />;
+              
+              // New unified assessments module
+              case 'assessments':
+                return <AssessmentsManager user={user} withSubmit={withSubmit} />;
+              
+              // Old routes - redirect to unified module with appropriate tab
               case 'exam-marks':
-                return <ExamManagement user={user} withSubmit={withSubmit} />;
+                // Auto-redirect to assessments with marks-entry tab
+                setTimeout(() => setActiveView('assessments'), 0);
+                return <AssessmentsManager user={user} withSubmit={withSubmit} />;
               case 'report-card':
-                return <ReportCard user={user} />;
+                // Auto-redirect to assessments with reports tab
+                setTimeout(() => {
+                  setActiveView('assessments');
+                  const url = new URL(window.location);
+                  url.searchParams.set('tab', 'reports');
+                  window.history.pushState({}, '', url);
+                }, 0);
+                return <AssessmentsManager user={user} withSubmit={withSubmit} />;
               case 'marklist':
-                return <Marklist user={user} />;
+                // Auto-redirect to assessments with marklists tab
+                setTimeout(() => {
+                  setActiveView('assessments');
+                  const url = new URL(window.location);
+                  url.searchParams.set('tab', 'marklists');
+                  window.history.pushState({}, '', url);
+                }, 0);
+                return <AssessmentsManager user={user} withSubmit={withSubmit} />;
               case 'class-data':
                 return <ClassDataView />;
               case 'admin-data':

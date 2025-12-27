@@ -515,6 +515,13 @@ function submitExamMarks(data) {
   _ensureHeaders(marksSh, SHEETS.ExamMarks);
   const now = new Date().toISOString();
   
+  // Get existing marks to check for updates vs inserts
+  const marksHeaders = _headers(marksSh);
+  const existingMarks = _rows(marksSh).map((r, idx) => ({
+    data: _indexByHeader(r, marksHeaders),
+    rowIndex: idx + 2 // +2 because: 1-based index + header row
+  }));
+  
   // Process each student's marks
   for (const studentMark of marks) {
     // Accept both ce/te (old) and internal/external (new) field names
@@ -562,7 +569,22 @@ function submitExamMarks(data) {
       now
     ];
     
-    marksSh.appendRow(markData);
+    // Check if this student already has marks for this exam
+    const existingMark = existingMarks.find(m => 
+      m.data.examId === examId && 
+      String(m.data.admNo || '').trim() === String(studentMark.admNo || '').trim()
+    );
+    
+    if (existingMark) {
+      // Update existing row
+      const range = marksSh.getRange(existingMark.rowIndex, 1, 1, markData.length);
+      range.setValues([markData]);
+      Logger.log(`[Marks Update] Updated existing marks for ${studentMark.studentName} (Row ${existingMark.rowIndex})`);
+    } else {
+      // Insert new row
+      marksSh.appendRow(markData);
+      Logger.log(`[Marks Insert] Added new marks for ${studentMark.studentName}`);
+    }
   }
   
   // Audit log: Exam marks submission
@@ -753,13 +775,20 @@ function getExamMarksEntryStatusBatch(examIds, params) {
       const expectedSet = studentsByClass[meta.classNorm];
       if (!expectedSet || !expectedSet.has(adm)) continue;
 
-      // Treat 0 as entered ("0" should count). Empty string means not entered.
-      const hasAnyScore = (
-        String(mk.total ?? '').trim() !== '' ||
-        String(mk.ce ?? '').trim() !== '' ||
-        String(mk.te ?? '').trim() !== ''
+      // Only count as entered if there are actual marks (not all zeros/empty)
+      // Allow 'A' for absent, or any non-zero marks
+      const ce = String(mk.ce ?? '').trim();
+      const te = String(mk.te ?? '').trim();
+      const total = String(mk.total ?? '').trim();
+      
+      const isAbsent = (te.toUpperCase() === 'A' || te.toUpperCase() === 'ABSENT');
+      const hasActualMarks = (
+        (ce !== '' && ce !== '0' && parseFloat(ce) > 0) ||
+        (te !== '' && te !== '0' && parseFloat(te) > 0 && !isAbsent) ||
+        isAbsent
       );
-      if (!hasAnyScore) continue;
+      
+      if (!hasActualMarks) continue;
 
       if (!enteredByExamId[exId]) enteredByExamId[exId] = new Set();
       enteredByExamId[exId].add(adm);
@@ -951,12 +980,20 @@ function getExamMarksEntryStatusAll(params) {
       const expectedSet = studentsByClass[meta.classNorm];
       if (!expectedSet || !expectedSet.has(adm)) continue;
 
-      const hasAnyScore = (
-        String(mk.total ?? '').trim() !== '' ||
-        String(mk.ce ?? '').trim() !== '' ||
-        String(mk.te ?? '').trim() !== ''
+      // Only count as entered if there are actual marks (not all zeros/empty)
+      // Allow 'A' for absent, or any non-zero marks
+      const ce = String(mk.ce ?? '').trim();
+      const te = String(mk.te ?? '').trim();
+      const total = String(mk.total ?? '').trim();
+      
+      const isAbsent = (te.toUpperCase() === 'A' || te.toUpperCase() === 'ABSENT');
+      const hasActualMarks = (
+        (ce !== '' && ce !== '0' && parseFloat(ce) > 0) ||
+        (te !== '' && te !== '0' && parseFloat(te) > 0 && !isAbsent) ||
+        isAbsent
       );
-      if (!hasAnyScore) continue;
+      
+      if (!hasActualMarks) continue;
 
       if (!enteredByExamId[exId]) enteredByExamId[exId] = new Set();
       enteredByExamId[exId].add(adm);

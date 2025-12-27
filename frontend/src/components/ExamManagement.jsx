@@ -157,15 +157,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     const pct = typeof percentage === 'string' ? parseFloat(percentage) : Number(percentage);
     if (isNaN(pct)) return 'E';
 
-    console.log('🎓 calculateGrade called:', {
-      percentage: pct,
-      className,
-      gradeBoundariesLoaded,
-      boundariesCount: gradeBoundaries.length
-    });
-
     if (!gradeBoundariesLoaded || !gradeBoundaries.length) {
-      console.log('⚠️ Using fallback grading - boundaries not loaded');
       if (pct >= 80) return 'A';
       if (pct >= 60) return 'B';
       if (pct >= 40) return 'C';
@@ -194,29 +186,23 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       .trim();
 
     const targetGroup = normalizeGroup(stdGroup);
-    console.log('📚 Standard group determined:', { className, stdGroup: targetGroup });
 
     // Filter boundaries by normalized group label (supports 'Std 9-12' and '9-12')
     const boundaries = gradeBoundaries
       .filter(b => normalizeGroup(b.standardGroup) === targetGroup)
       .sort((a, b) => Number(b.minPercentage) - Number(a.minPercentage));
 
-    console.log('🔍 Filtered boundaries:', boundaries);
-
     for (const boundary of boundaries) {
       const minP = Number(boundary.minPercentage);
       const maxP = Number(boundary.maxPercentage);
       if (!isNaN(minP) && !isNaN(maxP) && pct >= minP && pct <= maxP) {
-        console.log('✅ Grade found:', boundary.grade, `(${pct}% in range ${minP}-${maxP}%)`);
         return boundary.grade;
       }
     }
 
-    console.log('⚠️ No matching boundary, using lowest grade');
     return boundaries.length > 0 ? boundaries[boundaries.length - 1].grade : 'E';
   }, [gradeBoundaries, gradeBoundariesLoaded]);
   const clearCache = useCallback(() => {
-    console.log('🗑️ Clearing all caches');
     setStudentsCache(new Map());
     setMarksCache(new Map());
     setApiError('Cache cleared successfully');
@@ -1345,13 +1331,6 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         external: Number(row.external) || 0
       }));
       
-      // Debug logging
-      console.log('=== SUBMITTING MARKS ===');
-      console.log('Selected Exam:', selectedExam);
-      console.log('Exam ID:', selectedExam?.examId);
-      console.log('Marks Count:', marks.length);
-      console.log('Sample Mark:', marks[0]);
-      
       // Submit to API
       const result = await api.submitExamMarks({
         examId: selectedExam.examId,
@@ -1362,25 +1341,15 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         marks
       });
       
-      console.log('Backend Response:', result);
-      console.log('Response details:', {
-        hasOk: result?.ok,
-        hasSubmitted: result?.submitted,
-        hasError: result?.error,
-        fullResponse: JSON.stringify(result)
-      });
-      
       // Support both response formats for compatibility
       if (result && (result.ok || result.submitted)) {
         success('Marks Saved', 'Marks saved successfully');
         setShowMarksForm(false);
       } else {
         const errorMsg = result?.error || 'Failed to save marks';
-        console.error('❌ SAVE FAILED:', errorMsg);
         throw new Error(errorMsg);
       }
     } catch (err) {
-      console.error('Error submitting marks:', err);
       setApiError(`Failed to save marks: ${err.message || 'Unknown error'}`);
     } finally {
       setIsLoading(false);
