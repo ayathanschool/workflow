@@ -518,13 +518,30 @@ function submitExamMarks(data) {
   // Process each student's marks
   for (const studentMark of marks) {
     // Accept both ce/te (old) and internal/external (new) field names
-    const ce = parseInt(studentMark.ce || studentMark.internal) || 0;
-    const te = parseInt(studentMark.te || studentMark.external) || 0;
-    const total = ce + te;
-    const percentage = (total / exam.totalMax) * 100;
-    const grade = _calculateGradeFromBoundaries(percentage, exam.class);
-    
-    Logger.log(`[Marks Submission] Student: ${studentMark.studentName}, CE: ${ce}, TE: ${te}, Total: ${total}/${exam.totalMax}, Percentage: ${percentage.toFixed(2)}%, Grade: ${grade}`);
+    let ce = parseInt(studentMark.ce ?? studentMark.internal);
+    if (isNaN(ce)) ce = 0;
+    const rawExternal = (studentMark.te ?? studentMark.external);
+    const extStr = String(rawExternal || '').trim().toUpperCase();
+    const isAbsent = extStr === 'A' || extStr === 'ABSENT';
+
+    let teStored;
+    let total;
+    let grade;
+
+    if (isAbsent) {
+      // Persist explicit Absent status
+      teStored = 'A';
+      total = ce; // Only internal contributes when external is Absent
+      grade = 'Absent';
+      Logger.log(`[Marks Submission] Student: ${studentMark.studentName}, CE: ${ce}, TE: A (Absent), Total: ${total}/${exam.totalMax}, Grade: Absent`);
+    } else {
+      const teNum = parseInt(rawExternal) || 0;
+      teStored = teNum;
+      total = ce + teNum;
+      const percentage = (total / exam.totalMax) * 100;
+      grade = _calculateGradeFromBoundaries(percentage, exam.class);
+      Logger.log(`[Marks Submission] Student: ${studentMark.studentName}, CE: ${ce}, TE: ${teNum}, Total: ${total}/${exam.totalMax}, Percentage: ${percentage.toFixed(2)}%, Grade: ${grade}`);
+    }
     
     // Invalidate cache for this exam
     invalidateCache('exam_marks_examid:' + examId);
@@ -539,7 +556,7 @@ function submitExamMarks(data) {
       studentMark.studentName || '',
       exam.examType,
       ce,
-      te,
+      teStored,
       total,
       grade,
       now

@@ -903,11 +903,13 @@ const App = () => {
                       const marks = allMarksArrays[idx];
                       const className = exam.class;
                       const normKey = normClassKey(className);
-                      
+
                       if (Array.isArray(marks) && marks.length > 0) {
-                        const studentMarks = [];
+                        // Normalize admission number to deduplicate per student
+                        const normAdm = (s) => String(s || '').trim().toLowerCase();
+                        const byAdm = new Map();
                         let skippedMarks = 0;
-                        
+
                         // Filter marks to only include students from this specific class
                         marks.forEach(mark => {
                           // Skip marks that don't match this class (normalize both for comparison)
@@ -915,10 +917,12 @@ const App = () => {
                             skippedMarks++;
                             return;
                           }
-                          
+
                           const totalVal = (mark && (mark.total ?? mark.Total)) ?? '';
                           const ceVal = (mark && (mark.ce ?? mark.CE)) ?? '';
                           const teVal = (mark && (mark.te ?? mark.TE)) ?? '';
+                          const admKey = normAdm(mark?.admNo);
+                          if (!admKey) return;
 
                           if (mark && (totalVal != null || ceVal != null || teVal != null)) {
                             // Calculate total from ce + te if total not present
@@ -931,17 +935,23 @@ const App = () => {
                             const max = (Number.isFinite(totalMaxNum) && totalMaxNum > 0)
                               ? totalMaxNum
                               : ((Number(exam?.internalMax) || 0) + (Number(exam?.externalMax) || 0) || 100);
-                            
+
                             if (total >= 0 && max > 0) {
-                              studentMarks.push({
-                                total: total,
-                                max: max,
-                                percentage: (total / max) * 100
-                              });
+                              const entry = { total, max, percentage: (total / max) * 100 };
+                              if (!byAdm.has(admKey)) {
+                                byAdm.set(admKey, entry);
+                              } else {
+                                // Prefer the higher total if duplicates exist
+                                const prev = byAdm.get(admKey);
+                                if ((entry.total || 0) > (prev.total || 0)) {
+                                  byAdm.set(admKey, entry);
+                                }
+                              }
                             }
                           }
                         });
-                        
+
+                        const studentMarks = Array.from(byAdm.values());
                         if (studentMarks.length > 0) {
                           // Calculate class average
                           const percentages = studentMarks.map(m => m.percentage);
@@ -961,6 +971,8 @@ const App = () => {
                             avgPercentage: Math.round(avgPercentage),
                             totalStudents: actualTotal,
                             studentsWithMarks: studentMarks.length,
+                            aboveAveragePct: actualTotal > 0 ? Math.round((aboveAverage / actualTotal) * 100) : 0,
+                            needFocusPct: actualTotal > 0 ? Math.round((needFocus / actualTotal) * 100) : 0,
                             displayName: className
                           };
                           
@@ -1192,13 +1204,13 @@ const App = () => {
                             <span className="text-xs text-emerald-600 flex items-center gap-1">
                               <Award className="w-3 h-3" /> Above Average
                             </span>
-                            <span className="text-sm font-bold text-emerald-600">{perf.aboveAverage}</span>
+                            <span className="text-sm font-bold text-emerald-600">{perf.aboveAverage} <span className="text-xs text-gray-500">({perf.aboveAveragePct || Math.round(((perf.aboveAverage || 0) / (perf.totalStudents || 1)) * 100)}%)</span></span>
                           </div>
                           <div className="flex justify-between items-center">
                             <span className="text-xs text-amber-600 flex items-center gap-1">
                               <AlertCircle className="w-3 h-3" /> Need Focus
                             </span>
-                            <span className="text-sm font-bold text-amber-600">{perf.needFocus}</span>
+                            <span className="text-sm font-bold text-amber-600">{perf.needFocus} <span className="text-xs text-gray-500">({perf.needFocusPct || Math.round(((perf.needFocus || 0) / (perf.totalStudents || 1)) * 100)}%)</span></span>
                           </div>
                         </div>
                       </div>
