@@ -1,7 +1,7 @@
 import { addDays, format } from 'date-fns';
 import { Clock, AlertTriangle, Calendar, CheckCircle, Bell, RefreshCw, TrendingUp, XCircle } from 'lucide-react';
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNotifications, NOTIFICATION_PRIORITY } from '../contexts/NotificationContext';
+import { useToast } from '../hooks/useToast';
 import { Settings } from 'lucide-react';
 
 const SmartReminders = ({ user }) => {
@@ -21,7 +21,7 @@ const SmartReminders = ({ user }) => {
     low: 0,
     total: 0
   });
-  const { warning, info } = useNotifications();
+  const { warning, info } = useToast();
 
   useEffect(() => {
     if (user && settings.enableReminders) {

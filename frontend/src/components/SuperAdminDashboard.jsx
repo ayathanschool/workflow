@@ -15,10 +15,10 @@ import {
   DollarSign
 } from 'lucide-react';
 import * as api from '../api';
-import { useNotifications } from '../contexts/NotificationContext';
+import { useToast } from '../hooks/useToast';
 
 const SuperAdminDashboard = ({ user, onNavigate }) => {
-  const { success, error: showError } = useNotifications();
+  const { success, error: showError } = useToast();
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalExams: 0,

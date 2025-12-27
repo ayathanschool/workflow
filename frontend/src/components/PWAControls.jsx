@@ -1,11 +1,11 @@
 import { Download, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import React from 'react';
-import { useNotifications } from '../contexts/NotificationContext';
+import { useToast } from '../hooks/useToast';
 import { usePWA } from '../hooks/usePWA';
 
 const PWAControls = () => {
   const { isInstallable, isOnline, isStandalone, hasUpdate, installApp, updateApp } = usePWA();
-  const { info, success } = useNotifications();
+  const { info, success } = useToast();
 
   const handleInstall = async () => {
     const installed = await installApp();

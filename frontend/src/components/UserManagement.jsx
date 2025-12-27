@@ -9,10 +9,10 @@ import {
   Save
 } from 'lucide-react';
 import * as api from '../api';
-import { useNotifications } from '../contexts/NotificationContext';
+import { useToast } from '../hooks/useToast';
 
 const UserManagement = ({ user }) => {
-  const { success, error: showError } = useNotifications();
+  const { success, error: showError } = useToast();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');

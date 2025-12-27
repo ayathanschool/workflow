@@ -1,12 +1,12 @@
 import { Calendar, RefreshCw, UserPlus, FileText, FileSpreadsheet, Eye, EyeOff, Monitor, Share2 } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as api from '../api';
-import { useNotifications } from '../contexts/NotificationContext';
+import { useToast } from '../hooks/useToast';
 import { formatDateForInput, formatLocalDate, periodToTimeString } from '../utils/dateUtils';
 
 const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
   // Notification system
-  const { success: notifySuccess, error: _notifyError, info: notifyInfo } = useNotifications();
+  const { success: notifySuccess, error: _notifyError, info: notifyInfo } = useToast();
   
   // State Management
   const [selectedDate, setSelectedDate] = useState(formatDateForInput(new Date()));

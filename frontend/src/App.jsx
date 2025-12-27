@@ -47,7 +47,6 @@ import * as api from './api'
 import LoadingSplash from './auth/LoadingSplash';
 import LoginForm from './auth/LoginForm';
 import AnimatedPage from './components/AnimatedPage';
-import NotificationCenter from './components/NotificationCenter';
 import PerformanceDebugger from './components/PerformanceDebugger';
 import StatsCard from './components/shared/StatsCard';
 import FeeCollectionModule from './components/FeeCollectionModule';
@@ -56,12 +55,11 @@ import PWAControls from './components/PWAControls';
 import PWAInstallBanner from './components/PWAInstallBanner';
 import ThemeToggle from './components/ThemeToggle';
 import { useGoogleAuth } from './contexts/GoogleAuthContext';
-import { NotificationProvider, useNotifications } from './contexts/NotificationContext';
+import { ToastProvider, useToast } from './hooks/useToast';
 import { useTheme } from './contexts/ThemeContext';
 // import { useRealTimeUpdates } from './hooks/useRealTimeUpdates';
 
 // Lazy load heavy components for better performance
-const SmartReminders = lazy(() => import('./components/SmartReminders'));
 const SubstitutionModule = lazy(() => import('./components/SubstitutionModule'));
 const EnhancedSubstitutionView = lazy(() => import('./components/EnhancedSubstitutionView'));
 const DailyReportModern = lazy(() => import('./DailyReportModern'));
@@ -69,7 +67,6 @@ const MissingLessonPlansAlert = lazy(() => import('./components/MissingLessonPla
 const HMMissingLessonPlansOverview = lazy(() => import('./components/HMMissingLessonPlansOverview'));
 const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodSubstitutionView'));
 const ExamManagement = lazy(() => import('./components/ExamManagement'));
-const ExamMarksEntryStatusDetails = lazy(() => import('./components/ExamMarksEntryStatusDetails'));
 const ReportCard = lazy(() => import('./components/ReportCard'));
 const Marklist = lazy(() => import('./components/Marklist'));
 const SchemeLessonPlanning = lazy(() => import('./components/SchemeLessonPlanning'));
@@ -89,8 +86,8 @@ const appNormalize = (s) => (s || '').toString().trim().toLowerCase();
 
 const App = () => {
   
-  // Get notifications context
-  const notificationSystem = useNotifications();
+  // Get toast functions for notifications
+  const { success, error, warning, info } = useToast();
   
   // Theme styling relies on 'dark' class on <html>; avoid consuming theme in App to prevent re-renders on toggle
   
@@ -150,9 +147,6 @@ const App = () => {
   // ----- GLOBAL submit overlay -----
   const [submitting, setSubmitting] = useState({ active:false, message:'' });
   const [viewModal, setViewModal] = useState(null);
-
-  // Get notification functions
-  const { success, error, warning, info } = useNotifications();
 
   // Lesson view modal state
   const [viewLesson, setViewLesson] = useState(null);
@@ -505,8 +499,7 @@ const App = () => {
         { id: 'timetable', label: 'Timetable', icon: Calendar },
         { id: 'my-substitutions', label: 'My Substitutions', icon: UserPlus },
         { id: 'reports', label: 'Daily Reports (Enhanced)', icon: FileText },
-        { id: 'my-daily-reports', label: 'My Reports History', icon: FileClock },
-        { id: 'smart-reminders', label: 'Smart Reminders', icon: Bell }
+        { id: 'my-daily-reports', label: 'My Reports History', icon: FileClock }
       );
       // Teachers and class teachers can also manage exams: view available exams,
       // enter marks for their classes and subjects, and view marks.
@@ -540,7 +533,6 @@ const App = () => {
         { id: 'class-data', label: 'Class Data', icon: UserCheck },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
-        { id: 'smart-reminders', label: 'Smart Reminders', icon: Bell },
         { id: 'exam-marks', label: 'Exam Marks', icon: Award },
         { id: 'report-card', label: 'Report Card', icon: FileText },
         { id: 'marklist', label: 'Marklist', icon: FileText },
@@ -561,111 +553,6 @@ const App = () => {
   };
 
   // Substitution notifications state (moved to App level to avoid hook issues)
-  const [substitutionNotifications, setSubstitutionNotifications] = useState([]);
-  const [shownNotificationIds, setShownNotificationIds] = useState(new Set()); // Track shown notifications
-  
-  // Keep a ref in sync with shownNotificationIds so our callbacks always see the latest set
-  const shownNotificationIdsRef = useRef(shownNotificationIds);
-  
-  useEffect(() => {
-    shownNotificationIdsRef.current = shownNotificationIds;
-  }, [shownNotificationIds]);
-  
-  // Load substitution notifications for current user and add to NotificationCenter
-  const loadSubstitutionNotifications = useCallback(async () => {
-    if (!user?.email) return;
-    
-    try {
-      const response = await api.getSubstitutionNotifications(user.email);
-      
-      let notificationsList = [];
-      
-      // Handle different response formats
-      if (Array.isArray(response)) {
-        notificationsList = response;
-      } else if (response && response.notifications) {
-        notificationsList = response.notifications;
-      } else if (response && Array.isArray(response.data)) {
-        notificationsList = response.data;
-      }
-      
-      // Store for teacher dashboard display
-      setSubstitutionNotifications(notificationsList);
-      
-    // Add unacknowledged notifications to NotificationCenter (only if not already shown)
-    notificationsList.forEach(notification => {
-      const isUnacknowledged = String(notification.acknowledged || '').toLowerCase() !== 'true';
-      const notAlreadyShown = !shownNotificationIdsRef.current.has(notification.id);
-      
-      if (isUnacknowledged && notAlreadyShown) {
-        // Parse the notification data
-        let notifData = {};
-        try {
-          notifData = JSON.parse(notification.data || '{}');
-        } catch (e) {
-          console.warn('Failed to parse notification data:', e);
-        }
-        
-        // Add to notification center
-        info(
-          notification.title || 'Substitution Assignment',
-          notification.message || `Period ${notifData.period} - Class ${notifData.class}`,
-          {
-            autoClose: false, // Don't auto-close substitution notifications
-            actions: [
-              {
-                label: 'Acknowledge',
-                handler: () => acknowledgeNotification(notification.id)
-              }
-            ],
-            metadata: {
-              type: 'substitution',
-              notificationId: notification.id,
-              ...notifData
-            }
-          }
-        );
-        
-        // Mark as shown (guarded so we don't trigger extra renders for same id)
-        setShownNotificationIds(prev => {
-          if (prev.has(notification.id)) return prev;
-          const next = new Set(prev);
-          next.add(notification.id);
-          return next;
-        });
-      }
-    });
-    
-  } catch (error) {
-    console.error('Error loading substitution notifications:', error);
-  }
-}, [user?.email, info]);  const acknowledgeNotification = useCallback(async (notificationId) => {
-    try {
-      await api.acknowledgeSubstitutionNotification(user.email, notificationId);
-      success('Acknowledged', 'Substitution assignment acknowledged successfully');
-      
-      // Remove from state
-      setSubstitutionNotifications(prev => 
-        prev.filter(n => n.id !== notificationId)
-      );
-      
-      // Reload to refresh data
-      loadSubstitutionNotifications();
-    } catch (error) {
-      console.error('Error acknowledging notification:', error);
-      error('Error', 'Failed to acknowledge notification');
-    }
-  }, [user?.email, success, error, loadSubstitutionNotifications]);
-  
-  // Poll for substitution notifications
-  useEffect(() => {
-    if (user?.email) {
-      loadSubstitutionNotifications();
-      // Poll for new notifications every 2 minutes
-      const interval = setInterval(loadSubstitutionNotifications, 2 * 60 * 1000);
-      return () => clearInterval(interval);
-    }
-  }, [user?.email, loadSubstitutionNotifications]);
   
   // Dashboard component
   const Dashboard = ({ 
@@ -1060,7 +947,6 @@ const App = () => {
                 📢 Send Notice
               </button>
             )}
-            <NotificationCenter />
           </div>
         </div>
 
@@ -1455,17 +1341,12 @@ const App = () => {
                 return <EnhancedSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
               case 'full-timetable':
                 return <FullTimetableView />;
-              case 'smart-reminders':
-                return <SmartReminders user={user} />;
               case 'users':
                 return <UserManagement user={user} />;
               case 'audit-log':
                 return <AuditLog user={user} />;
               case 'exam-marks':
                 return <ExamManagement user={user} withSubmit={withSubmit} />;
-              case 'exam-marks-status':
-                if (hasRole('class teacher')) return <Dashboard />;
-                return <ExamMarksEntryStatusDetails user={user} />;
               case 'report-card':
                 return <ReportCard user={user} />;
               case 'marklist':
@@ -4040,15 +3921,6 @@ const App = () => {
     });
   }
 
-  if (substitutionNotifications.length > 0) {
-    criticalAlerts.push({
-      type: 'info',
-      icon: '🔄',
-      message: `${substitutionNotifications.length} unacknowledged substitution${substitutionNotifications.length > 1 ? 's' : ''}`,
-      color: 'amber'
-    });
-  }
-
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
@@ -4361,43 +4233,6 @@ const App = () => {
         </div>
       )}
 
-      {/* Substitution Notifications */}
-      {substitutionNotifications.length > 0 && (
-        <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded-lg">
-          <div className="flex items-start">
-            <div className="flex-shrink-0">
-              <Bell className="h-5 w-5 text-amber-400" />
-            </div>
-            <div className="ml-3 flex-1">
-              <h3 className="text-sm font-medium text-amber-800">
-                Substitution Assignments ({substitutionNotifications.length})
-              </h3>
-              <div className="mt-2 space-y-2">
-                {substitutionNotifications.map((notification) => (
-                  <div key={notification.id} className="bg-white p-3 rounded border border-amber-200">
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <h4 className="font-medium text-gray-900">{notification.title}</h4>
-                        <p className="text-sm text-gray-600 mt-1">{notification.message}</p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {new Date(notification.createdAt).toLocaleString()}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => acknowledgeNotification(notification.id)}
-                        className="ml-3 px-3 py-1 text-xs font-medium text-green-700 bg-green-100 hover:bg-green-200 rounded-md transition-colors"
-                      >
-                        Acknowledge
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
           <div className="flex items-center">
@@ -4480,9 +4315,6 @@ const App = () => {
           >
             <RefreshCw className="h-6 w-6 text-amber-600 mb-2" />
             <span className="text-sm font-medium text-amber-900">Substitutions</span>
-            {substitutionNotifications.length > 0 && (
-              <span className="mt-1 px-2 py-0.5 text-xs bg-amber-600 text-white rounded-full">{substitutionNotifications.length}</span>
-            )}
           </button>
           
           <button 
@@ -10045,16 +9877,16 @@ const App = () => {
   }
 }
 
-// Main App component wrapped with NotificationProvider
-const AppWithNotifications = () => {
+// Main App component wrapped with ToastProvider
+const AppWithToast = () => {
   return (
-    <NotificationProvider>
+    <ToastProvider>
       <App />
       <PerformanceDebugger />
-    </NotificationProvider>
+    </ToastProvider>
   );
 };
 
-export default AppWithNotifications;
+export default AppWithToast;
 
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Shield, User, Filter, RefreshCw, Download, AlertTriangle, Info, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import * as api from '../api';
-import { useNotifications } from '../contexts/NotificationContext';
+import { useToast } from '../hooks/useToast';
 
 const AuditLog = ({ user }) => {
   const [logs, setLogs] = useState([]);
@@ -17,7 +17,7 @@ const AuditLog = ({ user }) => {
     limit: 100
   });
   const [stats, setStats] = useState(null);
-  const { error: showError, success } = useNotifications();
+  const { error: showError, success } = useToast();
 
   // Entity types
   const entityTypes = [

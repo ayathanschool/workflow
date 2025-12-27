@@ -1,13 +1,13 @@
 import { Plus, RefreshCw, Upload, Download, ChevronUp, ChevronDown, Share2 } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as api from '../api';
-import { useNotifications } from '../contexts/NotificationContext';
+import { useToast } from '../hooks/useToast';
 import { todayIST, parseApiDate, formatShortDate } from '../utils/dateUtils';
 import ClassTeacherOnePage from './ClassTeacherOnePage.jsx';
 
 const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
   // Get notification functions
-  const { success, error: _error, warning, info: _info } = useNotifications();
+  const { success, error: _error, warning, info: _info } = useToast();
   const displayClass = (cls) => {
     const v = Array.isArray(cls) ? cls[0] : cls;
     return String(v ?? '').trim().replace(/^STD\s*/i, '').trim();
