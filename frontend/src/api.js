@@ -473,7 +473,7 @@ export async function getPlannedLessonsForDate(email, date) {
     email,
     date
   });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
   return result?.data || result || { success: false, lessonsByPeriod: {} };
 }
 
@@ -854,12 +854,15 @@ export async function deleteExam(email, examId) {
 }
 
 // Get marks entry progress (entered/total) for a set of exams.
-export async function getExamMarksEntryStatusBatch(examIds = []) {
+export async function getExamMarksEntryStatusBatch(examIds = [], options = {}) {
   const ids = Array.isArray(examIds) ? examIds.filter(Boolean).map(String) : [];
   const q = new URLSearchParams({
     action: 'getExamMarksEntryStatusBatch',
     examIds: ids.join(',')
   });
+  // Add teacher filtering for class teachers
+  if (options.teacherEmail) q.append('teacherEmail', String(options.teacherEmail));
+  if (options.role) q.append('role', String(options.role));
   const result = await getJSON(`${BASE_URL}?${q.toString()}`);
   return result?.data || result || { success: false, exams: [] };
 }
@@ -1314,22 +1317,71 @@ export async function getStudentReportCard(examType, admNo = '', cls = '') {
   return result?.data || result || {};
 }
 
-// Batch fetch report cards for entire class and multiple exam types
-export async function getReportCardsBatch(cls, examTypes = []) {
-  const examTypesParam = (examTypes || []).join(',');
-  const q = new URLSearchParams({
-    action: 'getReportCardsBatch',
-    class: cls,
-    examTypes: examTypesParam
-  });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, CACHE_DURATION);
-  return result;
-}
-
 // Administrative API
 // Fetch all plans (schemes and lesson plans) with optional filters.
 // Parameters: teacher (email or part of name), class, subject, status.
 // Fetch all approved schemes across the school, used to populate teacher dropdowns
+export async function getReportCardsBatch(className, examTypes, students) {
+  const cls = String(className || '').trim();
+  const types = Array.isArray(examTypes) ? examTypes.filter(Boolean) : [];
+  if (!cls) throw new Error('Missing className');
+  if (types.length === 0) return {};
+
+  // If students not provided, fetch once
+  let stu = Array.isArray(students) ? students : null;
+  if (!stu) {
+    try {
+      stu = await getStudents(cls);
+    } catch (e) {
+      stu = [];
+    }
+  }
+  const byAdm = new Map((stu || []).map(s => [String(s.admNo || s.admissionNo || '').trim(), s]));
+  const admNos = (stu || []).map(s => String(s.admNo || s.admissionNo || '').trim()).filter(Boolean);
+
+  // Simple concurrency limiter
+  async function mapLimit(items, limit, fn) {
+    const out = new Array(items.length);
+    let i = 0;
+    const workers = Array(Math.min(limit, items.length)).fill(0).map(async () => {
+      while (i < items.length) {
+        const idx = i++;
+        out[idx] = await fn(items[idx], idx);
+      }
+    });
+    await Promise.all(workers);
+    return out;
+  }
+
+  const result = {};
+  for (const examType of types) {
+    const rows = await mapLimit(admNos, 6, async (admNo) => {
+      try {
+        const rc = await getStudentReportCard(examType, admNo, cls);
+        const r = rc && (rc.data || rc.report || rc.result || rc);
+        const summary = (r && (r.summary || r.totals || r.overall)) || r || {};
+        const total =
+          Number(summary.total ?? summary.grandTotal ?? summary.overallTotal ?? summary.totalMarks ?? summary.totalScore ?? 0) || 0;
+        const percentage =
+          Number(summary.percentage ?? summary.overallPercentage ?? summary.percent ?? 0) || 0;
+        const grade =
+          String(summary.grade ?? summary.overallGrade ?? summary.finalGrade ?? '').trim();
+
+        const s = byAdm.get(admNo) || {};
+        const name = String(s.name || s.studentName || s.student || '').trim();
+        return { admNo, name, total, grade, percentage };
+      } catch (e) {
+        const s = byAdm.get(admNo) || {};
+        const name = String(s.name || s.studentName || '').trim();
+        return { admNo, name, total: 0, grade: '', percentage: 0, error: String(e && e.message ? e.message : e) };
+      }
+    });
+    result[examType] = rows;
+  }
+  return result;
+}
+
+
 export async function getAllApprovedSchemes() {
   try {
     const res = await getJSON(`${BASE_URL}?action=getAllPlans&status=Approved`);
@@ -1745,7 +1797,7 @@ export async function getMissingLessonPlans(teacherEmail, daysAhead = 7) {
     teacherEmail,
     daysAhead
   });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
   return result?.data || result;
 }
 
@@ -1754,7 +1806,7 @@ export async function getAllMissingLessonPlans(daysAhead = 7) {
     action: 'getAllMissingLessonPlans',
     daysAhead
   });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
   return result?.data || result;
 }
 

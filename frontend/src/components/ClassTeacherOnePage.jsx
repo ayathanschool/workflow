@@ -67,7 +67,10 @@ const ClassTeacherOnePage = ({ user }) => {
 
   useEffect(() => {
     const init = async () => {
-      if (!className) return;
+      if (!className) {
+      setLoading(false);
+      return;
+    }
       try {
         setLoading(true);
         setError('');
@@ -99,16 +102,20 @@ const ClassTeacherOnePage = ({ user }) => {
 
     async function loadMatrix() {
       try {
-        if (!students || students.length === 0) return;
+        if (!students || students.length === 0) {
+      setLoading(false);
+      return;
+    }
         if (!selectedExamTypes || selectedExamTypes.length === 0) {
-          setMatrix({});
-          return;
-        }
+      setMatrix({});
+      setLoading(false);
+      return;
+    }
 
         setLoading(true);
         setError('');
 
-        const res = await api.getReportCardsBatch(className, selectedExamTypes);
+        const res = await api.getReportCardsBatch(className, selectedExamTypes, students);
 
         if (cancelled) return;
 
@@ -141,7 +148,7 @@ const ClassTeacherOnePage = ({ user }) => {
       setLoading(true);
       setError('');
 
-      const batchRes = await api.getReportCardsBatch(className, selectedExamTypes);
+      const batchRes = await api.getReportCardsBatch(className, selectedExamTypes, students);
       
       if (!batchRes || !batchRes.ok) {
         throw new Error(batchRes?.error || 'Batch fetch failed');

@@ -862,7 +862,10 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                   examType: filters.examType || '',
                   _ts: Date.now()
                 })
-              : await api.getExamMarksEntryStatusBatch(ids);
+              : await api.getExamMarksEntryStatusBatch(ids, {
+                  teacherEmail: user?.email || '',
+                  role: userRole
+                });
 
             (res?.exams || []).forEach(row => {
               if (row && row.examId) byId[row.examId] = row;

@@ -430,10 +430,85 @@ function submitExamMarks(data) {
   
   if (!exam) return { error: 'Exam not found' };
 
-  // Permission check: align with exam creation rules (HM/SuperAdmin allowed; class teacher for class allowed; subject teachers allowed)
-  if (!userCanCreateExam(teacherEmail, String(exam.class || ''), String(exam.subject || ''))) {
-    appLog('ERROR', 'submitExamMarks', 'Permission denied for ' + teacherEmail + ' on ' + exam.class + ' ' + exam.subject);
-    return { error: 'You do not have permission to submit marks for this exam' };
+  // Permission check for marks submission:
+  // 1. Super Admin - allowed for all
+  // 2. HM - allowed for all
+  // 3. Class Teacher for this class - allowed for ALL subjects in their class
+  // 4. Subject Teacher - allowed if they teach this subject in this class
+  
+  const isSuperAdmin = _isSuperAdminSafe(teacherEmail);
+  if (isSuperAdmin) {
+    appLog('INFO', 'submitExamMarks', 'Super Admin access granted for ' + teacherEmail);
+  } else {
+    // Get user details
+    const userSh = _getSheet('Users');
+    const userHeaders = _headers(userSh);
+    const users = _rows(userSh).map(r => _indexByHeader(r, userHeaders));
+    const user = users.find(u => String(u.email||'').toLowerCase() === teacherEmail);
+    
+    if (!user) {
+      appLog('ERROR', 'submitExamMarks', 'User not found: ' + teacherEmail);
+      return { error: 'User not found. Please contact administrator.' };
+    }
+    
+    // Check if HM
+    const roles = String(user.roles || '').toLowerCase();
+    const isHM = roles.includes('hm') || roles.includes('headmaster') || roles.includes('h m') || roles.includes('head master');
+    
+    if (isHM) {
+      appLog('INFO', 'submitExamMarks', 'HM access granted for ' + teacherEmail);
+    } else {
+      // Check if class teacher for this class (by classTeacherFor field OR by "Class Teacher" role)
+      const classTeacherFor = String(user.classTeacherFor || '')
+        .split(',')
+        .map(c => c.trim())
+        .filter(c => c.length > 0);
+      
+      // Normalize class for comparison - remove std prefix, spaces, and make lowercase
+      const normClass = function(s) { 
+        return String(s || '').trim().replace(/^std\s*/gi, '').replace(/\s+/g, '').toLowerCase(); 
+      };
+      const examClassNorm = normClass(exam.class);
+      
+      // Also check by numeric class only (e.g., "10" matches "10A", "10B")
+      const numOnly = function(s) {
+        const m = String(s || '').match(/\d+/);
+        return m ? m[0] : '';
+      };
+      const examClassNum = numOnly(exam.class);
+      
+      // Check if user is class teacher for this class
+      const isClassTeacher = classTeacherFor.some(c => {
+        const cNorm = normClass(c);
+        const cNum = numOnly(c);
+        return cNorm === examClassNorm || (examClassNum && cNum === examClassNum);
+      });
+      
+      // Also check if user has "Class Teacher" role (general class teacher)
+      const hasClassTeacherRole = roles.includes('class teacher') || roles.includes('classteacher');
+      
+      appLog('INFO', 'submitExamMarks', {
+        email: teacherEmail,
+        examClass: exam.class,
+        examClassNorm: examClassNorm,
+        classTeacherFor: classTeacherFor,
+        isClassTeacher: isClassTeacher,
+        hasClassTeacherRole: hasClassTeacherRole,
+        roles: roles
+      });
+      
+      if (isClassTeacher || hasClassTeacherRole) {
+        appLog('INFO', 'submitExamMarks', 'Class Teacher access granted for ' + teacherEmail + ' on class ' + exam.class);
+      } else {
+        // Check if subject teacher for this class+subject combination
+        const hasPermission = userCanCreateExam(teacherEmail, String(exam.class || ''), String(exam.subject || ''));
+        if (!hasPermission) {
+          appLog('ERROR', 'submitExamMarks', 'Permission denied for ' + teacherEmail + ' on ' + exam.class + ' ' + exam.subject);
+          return { error: 'You do not have permission to submit marks for this exam. Only HM, Class Teachers, or Subject Teachers can submit marks.' };
+        }
+        appLog('INFO', 'submitExamMarks', 'Subject Teacher access granted for ' + teacherEmail);
+      }
+    }
   }
   
   const marksSh = _getSheet('ExamMarks');
@@ -517,10 +592,14 @@ function _fetchExamMarks(examId) {
  * Returns entered/total counts per examId to show an indicator in UI.
  *
  * @param {string[]} examIds
+ * @param {{teacherEmail?:string, role?:string}=} params
  * @returns {{success:boolean, exams:Array<{examId:string, class:string, enteredCount:number, totalStudents:number, missingCount:number, complete:boolean}>}}
  */
-function getExamMarksEntryStatusBatch(examIds) {
+function getExamMarksEntryStatusBatch(examIds, params) {
   try {
+    const p = params || {};
+    const teacherEmail = String(p.teacherEmail || '').toLowerCase().trim();
+    
     const ids = (Array.isArray(examIds) ? examIds : [])
       .map(x => String(x || '').trim())
       .filter(Boolean);
@@ -542,6 +621,26 @@ function getExamMarksEntryStatusBatch(examIds) {
     };
 
     const idSet = new Set(ids);
+    
+    // Check if we should filter by teacher permissions
+    const roleLower = String(p.role || '').toLowerCase();
+    const isPrivilegedRole = (
+      roleLower.includes('super') ||
+      roleLower.includes('admin') ||
+      roleLower.includes('hm') ||
+      roleLower.includes('h m') ||
+      roleLower.includes('headmaster') ||
+      roleLower.includes('head master')
+    );
+    const filterByTeacher = !!teacherEmail && !isPrivilegedRole;
+    
+    const normalizeClassForPermission = function(v) {
+      return String(v || '')
+        .trim()
+        .replace(/^std\s*/gi, '')
+        .replace(/\s+/g, '')
+        .toUpperCase();
+    };
 
     // Map examId -> class (normalized + raw)
     const examsSh = _getSheet('Exams');
@@ -553,7 +652,16 @@ function getExamMarksEntryStatusBatch(examIds) {
     for (const ex of examsList) {
       const exId = String(ex.examId || '').trim();
       if (!exId || !idSet.has(exId)) continue;
+      
       const exClassRaw = String(ex.class || '').trim();
+      const exSubject = String(ex.subject || '').trim();
+      
+      // Filter by teacher permissions for class teachers
+      if (filterByTeacher) {
+        const permClass = normalizeClassForPermission(exClassRaw);
+        if (!userCanCreateExam(teacherEmail, permClass, exSubject)) continue;
+      }
+      
       examMetaById[exId] = {
         examId: exId,
         classRaw: exClassRaw,
