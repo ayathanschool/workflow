@@ -3,7 +3,6 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as api from '../api';
 import { useToast } from '../hooks/useToast';
 import { todayIST, parseApiDate, formatShortDate } from '../utils/dateUtils';
-import ClassTeacherOnePage from './ClassTeacherOnePage.jsx';
 
 const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
   // Get notification functions
@@ -110,7 +109,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
 
   const [viewExamMarks, setViewExamMarks] = useState(null);
   const [examMarks, setExamMarks] = useState([]);
-  const [showClassTeacherView, setShowClassTeacherView] = useState(false);
+
 
   // Marks entry indicator: examId -> { enteredCount, totalStudents, complete, ... }
   const [marksEntryStatus, setMarksEntryStatus] = useState({});
@@ -1764,15 +1763,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
               Enter Marks
             </button>
           )}
-          {user && normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher') && (
-            <button
-              onClick={() => setShowClassTeacherView(true)}
-              className="flex-1 sm:flex-initial bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center justify-center hover:bg-gray-800"
-              title="One-page class view"
-            >
-              One-Page Class View
-            </button>
-          )}
+
         </div>
       </div>
 
@@ -3014,23 +3005,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         </div>
       )}
 
-      {/* Class Teacher One-Page View Modal */}
-      {showClassTeacherView && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-lg p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto relative">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">Class Teacher: One-Page View</h2>
-              <button 
-                onClick={() => setShowClassTeacherView(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                ✕
-              </button>
-            </div>
-            <ClassTeacherOnePage user={user} />
-          </div>
-        </div>
-      )}
+
     </div>
   );
 };

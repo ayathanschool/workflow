@@ -812,11 +812,25 @@ const App = () => {
                           if (!admKey) return;
 
                           if (mark && (totalVal != null || ceVal != null || teVal != null)) {
+                            // Skip absent students from performance calculations
+                            const teStr = String(teVal).trim().toUpperCase();
+                            const gradeStr = String(mark.grade || '').trim().toLowerCase();
+                            
+                            // Check if student is marked absent (TE='A' string OR grade='Absent')
+                            if (teStr === 'A' || gradeStr === 'absent') {
+                              return; // Don't include absent students in class average
+                            }
+
                             // Calculate total from ce + te if total not present
                             const totalNum = Number(totalVal);
                             const ceNum = Number(ceVal || 0);
                             const teNum = Number(teVal || 0);
                             const total = (Number.isFinite(totalNum) && String(totalVal).trim() !== '') ? totalNum : (ceNum + teNum);
+
+                            // Skip entries where both CE and TE are 0 (likely absent/no exam taken)
+                            if (ceNum === 0 && teNum === 0 && total === 0) {
+                              return; // Don't include no-marks entries in class average
+                            }
 
                             const totalMaxNum = Number(exam?.totalMax);
                             const max = (Number.isFinite(totalMaxNum) && totalMaxNum > 0)
