@@ -6,6 +6,8 @@ import './theme.css'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import GoogleAuthProvider from './contexts/GoogleAuthProvider'
 import { ThemeProvider } from './contexts/ThemeContext'
+import { ToastProvider } from './hooks/useToast'
+import { NotificationProvider } from './contexts/NotificationContext'
 
 // Mute info/debug logs in production unless DEBUG_LOGS is set
 if (import.meta.env.PROD) {
@@ -28,7 +30,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <ThemeProvider>
       <GoogleAuthProvider>
         <ErrorBoundary>
-          <App />
+          <NotificationProvider>
+            <ToastProvider>
+              <App />
+            </ToastProvider>
+          </NotificationProvider>
         </ErrorBoundary>
       </GoogleAuthProvider>
     </ThemeProvider>

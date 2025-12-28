@@ -67,10 +67,7 @@ const ClassTeacherOnePage = ({ user }) => {
 
   useEffect(() => {
     const init = async () => {
-      if (!className) {
-      setLoading(false);
-      return;
-    }
+      if (!className) return;
       try {
         setLoading(true);
         setError('');
@@ -101,21 +98,19 @@ const ClassTeacherOnePage = ({ user }) => {
     let cancelled = false;
 
     async function loadMatrix() {
-      try {
-        if (!students || students.length === 0) {
-      setLoading(false);
-      return;
-    }
+      
+      if (!cancelled) setLoadingMatrix(true);
+try {
+        if (!students || students.length === 0) { if (!cancelled) setLoadingMatrix(false); return; }
         if (!selectedExamTypes || selectedExamTypes.length === 0) {
-      setMatrix({});
-      setLoading(false);
-      return;
-    }
+          setMatrix({});
+          return;
+        }
 
         setLoading(true);
         setError('');
 
-        const res = await api.getReportCardsBatch(className, selectedExamTypes, students);
+        const res = await api.getReportCardsBatch(className, selectedExamTypes);
 
         if (cancelled) return;
 
@@ -133,7 +128,10 @@ const ClassTeacherOnePage = ({ user }) => {
           setMatrix({});
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setLoadingMatrix(false);
+        }
       }
     }
 
@@ -143,12 +141,14 @@ const ClassTeacherOnePage = ({ user }) => {
 
   // Manual refresh function (keep as backup/refresh button)
   const refreshMatrix = async () => {
-    if (!className || students.length === 0 || selectedExamTypes.length === 0) return;
+    
+    setLoadingMatrix(true);
+if (!className || students.length === 0 || selectedExamTypes.length === 0) return;
     try {
       setLoading(true);
       setError('');
 
-      const batchRes = await api.getReportCardsBatch(className, selectedExamTypes, students);
+      const batchRes = await api.getReportCardsBatch(className, selectedExamTypes);
       
       if (!batchRes || !batchRes.ok) {
         throw new Error(batchRes?.error || 'Batch fetch failed');
@@ -160,6 +160,7 @@ const ClassTeacherOnePage = ({ user }) => {
       setError('Failed to refresh matrix: ' + (err.message || 'Unknown error'));
     } finally {
       setLoading(false);
+      setLoadingMatrix(false);
     }
   };
 

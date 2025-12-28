@@ -36,27 +36,6 @@ function normalizeClassParam(value) {
 
 // Legacy cache system (keep for backward compatibility, but new code should use cacheManager)
 const apiCache = new Map();
-
-// ---- Local in-memory TTL cache (per tab) for very hot endpoints ----
-// Helps prevent repeated bursts of identical requests causing spinner loops.
-const __localTTLCache = new Map(); // key -> { ts, data, promise }
-function __localTTLGet(key, ttlMs) {
-  const v = __localTTLCache.get(key);
-  if (!v) return null;
-  if (v.data !== undefined && (Date.now() - v.ts) <= ttlMs) return v.data;
-  return null;
-}
-function __localTTLGetPromise(key) {
-  const v = __localTTLCache.get(key);
-  return v && v.promise ? v.promise : null;
-}
-function __localTTLSetPromise(key, promise) {
-  __localTTLCache.set(key, { ts: Date.now(), promise });
-}
-function __localTTLSetData(key, data) {
-  __localTTLCache.set(key, { ts: Date.now(), data });
-}
-
 const pendingRequests = new Map();
 
 function withInFlight(key, factory) {
@@ -1290,36 +1269,36 @@ export async function submitExamMarks(data) {
 }
 
 // Retrieve all marks for a given examId.  Returns an array of mark records.
-export async function getExamMarks(examId, options = {}) {
-  const key = `examMarks:${String(examId || 'all')}`;
-  const ttlMs = Number(options.cacheTTL || 30000); // default 30s
-  const cached = __localTTLGet(key, ttlMs);
-  if (cached !== null) return cached;
-
-  const inFlight = __localTTLGetPromise(key);
-  if (inFlight) return inFlight;
-
-  const q = new URLSearchParams({ action: 'getExamMarks', examId });
-  const p = (async () => {
-    const result = await getJSON(`${BASE_URL}?${q.toString()}`);
-    const data = result?.data || result || [];
-    __localTTLSetData(key, data);
-    return data;
-  })();
-
-  __localTTLSetPromise(key, p);
-  try {
-    return await p;
-  } finally {
-    // if it failed, remove promise entry so retries are possible
-    const v = __localTTLCache.get(key);
-    if (v && v.promise) {
-      // keep data if set; otherwise clear
-      if (v.data === undefined) __localTTLCache.delete(key);
-      else __localTTLSetData(key, v.data);
-    }
-  }
+export async function getExamMarks(examId) {
+  const q = new URLSearchParams({ action: 'getExamMarks', examId })
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`)
+  return result?.data || result || []
 }
+
+// Cached marks fetch to avoid repeated network calls (especially from dashboard)
+// ttlMs default 6 hours
+export async function getExamMarksCached(examId, opts = {}) {
+  const ttlMs = Number(opts.ttlMs || (6 * 60 * 60 * 1000));
+  const key = `examMarks:${String(examId || '').trim()}`;
+  if (!examId) return [];
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.t && Array.isArray(parsed.v) && (Date.now() - parsed.t) < ttlMs) {
+        return parsed.v;
+      }
+    }
+  } catch (e) { /* ignore cache read errors */ }
+
+  // Leverage existing in-flight de-dupe if present
+  const v = await getExamMarks(examId);
+  try {
+    localStorage.setItem(key, JSON.stringify({ t: Date.now(), v }));
+  } catch (e) { /* ignore quota */ }
+  return v;
+}
+
 
 // Get all exams - using working getExams function directly
 export async function getAllExams() {

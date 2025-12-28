@@ -1,12 +1,13 @@
 import { Plus, RefreshCw, Upload, Download, ChevronUp, ChevronDown, Share2 } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as api from '../api';
-import { useToast } from '../hooks/useToast';
+import { useNotifications } from '../contexts/NotificationContext';
 import { todayIST, parseApiDate, formatShortDate } from '../utils/dateUtils';
+import ClassTeacherOnePage from './ClassTeacherOnePage.jsx';
 
 const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
   // Get notification functions
-  const { success, error: _error, warning, info: _info } = useToast();
+  const { success, error: _error, warning, info: _info } = useNotifications();
   const displayClass = (cls) => {
     const v = Array.isArray(cls) ? cls[0] : cls;
     return String(v ?? '').trim().replace(/^STD\s*/i, '').trim();
@@ -109,7 +110,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
 
   const [viewExamMarks, setViewExamMarks] = useState(null);
   const [examMarks, setExamMarks] = useState([]);
-
+  const [showClassTeacherView, setShowClassTeacherView] = useState(false);
 
   // Marks entry indicator: examId -> { enteredCount, totalStudents, complete, ... }
   const [marksEntryStatus, setMarksEntryStatus] = useState({});
@@ -199,10 +200,10 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         return boundary.grade;
       }
     }
-
     return boundaries.length > 0 ? boundaries[boundaries.length - 1].grade : 'E';
   }, [gradeBoundaries, gradeBoundariesLoaded]);
   const clearCache = useCallback(() => {
+    console.log('🗑️ Clearing all caches');
     setStudentsCache(new Map());
     setMarksCache(new Map());
     setApiError('Cache cleared successfully');
@@ -386,8 +387,8 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
           : normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'));
         const isClassTeacher = normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher');
 
-        // Determine target class: prefer edit form, bulk form, exam form, class-teacher's class, or filter selection
-        const selectedClass = (editExamData?.class || bulkExamFormData.class || examFormData.class || (isClassTeacher ? user?.classTeacherFor : filters.class) || '')
+        // Determine target class: prefer bulk representative class, then exam form class, else class-teacher's class, else filter selection
+        const selectedClass = (bulkExamFormData.class || examFormData.class || (isClassTeacher ? user?.classTeacherFor : filters.class) || '')
           .toString()
           .trim();
 
@@ -455,7 +456,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     }
 
     fetchAllSubjects();
-  }, [user, hasRole, normalizedRoles, editExamData?.class, bulkExamFormData.class, examFormData.class, filters.class]);
+  }, [user, hasRole, normalizedRoles, bulkExamFormData.class, examFormData.class, filters.class]);
 
   // Handlers for Exam Creation
   const handleExamFormChange = (field, value) => {
@@ -898,7 +899,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       const icon = entered === 0 ? '🔴' : '🟡';
       const status = entered === 0 ? 'Pending' : 'Partial';
       
-      message += `${icon} *${exam.examType}*\n`;
+      message += `${icon} *${exam.examId}*\n`;
       message += `   ${displayClass(exam.class)} - ${exam.subject}\n`;
       message += `   Status: ${status} (${pending} pending)\n\n`;
     });
@@ -1088,22 +1089,20 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       const rows = students.map(student => {
         const existingMark = marksMap[student.admNo] || {};
         
-        // For external-only exams, if external is empty but total exists, use total as external
-        let external = existingMark.external || '';
-        let total = existingMark.total || '';
+        // FIXED: Backend returns 'ce' and 'te' from ExamMarks sheet
+        // ce = Continuous Evaluation (Internal)
+        // te = Term Exam (External)
+        const internal = existingMark.ce || existingMark.internal || '';
+        const external = existingMark.te || existingMark.external || '';
+        const total = existingMark.total || '';
         
-        // If this is an external-only exam and external is empty but total has value
-        if (!examHasInternalMarks(exam) && !external && total) {
-          external = total;
-        }
-
         // Recalculate percentage and grade using current grading system
-        let percentage = existingMark.percentage || '';
-        let grade = existingMark.grade || '';
+        let percentage = '';
+        let grade = '';
         
-        if (external || existingMark.internal) {
+        if (external || internal) {
           const calculatedTotal = examHasInternalMarks(exam) 
-            ? (Number(existingMark.internal) || 0) + (Number(external) || 0)
+            ? (Number(internal) || 0) + (Number(external) || 0)
             : (Number(external) || 0);
           
           if (exam.totalMax && calculatedTotal > 0) {
@@ -1115,7 +1114,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         return {
           admNo: student.admNo,
           studentName: student.name,
-          internal: existingMark.internal || '',
+          internal: internal,
           external: external,
           total: total,
           percentage: percentage,
@@ -1165,8 +1164,8 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       const totalMax = Number(editExamData.internalMax || 0) + Number(editExamData.externalMax || 0);
       
       // Submit update via API
-      await withSubmit('Updating exam...', async () => {
-        const result = await api.updateExam({
+      const result = await withSubmit('Updating exam...', async () => {
+        const response = await api.updateExam({
           examId: editExamData.examId,
           userEmail: user.email,
           class: editExamData.class,
@@ -1179,18 +1178,27 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
           date: editExamData.date
         });
         
-        if (result && result.error) {
-          throw new Error(result.error);
+        // Check for errors in response
+        if (response && response.error) {
+          throw new Error(response.error);
         }
         
-        return result;
+        // Verify response indicates success
+        if (!response || (response.success === false)) {
+          throw new Error(response?.message || 'Update failed with no error message');
+        }
+        
+        return response;
       });
+      
+      // Clear cache to force fresh data
+      clearCache();
       
       // Show success message
       success('Exam Updated', 'Exam updated successfully');
       
-      // Refresh exams list
-      reloadExams();
+      // Refresh exams list with fresh data
+      await reloadExams();
       
       // Close form
       setShowEditExamForm(false);
@@ -1199,6 +1207,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     } catch (err) {
       console.error('Error updating exam:', err);
       setApiError(`Failed to update exam: ${err.message || 'Unknown error'}`);
+      _error('Update Failed', err.message || 'Failed to update exam');
     }
   };
   
@@ -1331,6 +1340,13 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         external: Number(row.external) || 0
       }));
       
+      // Debug logging
+      console.log('=== SUBMITTING MARKS ===');
+      console.log('Selected Exam:', selectedExam);
+      console.log('Exam ID:', selectedExam?.examId);
+      console.log('Marks Count:', marks.length);
+      console.log('Sample Mark:', marks[0]);
+      
       // Submit to API
       const result = await api.submitExamMarks({
         examId: selectedExam.examId,
@@ -1341,15 +1357,25 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         marks
       });
       
+      console.log('Backend Response:', result);
+      console.log('Response details:', {
+        hasOk: result?.ok,
+        hasSubmitted: result?.submitted,
+        hasError: result?.error,
+        fullResponse: JSON.stringify(result)
+      });
+      
       // Support both response formats for compatibility
       if (result && (result.ok || result.submitted)) {
         success('Marks Saved', 'Marks saved successfully');
         setShowMarksForm(false);
       } else {
         const errorMsg = result?.error || 'Failed to save marks';
+        console.error('❌ SAVE FAILED:', errorMsg);
         throw new Error(errorMsg);
       }
     } catch (err) {
+      console.error('Error submitting marks:', err);
       setApiError(`Failed to save marks: ${err.message || 'Unknown error'}`);
     } finally {
       setIsLoading(false);
@@ -1732,7 +1758,15 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
               Enter Marks
             </button>
           )}
-
+          {user && normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher') && (
+            <button
+              onClick={() => setShowClassTeacherView(true)}
+              className="flex-1 sm:flex-initial bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center justify-center hover:bg-gray-800"
+              title="One-page class view"
+            >
+              One-Page Class View
+            </button>
+          )}
         </div>
       </div>
 
@@ -1838,7 +1872,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                     <table className="min-w-full text-xs">
                       <thead>
                         <tr className="border-b">
-                          <th className="text-left py-1 px-2">Exam Type</th>
+                          <th className="text-left py-1 px-2">Exam ID</th>
                           <th className="text-left py-1 px-2">Adm No</th>
                           <th className="text-left py-1 px-2">Student</th>
                           <th className="text-left py-1 px-2">Internal</th>
@@ -2312,25 +2346,22 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
               </div>
             </div>
             
-            {/* Completion Status Filter - HM and Super Admin only */}
-            {(isSuperAdmin || normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'))) && (
-              <div className="flex-1 min-w-full md:min-w-[180px]">
-                <label className="block text-xs font-medium text-gray-700 mb-1">Completion Status</label>
-                <div className="relative">
-                  <select
-                    value={filters.completionStatus}
-                    onChange={(e) => setFilters({...filters, completionStatus: e.target.value})}
-                    className="w-full pl-3 pr-10 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    disabled={isLoading}
-                  >
-                    <option value="">All Statuses</option>
-                    <option value="pending">🔴 Pending</option>
-                    <option value="partial">🟡 Partial</option>
-                    <option value="complete">🟢 Complete</option>
-                  </select>
-                </div>
+            <div className="flex-1 min-w-full md:min-w-[180px]">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Completion Status</label>
+              <div className="relative">
+                <select
+                  value={filters.completionStatus}
+                  onChange={(e) => setFilters({...filters, completionStatus: e.target.value})}
+                  className="w-full pl-3 pr-10 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  disabled={isLoading}
+                >
+                  <option value="">All Statuses</option>
+                  <option value="pending">🔴 Pending</option>
+                  <option value="partial">🟡 Partial</option>
+                  <option value="complete">🟢 Complete</option>
+                </select>
               </div>
-            )}
+            </div>
             
             <div className="flex gap-2 w-full md:w-auto md:items-end">
               <button
@@ -2412,7 +2443,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                   return (
                     <tr key={exam.examId} className={rowClassName}>
                       <td className="px-6 py-4 whitespace-nowrap font-medium">
-                        {exam.examType}
+                        {exam.examId}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">{displayClass(exam.class)}</td>
                       <td className="px-6 py-4 whitespace-nowrap">{exam.subject}</td>
@@ -2974,7 +3005,23 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         </div>
       )}
 
-
+      {/* Class Teacher One-Page View Modal */}
+      {showClassTeacherView && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto relative">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold">Class Teacher: One-Page View</h2>
+              <button 
+                onClick={() => setShowClassTeacherView(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            <ClassTeacherOnePage user={user} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
