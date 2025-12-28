@@ -67,6 +67,7 @@ const MissingLessonPlansAlert = lazy(() => import('./components/MissingLessonPla
 const HMMissingLessonPlansOverview = lazy(() => import('./components/HMMissingLessonPlansOverview'));
 const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodSubstitutionView'));
 const AssessmentsManager = lazy(() => import('./components/AssessmentsManager'));
+const LessonPlansManager = lazy(() => import('./components/LessonPlansManager'));
 const ExamManagement = lazy(() => import('./components/ExamManagement'));
 const ReportCard = lazy(() => import('./components/ReportCard'));
 const Marklist = lazy(() => import('./components/Marklist'));
@@ -493,8 +494,7 @@ const App = () => {
     if (hasAnyRole(['teacher','class teacher'])) {
       items.push(
         { id: 'schemes', label: 'Schemes of Work', icon: Book },
-        { id: 'lesson-plans', label: 'Lesson Plans', icon: BookOpen },
-        { id: 'scheme-lesson-planning', label: 'Scheme-Based Planning', icon: BookCheck },
+        { id: 'lessonplans', label: 'Lesson Plans', icon: BookOpen },
         { id: 'timetable', label: 'Timetable', icon: Calendar },
         { id: 'my-substitutions', label: 'My Substitutions', icon: UserPlus },
         { id: 'reports', label: 'Daily Reports (Enhanced)', icon: FileText },
@@ -1026,7 +1026,12 @@ const App = () => {
             <Suspense fallback={<div className="animate-pulse bg-gray-100 h-32 rounded-lg"></div>}>
               <MissingLessonPlansAlert 
                 user={user} 
-                onPrepareClick={() => setActiveView('lesson-planning')}
+                onPrepareClick={() => {
+                  setActiveView('lessonplans');
+                  const params = new URLSearchParams(window.location.search);
+                  params.set('tab', 'draft');
+                  window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+                }}
               />
             </Suspense>
             
@@ -1308,9 +1313,33 @@ const App = () => {
                 );
               case 'schemes':
                 return <SchemesView />;
+              case 'lessonplans':
+                const lpTab = new URLSearchParams(window.location.search).get('tab');
+                return (
+                  <LessonPlansManager 
+                    user={user}
+                    SchemeLessonPlanning={SchemeLessonPlanning}
+                    LessonPlansView={LessonPlansView}
+                    onNavigate={(view) => setActiveView(view)}
+                  />
+                );
               case 'lesson-plans':
+                // Redirect to unified lessonplans with submitted tab
+                setTimeout(() => setActiveView('lessonplans'), 0);
+                if (typeof window !== 'undefined') {
+                  const params = new URLSearchParams(window.location.search);
+                  params.set('tab', 'submitted');
+                  window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+                }
                 return <LessonPlansView />;
               case 'scheme-lesson-planning':
+                // Redirect to unified lessonplans with draft tab
+                setTimeout(() => setActiveView('lessonplans'), 0);
+                if (typeof window !== 'undefined') {
+                  const params = new URLSearchParams(window.location.search);
+                  params.set('tab', 'draft');
+                  window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+                }
                 return <SchemeLessonPlanning userEmail={user?.email} userName={user?.name} />;
               case 'session-tracking':
                 return <SessionCompletionTracker user={user} />;
@@ -2734,36 +2763,6 @@ const App = () => {
             </form>
           </div>
         )}
-
-        {/* DISABLED: Old Lesson Plan Submission - Replaced by Scheme-based Planning */}
-        {/* Migration Notice */}
-        <div className="bg-blue-50 border-l-4 border-blue-400 rounded-lg overflow-hidden mb-6">
-          <div className="px-6 py-4">
-            <div className="flex items-start">
-              <div className="flex-shrink-0">
-                <svg className="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div className="ml-3 flex-1">
-                <h3 className="text-lg font-medium text-blue-800">📋 New Lesson Planning System</h3>
-                <div className="mt-2 text-sm text-blue-700">
-                  <p className="mb-2">Lesson plans are now created through the <strong>Scheme-based Lesson Planning</strong> workflow for better organization and tracking.</p>
-                  <p className="mb-3">Navigate to <strong>Schemes → Select Chapter → Create Lesson Plan</strong> to prepare your lesson plans.</p>
-                  <div className="bg-white bg-opacity-50 rounded px-3 py-2 text-xs">
-                    <strong>Benefits:</strong>
-                    <ul className="list-disc ml-4 mt-1 space-y-1">
-                      <li>Linked to approved schemes and chapters</li>
-                      <li>Better session tracking and progress monitoring</li>
-                      <li>Prevents duplicate period assignments</li>
-                      <li>Organized by academic structure</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
 
         {/* Submitted Lesson Plans Section */}
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden mt-6">
