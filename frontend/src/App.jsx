@@ -63,7 +63,6 @@ import { useTheme } from './contexts/ThemeContext';
 const SubstitutionModule = lazy(() => import('./components/SubstitutionModule'));
 const EnhancedSubstitutionView = lazy(() => import('./components/EnhancedSubstitutionView'));
 const DailyReportModern = lazy(() => import('./DailyReportModern'));
-const MissingLessonPlansAlert = lazy(() => import('./components/MissingLessonPlansAlert'));
 const HMMissingLessonPlansOverview = lazy(() => import('./components/HMMissingLessonPlansOverview'));
 const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodSubstitutionView'));
 const AssessmentsManager = lazy(() => import('./components/AssessmentsManager'));
@@ -557,6 +556,9 @@ const App = () => {
     setNotificationData 
   }) => {
 
+    // Use the effective logged-in user to avoid re-fetch loops / wrong role detection
+    const currentUser = effectiveUser || user;
+
     // Insights state holds counts used to populate the summary cards.  When the
     // logged‑in user is the headmaster ("H M" role) we fetch global counts
     // from the API.  For teachers/class teachers we compute counts based on
@@ -579,6 +581,9 @@ const App = () => {
     });
     const [dashboardLoading, setDashboardLoading] = useState(false);
     const [dashboardLoaded, setDashboardLoaded] = useState(false);
+
+    // Lightweight lesson plan warning (teacher dashboard)
+    const [missingPlansSummary, setMissingPlansSummary] = useState({ loading: false, count: 0 });
 
     // Send notification modal state - now using app-level state
     // const [showSendNotification, setShowSendNotification] = useState(true); // Removed - moved to app level
@@ -606,7 +611,11 @@ const App = () => {
     // Send custom notification function
     const sendCustomNotification = async (title, message, priority, recipients) => {
       try {
-        const result = await api.sendCustomNotification(user.email, title, message, priority, recipients);
+        if (!currentUser?.email) {
+          error('Send Failed', 'User not logged in');
+          return;
+        }
+        const result = await api.sendCustomNotification(currentUser.email, title, message, priority, recipients);
         if (result.success) {
           success('Notification Sent!', result.message);
           setShowSendNotification(false);
@@ -623,13 +632,30 @@ const App = () => {
 
     useEffect(() => {
       async function fetchDashboardData() {
-        if (!user?.email) return;
+        if (!currentUser?.email) return;
 
-        const rolesKey = Array.isArray(user?.roles) ? user.roles.map(r => String(r || '').toLowerCase().trim()).sort().join(',') : '';
-        const classesKey = Array.isArray(user?.classes) ? user.classes.join(',') : String(user?.classes || '');
-        const subjectsKey = Array.isArray(user?.subjects) ? user.subjects.join(',') : String(user?.subjects || '');
-        const ctKey = Array.isArray(user?.classTeacherFor) ? user.classTeacherFor.join(',') : String(user?.classTeacherFor || '');
-        const fetchKey = `${user.email}|${rolesKey}|${classesKey}|${subjectsKey}|${ctKey}`;
+        const rolesKey = Array.isArray(currentUser?.roles)
+          ? currentUser.roles.map(r => String(r || '').toLowerCase().trim()).sort().join(',')
+          : '';
+        const classesKey = Array.isArray(currentUser?.classes) ? currentUser.classes.join(',') : String(currentUser?.classes || '');
+        const subjectsKey = Array.isArray(currentUser?.subjects) ? currentUser.subjects.join(',') : String(currentUser?.subjects || '');
+        const ctKey = Array.isArray(currentUser?.classTeacherFor)
+          ? currentUser.classTeacherFor.join(',')
+          : String(currentUser?.classTeacherFor || '');
+        const fetchKey = `${currentUser.email}|${rolesKey}|${classesKey}|${subjectsKey}|${ctKey}`;
+
+        // DEV-only: StrictMode can mount/unmount twice; avoid immediate duplicate fetches
+        if (import.meta?.env?.DEV) {
+          try {
+            const prevKey = sessionStorage.getItem('dashboard.fetchKey') || '';
+            const prevAt = Number(sessionStorage.getItem('dashboard.fetchAt') || 0);
+            if (prevKey === fetchKey && Date.now() - prevAt < 2000) return;
+            sessionStorage.setItem('dashboard.fetchKey', fetchKey);
+            sessionStorage.setItem('dashboard.fetchAt', String(Date.now()));
+          } catch (e) {
+            // ignore storage errors
+          }
+        }
 
         // Skip if we've already fetched for the same effective user data
         if (dashboardFetchKeyRef.current === fetchKey) return;
@@ -654,276 +680,231 @@ const App = () => {
           } else if (hasAnyRole(['teacher','class teacher','daily reporting teachers'])) {
             // Teacher view: compute classes and subjects from user object
             // Some users (notably class teachers) may not have `user.classes` populated; fall back to classTeacherFor.
-            const teachingClassesFromUser = Array.isArray(user?.classes)
-              ? user.classes
-              : (user?.classes ? String(user.classes).split(',').map(s => s.trim()).filter(Boolean) : []);
-            const classTeacherFor = Array.isArray(user?.classTeacherFor)
-              ? user.classTeacherFor
-              : (user?.classTeacherFor ? [user.classTeacherFor] : []);
+            const teachingClassesFromUser = Array.isArray(currentUser?.classes)
+              ? currentUser.classes
+              : (currentUser?.classes ? String(currentUser.classes).split(',').map(s => s.trim()).filter(Boolean) : []);
+            const classTeacherFor = Array.isArray(currentUser?.classTeacherFor)
+              ? currentUser.classTeacherFor
+              : (currentUser?.classTeacherFor ? [currentUser.classTeacherFor] : []);
             const teachingClasses = (teachingClassesFromUser.length > 0)
               ? teachingClassesFromUser
               : (hasRole('class teacher') ? classTeacherFor : []);
 
-            const teachingSubjects = Array.isArray(user?.subjects)
-              ? user.subjects
-              : (user?.subjects ? String(user.subjects).split(',').map(s => s.trim()).filter(Boolean) : []);
-            const classCount = teachingClasses.length;
-            const subjectCount = teachingSubjects.length;
+            const teachingSubjects = Array.isArray(currentUser?.subjects)
+              ? currentUser.subjects
+              : (currentUser?.subjects ? String(currentUser.subjects).split(',').map(s => s.trim()).filter(Boolean) : []);
 
-            // Normalize class names for API calls and comparisons (handles users saved as "STD 10A")
+            // Normalize + de-dupe classes (prevents double API calls from mixed formats like "STD 10A" vs "10A")
             const normClassKey = (s) => stripStdPrefix(String(s || '')).trim().toLowerCase().replace(/\s+/g, '');
+            const uniqueTeachingClasses = Array.from(
+              new Map((Array.isArray(teachingClasses) ? teachingClasses : []).map(cls => [normClassKey(cls), cls]))
+                .values()
+            );
+            const uniqueTeachingSubjects = Array.from(new Set(Array.isArray(teachingSubjects) ? teachingSubjects : []));
+
+            const classCount = uniqueTeachingClasses.length;
+            const subjectCount = uniqueTeachingSubjects.length;
+
             // Pre-populate counts to avoid initial blank UI
             setInsights(prev => ({
               ...prev,
               classCount,
               subjectCount,
-              teachingClasses,
-              teachingSubjects
+              teachingClasses: uniqueTeachingClasses,
+              teachingSubjects: uniqueTeachingSubjects
             }));
-            
-            // Fetch student counts per class for class teacher
-            let classStudentCounts = {};
-            let studentsAboveAverage = 0;
-            let studentsNeedFocus = 0;
-            let classPerformance = {};
-            
-            if (hasRole('class teacher') && teachingClasses.length > 0) {
-              try {
-                if (import.meta?.env?.DEV) {
-                  console.log('📊 Dashboard: fetching class performance for classes:', teachingClasses);
-                }
-                // Fetch students for each class and store count per class
-                const studentPromises = teachingClasses.map(cls => api.getStudents(stripStdPrefix(cls)));
-                const studentsPerClass = await Promise.all(studentPromises);
-                teachingClasses.forEach((cls, idx) => {
-                  const students = studentsPerClass[idx];
-                  const count = Array.isArray(students) ? students.length : 0;
-                  // Store under both raw and stripped keys to avoid lookup mismatches elsewhere
-                  classStudentCounts[cls] = count;
-                  classStudentCounts[stripStdPrefix(cls)] = count;
-                });
-                
-                // Calculate academic performance for class teacher's classes
+
+            // Mark dashboard as loaded quickly; do heavy fetching in background
+            setDashboardLoaded(true);
+            setDashboardLoading(false);
+
+            // Background: student counts, class performance, pending daily reports
+            (async () => {
+              // If user changes while this runs, skip applying stale results
+              const activeKey = fetchKey;
+
+              // Fetch student counts per class for class teacher
+              let classStudentCounts = {};
+              let studentsAboveAverage = 0;
+              let studentsNeedFocus = 0;
+              let classPerformance = {};
+
+              if (hasRole('class teacher') && uniqueTeachingClasses.length > 0) {
                 try {
-                  // Initialize classPerformance with all teaching classes (even without marks)
-                  // Use normalized keys to avoid mismatch when exams return different class format
-                  teachingClasses.forEach(className => {
-                    const normKey = normClassKey(className);
-                    if (!classPerformance[normKey]) {
-                      classPerformance[normKey] = {
-                        aboveAverage: 0,
-                        needFocus: 0,
-                        avgPercentage: 0,
-                        totalStudents: classStudentCounts[className] || 0,
-                        studentsWithMarks: 0,
-                        displayName: className // Store original for display
-                      };
-                    }
+                  const studentPromises = uniqueTeachingClasses.map(cls => api.getStudents(stripStdPrefix(cls)));
+                  const studentsPerClass = await Promise.all(studentPromises);
+                  uniqueTeachingClasses.forEach((cls, idx) => {
+                    const students = studentsPerClass[idx];
+                    const count = Array.isArray(students) ? students.length : 0;
+                    classStudentCounts[cls] = count;
+                    classStudentCounts[stripStdPrefix(cls)] = count;
                   });
-                  
-                  // IMPORTANT: Class-wise performance should consider *all* exams for the class teacher's classes,
-                  // and pick the newest exam that actually has marks entered.
-                  // This avoids getting stuck on newer exams with no marks for some classes (e.g., 6A/7A).
-                  const examsArray = [];
-                  const allMarksArrays = [];
 
-                  const perClassData = await Promise.all(
-                    teachingClasses.map(async (cls) => {
-                      const [exams, status] = await Promise.all([
-                        api.getExams({ class: cls}).catch(() => []),
-                        api.getExamMarksEntryStatusAll({ class: cls, limit: 200 }).catch(() => ({ success: false, exams: [] }))
-                      ]);
-                      return {
-                        cls,
-                        exams: Array.isArray(exams) ? exams : [],
-                        statusRows: status && Array.isArray(status.exams) ? status.exams : []
-                      };
-                    })
-                  );
-
-                  for (const item of perClassData) {
-                    const normCls = normClassKey(item.cls);
-                    const statusById = {};
-                    (item.statusRows || []).forEach(r => {
-                      if (r && r.examId) statusById[String(r.examId)] = r;
+                  // Calculate academic performance for class teacher's classes (uses newest exam with marks)
+                  try {
+                    uniqueTeachingClasses.forEach(className => {
+                      const normKey = normClassKey(className);
+                      if (!classPerformance[normKey]) {
+                        classPerformance[normKey] = {
+                          aboveAverage: 0,
+                          needFocus: 0,
+                          avgPercentage: 0,
+                          totalStudents: classStudentCounts[className] || 0,
+                          studentsWithMarks: 0,
+                          displayName: className
+                        };
+                      }
                     });
 
-                    const sortedExams = (item.exams || [])
-                      .filter(ex => normClassKey(ex?.class) === normCls)
-                      .slice()
-                      .sort((a, b) => {
-                        const da = new Date(a?.date || a?.createdAt || 0);
-                        const db = new Date(b?.date || b?.createdAt || 0);
-                        const ta = isNaN(da.getTime()) ? -Infinity : da.getTime();
-                        const tb = isNaN(db.getTime()) ? -Infinity : db.getTime();
-                        return tb - ta;
+                    const examsArray = [];
+                    const allMarksArrays = [];
+
+                    const perClassData = await Promise.all(
+                      uniqueTeachingClasses.map(async (cls) => {
+                        const [exams, status] = await Promise.all([
+                          api.getExams({ class: cls }).catch(() => []),
+                          api.getExamMarksEntryStatusAll({ class: cls, limit: 200 }).catch(() => ({ success: false, exams: [] }))
+                        ]);
+                        return {
+                          cls,
+                          exams: Array.isArray(exams) ? exams : [],
+                          statusRows: status && Array.isArray(status.exams) ? status.exams : []
+                        };
+                      })
+                    );
+
+                    for (const item of perClassData) {
+                      const normCls = normClassKey(item.cls);
+                      const statusById = {};
+                      (item.statusRows || []).forEach(r => {
+                        if (r && r.examId) statusById[String(r.examId)] = r;
                       });
 
-                    const chosenExam = sortedExams.find(ex => Number(statusById[String(ex.examId)]?.enteredCount || 0) > 0) || null;
-                    if (!chosenExam) {
-                      if (import.meta?.env?.DEV) {
-                        console.log('📊 No marks yet for class:', item.cls, {
-                          exams: sortedExams.length,
-                          statusRows: (item.statusRows || []).length
+                      const sortedExams = (item.exams || [])
+                        .filter(ex => normClassKey(ex?.class) === normCls)
+                        .slice()
+                        .sort((a, b) => {
+                          const da = new Date(a?.date || a?.createdAt || 0);
+                          const db = new Date(b?.date || b?.createdAt || 0);
+                          const ta = isNaN(da.getTime()) ? -Infinity : da.getTime();
+                          const tb = isNaN(db.getTime()) ? -Infinity : db.getTime();
+                          return tb - ta;
                         });
-                      }
-                      continue;
+
+                      const chosenExam = sortedExams.find(ex => Number(statusById[String(ex.examId)]?.enteredCount || 0) > 0) || null;
+                      if (!chosenExam) continue;
+
+                      const chosenMarks = await api.getExamMarks(chosenExam.examId).catch(() => []);
+                      examsArray.push(chosenExam);
+                      allMarksArrays.push(Array.isArray(chosenMarks) ? chosenMarks : []);
                     }
 
-                    const chosenMarks = await api.getExamMarks(chosenExam.examId).catch(() => []);
-                    examsArray.push(chosenExam);
-                    allMarksArrays.push(Array.isArray(chosenMarks) ? chosenMarks : []);
-                  }
-                    
-                  if (examsArray.length > 0) {
-                    // Build performance data per class
-                    // Use the outer classPerformance variable instead of declaring new one
-                    let totalAboveAverage = 0;
-                    let totalNeedFocus = 0;
-                    
-                    examsArray.forEach((exam, idx) => {
-                      const marks = allMarksArrays[idx];
-                      const className = exam.class;
-                      const normKey = normClassKey(className);
+                    if (examsArray.length > 0) {
+                      let totalAboveAverage = 0;
+                      let totalNeedFocus = 0;
 
-                      if (Array.isArray(marks) && marks.length > 0) {
-                        // Normalize admission number to deduplicate per student
+                      examsArray.forEach((exam, idx) => {
+                        const marks = allMarksArrays[idx];
+                        const className = exam.class;
+                        const normKey = normClassKey(className);
+                        if (!Array.isArray(marks) || marks.length === 0) return;
+
                         const normAdm = (s) => String(s || '').trim().toLowerCase();
                         const byAdm = new Map();
-                        let skippedMarks = 0;
 
-                        // Filter marks to only include students from this specific class
                         marks.forEach(mark => {
-                          // Skip marks that don't match this class (normalize both for comparison)
-                          if (mark.class && normClassKey(mark.class) !== normKey) {
-                            skippedMarks++;
-                            return;
-                          }
-
+                          if (mark.class && normClassKey(mark.class) !== normKey) return;
                           const totalVal = (mark && (mark.total ?? mark.Total)) ?? '';
                           const ceVal = (mark && (mark.ce ?? mark.CE)) ?? '';
                           const teVal = (mark && (mark.te ?? mark.TE)) ?? '';
                           const admKey = normAdm(mark?.admNo);
                           if (!admKey) return;
 
-                          if (mark && (totalVal != null || ceVal != null || teVal != null)) {
-                            // Skip absent students from performance calculations
-                            const teStr = String(teVal).trim().toUpperCase();
-                            const gradeStr = String(mark.grade || '').trim().toLowerCase();
-                            
-                            // Check if student is marked absent (TE='A' string OR grade='Absent')
-                            if (teStr === 'A' || gradeStr === 'absent') {
-                              return; // Don't include absent students in class average
-                            }
+                          const teStr = String(teVal).trim().toUpperCase();
+                          const gradeStr = String(mark.grade || '').trim().toLowerCase();
+                          if (teStr === 'A' || gradeStr === 'absent') return;
 
-                            // Calculate total from ce + te if total not present
-                            const totalNum = Number(totalVal);
-                            const ceNum = Number(ceVal || 0);
-                            const teNum = Number(teVal || 0);
-                            const total = (Number.isFinite(totalNum) && String(totalVal).trim() !== '') ? totalNum : (ceNum + teNum);
+                          const totalNum = Number(totalVal);
+                          const ceNum = Number(ceVal || 0);
+                          const teNum = Number(teVal || 0);
+                          const total = (Number.isFinite(totalNum) && String(totalVal).trim() !== '') ? totalNum : (ceNum + teNum);
+                          if (ceNum === 0 && teNum === 0 && total === 0) return;
 
-                            // Skip entries where both CE and TE are 0 (likely absent/no exam taken)
-                            if (ceNum === 0 && teNum === 0 && total === 0) {
-                              return; // Don't include no-marks entries in class average
-                            }
+                          const totalMaxNum = Number(exam?.totalMax);
+                          const max = (Number.isFinite(totalMaxNum) && totalMaxNum > 0)
+                            ? totalMaxNum
+                            : ((Number(exam?.internalMax) || 0) + (Number(exam?.externalMax) || 0) || 100);
 
-                            const totalMaxNum = Number(exam?.totalMax);
-                            const max = (Number.isFinite(totalMaxNum) && totalMaxNum > 0)
-                              ? totalMaxNum
-                              : ((Number(exam?.internalMax) || 0) + (Number(exam?.externalMax) || 0) || 100);
-
-                            if (total >= 0 && max > 0) {
-                              const entry = { total, max, percentage: (total / max) * 100 };
-                              if (!byAdm.has(admKey)) {
-                                byAdm.set(admKey, entry);
-                              } else {
-                                // Prefer the higher total if duplicates exist
-                                const prev = byAdm.get(admKey);
-                                if ((entry.total || 0) > (prev.total || 0)) {
-                                  byAdm.set(admKey, entry);
-                                }
-                              }
+                          if (total >= 0 && max > 0) {
+                            const entry = { total, max, percentage: (total / max) * 100 };
+                            if (!byAdm.has(admKey)) {
+                              byAdm.set(admKey, entry);
+                            } else {
+                              const prev = byAdm.get(admKey);
+                              if ((entry.total || 0) > (prev.total || 0)) byAdm.set(admKey, entry);
                             }
                           }
                         });
 
                         const studentMarks = Array.from(byAdm.values());
-                        if (studentMarks.length > 0) {
-                          // Calculate class average
-                          const percentages = studentMarks.map(m => m.percentage);
-                          const avgPercentage = percentages.reduce((sum, p) => sum + p, 0) / percentages.length;
-                          
-                          // Categorize students for this class
-                          const aboveAverage = percentages.filter(p => p >= avgPercentage).length;
-                          const needFocus = percentages.filter(p => p < 50).length;
-                          
-                          // Use actual roster count if available, otherwise exam marks count
-                          const actualTotal = classStudentCounts[className] || studentMarks.length;
-                          
-                          // Store using normalized key for consistent lookup
-                          classPerformance[normKey] = {
-                            aboveAverage,
-                            needFocus,
-                            avgPercentage: Math.round(avgPercentage),
-                            totalStudents: actualTotal,
-                            studentsWithMarks: studentMarks.length,
-                            aboveAveragePct: actualTotal > 0 ? Math.round((aboveAverage / actualTotal) * 100) : 0,
-                            needFocusPct: actualTotal > 0 ? Math.round((needFocus / actualTotal) * 100) : 0,
-                            displayName: className
-                          };
-                          
-                          totalAboveAverage += aboveAverage;
-                          totalNeedFocus += needFocus;
-                        }
-                      }
-                    });
-                    
-                    studentsAboveAverage = totalAboveAverage;
-                    studentsNeedFocus = totalNeedFocus;
-                    
-                    // Debug: show what we stored in classPerformance
-                    if (import.meta?.env?.DEV) {
-                      console.log('📊 Class-wise Performance after processing:', {
-                        keys: Object.keys(classPerformance),
-                        data: classPerformance,
-                        teachingClasses,
-                        totalAboveAverage,
-                        totalNeedFocus
+                        if (studentMarks.length === 0) return;
+                        const percentages = studentMarks.map(m => m.percentage);
+                        const avgPercentage = percentages.reduce((sum, p) => sum + p, 0) / percentages.length;
+                        const aboveAverage = percentages.filter(p => p >= avgPercentage).length;
+                        const needFocus = percentages.filter(p => p < 50).length;
+                        const actualTotal = classStudentCounts[className] || studentMarks.length;
+
+                        classPerformance[normKey] = {
+                          aboveAverage,
+                          needFocus,
+                          avgPercentage: Math.round(avgPercentage),
+                          totalStudents: actualTotal,
+                          studentsWithMarks: studentMarks.length,
+                          aboveAveragePct: actualTotal > 0 ? Math.round((aboveAverage / actualTotal) * 100) : 0,
+                          needFocusPct: actualTotal > 0 ? Math.round((needFocus / actualTotal) * 100) : 0,
+                          displayName: className
+                        };
+
+                        totalAboveAverage += aboveAverage;
+                        totalNeedFocus += needFocus;
                       });
+
+                      studentsAboveAverage = totalAboveAverage;
+                      studentsNeedFocus = totalNeedFocus;
                     }
+                  } catch (err) {
+                    console.warn('Unable to fetch performance data:', err);
                   }
                 } catch (err) {
-                  console.warn('Unable to fetch performance data:', err);
+                  console.warn('Unable to fetch student counts:', err);
+                }
+              }
+
+              // Pending reports (lightweight, but still async)
+              let pendingReports = 0;
+              try {
+                const todayIso = todayIST();
+                const reports = await api.getTeacherDailyReportsForDate(currentUser.email, todayIso);
+                if (Array.isArray(reports)) {
+                  pendingReports = reports.filter(r => String(r.status || '').toLowerCase() !== 'submitted').length;
                 }
               } catch (err) {
-                console.warn('Unable to fetch student counts:', err);
+                console.warn('Unable to fetch teacher daily reports:', err);
               }
-            }
+
+              if (dashboardFetchKeyRef.current !== activeKey) return;
+              setInsights(prev => ({
+                ...prev,
+                pendingReports,
+                classStudentCounts,
+                studentsAboveAverage,
+                studentsNeedFocus,
+                classPerformance
+              }));
+            })();
+
+            return;
             
-            // Attempt to fetch daily reports for today to count pending submissions
-            let pendingReports = 0;
-            try {
-              const todayIso = todayIST();
-              const reports = await api.getTeacherDailyReportsForDate(user.email, todayIso);
-              if (Array.isArray(reports)) {
-                // Count reports that are not yet submitted (status != 'Submitted')
-                pendingReports = reports.filter(r => String(r.status || '').toLowerCase() !== 'submitted').length;
-              }
-            } catch (err) {
-              // If the endpoint is not implemented or fails, just leave pendingReports as 0
-              console.warn('Unable to fetch teacher daily reports:', err);
-            }
-            setInsights(prev => ({
-              ...prev,
-              planCount: 0,
-              lessonCount: 0,
-              teacherCount: 0,
-              pendingReports,
-              classStudentCounts,
-              studentsAboveAverage,
-              studentsNeedFocus,
-              classPerformance
-            }));
           }
         } catch (err) {
           console.error('Error loading dashboard data:', err);
@@ -932,14 +913,38 @@ const App = () => {
         }
       }
       
-      if (user?.email) fetchDashboardData();
+      if (currentUser?.email) fetchDashboardData();
     }, [
-      user?.email,
-      Array.isArray(user?.roles) ? user.roles.join('|') : String(user?.roles || ''),
-      Array.isArray(user?.classes) ? user.classes.join('|') : String(user?.classes || ''),
-      Array.isArray(user?.subjects) ? user.subjects.join('|') : String(user?.subjects || ''),
-      Array.isArray(user?.classTeacherFor) ? user.classTeacherFor.join('|') : String(user?.classTeacherFor || '')
+      currentUser?.email,
+      Array.isArray(currentUser?.roles) ? currentUser.roles.join('|') : String(currentUser?.roles || ''),
+      Array.isArray(currentUser?.classes) ? currentUser.classes.join('|') : String(currentUser?.classes || ''),
+      Array.isArray(currentUser?.subjects) ? currentUser.subjects.join('|') : String(currentUser?.subjects || ''),
+      Array.isArray(currentUser?.classTeacherFor) ? currentUser.classTeacherFor.join('|') : String(currentUser?.classTeacherFor || '')
     ]);
+
+    // Fetch missing lesson plan summary for next 2 days (today + tomorrow)
+    useEffect(() => {
+      let cancelled = false;
+      const run = async () => {
+        if (!currentUser?.email) return;
+        if (!hasAnyRole(['teacher', 'class teacher', 'daily reporting teachers'])) return;
+        // HM/Super Admin should not see teacher prep warnings
+        if (hasAnyRole(['h m', 'super admin', 'superadmin', 'super_admin'])) return;
+
+        try {
+          setMissingPlansSummary(prev => ({ ...prev, loading: true }));
+          const res = await api.getMissingLessonPlans(currentUser.email, 2);
+          if (cancelled) return;
+          const count = Number(res?.missingCount || 0);
+          setMissingPlansSummary({ loading: false, count: Number.isFinite(count) ? count : 0 });
+        } catch (e) {
+          if (cancelled) return;
+          setMissingPlansSummary({ loading: false, count: 0 });
+        }
+      };
+      run();
+      return () => { cancelled = true; };
+    }, [currentUser?.email, Array.isArray(currentUser?.roles) ? currentUser.roles.join('|') : String(currentUser?.roles || '')]);
 
     return (
       <div className="max-w-7xl mx-auto space-y-4 md:space-y-6">
@@ -1022,18 +1027,33 @@ const App = () => {
                 </>
               )}
             </div>
-            {/* Missing Lesson Plans Alert - Teacher View (moved below stats) */}
-            <Suspense fallback={<div className="animate-pulse bg-gray-100 h-32 rounded-lg"></div>}>
-              <MissingLessonPlansAlert 
-                user={user} 
-                onPrepareClick={() => {
-                  setActiveView('lessonplans');
-                  const params = new URLSearchParams(window.location.search);
-                  params.set('tab', 'draft');
-                  window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
-                }}
-              />
-            </Suspense>
+            {/* Lesson plan warning (next 2 days) */}
+            {!hasAnyRole(['h m', 'super admin', 'superadmin', 'super_admin']) && missingPlansSummary.count > 0 && (
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-900/40 rounded-xl p-4 md:p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-yellow-900 dark:text-yellow-100">
+                      Lesson plans pending
+                    </div>
+                    <div className="text-sm text-yellow-800 dark:text-yellow-200 mt-1">
+                      You have {missingPlansSummary.count} period{missingPlansSummary.count === 1 ? '' : 's'} without lesson plans (today + tomorrow).
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveView('lessonplans');
+                      const params = new URLSearchParams(window.location.search);
+                      params.set('tab', 'draft');
+                      window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+                    }}
+                    className="px-3 py-2 text-sm bg-gray-900 dark:bg-gray-700 text-white rounded-lg hover:bg-gray-800 dark:hover:bg-gray-600"
+                  >
+                    Open Lesson Plans
+                  </button>
+                </div>
+              </div>
+            )}
             
             {/* Detailed Teaching Assignment - Shows specific classes and subjects */}
             {(insights.teachingClasses.length > 0 || insights.teachingSubjects.length > 0) && (

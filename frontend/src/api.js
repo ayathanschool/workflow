@@ -1339,6 +1339,20 @@ export async function getStudentReportCard(examType, admNo = '', cls = '') {
   return result?.data || result || {};
 }
 
+// Class teacher: batch report cards for a class across multiple exam types
+export async function getReportCardsBatch(cls, examTypes = []) {
+  const className = String(cls || '').trim();
+  const types = Array.isArray(examTypes)
+    ? examTypes.map(t => String(t || '').trim()).filter(Boolean)
+    : String(examTypes || '').split(',').map(t => String(t || '').trim()).filter(Boolean);
+
+  const q = new URLSearchParams({ action: 'getReportCardsBatch' });
+  if (className) q.append('class', className);
+  if (types.length) q.append('examTypes', types.join(','));
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`);
+  return result?.data || result || { ok: false, error: 'no_response' };
+}
+
 // Administrative API
 // Fetch all plans (schemes and lesson plans) with optional filters.
 // Parameters: teacher (email or part of name), class, subject, status.

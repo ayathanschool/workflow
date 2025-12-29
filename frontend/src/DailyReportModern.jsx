@@ -60,15 +60,52 @@ export default function DailyReportModern({ user }) {
   const loadingRef = useRef(false);
   const lastErrorRef = useRef(null);
   const errorCountRef = useRef(0);
+  const draftsSaveTimeoutRef = useRef(null);
 
   const email = user?.email || "";
   const teacherName = user?.name || "";
+
+  const debug = typeof window !== 'undefined' && !!window.__DEBUG_DAILY_REPORT__;
+
+  const normalizeText = useCallback((v) => {
+    return String(v || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .replace(/[^a-z0-9 ]+/g, '');
+  }, []);
+
+  const normalizePeriod = useCallback((v) => {
+    const s = String(v ?? '').trim();
+    const m = s.match(/(\d+)/);
+    return m ? m[1] : s;
+  }, []);
+
+  // Build a normalized index so "Ready" lesson plans match even if timetable strings vary.
+  const lessonPlansIndex = useMemo(() => {
+    const idx = new Map();
+    const values = Object.values(lessonPlans || {});
+    values.forEach((lp) => {
+      const p = normalizePeriod(lp?.selectedPeriod || lp?.period || lp?.periodNumber || lp?.sessionPeriod || lp?.session);
+      const cls = normalizeText(lp?.class || lp?.className);
+      const subj = normalizeText(lp?.subject || lp?.subjectName || lp?.subj);
+      if (p && cls && subj) {
+        const k = `${p}|${cls}|${subj}`;
+        if (!idx.has(k)) idx.set(k, lp);
+      }
+      if (p && cls) {
+        const k2 = `${p}|${cls}`;
+        if (!idx.has(k2)) idx.set(k2, lp);
+      }
+    });
+    return idx;
+  }, [lessonPlans, normalizePeriod, normalizeText]);
 
   const periodKey = (p) => `${p.period}|${p.class}|${p.subject}`;
 
   const loadData = useCallback(async () => {
     if (!email || !date) {
-      console.log('❌ Cannot load - missing email or date');
+      if (debug) console.log('❌ Cannot load - missing email or date');
       setLoading(false);
       loadingRef.current = false;
       return;
@@ -76,17 +113,17 @@ export default function DailyReportModern({ user }) {
     
     // Prevent multiple simultaneous loads
     if (loadingRef.current) {
-      console.log('⏭️ Load already in progress, skipping');
+      if (debug) console.log('⏭️ Load already in progress, skipping');
       return;
     }
     
     // Stop retrying if we've had repeated failures
     if (errorCountRef.current >= 2 && lastErrorRef.current) {
-      console.log('⏭️ Too many errors, stopping retry');
+      if (debug) console.log('⏭️ Too many errors, stopping retry');
       return;
     }
     
-    console.log('🔄 Loading data for:', { email, date });
+    if (debug) console.log('🔄 Loading data for:', { email, date });
     loadingRef.current = true;
     setLoading(true);
     setMessage({ text: "", type: "" });
@@ -96,10 +133,13 @@ export default function DailyReportModern({ user }) {
       // Fallback to legacy endpoints if the deployment doesn't have it yet.
       let timetableRes, reportsRes, plansRes;
       try {
-        const daily = await getTeacherDailyData(email, date);
+        const [daily, planned] = await Promise.all([
+          getTeacherDailyData(email, date),
+          getPlannedLessonsForDate(email, date)
+        ]);
         timetableRes = daily?.timetableWithReports || daily?.timetable || daily;
         reportsRes = { data: Array.isArray(daily?.reports) ? daily.reports : [] };
-        plansRes = await getPlannedLessonsForDate(email, date);
+        plansRes = planned;
       } catch (batchErr) {
         // Legacy (3 requests)
         [timetableRes, reportsRes, plansRes] = await Promise.all([
@@ -125,7 +165,7 @@ export default function DailyReportModern({ user }) {
       // Fallback: if no daily timetable returned, derive periods from weekly timetable structure
       if ((!timetableData || timetableData.length === 0) && email) {
         try {
-          console.warn('⚠️ Daily timetable empty. Attempting weekly fallback for', { email, date });
+          if (debug) console.warn('⚠️ Daily timetable empty. Attempting weekly fallback for', { email, date });
           const weekly = await getTeacherWeeklyTimetable(email);
           const weeklyDays = Array.isArray(weekly?.data) ? weekly.data : (Array.isArray(weekly) ? weekly : []); // expect array of day objects
           if (weeklyDays.length > 0) {
@@ -141,7 +181,7 @@ export default function DailyReportModern({ user }) {
               return dow.toLowerCase() === dayName.toLowerCase();
             });
             if (dayObj && Array.isArray(dayObj.periods) && dayObj.periods.length > 0) {
-              console.log('✅ Weekly fallback found day periods:', dayObj.periods.length);
+              if (debug) console.log('✅ Weekly fallback found day periods:', dayObj.periods.length);
               const norm = dayObj.periods.map(p => {
                 const periodValRaw = p.period || p.Period || p.periodNumber || p.slot || p.slotNumber || p.index;
                 const classValRaw = p.class || p.Class || p.className || p.standard || p.grade || p.Grade || p.Standard;
@@ -163,16 +203,16 @@ export default function DailyReportModern({ user }) {
               });
               const placeholderCount = norm.filter(x => x.class === 'UNKNOWN-CLASS' || x.subject === 'UNKNOWN-SUBJECT').length;
               if (placeholderCount > 0) {
-                console.warn(`⚠️ ${placeholderCount} fallback periods missing class/subject; placeholders applied.`);
+                if (debug) console.warn(`⚠️ ${placeholderCount} fallback periods missing class/subject; placeholders applied.`);
               }
               timetableData = norm;
               setFallbackInfo({ used: true, weeklyCount: weeklyDays.length, matchedCount: norm.length, dayName });
             } else {
-              console.warn('⚠️ Weekly fallback found matching day but no periods');
+              if (debug) console.warn('⚠️ Weekly fallback found matching day but no periods');
               setFallbackInfo({ used: true, weeklyCount: weeklyDays.length, matchedCount: 0, dayName });
             }
           } else {
-            console.warn('⚠️ Weekly timetable also empty for teacher');
+            if (debug) console.warn('⚠️ Weekly timetable also empty for teacher');
             setFallbackInfo({ used: true, weeklyCount: 0, matchedCount: 0, dayName: '' });
           }
         } catch (fbErr) {
@@ -281,8 +321,22 @@ export default function DailyReportModern({ user }) {
 
   useEffect(() => {
     if (Object.keys(drafts).length > 0) {
-      localStorage.setItem(`dailyReportDrafts_${email}_${date}`, JSON.stringify(drafts));
+      if (draftsSaveTimeoutRef.current) {
+        clearTimeout(draftsSaveTimeoutRef.current);
+      }
+      draftsSaveTimeoutRef.current = setTimeout(() => {
+        try {
+          localStorage.setItem(`dailyReportDrafts_${email}_${date}`, JSON.stringify(drafts));
+        } catch (e) {
+          // ignore quota/storage errors
+        }
+      }, 300);
     }
+    return () => {
+      if (draftsSaveTimeoutRef.current) {
+        clearTimeout(draftsSaveTimeoutRef.current);
+      }
+    };
   }, [drafts, email, date]);
 
   const updateDraft = useCallback((key, field, value) => {
@@ -884,25 +938,20 @@ export default function DailyReportModern({ user }) {
               const planKey = `${period.period}|${period.class}|${period.subject}`;
               // Attempt direct key lookup first
               let plan = lessonPlans[planKey] || null;
-              // Fuzzy fallback: match by period + class if exact subject key not found (subject naming variations)
+              // Fallback: some backends key lesson plans by uniqueKey: teacherEmail|YYYY-MM-DD|period
               if (!plan) {
-                const fuzzy = Object.values(lessonPlans).find(lp => {
-                  const lpPeriod = String(lp.period || lp.selectedPeriod || lp.periodNumber || lp.sessionPeriod || '').trim();
-                  const lpClass = String(lp.class || lp.className || '').trim();
-                  return lpPeriod === String(period.period).trim() && lpClass.toLowerCase() === String(period.class).trim().toLowerCase();
-                });
-                if (fuzzy) {
-                  plan = fuzzy;
-                  // Optional lightweight debug (dev only)
-                  if (typeof window !== 'undefined' && !window.__SUPPRESS_CASCADE_DEBUG__) {
-                    console.log('[Cascade/Fuzzy] Matched lesson plan via period+class fallback:', {
-                      period: period.period,
-                      class: period.class,
-                      subjectOriginal: period.subject,
-                      planSubject: fuzzy.subject || fuzzy.chapter || '(none)'
-                    });
-                  }
-                }
+                const uk = `${String(email || '').trim().toLowerCase()}|${String(date || '').trim()}|${normalizePeriod(period.period)}`;
+                plan = lessonPlans[uk] || null;
+              }
+              // Normalized lookup: handles case/spacing/prefix differences in timetable strings
+              if (!plan) {
+                const pNorm = normalizePeriod(period.period);
+                const clsNorm = normalizeText(period.class);
+                const subjNorm = normalizeText(period.subject);
+                plan =
+                  lessonPlansIndex.get(`${pNorm}|${clsNorm}|${subjNorm}`) ||
+                  lessonPlansIndex.get(`${pNorm}|${clsNorm}`) ||
+                  null;
               }
               const completionLevel = getCompletionLevel(isSubmitted ? (report.completionPercentage || 0) : (draft.completionPercentage || 0));
               return (

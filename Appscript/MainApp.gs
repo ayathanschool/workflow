@@ -2756,18 +2756,9 @@
       Logger.log(`[BATCH] AcademicCalendar check failed: ${calErr && calErr.message}`);
     }
 
-    if (isNonTeachingDay) {
-      Logger.log(`[BATCH] ${queryDate} marked as non-teaching (${nonTeachingReason}); blocking lesson plans.`);
-      return {
-        success: true,
-        email: email,
-        date: queryDate,
-        isNonTeachingDay: true,
-        reason: nonTeachingReason,
-        lessonsByPeriod: {},
-        count: 0
-      };
-    }
+    // NOTE: Do NOT hard-block returning plans here.
+    // Teachers may still have "Ready" plans assigned to their timetable for this date.
+    // We return the non-teaching metadata, but still include any matching Ready plans.
     
     // Get all lesson plans for this date
     const sh = _getSheet('LessonPlans');
@@ -2776,8 +2767,12 @@
     
     Logger.log(`[BATCH] Total lesson plans in sheet: ${allLessonPlans.length}`);
     
-    // Filter for Ready status and matching date
+    // Filter for Ready status, matching date, and matching teacher
     const matchingPlans = allLessonPlans.filter(plan => {
+      const planTeacher = String(plan.teacherEmail || plan.email || '').trim().toLowerCase();
+      const qTeacher = String(email || '').trim().toLowerCase();
+      if (!planTeacher || !qTeacher || planTeacher !== qTeacher) return false;
+
       let selectedDateVal = plan.selectedDate || plan.date;
       
       // FALLBACK: Parse date from uniqueKey if selectedDate is missing
@@ -2789,7 +2784,11 @@
           }
         }
         
-        const planDate = _isoDateIST(selectedDateVal);
+        let planDate = _isoDateIST(selectedDateVal);
+        if (!planDate && typeof selectedDateVal === 'string') {
+          const t = String(selectedDateVal).trim();
+          if (/^\d{4}-\d{2}-\d{2}$/.test(t)) planDate = t;
+        }
         
         const statusRaw = String(plan.status || '');
         const isFetchableStatus = _isPlanReadyForTeacher(statusRaw);
@@ -2812,14 +2811,19 @@
       // Build response with period-indexed lessons
       const lessonsByPeriod = {};
       matchingPlans.forEach(plan => {
-        const periodKey = `${plan.selectedPeriod || plan.period}|${plan.class}|${plan.subject}`;
+        const periodVal = String(plan.selectedPeriod || plan.period || '').trim();
+        const classVal = String(plan.class || '').trim();
+        const subjectVal = String(plan.subject || '').trim();
+        const periodKey = `${periodVal}|${classVal}|${subjectVal}`;
+        // Also map by uniqueKey used in the sheet: teacherEmail|YYYY-MM-DD|period
+        const uniqueKey = String(plan.uniqueKey || '').trim() || `${String(email || '').trim().toLowerCase()}|${queryDate}|${periodVal}`;
         
         let totalSessions = 1;
         if (plan.schemeId && schemeMap[plan.schemeId]) {
           totalSessions = Number(schemeMap[plan.schemeId].noOfSessions || 1);
         }
-        
-        lessonsByPeriod[periodKey] = {
+
+        const entry = {
           lpId: plan.lpId,
           schemeId: plan.schemeId,
           chapter: plan.chapter || '',
@@ -2829,18 +2833,40 @@
           learningObjectives: plan.learningObjectives || '',
           teachingMethods: plan.teachingMethods || '',
           selectedDate: plan.selectedDate,
-          selectedPeriod: plan.selectedPeriod || plan.period,
-          class: plan.class,
-          subject: plan.subject,
+          selectedPeriod: periodVal,
+          class: classVal,
+          subject: subjectVal,
+          status: plan.status || '',
+          uniqueKey: uniqueKey,
           preparationDay: plan.preparationDay || ''
         };
+
+        lessonsByPeriod[periodKey] = entry;
+        lessonsByPeriod[uniqueKey] = entry;
         
         Logger.log(`[BATCH] Mapped lesson ${plan.lpId} to ${periodKey}`);
       });
       
+    // If the day is marked non-teaching AND there are no matching Ready plans, return empty but keep metadata.
+    if (isNonTeachingDay && matchingPlans.length === 0) {
+      Logger.log(`[BATCH] ${queryDate} is non-teaching (${nonTeachingReason}) and has no Ready plans for ${email}`);
+      return {
+        success: true,
+        email: email,
+        date: queryDate,
+        isNonTeachingDay: true,
+        reason: nonTeachingReason,
+        lessonsByPeriod: {},
+        totalPlans: 0
+      };
+    }
+
     return {
       success: true,
+      email: email,
       date: queryDate,
+      isNonTeachingDay: isNonTeachingDay,
+      reason: nonTeachingReason,
       lessonsByPeriod: lessonsByPeriod,
       totalPlans: matchingPlans.length
     };
@@ -2885,7 +2911,11 @@
           }
         }
         
-        const planDate = _isoDateIST(selectedDateVal);
+        let planDate = _isoDateIST(selectedDateVal);
+        if (!planDate && typeof selectedDateVal === 'string') {
+          const t = String(selectedDateVal).trim();
+          if (/^\d{4}-\d{2}-\d{2}$/.test(t)) planDate = t;
+        }
         
         const planPeriod = String(plan.selectedPeriod || plan.period || '');
         
