@@ -3992,11 +3992,6 @@ const App = () => {
         </div>
       </div>
 
-      {/* Missing Lesson Plans Overview */}
-      <Suspense fallback={<div className="animate-pulse bg-gray-100 h-24 rounded-lg"></div>}>
-        <HMMissingLessonPlansOverview />
-      </Suspense>
-
       {/* Critical Alerts Banner */}
       {criticalAlerts.length > 0 && (
         <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/40 rounded-xl p-4 flex items-start gap-3">
