@@ -472,7 +472,7 @@ const App = () => {
         { id: 'users', label: 'User Management', icon: Users },
         { id: 'audit-log', label: 'Audit Log', icon: Shield },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
-        { id: 'class-data', label: 'Class Data', icon: UserCheck },
+        { id: 'class-data', label: 'School Data', icon: UserCheck },
         { id: 'admin-data', label: 'Admin Data', icon: Edit2 },
         { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
         { id: 'assessments', label: 'Assessments', icon: Award },
@@ -527,7 +527,7 @@ const App = () => {
         { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
         { id: 'daily-oversight', label: 'Daily Oversight (Enhanced)', icon: ClipboardCheck },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
-        { id: 'class-data', label: 'Class Data', icon: UserCheck },
+        { id: 'class-data', label: 'School Data', icon: UserCheck },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
         { id: 'assessments', label: 'Assessments', icon: Award },
@@ -8057,16 +8057,15 @@ const App = () => {
 
   // Class Data View (Class Teacher only)
   const ClassDataView = () => {
+    // IMPORTANT: use the effective logged-in user (Google login / local login / restored state)
+    // Otherwise HM/Super Admin may be treated as a class teacher with no assigned class.
+    const currentUser = effectiveUser || user;
+
     // Check if user is Super Admin or HM - they can access all classes
-    const isSuperAdminOrHM = user?.roles && (
-      user.roles.includes('super admin') || 
-      user.roles.includes('superadmin') || 
-      user.roles.includes('super_admin') || 
-      user.roles.includes('h m')
-    );
+    const isSuperAdminOrHM = hasAnyRole(['super admin', 'superadmin', 'super_admin', 'h m']);
     
     // Fix: Ensure className is a string, not an array
-    const rawClassName = user?.classTeacherFor || '';
+    const rawClassName = currentUser?.classTeacherFor || '';
     const defaultClassName = Array.isArray(rawClassName) ? rawClassName[0] : rawClassName;
     
     const [selectedClass, setSelectedClass] = useState(defaultClassName || '');
@@ -8083,6 +8082,7 @@ const App = () => {
       if (isSuperAdminOrHM) {
         const fetchClasses = async () => {
           try {
+            setLoading(true);
             const studentsData = await api.getStudents('');
             const classes = [...new Set(studentsData.map(s => s.class))].sort();
             setAvailableClasses(classes);
@@ -8091,11 +8091,26 @@ const App = () => {
             }
           } catch (err) {
             console.error('Error fetching classes:', err);
+            setError('Failed to load classes');
+          } finally {
+            setLoading(false);
           }
         };
         fetchClasses();
+      } else {
+        // For regular class teachers, if they have a class, mark as loaded
+        if (defaultClassName) {
+          setLoading(false);
+        }
       }
-    }, [isSuperAdminOrHM]);
+    }, [isSuperAdminOrHM, defaultClassName, selectedClass]);
+
+    // If class teacher class arrives after login state hydration, sync it once.
+    useEffect(() => {
+      if (!isSuperAdminOrHM && defaultClassName && !selectedClass) {
+        setSelectedClass(defaultClassName);
+      }
+    }, [isSuperAdminOrHM, defaultClassName, selectedClass]);
 
     useEffect(() => {
       const fetchClassData = async () => {
@@ -8140,21 +8155,28 @@ const App = () => {
       }));
     };
 
-    if (!isSuperAdminOrHM && !defaultClassName) {
+    // For HM/Super Admin: Show loading state while fetching classes (check this FIRST)
+    if (isSuperAdminOrHM && loading && !selectedClass) {
       return (
         <div className="space-y-6">
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <p className="text-gray-600">No class assigned as class teacher.</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">School Data</h1>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+              <p className="text-gray-600 dark:text-gray-400 ml-3">Loading classes...</p>
+            </div>
           </div>
         </div>
       );
     }
 
-    if (isSuperAdminOrHM && availableClasses.length === 0) {
+    // Show error only for regular class teachers without assigned class
+    if (!isSuperAdminOrHM && !defaultClassName) {
       return (
         <div className="space-y-6">
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <p className="text-gray-600">Loading classes...</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Class Data</h1>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
+            <p className="text-gray-600 dark:text-gray-400">No class assigned as class teacher.</p>
           </div>
         </div>
       );
@@ -8164,7 +8186,7 @@ const App = () => {
       return (
         <div className="space-y-6">
           <h1 className="text-2xl font-bold text-gray-900">
-            Class Data – {stripStdPrefix(selectedClass)}
+            {isSuperAdminOrHM ? 'School Data' : 'Class Data'} – {stripStdPrefix(selectedClass)}
           </h1>
           <div className="bg-white rounded-xl shadow-sm p-6">
             <p className="text-gray-600">Loading class data...</p>
@@ -8180,7 +8202,7 @@ const App = () => {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">
-            Class Data {selectedClass && `– ${stripStdPrefix(selectedClass)}`}
+            {isSuperAdminOrHM ? 'School Data' : 'Class Data'} {selectedClass && `– ${stripStdPrefix(selectedClass)}`}
           </h1>
           
           {/* Class Selector for Super Admin/HM */}
