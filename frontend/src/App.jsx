@@ -559,12 +559,11 @@ const App = () => {
     // Use the effective logged-in user to avoid re-fetch loops / wrong role detection
     const currentUser = effectiveUser || user;
 
-    // Insights state holds counts used to populate the summary cards.  When the
-    // logged‑in user is the headmaster ("H M" role) we fetch global counts
-    // from the API.  For teachers/class teachers we compute counts based on
-    // their own classes and subjects and optionally fetch pending report
-    // counts from the API.  All fields default to zero to avoid showing mock
-    // numbers.
+    // Insights state holds counts used to populate the summary cards. When the
+    // logged-in user is the headmaster ("H M" role) we fetch global counts
+    // from the API. For teachers/class teachers we compute counts based on
+    // their own classes/subjects and optionally compute class performance.
+    // All fields default to zero to avoid showing mock numbers.
     const [insights, setInsights] = useState({
       planCount: 0,
       lessonCount: 0,
@@ -577,6 +576,7 @@ const App = () => {
       teachingSubjects: [],
       studentsAboveAverage: 0,
       studentsNeedFocus: 0,
+      assignedClassPerformance: null,
       classPerformance: {} // { className: { aboveAverage, needFocus, avgPercentage } }
     });
     const [dashboardLoading, setDashboardLoading] = useState(false);
@@ -718,7 +718,7 @@ const App = () => {
             setDashboardLoaded(true);
             setDashboardLoading(false);
 
-            // Background: student counts, class performance, pending daily reports
+            // Background: student counts + class performance
             (async () => {
               // If user changes while this runs, skip applying stale results
               const activeKey = fetchKey;
@@ -728,6 +728,7 @@ const App = () => {
               let studentsAboveAverage = 0;
               let studentsNeedFocus = 0;
               let classPerformance = {};
+              let assignedClassPerformance = null;
 
               if (hasRole('class teacher') && uniqueTeachingClasses.length > 0) {
                 try {
@@ -871,6 +872,17 @@ const App = () => {
 
                       studentsAboveAverage = totalAboveAverage;
                       studentsNeedFocus = totalNeedFocus;
+
+                      // Summary cards should reflect ONLY the class teacher's assigned class.
+                      // Keep class-wise performance for all teaching classes.
+                      if (hasRole('class teacher') && classTeacherFor.length > 0) {
+                        const assignedNormKey = normClassKey(classTeacherFor[0]);
+                        assignedClassPerformance = classPerformance?.[assignedNormKey] || null;
+                        if (assignedClassPerformance) {
+                          studentsAboveAverage = Number(assignedClassPerformance.aboveAverage || 0);
+                          studentsNeedFocus = Number(assignedClassPerformance.needFocus || 0);
+                        }
+                      }
                     }
                   } catch (err) {
                     console.warn('Unable to fetch performance data:', err);
@@ -880,25 +892,13 @@ const App = () => {
                 }
               }
 
-              // Pending reports (lightweight, but still async)
-              let pendingReports = 0;
-              try {
-                const todayIso = todayIST();
-                const reports = await api.getTeacherDailyReportsForDate(currentUser.email, todayIso);
-                if (Array.isArray(reports)) {
-                  pendingReports = reports.filter(r => String(r.status || '').toLowerCase() !== 'submitted').length;
-                }
-              } catch (err) {
-                console.warn('Unable to fetch teacher daily reports:', err);
-              }
-
               if (dashboardFetchKeyRef.current !== activeKey) return;
               setInsights(prev => ({
                 ...prev,
-                pendingReports,
                 classStudentCounts,
                 studentsAboveAverage,
                 studentsNeedFocus,
+                assignedClassPerformance,
                 classPerformance
               }));
             })();
@@ -975,7 +975,7 @@ const App = () => {
       <HMDashboardView insights={insights} />
     ) : user && hasAnyRole(['teacher','class teacher','daily reporting teachers']) ? (
       <div className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
               <StatsCard
                 icon={<School />}
                 iconColor="blue"
@@ -992,15 +992,6 @@ const App = () => {
                 subtitle="Subjects assigned"
               />
               
-              <StatsCard
-                icon={<FileText />}
-                iconColor="purple"
-                title="Pending Reports"
-                value={insights.pendingReports}
-                subtitle="Reports due today"
-                onClick={() => setActiveView('reports')}
-              />
-              
               {hasRole('class teacher') && (
                 <>
                   <StatsCard
@@ -1011,7 +1002,10 @@ const App = () => {
                     subtitle="Performing well"
                     trend={insights.studentsAboveAverage > 0 ? {
                       direction: 'up',
-                      value: `${Math.round((insights.studentsAboveAverage / Math.max(1, insights.studentsAboveAverage + insights.studentsNeedFocus)) * 100)}%`,
+                      value: `${Number.isFinite(insights?.assignedClassPerformance?.aboveAveragePct)
+                        ? insights.assignedClassPerformance.aboveAveragePct
+                        : Math.round((insights.studentsAboveAverage / Math.max(1, insights.studentsAboveAverage + insights.studentsNeedFocus)) * 100)
+                      }%`,
                       label: 'of class'
                     } : undefined}
                   />
