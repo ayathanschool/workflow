@@ -358,6 +358,7 @@ function getExams(params) {
     subject: params.subject,
     examType: params.examType,
     teacherEmail: params.teacherEmail,
+    teacherName: params.teacherName,
     role: params.role
   });
   
@@ -387,6 +388,26 @@ function _fetchExams(params) {
     return String(v || '').toLowerCase().trim();
   };
   
+  // Get teacher information from ClassSubjects sheet
+  const csSh = _getSheet('ClassSubjects');
+  const csHeaders = _headers(csSh);
+  const classSubjects = _rows(csSh).map(r => _indexByHeader(r, csHeaders));
+  
+  // Build a map of class+subject to teacher name for quick lookup
+  const teacherMap = {};
+  classSubjects.forEach(row => {
+    const cls = normClass(row.class);
+    const subj = normText(row.subject);
+    const key = cls + '|' + subj;
+    
+    // Try multiple possible column names for teacher
+    const teacher = row.teacherName || row.teacher || row.Teacher || row.TeacherName || row['Teacher Name'] || '';
+    
+    if (!teacherMap[key] && teacher) {
+      teacherMap[key] = teacher;
+    }
+  });
+  
   let filtered = list;
   
   // Filter by class if provided
@@ -405,6 +426,24 @@ function _fetchExams(params) {
   if (params.examType) {
     const target = normText(params.examType);
     filtered = filtered.filter(exam => normText(exam.examType) === target);
+  }
+  
+  // Enrich each exam with teacher info from ClassSubjects
+  filtered = filtered.map(exam => {
+    const key = normClass(exam.class) + '|' + normText(exam.subject);
+    const teacherName = teacherMap[key];
+    
+    return {
+      ...exam,
+      teacherName: teacherName || exam.creatorName || '',
+      teacherEmail: exam.creatorEmail || ''
+    };
+  });
+  
+  // Filter by teacher name if provided (after enrichment)
+  if (params.teacherName) {
+    const target = normText(params.teacherName);
+    filtered = filtered.filter(exam => normText(exam.teacherName) === target);
   }
   
   return filtered;

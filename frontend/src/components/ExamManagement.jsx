@@ -88,6 +88,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     class: '',
     subject: '',
     examType: '',
+    teacherName: '',
     completionStatus: '' // all, pending, partial, complete
   });
   
@@ -815,6 +816,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         class: filters.class || undefined,
         subject: filters.subject || undefined,
         examType: filters.examType || undefined,
+        teacherName: filters.teacherName || undefined,
         // prevent CDN/browser cache on Apps Script
         _ts: Date.now()
       });
@@ -901,6 +903,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       
       message += `${icon} *${exam.examId}*\n`;
       message += `   ${displayClass(exam.class)} - ${exam.subject}\n`;
+      message += `   Teacher: ${exam.teacherName || 'Unknown'}\n`;
       message += `   Status: ${status} (${pending} pending)\n\n`;
     });
     
@@ -996,6 +999,11 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     // Apply subject filter
     if (filters.subject) {
       result = result.filter(ex => normKey(ex.subject) === normKey(filters.subject));
+    }
+    
+    // Apply teacher name filter
+    if (filters.teacherName) {
+      result = result.filter(ex => normKey(ex.teacherName) === normKey(filters.teacherName));
     }
     
     // Apply exam type filter
@@ -2347,6 +2355,23 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
             </div>
             
             <div className="flex-1 min-w-full md:min-w-[180px]">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Filter by Teacher</label>
+              <div className="relative">
+                <select
+                  value={filters.teacherName}
+                  onChange={(e) => setFilters({...filters, teacherName: e.target.value})}
+                  className="w-full pl-3 pr-10 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  disabled={isLoading}
+                >
+                  <option value="">All Teachers</option>
+                  {[...new Set(examsForTeacher.map(ex => ex.teacherName).filter(Boolean))].sort().map(teacher => (
+                    <option key={teacher} value={teacher}>{teacher}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            
+            <div className="flex-1 min-w-full md:min-w-[180px]">
               <label className="block text-xs font-medium text-gray-700 mb-1">Completion Status</label>
               <div className="relative">
                 <select
@@ -2365,7 +2390,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
             
             <div className="flex gap-2 w-full md:w-auto md:items-end">
               <button
-                onClick={() => setFilters({class: '', subject: '', examType: '', completionStatus: ''})}
+                onClick={() => setFilters({class: '', subject: '', examType: '', teacherName: '', completionStatus: ''})}
                 className="flex-1 md:flex-initial px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 flex items-center justify-center gap-2"
                 disabled={isLoading}
               >
@@ -2403,6 +2428,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teacher Name</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exam Name</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
@@ -2442,8 +2468,11 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                   
                   return (
                     <tr key={exam.examId} className={rowClassName}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {exam.teacherName || 'Unknown'}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap font-medium">
-                        {exam.examId}
+                        {exam.examType || 'N/A'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">{displayClass(exam.class)}</td>
                       <td className="px-6 py-4 whitespace-nowrap">{exam.subject}</td>
@@ -2549,7 +2578,8 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                 <div key={exam.examId} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1">
-                      <h3 className="text-base font-semibold text-gray-900">{exam.examName || `${exam.examType} - ${displayClass(exam.class)} - ${exam.subject}`}</h3>
+                      <h3 className="text-base font-semibold text-gray-900">{exam.examType || 'N/A'} - {displayClass(exam.class)} - {exam.subject}</h3>
+                      <p className="text-sm text-gray-600 mt-1">Teacher: {exam.teacherName || 'Unknown'}</p>
                       {accessBadge && <div className="mt-1">{accessBadge}</div>}
                       {(() => {
                         const st = marksEntryStatus[exam.examId];
