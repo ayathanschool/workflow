@@ -419,8 +419,11 @@ const App = () => {
       // authenticates by email and password and returns the user object or an error.
       const result = await api.login(email, password);
       if (result && !result.error) {
-        setUser(result);
-        localStorage.setItem('user', JSON.stringify(result));
+        const roles = Array.isArray(result.roles) ? result.roles : (result.roles ? String(result.roles).split(',').map(s=>s.trim()).filter(Boolean) : []);
+        const merged = { ...result, roles };
+        setUser(merged);
+        setLocalUser(merged); // Set localUser for consistency
+        localStorage.setItem('user', JSON.stringify(merged));
       } else {
         throw new Error(result?.error || 'Invalid credentials');
       }
@@ -434,16 +437,26 @@ const App = () => {
     // Clear Google Auth if present
     if (googleAuth?.user) googleAuth.logout();
     setUser(null);
+    setLocalUser(null); // Clear localUser as well
     localStorage.removeItem('user');
     // Clear all cached data on logout
     api.invalidateCache.onLogout();
   };
 
-  // Initialize app
+  // Initialize app - restore user from localStorage
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
+      try {
+        const parsed = JSON.parse(savedUser);
+        const roles = Array.isArray(parsed.roles) ? parsed.roles : (parsed.roles ? String(parsed.roles).split(',').map(s=>s.trim()).filter(Boolean) : []);
+        const merged = { ...parsed, roles };
+        setUser(merged);
+        setLocalUser(merged); // IMPORTANT: Also set localUser so it persists on refresh
+      } catch (err) {
+        console.error('Failed to parse saved user:', err);
+        localStorage.removeItem('user');
+      }
     }
     setLoading(false);
   }, []);

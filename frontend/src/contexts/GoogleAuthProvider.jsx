@@ -32,6 +32,15 @@ function InnerAuthProvider({ children }) {
 	// Restore session from localStorage
 	useEffect(() => {
 		try {
+			// First check for manual login (username/password) - stored in 'user' key
+			const manualUser = localStorage.getItem('user');
+			if (manualUser) {
+				const parsed = JSON.parse(manualUser);
+				// Don't override manual login with Google session
+				return;
+			}
+			
+			// If no manual login, check for Google session
 			const stored = localStorage.getItem('sf_google_session');
 			if (stored) {
 				const parsed = JSON.parse(stored);
