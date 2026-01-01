@@ -212,9 +212,10 @@ const App = () => {
   const withSubmit = async (message, fn) => {
     setSubmitting({ active:true, message });
     try {
-      await fn();
+      const result = await fn();
       // Use new notification system for success
       success('Success!', message || 'Operation completed successfully');
+      return result;
     } catch (err) {
       console.error('submit error', err);
       // Use new notification system for errors
@@ -1609,6 +1610,8 @@ const App = () => {
       e.preventDefault();
       if (!user) return;
       
+      let shouldCloseForm = true;
+
       try {
         setSubmitting({ active: true, message: editingScheme ? 'Updating scheme...' : 'Submitting scheme...' });
         
@@ -1628,10 +1631,8 @@ const App = () => {
         
         if (editingScheme) {
           // Update existing scheme
-          result = await withSubmit('Updating scheme...', async () => {
-            const response = await api.updateScheme(editingScheme.schemeId, user.email, schemeData);
-            return response?.data || response;
-          });
+          const response = await api.updateScheme(editingScheme.schemeId, user.email, schemeData);
+          result = response?.data || response;
           if (result?.success) {
             success('Updated', 'Scheme updated successfully');
           } else {
@@ -1639,14 +1640,12 @@ const App = () => {
           }
         } else {
           // Submit new scheme
-          result = await withSubmit('Submitting scheme...', async () => {
-            const response = await api.submitPlan(user.email, schemeData);
-            return response?.data || response; // Unwrap {status,data,timestamp}
-          });
+          const response = await api.submitPlan(user.email, schemeData);
+          result = response?.data || response; // Unwrap {status,data,timestamp}
         }
         
         // Check if validation failed (only for new submissions)
-        if (!editingScheme && result && !result.submitted && result.error === 'Session count mismatch') {
+        if (!editingScheme && result && !result.ok && result.error === 'Session count mismatch') {
           const validation = result.validation;
           
           let confirmMessage = `${validation.message}\n\n`;
@@ -1677,6 +1676,7 @@ const App = () => {
               noOfSessions: validation.suggestion
             }));
             info('Timetable Adjustment', `Sessions updated to ${validation.suggestion} to match your timetable.`);
+            shouldCloseForm = false;
             return;
           } else if (!userChoice || validation.noTimetableFound) {
             // Force submit with override
@@ -1686,16 +1686,20 @@ const App = () => {
               validationWarning: validation.message
             };
             
-            await withSubmit('Submitting scheme with override...', () => api.submitPlan(user.email, overrideData));
+            const overrideResponse = await api.submitPlan(user.email, overrideData);
+            const overrideResult = overrideResponse?.data || overrideResponse;
+            if (!overrideResult?.ok) {
+              throw new Error(overrideResult?.error || 'Override submission failed');
+            }
             warning('Override Required', 'Scheme submitted with timetable override. HM review required.');
           }
-        } else if (result && (result.submitted || result.ok)) {
+        } else if (result?.ok) {
           // Success - normal submission
           const message = result.validation?.message || 'Scheme submitted successfully!';
           success('Scheme Submitted', message);
-        } else if (result && result.error) {
+        } else {
           // Other error
-          throw new Error(result.error || 'Submission failed');
+          throw new Error(result?.error || 'Submission failed');
         }
         
         // Refresh schemes list
@@ -1717,17 +1721,19 @@ const App = () => {
         error('Submission Failed', `Failed to submit scheme: ${err.message}`);
       } finally {
         setSubmitting({ active: false, message: '' });
-        setEditingScheme(null);
-        setShowForm(false);
-        setFormData({
-          class: '',
-          subject: '',
-          term: '',
-          unit: '',
-          chapter: '',
-          month: '',
-          noOfSessions: ''
-        });
+        if (shouldCloseForm) {
+          setEditingScheme(null);
+          setShowForm(false);
+          setFormData({
+            class: '',
+            subject: '',
+            term: '',
+            unit: '',
+            chapter: '',
+            month: '',
+            noOfSessions: ''
+          });
+        }
       }
     };
 
