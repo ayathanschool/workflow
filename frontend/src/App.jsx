@@ -1646,7 +1646,7 @@ const App = () => {
         }
         
         // Check if validation failed (only for new submissions)
-        if (!editingScheme && !result.ok && result.error === 'Session count mismatch') {
+        if (!editingScheme && result && !result.submitted && result.error === 'Session count mismatch') {
           const validation = result.validation;
           
           let confirmMessage = `${validation.message}\n\n`;
@@ -1689,11 +1689,11 @@ const App = () => {
             await withSubmit('Submitting scheme with override...', () => api.submitPlan(user.email, overrideData));
             warning('Override Required', 'Scheme submitted with timetable override. HM review required.');
           }
-        } else if (result.ok) {
+        } else if (result && (result.submitted || result.ok)) {
           // Success - normal submission
           const message = result.validation?.message || 'Scheme submitted successfully!';
           success('Scheme Submitted', message);
-        } else {
+        } else if (result && result.error) {
           // Other error
           throw new Error(result.error || 'Submission failed');
         }
