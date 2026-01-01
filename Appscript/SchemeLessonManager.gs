@@ -433,7 +433,8 @@ function _calculateLessonPlanningDateRange() {
     let upcomingTerm = null;
     
     for (const term of calendarRows) {
-      if (!term.startDate || !term.endDate) continue;
+      // Skip rows without a valid term name, startDate, or endDate
+      if (!term.term || !String(term.term).trim() || !term.startDate || !term.endDate) continue;
       
       const termStart = new Date(term.startDate);
       const termEnd = new Date(term.endDate);
@@ -1116,11 +1117,27 @@ function createSchemeLessonPlan(lessonPlanData) {
     // Prepare row data
     const finalStatus = lessonPlanData.status === 'submitted' ? 'Pending Review' : (lessonPlanData.status || 'draft');
     
+    // Get teacher name from Users sheet instead of using the passed name
+    let teacherName = lessonPlanData.teacherName || '';
+    try {
+      const usersSheet = _getSheet('Users');
+      const usersHeaders = _headers(usersSheet);
+      const usersRows = _rows(usersSheet);
+      const userRecord = usersRows
+        .map(r => _indexByHeader(r, usersHeaders))
+        .find(u => (u.email || '').toLowerCase() === (lessonPlanData.teacherEmail || '').toLowerCase());
+      if (userRecord && userRecord.name) {
+        teacherName = userRecord.name;
+      }
+    } catch (err) {
+      Logger.log(`Warning: Could not fetch teacher name from Users sheet: ${err.message}`);
+    }
+    
     const rowObject = {
       lpId: lpId,
       schemeId: lessonPlanData.schemeId,
       teacherEmail: lessonPlanData.teacherEmail,
-      teacherName: lessonPlanData.teacherName || '',
+      teacherName: teacherName,
       class: schemeDetails.class || lessonPlanData.class || '',
       subject: schemeDetails.subject || lessonPlanData.subject || '',
       chapter: lessonPlanData.chapter,
@@ -1249,6 +1266,22 @@ function createBulkSchemeLessonPlans(bulkData) {
     const createdPlans = [];
     const errors = [];
     
+    // Get teacher name from Users sheet instead of using the passed name
+    let teacherName = bulkData.teacherName || '';
+    try {
+      const usersSheet = _getSheet('Users');
+      const usersHeaders = _headers(usersSheet);
+      const usersRows = _rows(usersSheet);
+      const userRecord = usersRows
+        .map(r => _indexByHeader(r, usersHeaders))
+        .find(u => (u.email || '').toLowerCase() === (bulkData.teacherEmail || '').toLowerCase());
+      if (userRecord && userRecord.name) {
+        teacherName = userRecord.name;
+      }
+    } catch (err) {
+      Logger.log(`Warning: Could not fetch teacher name from Users sheet: ${err.message}`);
+    }
+    
     // Create lesson plans for each session
     for (let i = 0; i < sessionCount; i++) {
       const sessionNumber = i + 1;
@@ -1281,7 +1314,7 @@ function createBulkSchemeLessonPlans(bulkData) {
           lpId: lpId,
           schemeId: bulkData.schemeId,
           teacherEmail: bulkData.teacherEmail,
-          teacherName: bulkData.teacherName || '',
+          teacherName: teacherName,
           class: schemeDetails.class,
           subject: schemeDetails.subject,
           chapter: bulkData.chapter,

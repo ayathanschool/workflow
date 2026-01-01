@@ -40,7 +40,8 @@ import {
   AlertTriangle,
   XCircle,
   Shield,
-  DollarSign
+  DollarSign,
+  Target
 } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
 import * as api from './api'
@@ -77,6 +78,7 @@ const SuperAdminDashboard = lazy(() => import('./components/SuperAdminDashboard'
 const UserManagement = lazy(() => import('./components/UserManagement'));
 const AuditLog = lazy(() => import('./components/AuditLog'));
 const AdminDataEditor = lazy(() => import('./components/AdminDataEditor'));
+const SchemeApprovalsView = lazy(() => import('./views/SchemeApprovalsView'));
 
 // Keep lightweight components as regular imports
 import { periodToTimeString, todayIST, formatDateForInput, formatLocalDate } from './utils/dateUtils';
@@ -1377,11 +1379,11 @@ const App = () => {
                   </div>
                 );
               case 'hm-dashboard':
-                return <Dashboard />;
+                return <HMDashboardView />;
               case 'day-timetable':
                 return <DayTimetableView periodTimes={memoizedSettings.periodTimes} />;
               case 'scheme-approvals':
-                return <SchemeApprovalsView />;
+                return <SchemeApprovalsViewWrapper />;
               case 'lesson-approvals':
                 return <LessonApprovalsView />;
               case 'my-daily-reports':
@@ -3779,8 +3781,8 @@ const App = () => {
     );
   };
 
-  const HMDashboardView = ({ insights }) => {
-    console.debug('🚀 HMDashboardView rendering with insights:', insights);
+  const HMDashboardView = ({ insights: insightsProp }) => {
+    console.debug('🚀 HMDashboardView rendering with insights:', insightsProp);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [dailyReportsData, setDailyReportsData] = useState({ reports: [], stats: {} });
     const [autoRefresh, setAutoRefresh] = useState(true);
@@ -3789,9 +3791,48 @@ const App = () => {
     const [loadingPaceTracking, setLoadingPaceTracking] = useState(false);
     const [selectedPeriod, setSelectedPeriod] = useState(null);
 
+    const [lessonPlansToday, setLessonPlansToday] = useState([]);
+    const [loadingLessonPlansToday, setLoadingLessonPlansToday] = useState(false);
+
+    // Modal for lesson plan details
+    const [selectedLessonPlan, setSelectedLessonPlan] = useState(null);
+    const [showLessonPlanModal, setShowLessonPlanModal] = useState(false);
+
     // Missing lesson plans overview
     const [missingPlans, setMissingPlans] = useState(null);
     const [loadingMissingPlans, setLoadingMissingPlans] = useState(false);
+
+    // Insights state - fetch if not provided as prop
+    const [localInsights, setLocalInsights] = useState(null);
+    const insights = insightsProp || localInsights || {
+      planCount: 0,
+      lessonCount: 0,
+      teacherCount: 0,
+      classCount: 0
+    };
+
+    // Fetch insights if not provided
+    useEffect(() => {
+      if (!insightsProp) {
+        async function fetchInsights() {
+          try {
+            const [hmData, classes] = await Promise.all([
+              api.getHmInsights(),
+              api.getAllClasses()
+            ]);
+            setLocalInsights({
+              planCount: hmData?.planCount || 0,
+              lessonCount: hmData?.lessonCount || 0,
+              teacherCount: hmData?.teacherCount || 0,
+              classCount: Array.isArray(classes) ? classes.length : 0
+            });
+          } catch (err) {
+            console.error('Failed to fetch HM insights:', err);
+          }
+        }
+        fetchInsights();
+      }
+    }, [insightsProp]);
 
     useEffect(() => {
       async function loadMissingPlans() {
@@ -3814,10 +3855,14 @@ const App = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // Auto-refresh daily reports every 5 minutes
+  // Auto-refresh daily reports every 5 minutes (pauses when tab hidden)
   useEffect(() => {
     if (!autoRefresh) return;
-    const refreshTimer = setInterval(async () => {
+    
+    const refreshData = async () => {
+      // Skip if tab is hidden to save resources
+      if (document.hidden) return;
+      
       try {
         const today = new Date().toISOString().split('T')[0];
         const response = await api.getDailyReportsForDate(today);
@@ -3830,7 +3875,9 @@ const App = () => {
       } catch (err) {
         console.error('Auto-refresh failed:', err);
       }
-    }, 5 * 60 * 1000);
+    };
+    
+    const refreshTimer = setInterval(refreshData, 5 * 60 * 1000);
     return () => clearInterval(refreshTimer);
   }, [autoRefresh]);
 
@@ -3839,24 +3886,10 @@ const App = () => {
     async function loadTodayReports() {
       try {
         const today = new Date().toISOString().split('T')[0];
-        console.debug('📊 Loading daily reports for:', today);
         const response = await api.getDailyReportsForDate(today);
         const data = response?.data || response;
-        console.debug('📊 Daily reports response:', data);
-        console.debug('📊 Reports array:', data.reports);
-        console.debug('📊 Reports count:', data.reports?.length || 0);
-        console.debug('📊 Stats:', data.stats);
         
         if (data.reports && data.reports.length > 0) {
-          console.debug('📊 Sample report:', data.reports[0]);
-          // Group by period to see distribution
-          const byPeriod = {};
-          data.reports.forEach(r => {
-            const p = r.period;
-            byPeriod[p] = (byPeriod[p] || 0) + 1;
-          });
-          console.debug('📊 Reports by period:', byPeriod);
-        } else {
           console.warn('⚠️ NO REPORTS FOUND - Check backend logs for timetable data');
         }
         
@@ -3938,32 +3971,111 @@ const App = () => {
 
   const currentPeriod = getCurrentPeriod();
 
-  // Calculate critical alerts
-  const criticalAlerts = [];
-  const pendingCount = dailyReportsData.stats.pending || 0;
-  const lateSubmissions = dailyReportsData.reports.filter(r => {
-    if (r.submitted) return false;
-    const reportPeriod = parseInt(r.period);
-    return currentPeriod && reportPeriod < currentPeriod;
-  }).length;
+  // Lazy-load lesson plans for today so we can show chapter/session in live and selected periods.
+  useEffect(() => {
+    const shouldLoad = Boolean(currentPeriod || selectedPeriod);
+    if (!shouldLoad) return;
+    if (Array.isArray(lessonPlansToday) && lessonPlansToday.length > 0) return;
 
-  if (lateSubmissions > 0) {
-    criticalAlerts.push({
-      type: 'critical',
-      icon: '🚨',
-      message: `${lateSubmissions} late report${lateSubmissions > 1 ? 's' : ''} (period${lateSubmissions > 1 ? 's' : ''} already completed)`,
-      color: 'red'
-    });
-  }
+    let cancelled = false;
+    async function loadLessonPlansForToday() {
+      try {
+        setLoadingLessonPlansToday(true);
+        const today = new Date().toISOString().split('T')[0];
+        const response = await api.getLessonPlansForDate(today);
+        const result = response?.data || response;
+        const plans = Array.isArray(result?.lessonPlans) ? result.lessonPlans : (Array.isArray(result) ? result : []);
+        if (!cancelled) setLessonPlansToday(plans);
+      } catch (err) {
+        console.warn('Failed to load lesson plans for HM live period:', err);
+        if (!cancelled) setLessonPlansToday([]);
+      } finally {
+        if (!cancelled) setLoadingLessonPlansToday(false);
+      }
+    }
 
-  if (pendingCount > 10) {
-    criticalAlerts.push({
-      type: 'warning',
-      icon: '⚠️',
-      message: `${pendingCount} reports still pending`,
-      color: 'orange'
+    loadLessonPlansForToday();
+    return () => { cancelled = true; };
+  }, [currentPeriod, selectedPeriod, lessonPlansToday]);
+
+  const normalizeKeyPart = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, '');
+
+  const normalizeSubjectKey = (value) => {
+    const s = normalizeKeyPart(value).replace(/[^a-z0-9]/g, '');
+    if (!s) return '';
+    if (s === 'eng' || s === 'english' || s === 'engg' || s === 'englishg' || s === 'englishgrammar') return 'english';
+    if (s === 'mal' || s === 'malayalam') return 'malayalam';
+    if (s === 'math' || s === 'maths' || s === 'mathematics') return 'maths';
+    return s;
+  };
+
+  const buildLiveKey = (row) => {
+    const period = String(row?.period || '').replace(/^Period\s*/i, '').trim();
+    const cls = normalizeKeyPart(row?.class);
+    const subj = normalizeSubjectKey(row?.subject);
+    return `${period}|${cls}|${subj}`;
+  };
+
+  const plansByLiveKey = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(lessonPlansToday) ? lessonPlansToday : []).forEach((p) => {
+      const row = {
+        period: p?.selectedPeriod || p?.period,
+        class: p?.class,
+        subject: p?.subject
+      };
+      map.set(buildLiveKey(row), p);
     });
-  }
+    return map;
+  }, [lessonPlansToday]);
+
+  const getDisplayChapter = (row, matchingPlan) =>
+    row?.chapterName || row?.chapter || (matchingPlan && matchingPlan.chapter) || '';
+
+  const getDisplaySessionNo = (row, matchingPlan) =>
+    row?.sessionNo || row?.sessionNumber || row?.session || (matchingPlan && (matchingPlan.session || matchingPlan.sessionNo || matchingPlan.sessionNumber)) || '';
+
+  const getDisplayTeacher = (row) => row?.teacherName || row?.teacher || row?.teacherEmail || '';
+
+  const getPeriodTimeLabel = (periodNumber) => {
+    const p = Number(periodNumber);
+    if (!p) return '';
+
+    const today = new Date();
+    const isFriday = today.getDay() === 5;
+
+    let selectedPeriodTimes = null;
+    if (isFriday && memoizedSettings?.periodTimesFriday && Array.isArray(memoizedSettings.periodTimesFriday) && memoizedSettings.periodTimesFriday.length) {
+      selectedPeriodTimes = memoizedSettings.periodTimesFriday;
+    } else if (memoizedSettings?.periodTimesWeekday && Array.isArray(memoizedSettings.periodTimesWeekday) && memoizedSettings.periodTimesWeekday.length) {
+      selectedPeriodTimes = memoizedSettings.periodTimesWeekday;
+    } else if (memoizedSettings?.periodTimes && Array.isArray(memoizedSettings.periodTimes) && memoizedSettings.periodTimes.length) {
+      selectedPeriodTimes = memoizedSettings.periodTimes;
+    }
+
+    const fromSettings = selectedPeriodTimes
+      ? selectedPeriodTimes.find(x => Number(x?.period) === p)
+      : null;
+    if (fromSettings?.start && fromSettings?.end) return `${fromSettings.start} - ${fromSettings.end}`;
+
+    const fallback = {
+      1: '08:50 - 09:35',
+      2: '09:35 - 10:20',
+      3: '10:30 - 11:15',
+      4: '11:15 - 12:00',
+      5: '12:00 - 12:45',
+      6: '13:15 - 14:00',
+      7: '14:00 - 14:40',
+      8: '14:45 - 15:25'
+    };
+    return fallback[p] || '';
+  };
+
+  const lateSubmissions =
+    dailyReportsData?.stats?.lateSubmissions ??
+    dailyReportsData?.stats?.late ??
+    dailyReportsData?.stats?.lateCount ??
+    0;
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -3976,7 +4088,7 @@ const App = () => {
             </div>
             <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
               Live monitoring • {currentTime.toLocaleDateString()} • {currentTime.toLocaleTimeString()}
-              {currentPeriod && ` • Current Period: ${currentPeriod}`}
+              {` • Live Period: ${currentPeriod || '—'}`}
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -3998,37 +4110,9 @@ const App = () => {
               <ClipboardCheck className="h-4 w-4 mr-2" />
               Detailed View
             </button>
-            <button className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-4 py-2 rounded-lg flex items-center hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700">
-              <Download className="h-4 w-4 mr-2" />
-              Export Report
-            </button>
           </div>
         </div>
       </div>
-
-      {/* Critical Alerts Banner */}
-      {criticalAlerts.length > 0 && (
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/40 rounded-xl p-4 flex items-start gap-3">
-          <div className="flex items-start">
-            <div className="flex-shrink-0">
-              <AlertCircle className="h-6 w-6 text-red-500" />
-            </div>
-            <div className="ml-3 flex-1">
-              <h3 className="text-sm font-bold text-red-800 mb-2">
-                🔴 CRITICAL ALERTS - IMMEDIATE ATTENTION REQUIRED
-              </h3>
-              <div className="space-y-1">
-                {criticalAlerts.map((alert, idx) => (
-                  <div key={idx} className="flex items-center text-sm">
-                    <span className="mr-2 text-lg">{alert.icon}</span>
-                    <span className={`font-medium text-${alert.color}-800`}>{alert.message}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Real-Time Activity Monitor */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
@@ -4039,125 +4123,180 @@ const App = () => {
           </span>
         </div>
         
-        {/* Period Heatmap - Show what's running in each period */}
-        <div className="grid grid-cols-8 gap-2 mb-6">
-          {[1,2,3,4,5,6,7,8].map(period => {
-            const periodClasses = dailyReportsData.reports.filter(r => parseInt(r.period) === period);
-            const isCurrent = currentPeriod === period;
-            const isPast = currentPeriod && period < currentPeriod;
-            const isFuture = currentPeriod && period > currentPeriod;
-            
-            // Group by subject to show what's being taught
-            const subjectCount = {};
-            periodClasses.forEach(c => {
-              const subj = c.subject || 'Unknown';
-              subjectCount[subj] = (subjectCount[subj] || 0) + 1;
+        {/* Live Period - Class-wise View Only */}
+        {(() => {
+          const focusPeriod = currentPeriod || 1;
+          const periodRows = (dailyReportsData?.reports || [])
+            .filter(r => String(r?.period || '').trim() === String(focusPeriod))
+            .sort((a, b) => {
+              const classA = String(a?.class || '');
+              const classB = String(b?.class || '');
+              const numA = parseInt(classA.match(/\d+/)?.[0] || '0');
+              const numB = parseInt(classB.match(/\d+/)?.[0] || '0');
+              if (numA !== numB) return numA - numB;
+              return classA.localeCompare(classB);
             });
-            const topSubjects = Object.entries(subjectCount)
-              .sort((a, b) => b[1] - a[1])
-              .slice(0, 2)
-              .map(([subj]) => subj);
-            
-            let bgColor = 'bg-gray-100';
-            let textColor = 'text-gray-700';
-            let borderColor = '';
-            
-            if (periodClasses.length === 0) {
-              bgColor = 'bg-gray-50 border-2 border-dashed border-gray-300';
-              textColor = 'text-gray-400';
-            } else if (isCurrent) {
-              bgColor = 'bg-blue-500';
-              textColor = 'text-white';
-              borderColor = 'ring-4 ring-blue-300';
-            } else if (isPast) {
-              bgColor = 'bg-green-100 border border-green-300';
-              textColor = 'text-green-800';
-            } else if (isFuture) {
-              bgColor = 'bg-orange-50 border border-orange-200';
-              textColor = 'text-orange-700';
-            }
-            
-            return (
-              <button 
-                key={period} 
-                onClick={() => setSelectedPeriod(period)}
-                className={`relative p-2 rounded-lg ${bgColor} ${borderColor} transition-all hover:shadow-md cursor-pointer hover:scale-105`}
-              >
-                <div className="text-center">
-                  <div className={`text-xs font-bold ${textColor} mb-1`}>
-                    Period {period}
-                  </div>
-                  {periodClasses.length > 0 ? (
-                    <>
-                      <div className={`text-lg font-bold ${textColor}`}>
-                        {periodClasses.length}
-                      </div>
-                      <div className={`text-xs ${textColor} opacity-90`}>
-                        classes
-                      </div>
-                      {topSubjects.length > 0 && (
-                        <div className={`text-xs ${textColor} mt-1 font-medium truncate`}>
-                          {topSubjects.join(', ')}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <div className={`text-lg font-bold ${textColor}`}>-</div>
-                      <div className={`text-xs ${textColor}`}>No TT</div>
-                    </>
-                  )}
-                  {isCurrent && (
-                    <div className="text-xs font-bold text-white mt-1 bg-blue-700 rounded px-1">
-                      LIVE NOW
+
+          return (
+            <>
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                    📊 Period {focusPeriod}
+                    {getPeriodTimeLabel(focusPeriod) && (
+                      <span className="text-base font-normal text-blue-600 dark:text-blue-400 ml-2">
+                        {getPeriodTimeLabel(focusPeriod)}
+                      </span>
+                    )}
+                    {currentPeriod === focusPeriod && (
+                      <span className="ml-3 text-sm bg-blue-500 text-white px-3 py-1 rounded-full font-semibold">
+                        LIVE
+                      </span>
+                    )}
+                  </h2>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    {new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})} • Last updated: {lastRefresh.toLocaleTimeString()}
+                  </p>
+                </div>
+                {loadingLessonPlansToday && (
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Loading lesson plans…</div>
+                )}
+              </div>
+
+              {dailyReportsData.reports.length === 0 && (
+                <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-900/40 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100">No Timetable Data for Today</h3>
+                      <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                        The system cannot find any timetable periods scheduled for today ({new Date().toLocaleDateString('en-US', {weekday: 'long'})}). 
+                        Please ensure:
+                      </p>
+                      <ul className="text-sm text-blue-700 dark:text-blue-300 mt-2 ml-4 list-disc space-y-1">
+                        <li>Timetable data is uploaded in the Timetable sheet</li>
+                        <li>Today's day name matches the timetable day entries</li>
+                        <li>Period numbers are correctly assigned (1-8)</li>
+                      </ul>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {periodRows.length === 0 && dailyReportsData.reports.length > 0 ? (
+                <div className="p-8 text-center">
+                  <AlertCircle className="h-12 w-12 text-gray-400 dark:text-gray-600 mx-auto mb-3" />
+                  <p className="text-gray-600 dark:text-gray-400">No classes scheduled for Period {focusPeriod} today.</p>
+                  {!currentPeriod && (
+                    <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
+                      Currently outside school hours.
+                    </p>
                   )}
                 </div>
-              </button>
-            );
-          })}
-        </div>
+              ) : periodRows.length > 0 ? (
+                <div className="space-y-2">
+                  {periodRows.map((row, idx) => {
+                    const matchingPlan = plansByLiveKey.get(buildLiveKey(row)) || null;
+                    const chapter = getDisplayChapter(row, matchingPlan);
+                    const sessionNo = getDisplaySessionNo(row, matchingPlan);
+                    const teacher = getDisplayTeacher(row);
+                    const subject = row?.subject || '';
+                    const cls = row?.class || '';
+                    const isSubmitted = row?.submitted || false;
 
-        {/* Info Message if no timetable data */}
-        {dailyReportsData.reports.length === 0 && (
-          <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold text-blue-900">No Timetable Data for Today</h3>
-                <p className="text-sm text-blue-700 mt-1">
-                  The system cannot find any timetable periods scheduled for today ({new Date().toLocaleDateString('en-US', {weekday: 'long'})}). 
-                  Please ensure:
-                </p>
-                <ul className="text-sm text-blue-700 mt-2 ml-4 list-disc space-y-1">
-                  <li>Timetable data is uploaded in the Timetable sheet</li>
-                  <li>Today's day name matches the timetable day entries</li>
-                  <li>Period numbers are correctly assigned (1-8)</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        )}
+                    return (
+                      <div
+                        key={`${buildLiveKey(row)}|${idx}`}
+                        onClick={() => {
+                          if (matchingPlan) {
+                            setSelectedLessonPlan(matchingPlan);
+                            setShowLessonPlanModal(true);
+                          }
+                        }}
+                        className={`p-3 md:p-4 rounded-lg border transition-all ${
+                          matchingPlan ? 'cursor-pointer hover:shadow-md' : ''
+                        } ${
+                          isSubmitted
+                            ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-900/40'
+                            : 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-900/40'
+                        }`}
+                      >
+                        {/* Mobile: Vertical card layout */}
+                        <div className="flex md:hidden flex-col gap-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-lg font-bold text-gray-900 dark:text-gray-100">{cls}</span>
+                            <span
+                              className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold ${
+                                isSubmitted
+                                  ? 'bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-200'
+                                  : 'bg-orange-200 dark:bg-orange-800 text-orange-800 dark:text-orange-200'
+                              }`}
+                            >
+                              {isSubmitted ? '✓' : '○'}
+                            </span>
+                          </div>
+                          <div className="text-sm font-medium text-blue-700 dark:text-blue-400">{subject}</div>
+                          <div className="text-sm text-gray-700 dark:text-gray-300">{teacher || '—'}</div>
+                          <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
+                            <span>{chapter || '—'}</span>
+                            <span className="text-purple-700 dark:text-purple-400 font-medium">
+                              {sessionNo ? `S${sessionNo}` : '—'}
+                            </span>
+                          </div>
+                        </div>
 
-        {/* Quick Stats */}
+                        {/* Desktop: Horizontal grid layout */}
+                        <div className="hidden md:grid grid-cols-6 gap-4 items-center text-sm">
+                          <div className="font-bold text-gray-900 dark:text-gray-100">{cls}</div>
+                          <div className="text-gray-700 dark:text-gray-300">{teacher || '—'}</div>
+                          <div className="font-medium text-blue-700 dark:text-blue-400">{subject}</div>
+                          <div className="text-gray-700 dark:text-gray-300">{chapter || '—'}</div>
+                          <div className="text-purple-700 dark:text-purple-400 font-medium">
+                            {sessionNo ? `Session ${sessionNo}` : '—'}
+                          </div>
+                          <div className="text-right">
+                            <span
+                              className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
+                                isSubmitted
+                                  ? 'bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-200'
+                                  : 'bg-orange-200 dark:bg-orange-800 text-orange-800 dark:text-orange-200'
+                              }`}
+                            >
+                              {isSubmitted ? '✓ Reported' : '○ Pending'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </>
+          );
+        })()}
+      </div>
+
+      {/* Today's Summary Stats */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Today's Summary</h3>
         <div className="grid grid-cols-4 gap-4">
-          <div className="text-center p-3 bg-blue-50 rounded-lg">
-            <div className="text-2xl font-bold text-blue-600">{dailyReportsData.stats.submitted || 0}</div>
-            <div className="text-xs text-gray-600">Submitted (Today)</div>
+          <div className="text-center p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{dailyReportsData.stats.submitted || 0}</div>
+            <div className="text-xs text-gray-600 dark:text-gray-400">Submitted</div>
           </div>
-          <div className="text-center p-3 bg-orange-50 rounded-lg">
-            <div className="text-2xl font-bold text-orange-600">{dailyReportsData.stats.pending || 0}</div>
-            <div className="text-xs text-gray-600">Pending (Today)</div>
+          <div className="text-center p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+            <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">{dailyReportsData.stats.pending || 0}</div>
+            <div className="text-xs text-gray-600 dark:text-gray-400">Pending</div>
           </div>
-          <div className="text-center p-3 bg-red-50 rounded-lg">
-            <div className="text-2xl font-bold text-red-600">{lateSubmissions}</div>
-            <div className="text-xs text-gray-600">Late (Today)</div>
+          <div className="text-center p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+            <div className="text-2xl font-bold text-red-600 dark:text-red-400">{lateSubmissions}</div>
+            <div className="text-xs text-gray-600 dark:text-gray-400">Late</div>
           </div>
-          <div className="text-center p-3 bg-green-50 rounded-lg">
-            <div className="text-2xl font-bold text-green-600">
+          <div className="text-center p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+            <div className="text-2xl font-bold text-green-600 dark:text-green-400">
               {dailyReportsData.stats.totalPeriods > 0 ? Math.round((dailyReportsData.stats.submitted / dailyReportsData.stats.totalPeriods) * 100) : 0}%
             </div>
-            <div className="text-xs text-gray-600">Completion (Today)</div>
+            <div className="text-xs text-gray-600 dark:text-gray-400">Completion</div>
           </div>
         </div>
       </div>
@@ -4168,12 +4307,7 @@ const App = () => {
           <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center p-6 border-b border-gray-200 bg-gradient-to-r from-blue-500 to-blue-600">
               <h2 className="text-xl font-bold text-white">
-                Period {selectedPeriod} - Class Schedule
-                {currentPeriod === selectedPeriod && (
-                  <span className="ml-3 text-sm bg-white text-blue-600 px-3 py-1 rounded-full font-semibold animate-pulse">
-                    🔴 LIVE NOW
-                  </span>
-                )}
+                Period {selectedPeriod}{getPeriodTimeLabel(selectedPeriod) ? ` (${getPeriodTimeLabel(selectedPeriod)})` : ''} - Class Schedule
               </h2>
               <button 
                 onClick={() => setSelectedPeriod(null)}
@@ -4187,7 +4321,14 @@ const App = () => {
               {(() => {
                 const periodClasses = dailyReportsData.reports
                   .filter(r => parseInt(r.period) === selectedPeriod)
-                  .sort((a, b) => (a.class || '').localeCompare(b.class || ''));
+                  .sort((a, b) => {
+                    const classA = String(a.class || '');
+                    const classB = String(b.class || '');
+                    const numA = parseInt(classA.match(/\d+/)?.[0] || '0');
+                    const numB = parseInt(classB.match(/\d+/)?.[0] || '0');
+                    if (numA !== numB) return numA - numB;
+                    return classA.localeCompare(classB);
+                  });
                 
                 if (periodClasses.length === 0) {
                   return (
@@ -4231,6 +4372,21 @@ const App = () => {
                             <div>
                               <h4 className="font-bold text-gray-900 text-lg">{classData.class}</h4>
                               <p className="text-sm font-medium text-blue-600">{classData.subject}</p>
+                              {(() => {
+                                const matchingPlan = plansByLiveKey.get(buildLiveKey({
+                                  period: selectedPeriod,
+                                  class: classData?.class,
+                                  subject: classData?.subject
+                                })) || null;
+                                const chapter = getDisplayChapter(classData, matchingPlan);
+                                const sessionNo = getDisplaySessionNo(classData, matchingPlan);
+                                return (
+                                  <div className="text-xs text-gray-700 mt-1">
+                                    <span className="font-medium">Chapter:</span> {chapter || '—'}
+                                    {sessionNo ? <span className="text-purple-700"> • Session {sessionNo}</span> : null}
+                                  </div>
+                                );
+                              })()}
                             </div>
                             <div className={`px-2 py-1 rounded-full text-xs font-semibold ${
                               classData.submitted 
@@ -4244,7 +4400,7 @@ const App = () => {
                           <div className="mt-3 pt-3 border-t border-gray-200">
                             <div className="flex items-center gap-2 text-sm text-gray-700">
                               <User className="h-4 w-4" />
-                              <span className="font-medium">{classData.teacher || classData.teacherEmail}</span>
+                              <span className="font-medium">{getDisplayTeacher(classData) || '—'}</span>
                             </div>
                             {classData.isSubstitution && (
                               <div className="mt-2 text-xs bg-yellow-100 border border-yellow-300 rounded px-2 py-1 text-yellow-800">
@@ -4263,6 +4419,101 @@ const App = () => {
             <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-end">
               <button
                 onClick={() => setSelectedPeriod(null)}
+                className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lesson Plan Details Modal */}
+      {showLessonPlanModal && selectedLessonPlan && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowLessonPlanModal(false)}>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-3xl w-full max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-500 to-blue-600">
+              <div>
+                <h2 className="text-xl font-bold text-white">
+                  Lesson Plan Details
+                </h2>
+                <p className="text-sm text-blue-100 mt-1">
+                  {selectedLessonPlan.class} • {selectedLessonPlan.subject} • Chapter: {selectedLessonPlan.chapter} • Session {selectedLessonPlan.session || selectedLessonPlan.sessionNo}
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowLessonPlanModal(false)}
+                className="text-white hover:text-gray-200 transition-colors"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto max-h-[calc(80vh-180px)] space-y-6">
+              {/* Teacher Info */}
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-900/40 rounded-lg p-4">
+                <div className="flex items-center gap-3">
+                  <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  <div>
+                    <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">Teacher</p>
+                    <p className="text-blue-700 dark:text-blue-300">{selectedLessonPlan.teacherName || selectedLessonPlan.teacher || selectedLessonPlan.teacherEmail}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Learning Objectives */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Target className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Learning Objectives</h3>
+                </div>
+                <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-900/40 rounded-lg p-4">
+                  {selectedLessonPlan.objectives || selectedLessonPlan.learningObjectives ? (
+                    <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                      {selectedLessonPlan.objectives || selectedLessonPlan.learningObjectives}
+                    </p>
+                  ) : (
+                    <p className="text-gray-500 dark:text-gray-400 italic">No learning objectives specified</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Teaching Methods / Activities */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <BookOpen className="h-5 w-5 text-green-600 dark:text-green-400" />
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Teaching Methods</h3>
+                </div>
+                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-900/40 rounded-lg p-4">
+                  {selectedLessonPlan.teachingMethods || selectedLessonPlan.activities ? (
+                    <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                      {selectedLessonPlan.teachingMethods || selectedLessonPlan.activities}
+                    </p>
+                  ) : (
+                    <p className="text-gray-500 dark:text-gray-400 italic">No teaching methods specified</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Additional Info */}
+              {selectedLessonPlan.status && (
+                <div className="flex items-center gap-2 text-sm">
+                  <span className={`px-3 py-1 rounded-full font-medium ${
+                    selectedLessonPlan.status === 'Approved' || selectedLessonPlan.status === 'Ready'
+                      ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                      : selectedLessonPlan.status === 'Pending Review'
+                      ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
+                      : 'bg-gray-100 dark:bg-gray-900/30 text-gray-700 dark:text-gray-300'
+                  }`}>
+                    Status: {selectedLessonPlan.status}
+                  </span>
+                </div>
+              )}
+            </div>
+            
+            <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex justify-end">
+              <button
+                onClick={() => setShowLessonPlanModal(false)}
                 className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
               >
                 Close
@@ -4366,126 +4617,7 @@ const App = () => {
         </div>
       </div>
 
-      {/* Teacher Status Overview */}
-      <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">👥 Teacher Status Overview <span className="text-sm font-normal text-blue-600">[{new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})}]</span></h2>
-        <div className="space-y-3">
-          {/* Group reports by teacher */}
-          {Object.entries(
-            dailyReportsData.reports.reduce((acc, report) => {
-              const teacherKey = report.teacherEmail || report.teacherName;
-              if (!acc[teacherKey]) {
-                acc[teacherKey] = {
-                  name: report.teacherName || teacherKey,
-                  submitted: 0,
-                  total: 0,
-                  periods: []
-                };
-              }
-              acc[teacherKey].total++;
-              if (report.submitted) acc[teacherKey].submitted++;
-              acc[teacherKey].periods.push(report.period);
-              return acc;
-            }, {})
-          )
-          .sort((a, b) => {
-            const aPercent = a[1].total > 0 ? a[1].submitted / a[1].total : 0;
-            const bPercent = b[1].total > 0 ? b[1].submitted / b[1].total : 0;
-            return aPercent - bPercent; // Sort by completion rate (lowest first)
-          })
-          .slice(0, 10) // Show top 10 teachers needing attention
-          .map(([teacherKey, data]) => {
-            const percentage = data.total > 0 ? Math.round((data.submitted / data.total) * 100) : 0;
-            let statusColor = 'bg-green-500';
-            let statusText = 'All Done';
-            if (percentage < 50) {
-              statusColor = 'bg-red-500';
-              statusText = 'Needs Attention';
-            } else if (percentage < 100) {
-              statusColor = 'bg-yellow-500';
-              statusText = 'In Progress';
-            }
-            
-            return (
-              <div key={teacherKey} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center gap-3 flex-1">
-                  <div className={`w-3 h-3 rounded-full ${statusColor}`}></div>
-                  <div className="flex-1">
-                    <div className="font-medium text-gray-900">{data.name}</div>
-                    <div className="text-xs text-gray-500">Periods: {data.periods.sort((a,b) => a-b).join(', ')}</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-right">
-                    <div className="text-sm font-semibold text-gray-900">{data.submitted}/{data.total}</div>
-                    <div className="text-xs text-gray-500">{statusText}</div>
-                  </div>
-                  <div className="w-16">
-                    <div className="bg-gray-200 rounded-full h-2">
-                      <div 
-                        className={`h-2 rounded-full ${percentage >= 80 ? 'bg-green-500' : percentage >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
-                        style={{ width: `${percentage}%` }}
-                      ></div>
-                    </div>
-                    <div className="text-xs text-center text-gray-600 mt-1">{percentage}%</div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          
-          {dailyReportsData.reports.length === 0 && (
-            <div className="text-center py-8 text-gray-500">
-              <Users className="h-12 w-12 mx-auto mb-2 text-gray-400" />
-              <p>No data available for today</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Submission Timeline Chart */}
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">📈 Submission Timeline <span className="text-sm font-normal text-blue-600">[{new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})}]</span></h2>
-          <div className="space-y-2">
-            {[1,2,3,4,5,6,7,8].map(period => {
-              const periodReports = dailyReportsData.reports.filter(r => parseInt(r.period) === period);
-              const submitted = periodReports.filter(r => r.submitted).length;
-              const total = periodReports.length;
-              const percentage = total > 0 ? Math.round((submitted / total) * 100) : 0;
-              
-              return (
-                <div key={period} className="flex items-center gap-3">
-                  <div className="w-16 text-sm font-medium text-gray-700">Period {period}</div>
-                  <div className="flex-1">
-                    <div className="relative bg-gray-200 rounded-full h-8 overflow-hidden">
-                      <div 
-                        className={`h-full flex items-center justify-end pr-2 text-xs font-bold text-white transition-all duration-500 ${
-                          percentage >= 80 ? 'bg-green-500' : 
-                          percentage >= 60 ? 'bg-blue-500' : 
-                          percentage >= 40 ? 'bg-yellow-500' : 
-                          percentage > 0 ? 'bg-orange-500' : 'bg-gray-300'
-                        }`}
-                        style={{ width: `${percentage}%` }}
-                      >
-                        {percentage > 15 && `${percentage}%`}
-                      </div>
-                      {percentage <= 15 && percentage > 0 && (
-                        <div className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-700">
-                          {percentage}%
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="w-16 text-sm text-gray-600 text-right">
-                    {submitted}/{total}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        
+      <div className="grid grid-cols-1 gap-6">
         {/* Completion Distribution */}
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h2 className="text-lg font-medium text-gray-900 mb-4">🎯 Completion Distribution <span className="text-sm font-normal text-blue-600">[{new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})}]</span></h2>
@@ -4543,617 +4675,12 @@ const App = () => {
           </div>
         </div>
       </div>
-
-      {/* Recent Activities - Show latest submissions */}
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-medium text-gray-900">📋 Recent Activity <span className="text-sm font-normal text-blue-600">[{new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})}]</span></h2>
-        </div>
-        <div className="p-6">
-          {dailyReportsData.reports.length > 0 ? (
-            <div className="space-y-2">
-              {dailyReportsData.reports
-                .filter(r => r.submitted)
-                .sort((a, b) => new Date(b.submittedAt || b.createdAt) - new Date(a.submittedAt || a.createdAt))
-                .slice(0, 10)
-                .map((report, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
-                    <div className="flex items-center gap-3 flex-1">
-                      <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
-                        <Check className="w-4 h-4 text-green-600" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-medium text-gray-900">{report.teacherName}</div>
-                        <div className="text-sm text-gray-500">
-                          {stripStdPrefix(report.class)} • {report.subject} • Period {report.period}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      {report.completionPercentage != null && (
-                        <div className={`text-sm font-semibold ${
-                          report.completionPercentage >= 80 ? 'text-green-600' :
-                          report.completionPercentage >= 60 ? 'text-blue-600' :
-                          report.completionPercentage >= 40 ? 'text-yellow-600' : 'text-red-600'
-                        }`}>
-                          {report.completionPercentage}% complete
-                        </div>
-                      )}
-                      <div className="text-xs text-gray-500">
-                        {new Date(report.submittedAt || report.createdAt).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-gray-500">
-              <Clock className="h-12 w-12 mx-auto mb-2 text-gray-400" />
-              <p>No reports submitted yet today</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Send Notification Modal */}
-      {showSendNotification && (
-        <div className="fixed inset-0 bg-red-500 bg-opacity-90 z-[9999] flex items-center justify-center">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 border-8 border-blue-500">
-            <div className="p-4 text-center">
-              <h1 className="text-2xl font-bold text-red-600">TEST MODAL IS WORKING!</h1>
-              <button 
-                onClick={() => setShowSendNotification(false)}
-                className="mt-4 px-4 py-2 bg-red-600 text-white rounded"
-              >
-                Close Test Modal
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
-  };
-  // Scheme Approvals View
-  const SchemeApprovalsView = () => {
-    const [allSchemes, setAllSchemes] = useState([]); // Store all schemes loaded once
-    const [loading, setLoading] = useState(true); // Add loading state
-    const [selectedSchemes, setSelectedSchemes] = useState(new Set()); // For bulk selection
-    const [selectedTeacher, setSelectedTeacher] = useState('');
-    const [groupByClass, setGroupByClass] = useState(false);
-    const [groupByChapter, setGroupByChapter] = useState(false);
-    const [statusFilter, setStatusFilter] = useState('Pending'); // Default to pending
-
-    // Ensure sidebar state doesn't auto-toggle here to avoid flicker on mobile
-
-    // Load all schemes ONCE on component mount
-    useEffect(() => {
-      async function fetchAllSchemes() {
-        setLoading(true);
-        try {
-          const data = await api.getAllSchemes(1, 1000, '', '', '', '', ''); // Get all schemes
-          const schemes = Array.isArray(data) ? data : (Array.isArray(data?.plans) ? data.plans : []);
-          
-          // Sort by createdAt in descending order (latest first)
-          schemes.sort((a, b) => {
-            const dateA = new Date(a.createdAt || 0);
-            const dateB = new Date(b.createdAt || 0);
-            return dateB - dateA;
-          });
-          
-          setAllSchemes(schemes);
-        } catch (err) {
-          console.error('Error fetching schemes:', err);
-          setAllSchemes([]);
-        } finally {
-          setLoading(false);
-        }
-      }
-      fetchAllSchemes();
-    }, []); // Empty dependency - load only once
-
-    // CLIENT-SIDE FILTERING
-    const filteredSchemes = useMemo(() => {
-      let result = allSchemes;
-      
-      // Filter by status
-      if (statusFilter && statusFilter !== 'All') {
-        result = result.filter(s => s.status === statusFilter);
-      }
-      
-      // Filter by teacher
-      if (selectedTeacher) {
-        result = result.filter(s => s.teacherName === selectedTeacher);
-      }
-      
-      // Group by class if enabled
-      if (groupByClass) {
-        result = [...result].sort((a, b) => (a.class || '').localeCompare(b.class || ''));
-      }
-      
-      // Group by chapter if enabled
-      if (groupByChapter) {
-        result = [...result].sort((a, b) => (a.chapter || '').localeCompare(b.chapter || ''));
-      }
-      
-      return result;
-    }, [allSchemes, statusFilter, selectedTeacher, groupByClass, groupByChapter]);
-
-    // Get unique values for dropdowns - optimized with useMemo
-    const uniqueTeachers = useMemo(() => {
-      return [...new Set(allSchemes.map(s => s.teacherName).filter(Boolean))].sort();
-    }, [allSchemes]);
-
-    const handleApproveScheme = async (schemeId) => {
-      try {
-        await withSubmit('Approving scheme...', () => api.updatePlanStatus(schemeId, 'Approved'));
-        // Remove from allSchemes and maintain filters
-        setAllSchemes(prev => prev.filter(scheme => scheme.schemeId !== schemeId));
-        setSelectedSchemes(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(schemeId);
-          return newSet;
-        });
-      } catch (err) {
-        console.error(err);
-      }
-    };
-
-    const handleRejectScheme = async (schemeId) => {
-      try {
-        await withSubmit('Rejecting scheme...', () => api.updatePlanStatus(schemeId, 'Rejected'));
-        // Remove from allSchemes and maintain filters
-        setAllSchemes(prev => prev.filter(scheme => scheme.schemeId !== schemeId));
-        setSelectedSchemes(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(schemeId);
-          return newSet;
-        });
-      } catch (err) {
-        console.error(err);
-      }
-    };
-
-    const handleBulkApprove = async () => {
-      if (selectedSchemes.size === 0) {
-        alert('Please select schemes to approve');
-        return;
-      }
-      
-      if (!confirm(`Approve ${selectedSchemes.size} selected scheme(s)?`)) {
-        return;
-      }
-
-      try {
-        const promises = Array.from(selectedSchemes).map(schemeId => 
-          api.updatePlanStatus(schemeId, 'Approved')
-        );
-        await withSubmit(`Approving ${selectedSchemes.size} schemes...`, () => Promise.all(promises));
-        
-        // Remove approved schemes from allSchemes
-        setAllSchemes(prev => prev.filter(scheme => !selectedSchemes.has(scheme.schemeId)));
-        setSelectedSchemes(new Set());
-      } catch (err) {
-        console.error('Bulk approve error:', err);
-        alert('Some approvals may have failed. Please refresh to see current status.');
-      }
-    };
-
-    const handleBulkReject = async () => {
-      if (selectedSchemes.size === 0) {
-        alert('Please select schemes to reject');
-        return;
-      }
-      
-      if (!confirm(`Reject ${selectedSchemes.size} selected scheme(s)?`)) {
-        return;
-      }
-
-      try {
-        const promises = Array.from(selectedSchemes).map(schemeId => 
-          api.updatePlanStatus(schemeId, 'Rejected')
-        );
-        await withSubmit(`Rejecting ${selectedSchemes.size} schemes...`, () => Promise.all(promises));
-        
-        // Remove rejected schemes from allSchemes
-        setAllSchemes(prev => prev.filter(scheme => !selectedSchemes.has(scheme.schemeId)));
-        setSelectedSchemes(new Set());
-      } catch (err) {
-        console.error('Bulk reject error:', err);
-        alert('Some rejections may have failed. Please refresh to see current status.');
-      }
-    };
-
-    const handleSelectAll = () => {
-      const pendingOnly = filteredSchemes.filter(s => 
-        s.status === 'Pending' || 
-        s.status === 'Pending - Validation Override' || 
-        s.status === 'Pending - No Timetable'
-      );
-      
-      if (selectedSchemes.size === pendingOnly.length) {
-        setSelectedSchemes(new Set());
-      } else {
-        setSelectedSchemes(new Set(pendingOnly.map(s => s.schemeId)));
-      }
-    };
-
-    const toggleSchemeSelection = (schemeId) => {
-      setSelectedSchemes(prev => {
-        const newSet = new Set(prev);
-        if (newSet.has(schemeId)) {
-          newSet.delete(schemeId);
-        } else {
-          newSet.add(schemeId);
-        }
-        return newSet;
-      });
-    };
-
-    // Show loading spinner while fetching data
-    if (loading) {
-      return (
-        <div className="flex items-center justify-center h-96">
-          <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 dark:border-blue-400 mb-4"></div>
-            <p className="text-gray-600 dark:text-gray-400">Loading schemes...</p>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-6 max-w-full">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-          <h1 className="text-xl md:text-2xl font-bold text-gray-900">Scheme Approvals</h1>
-          {selectedSchemes.size > 0 ? (
-            <div className="flex flex-wrap gap-2 md:gap-3 w-full sm:w-auto">
-              <button 
-                onClick={handleBulkApprove}
-                className="flex-1 sm:flex-initial bg-green-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center justify-center hover:bg-green-700 text-sm"
-              >
-                <Check className="h-4 w-4 mr-2" />
-                Approve ({selectedSchemes.size})
-              </button>
-              <button 
-                onClick={handleBulkReject}
-                className="flex-1 sm:flex-initial bg-red-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center justify-center hover:bg-red-700 text-sm"
-              >
-                <X className="h-4 w-4 mr-2" />
-                Reject ({selectedSchemes.size})
-              </button>
-            </div>
-          ) : null}
-        </div>
-
-        {/* Simple Filter Bar - Always Visible */}
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow-sm p-3 md:p-4 border border-blue-100">
-          <div className="flex flex-col md:flex-row md:flex-wrap md:items-center gap-2 md:gap-3">
-            {/* Teacher Dropdown */}
-            <div className="flex items-center gap-2 w-full md:w-auto">
-              <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Teacher:</label>
-              <select
-                value={selectedTeacher}
-                onChange={(e) => setSelectedTeacher(e.target.value)}
-                className="flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white md:min-w-[150px]"
-              >
-                <option value="">All Teachers</option>
-                {uniqueTeachers.map(teacher => (
-                  <option key={teacher} value={teacher}>{teacher}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Group Toggle Buttons */}
-            <div className="flex gap-2 w-full md:w-auto md:ml-4">
-              <button
-                onClick={() => {
-                  const newValue = !groupByClass;
-                  setGroupByClass(newValue);
-                  if (newValue) setGroupByChapter(false);
-                }}
-                className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-lg transition-all ${
-                  groupByClass
-                    ? 'bg-teal-600 text-white shadow-md'
-                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                }`}
-              >
-                <LayoutGrid className="h-3 w-3 md:h-4 md:w-4 inline mr-1" />
-                <span className="hidden sm:inline">Class-wise</span>
-                <span className="sm:hidden">Class</span>
-              </button>
-              <button
-                onClick={() => {
-                  const newValue = !groupByChapter;
-                  setGroupByChapter(newValue);
-                  if (newValue) setGroupByClass(false);
-                }}
-                className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-lg transition-all ${
-                  groupByChapter
-                    ? 'bg-purple-600 text-white shadow-md'
-                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                }`}
-              >
-                <BookOpen className="h-3 w-3 md:h-4 md:w-4 inline mr-1" />
-                <span className="hidden sm:inline">Chapter-wise</span>
-                <span className="sm:hidden">Chapter</span>
-              </button>
-            </div>
-
-            {/* Status Quick Filters */}
-            <div className="flex gap-2 w-full md:w-auto md:ml-auto">
-              <button
-                onClick={() => setStatusFilter('Pending')}
-                className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-full transition-all ${
-                  statusFilter === 'Pending'
-                    ? 'bg-yellow-500 text-white'
-                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                }`}
-              >
-                ⏳ Pending
-              </button>
-              <button
-                onClick={() => setStatusFilter('Approved')}
-                className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-full transition-all ${
-                  statusFilter === 'Approved'
-                    ? 'bg-green-500 text-white'
-                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                }`}
-              >
-                ✓ Approved
-              </button>
-              <button
-                onClick={() => setStatusFilter('')}
-                className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-full transition-all ${
-                  !statusFilter
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                }`}
-              >
-                All
-              </button>
-            </div>
-
-            {/* Active Filter Badge */}
-            {selectedTeacher && (
-              <span className="px-2 md:px-3 py-1 text-xs bg-blue-100 text-blue-800 rounded-full font-medium">
-                Teacher: {selectedTeacher}
-              </span>
-            )}
-            {groupByClass && (
-              <span className="px-2 md:px-3 py-1 text-xs bg-teal-100 text-teal-800 rounded-full font-medium">
-                Grouped by Class
-              </span>
-            )}
-            {groupByChapter && (
-              <span className="px-2 md:px-3 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
-                Grouped by Chapter
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Table Section */}
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-200">
-            <div className="flex flex-col gap-2">
-              <h2 className="text-lg font-medium text-gray-900">
-                {statusFilter === 'Approved' ? 'Approved Schemes' : 
-                 statusFilter === 'Pending' ? 'Pending Schemes' : 'All Schemes'} 
-                ({filteredSchemes.length})
-              </h2>
-              {(selectedTeacher || groupByClass || groupByChapter) && (
-                <div className="flex flex-wrap gap-1 text-xs">
-                  {selectedTeacher && (
-                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded">Teacher: {selectedTeacher}</span>
-                  )}
-                  {groupByClass && (
-                    <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded">Grouped by Class</span>
-                  )}
-                  {groupByChapter && (
-                    <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded">Grouped by Chapter</span>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Mobile Card View */}
-          <div className="block md:hidden">
-            {filteredSchemes.map((scheme) => {
-              const isPending = scheme.status === 'Pending' || scheme.status === 'Pending - Validation Override' || scheme.status === 'Pending - No Timetable';
-              return (
-                <div key={scheme.schemeId} className="border-b border-gray-200 p-3 hover:bg-gray-50">
-                  {/* Header: Teacher & Status */}
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="font-medium text-sm text-gray-900">{scheme.teacherName}</div>
-                    {scheme.status === 'Approved' ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                        ✓ Approved
-                      </span>
-                    ) : scheme.status === 'Rejected' ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
-                        ✗ Rejected
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
-                        ⏳ Pending
-                      </span>
-                    )}
-                  </div>
-                  
-                  {/* Class & Subject */}
-                  <div className="text-xs text-gray-600 mb-1.5">
-                    {stripStdPrefix(scheme.class)} • {scheme.subject}
-                  </div>
-                  
-                  {/* Chapter */}
-                  <div className="text-sm text-gray-900 font-medium mb-1.5 line-clamp-2 break-words">{scheme.chapter}</div>
-                  
-                  {/* Sessions & Date - Compact */}
-                  <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-xs text-gray-600 mb-3">
-                    <span>{scheme.noOfSessions} Sessions</span>
-                    <span>{scheme.createdAt ? new Date(scheme.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}</span>
-                  </div>
-                  
-                  {/* Action Buttons */}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {(statusFilter === 'Pending' || !statusFilter) && isPending && (
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={selectedSchemes.has(scheme.schemeId)}
-                          onChange={() => toggleSchemeSelection(scheme.schemeId)}
-                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className="text-xs text-gray-600">Select</span>
-                      </label>
-                    )}
-                    <button 
-                      className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100" 
-                      onClick={() => openLessonView(scheme)}
-                    >
-                      <Eye className="h-3.5 w-3.5" />
-                      View
-                    </button>
-                    {isPending && (
-                      <>
-                        <button 
-                          onClick={() => handleApproveScheme(scheme.schemeId)}
-                          className="px-2.5 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
-                          title="Approve"
-                        >
-                          ✓
-                        </button>
-                        <button 
-                          onClick={() => handleRejectScheme(scheme.schemeId)}
-                          className="px-2.5 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
-                          title="Reject"
-                        >
-                          ✗
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            {filteredSchemes.length === 0 && (
-              <div className="p-8 text-center text-gray-500">
-                No schemes found
-              </div>
-            )}
-          </div>
-
-          {/* Desktop Table View */}
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full divide-y divide-gray-200 text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  {(statusFilter === 'Pending' || !statusFilter) && (
-                    <th className="px-1 py-2 w-8">
-                      <input
-                        type="checkbox"
-                        checked={selectedSchemes.size > 0 && selectedSchemes.size === filteredSchemes.filter(s => s.status?.includes('Pending')).length}
-                        onChange={handleSelectAll}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                    </th>
-                  )}
-                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase max-w-[80px]">Teacher</th>
-                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Class</th>
-                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase max-w-[100px]">Subject</th>
-                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase max-w-[150px]">Chapter</th>
-                  <th className="px-1 py-2 text-center text-xs font-medium text-gray-600 uppercase w-10">Sess</th>
-                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase w-16">Date</th>
-                  <th className="px-1 py-2 text-left text-xs font-medium text-gray-600 uppercase w-20">Status</th>
-                  <th className="px-1 py-2 text-center text-xs font-medium text-gray-600 uppercase w-24">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredSchemes.map((scheme) => {
-                  const isPending = scheme.status === 'Pending' || scheme.status === 'Pending - Validation Override' || scheme.status === 'Pending - No Timetable';
-                  return (
-                    <tr key={scheme.schemeId} className={`hover:bg-gray-50 ${selectedSchemes.has(scheme.schemeId) ? 'bg-blue-50' : ''}`}>
-                      {(statusFilter === 'Pending' || !statusFilter) && (
-                        <td className="px-1 py-2">
-                          {isPending && (
-                            <input
-                              type="checkbox"
-                              checked={selectedSchemes.has(scheme.schemeId)}
-                              onChange={() => toggleSchemeSelection(scheme.schemeId)}
-                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            />
-                          )}
-                        </td>
-                      )}
-                      <td className="px-1 py-2 text-xs text-gray-900 max-w-[80px] truncate" title={scheme.teacherName}>{scheme.teacherName}</td>
-                      <td className="px-1 py-2 text-xs text-gray-900 w-16">{stripStdPrefix(scheme.class)}</td>
-                      <td className="px-1 py-2 text-xs text-gray-900 max-w-[100px] truncate" title={scheme.subject}>{scheme.subject}</td>
-                      <td className="px-1 py-2 text-xs text-gray-900 max-w-[150px] truncate" title={scheme.chapter}>{scheme.chapter}</td>
-                      <td className="px-1 py-2 text-xs text-gray-900 text-center font-medium w-10">{scheme.noOfSessions}</td>
-                      <td className="px-1 py-2 text-xs text-gray-600 w-16">{scheme.createdAt ? new Date(scheme.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}</td>
-                      <td className="px-1 py-2 w-20">
-                      {scheme.status === 'Approved' ? (
-                        <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                          ✓
-                        </span>
-                      ) : scheme.status === 'Rejected' ? (
-                        <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
-                          ✗
-                        </span>
-                      ) : scheme.status === 'Pending - Validation Override' ? (
-                        <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">
-                          Ovr
-                        </span>
-                      ) : scheme.status === 'Pending - No Timetable' ? (
-                        <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
-                          NoTT
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-1 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
-                          Pend
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-1 py-2 text-xs text-gray-500 w-24">
-                      <div className="flex items-center justify-center gap-1 whitespace-nowrap">
-                        <button type="button"
-                          onClick={() => openLessonView(scheme)}
-                          className="text-blue-600 hover:text-blue-900 p-1"
-                          title="View scheme details"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                        </button>
-                        {isPending && (
-                          <>
-                            <button 
-                              onClick={() => handleApproveScheme(scheme.schemeId)}
-                              className="text-green-600 hover:text-green-900 px-1.5 py-0.5 bg-green-100 rounded text-xs"
-                              title="Approve scheme"
-                            >
-                              ✓
-                            </button>
-                            <button 
-                              onClick={() => handleRejectScheme(scheme.schemeId)}
-                              className="text-red-600 hover:text-red-900 px-1.5 py-0.5 bg-red-100 rounded text-xs"
-                              title="Reject scheme"
-                            >
-                              ✗
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    );
+};
+  // Scheme Approvals View - extracted to separate file
+  const SchemeApprovalsViewWrapper = () => {
+    return <SchemeApprovalsView stripStdPrefix={stripStdPrefix} openLessonView={openLessonView} withSubmit={withSubmit} />;
   };
 
   // Lesson Approvals View
@@ -5371,7 +4898,14 @@ const App = () => {
           classMap[cls].counts.rejected++;
         }
       });
-      return Object.values(classMap).sort((a, b) => String(a.class || '').localeCompare(String(b.class || '')));
+      return Object.values(classMap).sort((a, b) => {
+        const classA = String(a.class || '');
+        const classB = String(b.class || '');
+        const numA = parseInt(classA.match(/\d+/)?.[0] || '0');
+        const numB = parseInt(classB.match(/\d+/)?.[0] || '0');
+        if (numA !== numB) return numA - numB;
+        return classA.localeCompare(classB);
+      });
     }, [filteredLessons]);
 
     const handleApproveLesson = async (lpId, status) => {

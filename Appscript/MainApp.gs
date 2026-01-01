@@ -1957,7 +1957,7 @@
         'Pending',                                     // status
         now,                                           // createdAt
         '',                                            // approvedAt (empty until approved)
-        data.academicYear || '2024-2025',            // academicYear (default)
+        data.academicYear || '2025-2026',            // academicYear (default)
         data.content || ''                             // content (scheme details)
       ];
       

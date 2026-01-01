@@ -11,6 +11,149 @@ import {
 import * as api from '../api';
 import { useToast } from '../hooks/useToast';
 
+const UserModal = React.memo(function UserModal({
+  isOpen,
+  onClose,
+  onSave,
+  title,
+  formData,
+  setFormData,
+  isEditMode,
+  loading
+}) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-6 border-b">
+          <h2 className="text-xl font-bold text-gray-900">{title}</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="Full Name"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+            <input
+              type="email"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="user@school.com"
+              disabled={isEditMode} // Can't change email when editing
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Password {isEditMode ? '(leave blank to keep current)' : '*'}
+            </label>
+            <input
+              type="password"
+              value={formData.password}
+              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="Password"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Roles *</label>
+            <input
+              type="text"
+              value={formData.roles}
+              onChange={(e) => setFormData({ ...formData, roles: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="teacher, class teacher, h m, super admin (comma-separated)"
+            />
+            <p className="text-xs text-gray-500 mt-1">Examples: teacher, class teacher, h m, super admin</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Classes</label>
+            <input
+              type="text"
+              value={formData.classes}
+              onChange={(e) => setFormData({ ...formData, classes: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="Class 6, Class 7, Class 8 (comma-separated)"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Subjects</label>
+            <input
+              type="text"
+              value={formData.subjects}
+              onChange={(e) => setFormData({ ...formData, subjects: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="Mathematics, Science, English (comma-separated)"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Class Teacher For</label>
+            <input
+              type="text"
+              value={formData.classTeacherFor}
+              onChange={(e) => setFormData({ ...formData, classTeacherFor: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="Class 6A (comma-separated if multiple)"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+            <input
+              type="tel"
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="+1234567890"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 p-6 border-t bg-gray-50">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-gray-700 bg-white border rounded-lg hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSave}
+            disabled={
+              loading ||
+              !formData.name ||
+              !formData.email ||
+              (!isEditMode && !formData.password) ||
+              !formData.roles
+            }
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <Save className="w-4 h-4" />
+            {loading ? 'Saving...' : 'Save User'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const UserManagement = ({ user }) => {
   const { success, error: showError } = useToast();
   const [users, setUsers] = useState([]);
@@ -31,10 +174,16 @@ const UserManagement = ({ user }) => {
   });
 
   useEffect(() => {
-    loadUsers();
-  }, []);
+    if (user?.email) {
+      loadUsers();
+    }
+  }, [user?.email]);
 
   const loadUsers = async () => {
+    if (!user?.email) {
+      console.error('No user email available');
+      return;
+    }
     try {
       setLoading(true);
       const response = await api.getAllUsers(user.email);
@@ -141,134 +290,6 @@ const UserManagement = ({ user }) => {
     (u.email && u.email.toLowerCase().includes(searchQuery.toLowerCase())) ||
     (u.roles && String(u.roles).toLowerCase().includes(searchQuery.toLowerCase()))
   ) : [];
-
-  const UserModal = ({ isOpen, onClose, onSave, title }) => {
-    if (!isOpen) return null;
-
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-        <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-          <div className="flex items-center justify-between p-6 border-b">
-            <h2 className="text-xl font-bold text-gray-900">{title}</h2>
-            <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          
-          <div className="p-6 space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Full Name"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="user@school.com"
-                disabled={showEditModal} // Can't change email when editing
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Password {showEditModal ? '(leave blank to keep current)' : '*'}
-              </label>
-              <input
-                type="password"
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Password"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Roles *</label>
-              <input
-                type="text"
-                value={formData.roles}
-                onChange={(e) => setFormData({ ...formData, roles: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="teacher, class teacher, h m, super admin (comma-separated)"
-              />
-              <p className="text-xs text-gray-500 mt-1">Examples: teacher, class teacher, h m, super admin</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Classes</label>
-              <input
-                type="text"
-                value={formData.classes}
-                onChange={(e) => setFormData({ ...formData, classes: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Class 6, Class 7, Class 8 (comma-separated)"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Subjects</label>
-              <input
-                type="text"
-                value={formData.subjects}
-                onChange={(e) => setFormData({ ...formData, subjects: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Mathematics, Science, English (comma-separated)"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Class Teacher For</label>
-              <input
-                type="text"
-                value={formData.classTeacherFor}
-                onChange={(e) => setFormData({ ...formData, classTeacherFor: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Class 6A (comma-separated if multiple)"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-              <input
-                type="tel"
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="+1234567890"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end gap-3 p-6 border-t bg-gray-50">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-gray-700 bg-white border rounded-lg hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={onSave}
-              disabled={loading || !formData.name || !formData.email || (!showEditModal && !formData.password) || !formData.roles}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              <Save className="w-4 h-4" />
-              {loading ? 'Saving...' : 'Save User'}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -397,6 +418,10 @@ const UserManagement = ({ user }) => {
         }}
         onSave={handleAdd}
         title="Add New User"
+        formData={formData}
+        setFormData={setFormData}
+        isEditMode={false}
+        loading={loading}
       />
 
       <UserModal
@@ -408,6 +433,10 @@ const UserManagement = ({ user }) => {
         }}
         onSave={handleEdit}
         title="Edit User"
+        formData={formData}
+        setFormData={setFormData}
+        isEditMode={true}
+        loading={loading}
       />
     </div>
   );

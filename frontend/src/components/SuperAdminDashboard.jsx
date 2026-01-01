@@ -148,6 +148,21 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
 
       {/* Actions */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ActionSection title="Monitoring" icon={Activity}>
+          <QuickAction
+            icon={ClipboardCheck}
+            title="Live Dashboard"
+            description="Real-time class monitoring and daily reports"
+            onClick={() => onNavigate && onNavigate('hm-dashboard')}
+          />
+          <QuickAction
+            icon={Calendar}
+            title="Daily Oversight"
+            description="Detailed daily reports and analytics"
+            onClick={() => onNavigate && onNavigate('daily-oversight')}
+          />
+        </ActionSection>
+
         <ActionSection title="Approvals" icon={CheckSquare}>
           <QuickAction
             icon={LayoutList}
@@ -162,7 +177,9 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
             onClick={() => onNavigate && onNavigate('lesson-approvals')}
           />
         </ActionSection>
+      </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <ActionSection title="Administration" icon={GraduationCap}>
           <QuickAction
             icon={Edit2}
@@ -171,10 +188,25 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
             onClick={() => onNavigate && onNavigate('admin-data')}
           />
           <QuickAction
+            icon={Users}
+            title="User Management"
+            description="Manage users and permissions"
+            onClick={() => onNavigate && onNavigate('users')}
+          />
+        </ActionSection>
+
+        <ActionSection title="System" icon={FileCheck}>
+          <QuickAction
             icon={Calendar}
             title="Timetable"
             description="View full timetable"
             onClick={() => onNavigate && onNavigate('full-timetable')}
+          />
+          <QuickAction
+            icon={FileCheck}
+            title="Exam Management"
+            description="Manage exams and marks entry"
+            onClick={() => onNavigate && onNavigate('exam-marks')}
           />
         </ActionSection>
       </div>

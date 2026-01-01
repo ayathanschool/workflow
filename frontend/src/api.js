@@ -920,10 +920,12 @@ export async function addUser(email, userData) {
 }
 
 export async function updateUser(adminEmail, userEmail, userData) {
+  // Remove email from userData to avoid overwriting adminEmail
+  const { email, ...userFields } = userData;
   const result = await postJSON(`${BASE_URL}?action=updateUser`, { 
     email: adminEmail,  // Admin email for permission check
     userEmail: userEmail,  // Email of user to update
-    ...userData 
+    ...userFields  // User fields without email
   });
   return result?.data || result;
 }
