@@ -437,6 +437,12 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
   const handleBulkPrepareClick = (scheme, chapter) => {
     console.log('Bulk prepare clicked:', { scheme, chapter });
+
+    if (chapter && chapter.canPrepare === false) {
+      alert(chapter.lockReason || 'Previous chapter should be completed');
+      return;
+    }
+
     setBulkPrepData({
       scheme,
       chapter,
@@ -606,13 +612,23 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                               <h4 className="text-sm sm:text-base font-medium text-gray-800">
                                 Ch {chapter.chapterNumber}: {chapter.chapterName}
                               </h4>
+                              {chapter.canPrepare === false && (
+                                <span className="text-xs text-red-600 font-semibold">
+                                  Previous chapter should be completed
+                                </span>
+                              )}
                               {chapter.plannedSessions === 0 && (
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleBulkPrepareClick(scheme, chapter);
                                   }}
-                                  className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors inline-flex items-center gap-2 shadow-sm hover:shadow-md"
+                                  disabled={chapter.canPrepare === false}
+                                  className={`px-4 py-2 text-sm bg-blue-600 text-white rounded-lg font-semibold transition-colors inline-flex items-center gap-2 shadow-sm ${
+                                    chapter.canPrepare === false
+                                      ? 'opacity-50 cursor-not-allowed'
+                                      : 'hover:bg-blue-700 hover:shadow-md'
+                                  }`}
                                   title="Prepare all sessions at once (bulk preparation)"
                                 >
                                   <Plus className="w-4 h-4" />
@@ -641,6 +657,12 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                   
                                   // Check if cancelled - do nothing
                                   if (normalizedStatus === 'cancelled') {
+                                    return;
+                                  }
+
+                                  // Enforce: previous chapter must be completed before preparing this chapter
+                                  if (chapter && chapter.canPrepare === false) {
+                                    alert(chapter.lockReason || 'Previous chapter should be completed');
                                     return;
                                   }
                                   

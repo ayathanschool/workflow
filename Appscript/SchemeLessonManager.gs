@@ -590,7 +590,49 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
     // Process each scheme to show chapter/session breakdown
     const schemesWithProgress = approvedSchemes.map(scheme => {
       const schemeChapters = _parseSchemeChapters(scheme);
-      const chaptersWithSessions = schemeChapters.map(chapter => {
+      const normKey = function(v) {
+        return String(v || '').toLowerCase().trim();
+      };
+      const isChapterMarkedComplete = function(report) {
+        const status = normKey(report && report.chapterStatus);
+        const chapterCompleted = report && report.chapterCompleted;
+        const chapterCompletedStr = normKey(chapterCompleted);
+        return (
+          status.indexOf('chapter complete') !== -1 ||
+          chapterCompleted === true ||
+          chapterCompletedStr === 'true' ||
+          chapterCompletedStr === 'yes' ||
+          chapterCompletedStr === 'y' ||
+          chapterCompletedStr === '1'
+        );
+      };
+
+      // Pre-compute chapter completion for this scheme (based on DailyReports)
+      const completionByChapter = {};
+      for (const ch of schemeChapters) {
+        const chName = String(ch && ch.name ? ch.name : '');
+        const key = normKey(chName);
+        if (!key) continue;
+        completionByChapter[key] = teacherReports.some(r => {
+          if (!r || typeof r !== 'object') return false;
+          const matchesClass = normKey(r.class) === normKey(scheme.class);
+          const matchesSubject = normKey(r.subject) === normKey(scheme.subject);
+          const matchesChapter = normKey(r.chapter) === key;
+          return matchesClass && matchesSubject && matchesChapter && isChapterMarkedComplete(r);
+        });
+      }
+
+      const chaptersWithSessions = [];
+      for (let chapterIndex = 0; chapterIndex < schemeChapters.length; chapterIndex++) {
+        const chapter = schemeChapters[chapterIndex];
+
+        const currentChapterKey = normKey(chapter && chapter.name);
+        const currentChapterCompleted = !!completionByChapter[currentChapterKey];
+        const prevChapter = chapterIndex > 0 ? schemeChapters[chapterIndex - 1] : null;
+        const prevChapterKey = normKey(prevChapter && prevChapter.name);
+        const prevChapterCompleted = chapterIndex === 0 ? true : !!completionByChapter[prevChapterKey];
+        const canPrepare = prevChapterCompleted;
+
         const sessions = _generateSessionsForChapter(chapter, scheme);
         const sessionsWithStatus = sessions.map(session => {
           const existingPlan = teacherPlans.find(plan =>
@@ -649,16 +691,20 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
           return status !== 'not-planned' && status !== 'cancelled' && status !== 'rejected';
         }).length;
         
-        return {
+        chaptersWithSessions.push({
           chapterNumber: chapter.number,
           chapterName: chapter.name,
           chapterDescription: chapter.description,
           totalSessions: totalSessions,
           plannedSessions: plannedSessions,
           completionPercentage: totalSessions > 0 ? Math.round((plannedSessions / totalSessions) * 100) : 0,
-          sessions: sessionsWithStatus
-        };
-      });
+          sessions: sessionsWithStatus,
+          // NEW: chapter-level gating for preparation
+          chapterCompleted: currentChapterCompleted,
+          canPrepare: canPrepare,
+          lockReason: canPrepare ? '' : 'Previous chapter should be completed'
+        });
+      }
       
       const totalSessions = chaptersWithSessions.reduce((sum, ch) => sum + ch.totalSessions, 0);
       const totalPlanned = chaptersWithSessions.reduce((sum, ch) => sum + ch.plannedSessions, 0);
@@ -1220,6 +1266,50 @@ function createBulkSchemeLessonPlans(bulkData) {
     const schemeDetails = _getSchemeDetails(bulkData.schemeId);
     if (!schemeDetails) {
       return { success: false, error: 'Scheme not found' };
+    }
+
+    // ENFORCE: previous chapter must be marked completed before preparing this chapter
+    try {
+      const schemeChapters = _parseSchemeChapters(schemeDetails);
+      const targetChapterName = String(bulkData.chapter || '').trim();
+      const norm = function(v) { return String(v || '').toLowerCase().trim(); };
+      const chapterIdx = schemeChapters.findIndex(ch => norm(ch && ch.name) === norm(targetChapterName));
+      if (chapterIdx > 0) {
+        const prevChapterName = schemeChapters[chapterIdx - 1] ? schemeChapters[chapterIdx - 1].name : '';
+        const drSh = _getSheet('DailyReports');
+        const drHeaders = _headers(drSh);
+        const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
+        const prevCompleted = allReports.some(r => {
+          if (!r || typeof r !== 'object') return false;
+          const matchesTeacher = norm(r.teacherEmail) === norm(bulkData.teacherEmail);
+          const matchesClass = norm(r.class) === norm(schemeDetails.class);
+          const matchesSubject = norm(r.subject) === norm(schemeDetails.subject);
+          const matchesChapter = norm(r.chapter) === norm(prevChapterName);
+          const status = norm(r.chapterStatus);
+          const chapterCompleted = r.chapterCompleted;
+          const chapterCompletedStr = norm(chapterCompleted);
+          const markedComplete = (
+            status.indexOf('chapter complete') !== -1 ||
+            chapterCompleted === true ||
+            chapterCompletedStr === 'true' ||
+            chapterCompletedStr === 'yes' ||
+            chapterCompletedStr === 'y' ||
+            chapterCompletedStr === '1'
+          );
+          return matchesTeacher && matchesClass && matchesSubject && matchesChapter && markedComplete;
+        });
+
+        if (!prevCompleted) {
+          return {
+            success: false,
+            error: 'Previous chapter should be completed',
+            reason: 'previous_chapter_incomplete'
+          };
+        }
+      }
+    } catch (gateErr) {
+      Logger.log(`Warning: chapter completion gating check failed: ${gateErr.message}`);
+      // Fail safe: do not block on gating-check exceptions.
     }
     
     // Get available periods for this class/subject
