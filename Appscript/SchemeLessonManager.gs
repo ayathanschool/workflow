@@ -58,10 +58,36 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           
           return matchesTeacher && matchesClass && matchesSubject;
         });
+
+        // Also consider lesson plans as "started" work. This prevents teachers from
+        // preparing a new chapter/scheme while previous chapter lesson plans exist but
+        // the chapter is not yet marked "Chapter Complete" in daily reports.
+        let teacherPlans = [];
+        try {
+          const lpSh = _getSheet('LessonPlans');
+          const lpHeaders = _headers(lpSh);
+          const allPlans = _rows(lpSh).map(row => _indexByHeader(row, lpHeaders));
+          teacherPlans = allPlans.filter(p => {
+            if (!p || typeof p !== 'object') return false;
+            const matchesTeacher = String(p.teacherEmail || '').toLowerCase().trim() === String(scheme.teacherEmail || '').toLowerCase().trim();
+            const matchesClass = String(p.class || '').trim() === String(scheme.class || '').trim();
+            const matchesSubject = String(p.subject || '').trim() === String(scheme.subject || '').trim();
+
+            // Ignore cancelled/rejected plans
+            const st = String(p.status || '').toLowerCase().trim();
+            if (st === 'cancelled' || st === 'rejected') return false;
+
+            return matchesTeacher && matchesClass && matchesSubject;
+          });
+        } catch (lpErr) {
+          Logger.log(`Warning: could not load LessonPlans for gating: ${lpErr.message}`);
+          teacherPlans = [];
+        }
         
-        // Check if this is the very first chapter (no reports exist yet)
-        if (teacherReports.length === 0) {
-          Logger.log(`No previous reports - allowing first chapter session 1`);
+        // If absolutely nothing exists yet (no reports and no lesson plans), allow first chapter.
+        // If lesson plans exist but no reports yet, treat chapters as started-but-not-completed.
+        if (teacherReports.length === 0 && teacherPlans.length === 0) {
+          Logger.log(`No previous reports or lesson plans - allowing first chapter session 1`);
           return {
             allowed: true,
             reason: 'first_chapter',
@@ -69,14 +95,18 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           };
         }
         
-        // Get all unique chapters that have been started (have daily reports)
-        // Collect distinct non-empty chapter names previously started
-        const startedChapters = [...new Set(teacherReports
+        // Get all unique chapters that have been started (daily reports OR lesson plans)
+        const startedFromReports = teacherReports
           .map(r => String(r.chapter || '').trim())
-          .filter(name => name))];
+          .filter(name => name);
+        const startedFromPlans = teacherPlans
+          .map(p => String(p.chapter || '').trim())
+          .filter(name => name);
+
+        const startedChapters = [...new Set(startedFromReports.concat(startedFromPlans))];
         Logger.log(`Started chapters for ${scheme.teacherEmail}: ${startedChapters.join(', ')}`);
         
-        // Check if the current chapter being prepared already has reports
+        // Check if the current chapter being prepared already has reports/plans
         const currentChapterStarted = startedChapters.includes(String(chapter.name || ''));
         
         if (currentChapterStarted) {
@@ -103,7 +133,12 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
             String(report.chapter || '') === chapterName
           );
           
-          if (chapterReports.length === 0) continue;
+          // If there are no daily reports for this chapter yet, it's not completed.
+          // (Even if lesson plans exist, completion is only proven by "Chapter Complete" marking.)
+          if (chapterReports.length === 0) {
+            incompletedChapters.push(chapterName);
+            continue;
+          }
           
           // Find ALL session numbers that exist for this chapter (including extended)
           const sessionNumbers = chapterReports
@@ -590,9 +625,11 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
     // Process each scheme to show chapter/session breakdown
     const schemesWithProgress = approvedSchemes.map(scheme => {
       const schemeChapters = _parseSchemeChapters(scheme);
-      const normKey = function(v) {
-        return String(v || '').toLowerCase().trim();
-      };
+
+      // Determine if each chapter is marked complete (for info) and whether preparation is allowed.
+      // IMPORTANT: preparation gating must follow _isPreparationAllowedForSession() so it also
+      // blocks starting new schemes/chapters until previously started chapters are marked complete.
+      const normKey = function(v) { return String(v || '').toLowerCase().trim(); };
       const isChapterMarkedComplete = function(report) {
         const status = normKey(report && report.chapterStatus);
         const chapterCompleted = report && report.chapterCompleted;
@@ -607,11 +644,9 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
         );
       };
 
-      // Pre-compute chapter completion for this scheme (based on DailyReports)
       const completionByChapter = {};
       for (const ch of schemeChapters) {
-        const chName = String(ch && ch.name ? ch.name : '');
-        const key = normKey(chName);
+        const key = normKey(ch && ch.name);
         if (!key) continue;
         completionByChapter[key] = teacherReports.some(r => {
           if (!r || typeof r !== 'object') return false;
@@ -626,12 +661,10 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
       for (let chapterIndex = 0; chapterIndex < schemeChapters.length; chapterIndex++) {
         const chapter = schemeChapters[chapterIndex];
 
-        const currentChapterKey = normKey(chapter && chapter.name);
-        const currentChapterCompleted = !!completionByChapter[currentChapterKey];
-        const prevChapter = chapterIndex > 0 ? schemeChapters[chapterIndex - 1] : null;
-        const prevChapterKey = normKey(prevChapter && prevChapter.name);
-        const prevChapterCompleted = chapterIndex === 0 ? true : !!completionByChapter[prevChapterKey];
-        const canPrepare = prevChapterCompleted;
+        // Compute gating using the same function used by createSchemeLessonPlan()
+        // so the UI mirrors backend restrictions.
+        const gate = _isPreparationAllowedForSession(chapter, 1, scheme);
+        const canPrepare = !!(gate && gate.allowed);
 
         const sessions = _generateSessionsForChapter(chapter, scheme);
         const sessionsWithStatus = sessions.map(session => {
@@ -691,6 +724,9 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
           return status !== 'not-planned' && status !== 'cancelled' && status !== 'rejected';
         }).length;
         
+        const currentChapterKey = normKey(chapter && chapter.name);
+        const currentChapterCompleted = !!completionByChapter[currentChapterKey];
+
         chaptersWithSessions.push({
           chapterNumber: chapter.number,
           chapterName: chapter.name,
@@ -702,7 +738,7 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
           // NEW: chapter-level gating for preparation
           chapterCompleted: currentChapterCompleted,
           canPrepare: canPrepare,
-          lockReason: canPrepare ? '' : 'Previous chapter should be completed'
+          lockReason: canPrepare ? '' : (gate && gate.message ? gate.message : 'Previous chapter should be completed')
         });
       }
       
@@ -1268,47 +1304,29 @@ function createBulkSchemeLessonPlans(bulkData) {
       return { success: false, error: 'Scheme not found' };
     }
 
-    // ENFORCE: previous chapter must be marked completed before preparing this chapter
+    // ENFORCE: bulk prep must follow the same gating rules as single-session prep.
+    // This will block starting a new chapter (or even a new scheme for same class/subject)
+    // until previously started chapters are marked "Chapter Complete" in Daily Reports.
     try {
       const schemeChapters = _parseSchemeChapters(schemeDetails);
-      const targetChapterName = String(bulkData.chapter || '').trim();
       const norm = function(v) { return String(v || '').toLowerCase().trim(); };
-      const chapterIdx = schemeChapters.findIndex(ch => norm(ch && ch.name) === norm(targetChapterName));
-      if (chapterIdx > 0) {
-        const prevChapterName = schemeChapters[chapterIdx - 1] ? schemeChapters[chapterIdx - 1].name : '';
-        const drSh = _getSheet('DailyReports');
-        const drHeaders = _headers(drSh);
-        const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
-        const prevCompleted = allReports.some(r => {
-          if (!r || typeof r !== 'object') return false;
-          const matchesTeacher = norm(r.teacherEmail) === norm(bulkData.teacherEmail);
-          const matchesClass = norm(r.class) === norm(schemeDetails.class);
-          const matchesSubject = norm(r.subject) === norm(schemeDetails.subject);
-          const matchesChapter = norm(r.chapter) === norm(prevChapterName);
-          const status = norm(r.chapterStatus);
-          const chapterCompleted = r.chapterCompleted;
-          const chapterCompletedStr = norm(chapterCompleted);
-          const markedComplete = (
-            status.indexOf('chapter complete') !== -1 ||
-            chapterCompleted === true ||
-            chapterCompletedStr === 'true' ||
-            chapterCompletedStr === 'yes' ||
-            chapterCompletedStr === 'y' ||
-            chapterCompletedStr === '1'
-          );
-          return matchesTeacher && matchesClass && matchesSubject && matchesChapter && markedComplete;
-        });
+      const targetChapterName = String(bulkData.chapter || '').trim();
+      const chapterObj = schemeChapters.find(ch => norm(ch && ch.name) === norm(targetChapterName)) || null;
+      if (!chapterObj) {
+        return { success: false, error: 'Chapter not found in scheme' };
+      }
 
-        if (!prevCompleted) {
-          return {
-            success: false,
-            error: 'Previous chapter should be completed',
-            reason: 'previous_chapter_incomplete'
-          };
-        }
+      const schemeForCheck = Object.assign({}, schemeDetails, { teacherEmail: bulkData.teacherEmail });
+      const gate = _isPreparationAllowedForSession(chapterObj, 1, schemeForCheck);
+      if (!gate || !gate.allowed) {
+        return {
+          success: false,
+          error: (gate && gate.message) ? gate.message : 'Previous chapter should be completed',
+          reason: (gate && gate.reason) ? gate.reason : 'previous_chapter_incomplete'
+        };
       }
     } catch (gateErr) {
-      Logger.log(`Warning: chapter completion gating check failed: ${gateErr.message}`);
+      Logger.log(`Warning: bulk preparation gating check failed: ${gateErr.message}`);
       // Fail safe: do not block on gating-check exceptions.
     }
     
