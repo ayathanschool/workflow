@@ -577,7 +577,10 @@ function _calculateLessonPlanningDateRange() {
  * Get approved schemes for a teacher with chapter/session breakdown
  */
 function getApprovedSchemesForLessonPlanning(teacherEmail) {
-  const cacheKey = generateCacheKey('approved_schemes', { email: teacherEmail });
+  // Cache-buster: bump this string whenever the payload/gating rules change.
+  // Apps Script caches can otherwise serve stale "schemes" objects without new fields.
+  const APPROVED_SCHEMES_CACHE_VERSION = 'v2026-01-01-lessonprep-gating-2';
+  const cacheKey = generateCacheKey('approved_schemes', { email: teacherEmail, v: APPROVED_SCHEMES_CACHE_VERSION });
   return getCachedData(cacheKey, function() {
     return _fetchApprovedSchemesForLessonPlanning(teacherEmail);
   }, CACHE_TTL.MEDIUM);
