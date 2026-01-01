@@ -285,7 +285,15 @@ const App = () => {
               <Detail label="Class" value={stripStdPrefix(viewLesson.class)} />
               <Detail label="Subject" value={viewLesson.subject} />
               <Detail label="Chapter" value={viewLesson.chapter} />
-              <Detail label="Session" value={viewLesson.noOfSessions ? `${viewLesson.session} of ${viewLesson.noOfSessions}` : viewLesson.session} />
+              <Detail label="Session" value={
+                viewLesson.session && viewLesson.noOfSessions 
+                  ? `${viewLesson.session} of ${viewLesson.noOfSessions}` 
+                  : viewLesson.session 
+                    ? viewLesson.session 
+                    : viewLesson.noOfSessions 
+                      ? `${viewLesson.noOfSessions} sessions`
+                      : '-'
+              } />
               <Detail label="Teacher" value={viewLesson.teacherName || viewLesson.teacher || ''} />
               <Detail label="Status" value={viewLesson.status} />
               {viewLesson.selectedDate && <Detail label="Date" value={formatDate(viewLesson.selectedDate)} />}
