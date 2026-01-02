@@ -3517,8 +3517,6 @@
       // PERFORMANCE: Use cached Settings data
       const settingsData = _getCachedSheetData('Settings').data;
       
-      Logger.log(`Total settings rows: ${settingsData.length}`);
-      
       // Extract period times for different days
       const mondayToThursdaySetting = settingsData.find(row => 
         (row.key || '').trim() === 'periodTimes (Monday to Thursday)'
@@ -3535,18 +3533,16 @@
       if (mondayToThursdaySetting && mondayToThursdaySetting.value) {
         try {
           periodTimesWeekday = JSON.parse(mondayToThursdaySetting.value);
-          Logger.log(`✅ Parsed Monday-Thursday period times: ${JSON.stringify(periodTimesWeekday).substring(0, 100)}...`);
         } catch (e) {
-          Logger.log(`⚠️ Failed to parse Monday-Thursday period times: ${e.message}`);
+          Logger.log(`[getAppSettings] Failed to parse weekday period times: ${e.message}`);
         }
       }
       
       if (fridaySetting && fridaySetting.value) {
         try {
           periodTimesFriday = JSON.parse(fridaySetting.value);
-          Logger.log(`✅ Parsed Friday period times: ${JSON.stringify(periodTimesFriday).substring(0, 100)}...`);
         } catch (e) {
-          Logger.log(`⚠️ Failed to parse Friday period times: ${e.message}`);
+          Logger.log(`[getAppSettings] Failed to parse Friday period times: ${e.message}`);
         }
       }
       
@@ -3558,7 +3554,8 @@
       });
       
     } catch (error) {
-      Logger.log('Error getting app settings: ' + error.message);
+      Logger.log('[getAppSettings] ERROR: ' + error.message);
+      Logger.log('[getAppSettings] Stack: ' + error.stack);
       return _respond({ success: false, error: error.message });
     }
   }

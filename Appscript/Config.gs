@@ -25,7 +25,7 @@ const SHEETS = {
   // === CORE SYSTEM (3 sheets) ===
   Users: ['email','name','password','roles','classes','subjects','classTeacherFor'],
   Students: ['admNo','name','class','email','parentContact'], 
-  Settings: ['key','value'],
+  Settings: ['key','value','description'],
   
   // === FEE COLLECTION SYSTEM (2 sheets) ===
   FeeHeads: ['feeHead','class','amount','dueDate'],

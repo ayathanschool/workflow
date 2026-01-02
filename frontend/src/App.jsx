@@ -129,17 +129,23 @@ const App = () => {
   useEffect(() => {
     async function fetchAppSettings() {
       try {
-        const settings = await api.getAppSettings();
+        const response = await api.getAppSettings();
+        
+        // Backend wraps response in {status, data, timestamp}
+        const settings = response?.data || response;
+        
         if (settings) {
-          setAppSettings({
+          const newSettings = {
             lessonPlanningDay: settings.lessonPlanningDay || '',
             allowNextWeekOnly: false, // Ignore sheet value; do not restrict to next week
             periodTimes: settings.periodTimes || settings.periodTimesWeekday || null,
             periodTimesWeekday: settings.periodTimesWeekday || null,
             periodTimesFriday: settings.periodTimesFriday || null
-          });
+          };
+          setAppSettings(newSettings);
         }
       } catch (err) {
+        console.error('Error loading settings:', err);
         console.warn('⚠️ Could not load app settings (offline or backend unavailable). Using defaults.');
         // Keep default settings - app will still work
       }
@@ -609,6 +615,10 @@ const App = () => {
     // Lightweight lesson plan warning (teacher dashboard)
     const [missingPlansSummary, setMissingPlansSummary] = useState({ loading: false, count: 0 });
 
+    // Live period (teacher dashboard)
+    const [liveTimetableState, setLiveTimetableState] = useState({ loading: false, periods: [], error: null });
+    const [nowTick, setNowTick] = useState(0);
+
     // Send notification modal state - now using app-level state
     // const [showSendNotification, setShowSendNotification] = useState(true); // Removed - moved to app level
     // const [notificationData, setNotificationData] = useState({
@@ -970,6 +980,143 @@ const App = () => {
       return () => { cancelled = true; };
     }, [currentUser?.email, Array.isArray(currentUser?.roles) ? currentUser.roles.join('|') : String(currentUser?.roles || '')]);
 
+    // Live period data: fetch today's timetable (lightweight) and recompute periodically.
+    useEffect(() => {
+      if (!currentUser?.email) return;
+      if (!hasAnyRole(['teacher', 'class teacher', 'daily reporting teachers'])) return;
+      if (hasAnyRole(['h m', 'super admin', 'superadmin', 'super_admin'])) return;
+
+      let cancelled = false;
+
+      const normalizeDailyTimetable = (timetableRes) => {
+        if (Array.isArray(timetableRes)) return timetableRes;
+        if (Array.isArray(timetableRes?.periods)) return timetableRes.periods;
+        if (Array.isArray(timetableRes?.data)) return timetableRes.data;
+        return [];
+      };
+
+      const load = async () => {
+        try {
+          setLiveTimetableState(prev => ({ ...prev, loading: true, error: null }));
+          const date = todayIST();
+          const timetableRes = await api.getTeacherDailyTimetable(currentUser.email, date);
+          const periods = normalizeDailyTimetable(timetableRes);
+          if (cancelled) return;
+          setLiveTimetableState({ loading: false, periods: Array.isArray(periods) ? periods : [], error: null });
+        } catch (e) {
+          if (cancelled) return;
+          setLiveTimetableState({ loading: false, periods: [], error: String(e?.message || e || 'Failed to load timetable') });
+        }
+      };
+
+      load();
+
+      const t = setInterval(() => setNowTick(Date.now()), 30_000);
+      return () => {
+        cancelled = true;
+        clearInterval(t);
+      };
+    }, [
+      currentUser?.email,
+      Array.isArray(currentUser?.roles) ? currentUser.roles.join('|') : String(currentUser?.roles || '')
+    ]);
+
+    const livePeriodInfo = useMemo(() => {
+      const periods = Array.isArray(liveTimetableState?.periods) ? liveTimetableState.periods : [];
+      
+      if (periods.length === 0) return { status: 'empty', period: null, timeLabel: '' };
+
+      const toIstDate = (d) => new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+      const nowIst = toIstDate(new Date());
+      const nowMinutes = (nowIst.getHours() * 60) + nowIst.getMinutes();
+
+      const isFridayIst = nowIst.getDay() === 5;
+
+      let selectedPeriodTimes = null;
+      if (isFridayIst && memoizedSettings?.periodTimesFriday && Array.isArray(memoizedSettings.periodTimesFriday) && memoizedSettings.periodTimesFriday.length) {
+        selectedPeriodTimes = memoizedSettings.periodTimesFriday;
+      } else if (memoizedSettings?.periodTimesWeekday && Array.isArray(memoizedSettings.periodTimesWeekday) && memoizedSettings.periodTimesWeekday.length) {
+        selectedPeriodTimes = memoizedSettings.periodTimesWeekday;
+      } else if (memoizedSettings?.periodTimes && Array.isArray(memoizedSettings.periodTimes) && memoizedSettings.periodTimes.length) {
+        selectedPeriodTimes = memoizedSettings.periodTimes;
+      }
+
+      const parseTimeToMinutes = (value) => {
+        const raw = String(value ?? '').trim();
+        if (!raw) return null;
+        const s = raw.replace(/\./g, ':').replace(/\s+/g, ' ').trim();
+        const m = s.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+        if (!m) return null;
+        let hh = Number(m[1]);
+        const mm = Number(m[2] ?? '0');
+        const ap = (m[3] ?? '').toLowerCase();
+        if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+        if (mm < 0 || mm > 59) return null;
+        if (ap) {
+          if (hh === 12) hh = 0;
+          if (ap === 'pm') hh += 12;
+        }
+        if (hh < 0 || hh > 23) return null;
+        return (hh * 60) + mm;
+      };
+
+      const normalized = periods.map(p => ({
+        period: p?.period ?? p?.Period ?? p?.periodNumber ?? p?.slot ?? p?.slotNumber ?? p?.index,
+        class: p?.class ?? p?.Class ?? p?.className ?? p?.standard ?? p?.grade ?? p?.Grade ?? p?.Standard,
+        subject: p?.subject ?? p?.Subject ?? p?.subjectName ?? p?.subj ?? p?.course ?? p?.topic ?? p?.Topic,
+        startTime: p?.startTime ?? p?.begin ?? p?.StartTime ?? '',
+        endTime: p?.endTime ?? p?.finish ?? p?.EndTime ?? '',
+        chapterName: p?.chapterName ?? '',
+        sessionNumber: p?.sessionNumber ?? '',
+        _raw: p
+      }));
+
+      // Prefer period time ranges from Settings.
+      if (selectedPeriodTimes) {
+        const ranges = selectedPeriodTimes
+          .map(p => {
+            if (!p || (!p.start && !p.end)) return null;
+            const start = parseTimeToMinutes(p.start);
+            const end = parseTimeToMinutes(p.end);
+            if (start == null || end == null) return null;
+            return { period: p.period, start, end };
+          })
+          .filter(Boolean);
+
+        const current = ranges.find(r => nowMinutes >= r.start && nowMinutes < r.end);
+        
+        if (current) {
+          // Match period by converting both to integers for comparison
+          const currentPeriodNum = parseInt(String(current.period ?? '').trim());
+          const match = normalized.find(x => {
+            const xPeriodNum = parseInt(String(x.period ?? '').trim());
+            return !isNaN(xPeriodNum) && !isNaN(currentPeriodNum) && xPeriodNum === currentPeriodNum;
+          }) || null;
+          
+          return {
+            status: 'live',
+            period: match || { period: current.period, class: '', subject: '', startTime: '', endTime: '', _raw: null },
+            timeLabel: periodToTimeString(current.period, selectedPeriodTimes)
+          };
+        }
+        return { status: 'none', period: null, timeLabel: '' };
+      }
+
+      // Fallback: use timetable-provided start/end (if settings are missing).
+      for (const p of normalized) {
+        const start = parseTimeToMinutes(p.startTime);
+        const end = parseTimeToMinutes(p.endTime);
+        if (start == null || end == null) continue;
+        if (nowMinutes >= start && nowMinutes < end) {
+          const label = (String(p.startTime || '').trim() || String(p.endTime || '').trim())
+            ? `${String(p.startTime || '').trim() || '—'} - ${String(p.endTime || '').trim() || '—'}`
+            : '';
+          return { status: 'live', period: p, timeLabel: label };
+        }
+      }
+      return { status: 'none', period: null, timeLabel: '' };
+    }, [liveTimetableState?.periods, nowTick, memoizedSettings?.periodTimes, memoizedSettings?.periodTimesWeekday, memoizedSettings?.periodTimesFriday]);
+
     return (
       <div className="max-w-7xl mx-auto space-y-4 md:space-y-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -999,51 +1146,103 @@ const App = () => {
       <HMDashboardView insights={insights} />
     ) : user && hasAnyRole(['teacher','class teacher','daily reporting teachers']) ? (
       <div className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-              <StatsCard
-                icon={<School />}
-                iconColor="blue"
-                title="Classes"
-                value={insights.classCount}
-                subtitle="Teaching classes"
-              />
-              
-              <StatsCard
-                icon={<Book />}
-                iconColor="green"
-                title="Subjects"
-                value={insights.subjectCount}
-                subtitle="Subjects assigned"
-              />
-              
-              {hasRole('class teacher') && (
-                <>
-                  <StatsCard
-                    icon={<Award />}
-                    iconColor="green"
-                    title="Above Average"
-                    value={insights.studentsAboveAverage}
-                    subtitle="Performing well"
-                    trend={insights.studentsAboveAverage > 0 ? {
-                      direction: 'up',
-                      value: `${Number.isFinite(insights?.assignedClassPerformance?.aboveAveragePct)
-                        ? insights.assignedClassPerformance.aboveAveragePct
-                        : Math.round((insights.studentsAboveAverage / Math.max(1, insights.studentsAboveAverage + insights.studentsNeedFocus)) * 100)
-                      }%`,
-                      label: 'of class'
-                    } : undefined}
-                  />
-                  
-                  <StatsCard
-                    icon={<AlertCircle />}
-                    iconColor="orange"
-                    title="Need Focus"
-                    value={insights.studentsNeedFocus}
-                    subtitle="Require attention"
-                    variant="bordered"
-                  />
-                </>
-              )}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4">
+              <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100">Insights</h3>
+                  {dashboardLoading && (
+                    <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Loading
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                    <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
+                      <School className="w-4 h-4 text-blue-600" /> Classes
+                    </div>
+                    <div className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.classCount}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Teaching classes</div>
+                  </div>
+
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                    <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
+                      <Book className="w-4 h-4 text-green-600" /> Subjects
+                    </div>
+                    <div className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.subjectCount}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Subjects assigned</div>
+                  </div>
+
+                  {hasRole('class teacher') && (
+                    <>
+                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                        <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
+                          <Award className="w-4 h-4 text-emerald-600" /> Above Avg
+                        </div>
+                        <div className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.studentsAboveAverage}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          {Number.isFinite(insights?.assignedClassPerformance?.aboveAveragePct)
+                            ? `${insights.assignedClassPerformance.aboveAveragePct}% of class`
+                            : 'Performing well'}
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                        <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
+                          <AlertCircle className="w-4 h-4 text-amber-600" /> Need Focus
+                        </div>
+                        <div className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.studentsNeedFocus}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Require attention</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
+                <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Live Period</h3>
+                {liveTimetableState.loading ? (
+                  <div className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin" /> Loading timetable...
+                  </div>
+                ) : liveTimetableState.error ? (
+                  <div className="text-sm text-gray-600 dark:text-gray-300">
+                    Unable to load live period.
+                  </div>
+                ) : livePeriodInfo.status === 'live' && livePeriodInfo.period ? (
+                  <div className="space-y-2">
+                    <div className="text-sm text-gray-600 dark:text-gray-300">Now teaching</div>
+                    <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      Period {String(livePeriodInfo.period.period ?? '').trim() || '-'}
+                    </div>
+                    <div className="text-sm text-gray-700 dark:text-gray-200">
+                      {stripStdPrefix(String(livePeriodInfo.period.class ?? '').trim() || '—')} · {String(livePeriodInfo.period.subject ?? '').trim() || '—'}
+                    </div>
+                    {livePeriodInfo.period.chapterName && (
+                      <div className="text-sm text-blue-600 dark:text-blue-400 font-medium">
+                        📖 {livePeriodInfo.period.chapterName}
+                        {livePeriodInfo.period.sessionNumber && (
+                          <span className="ml-2 text-xs bg-blue-100 dark:bg-blue-900 px-2 py-0.5 rounded">
+                            Session {livePeriodInfo.period.sessionNumber}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {String(livePeriodInfo.timeLabel || '').trim() && (
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {String(livePeriodInfo.timeLabel || '').trim()}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-sm text-gray-600 dark:text-gray-300">No live period right now</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      Based on today’s timetable.
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             {/* Lesson plan warning (next 2 days) */}
             {!hasAnyRole(['h m', 'super admin', 'superadmin', 'super_admin']) && missingPlansSummary.count > 0 && (
@@ -3191,6 +3390,13 @@ const App = () => {
       async function fetchTimetable() {
         try {
           if (!user) return;
+          
+          // For HM/Admin role, don't fetch teacher timetable (they won't have entries)
+          if (user.role === 'hm' || user.role === 'admin') {
+            setTimetable([]);
+            return;
+          }
+          
           const data = await api.getTeacherWeeklyTimetable(user.email);
           setTimetable(Array.isArray(data) ? data : []);
         } catch (err) {
@@ -3209,6 +3415,12 @@ const App = () => {
     );
     const periodHeaders = Array.from({ length: maxPeriods }, (_, i) => i + 1);
 
+    // Helper to get period time string
+    const getPeriodTime = (periodNum) => {
+      const periodTimes = memoizedSettings?.periodTimes || memoizedSettings?.periodTimesWeekday;
+      return periodToTimeString(periodNum, periodTimes);
+    };
+
     return (
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
@@ -3221,18 +3433,48 @@ const App = () => {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
-          <div className="px-4 md:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100">This Week</h2>
-          </div>
-
-          {/* Mobile Card Layout */}
-          <div className="block md:hidden">
-            {timetable.length === 0 ? (
-              <div className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                No timetable data available.
+        {/* Show appropriate view for HM/Admin */}
+        {(user?.role === 'hm' || user?.role === 'admin') ? (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden p-8">
+            <div className="text-center">
+              <Calendar className="h-16 w-16 text-gray-400 dark:text-gray-600 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+                View School Timetables
+              </h3>
+              <p className="text-gray-600 dark:text-gray-400 mb-6">
+                As an administrator, you can view the full school timetable or daily schedules.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <button
+                  onClick={() => setActiveView('day-timetable')}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
+                >
+                  <Calendar className="h-5 w-5" />
+                  Day Timetable
+                </button>
+                <button
+                  onClick={() => setActiveView('full-timetable')}
+                  className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center gap-2"
+                >
+                  <BookOpen className="h-5 w-5" />
+                  Full Timetable
+                </button>
               </div>
-            ) : (
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-4 md:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100">This Week</h2>
+            </div>
+
+            {/* Mobile Card Layout */}
+            <div className="block md:hidden">
+              {timetable.length === 0 ? (
+                <div className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                  No timetable data available.
+                </div>
+              ) : (
               <div className="divide-y divide-gray-200 dark:divide-gray-700">
                 {timetable.map((day, index) => (
                   <div key={index} className="p-4">
@@ -3240,11 +3482,12 @@ const App = () => {
                     {Array.isArray(day.periods) && day.periods.length > 0 ? (
                       <div className="space-y-2">
                         {day.periods.map((p, idx) => (
-                          <div key={idx} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                            <div className="flex items-center gap-2">
+                          <div key={idx} className="flex flex-col p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div className="flex items-center gap-2 mb-1">
                               <span className="text-xs font-medium text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 px-2 py-1 rounded">P{p.period}</span>
-                              <span className="text-sm text-gray-900 dark:text-gray-100">{stripStdPrefix(p.class)} - {p.subject}</span>
+                              <span className="text-xs text-gray-500 dark:text-gray-400">{getPeriodTime(p.period)}</span>
                             </div>
+                            <div className="text-sm text-gray-900 dark:text-gray-100">{stripStdPrefix(p.class)} - {p.subject}</div>
                           </div>
                         ))}
                       </div>
@@ -3265,7 +3508,8 @@ const App = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Day</th>
                   {periodHeaders.map(period => (
                     <th key={period} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                      Period {period}
+                      <div>Period {period}</div>
+                      <div className="text-xs font-normal text-gray-400 dark:text-gray-500 mt-0.5">{getPeriodTime(period)}</div>
                     </th>
                   ))}
                 </tr>
@@ -3292,6 +3536,7 @@ const App = () => {
             </table>
           </div>
         </div>
+        )}
       </div>
     );
   };
@@ -6627,7 +6872,7 @@ const App = () => {
     const [filterDay, setFilterDay] = useState('');
     const [filterClass, setFilterClass] = useState('');
     const [filterTeacher, setFilterTeacher] = useState('');
-    const [searchDate, setSearchDate] = useState('');
+    const [searchDate, setSearchDate] = useState(formatDateForInput(todayIST()));
     const [availableDays, setAvailableDays] = useState([]);
     const [availableClasses, setAvailableClasses] = useState([]);
     const [availableTeachers, setAvailableTeachers] = useState([]);

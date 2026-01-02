@@ -147,6 +147,37 @@ function _fetchTeacherDailyTimetable(identifier, date) {
   // Sort by period number
   finalPeriods.sort((a, b) => (parseInt(a.period) || 0) - (parseInt(b.period) || 0));
   
+  // Enrich with session progress (chapter name and session number)
+  try {
+    const sessionProgressSh = _getSheet('SessionProgress');
+    const sessionProgressHeaders = _headers(sessionProgressSh);
+    const allSessionProgress = _rows(sessionProgressSh)
+      .map(r => _indexByHeader(r, sessionProgressHeaders));
+    
+    finalPeriods.forEach(period => {
+      // Find the latest session progress for this class-subject combination
+      const matchingProgress = allSessionProgress
+        .filter(sp => 
+          String(sp.class || '').toLowerCase() === String(period.class || '').toLowerCase() &&
+          String(sp.subject || '').toLowerCase() === String(period.subject || '').toLowerCase()
+        )
+        .sort((a, b) => {
+          // Sort by date descending to get most recent
+          const dateA = new Date(a.sessionDate || 0);
+          const dateB = new Date(b.sessionDate || 0);
+          return dateB - dateA;
+        });
+      
+      if (matchingProgress.length > 0) {
+        const latest = matchingProgress[0];
+        period.chapterName = latest.chapterName || '';
+        period.sessionNumber = latest.sessionNumber || '';
+      }
+    });
+  } catch (error) {
+    Logger.log(`[getTeacherDailyTimetable] Warning: Could not enrich with session progress - ${error.message}`);
+  }
+  
   Logger.log(`[getTeacherDailyTimetable] Returning ${finalPeriods.length} periods (${allSubstitutions.filter(s => String(s.substituteTeacher || '').toLowerCase() === idLower).length} substitutions)`);
   
   return {
