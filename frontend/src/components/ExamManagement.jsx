@@ -1341,12 +1341,22 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       setApiError('');
       
       // Format marks data
-      const marks = marksRows.map(row => ({
-        admNo: row.admNo,
-        studentName: row.studentName,
-        internal: Number(row.internal) || 0,
-        external: Number(row.external) || 0
-      }));
+      // - If internal+external are both blank => treat as Absent (store as 'A')
+      // - If student scored 0, enter 0 explicitly
+      const marks = marksRows.map(row => {
+        const internalRaw = String(row.internal ?? '').trim();
+        const externalRaw = String(row.external ?? '').trim();
+        const externalUpper = externalRaw.toUpperCase();
+        const isBlankBoth = !internalRaw && !externalRaw;
+        const isAbsent = isBlankBoth || externalUpper === 'A' || externalUpper === 'ABSENT';
+
+        return {
+          admNo: row.admNo,
+          studentName: row.studentName,
+          internal: Number(internalRaw) || 0,
+          external: isAbsent ? 'A' : (Number(externalRaw) || 0)
+        };
+      });
       
       // Debug logging
       console.log('=== SUBMITTING MARKS ===');
@@ -1376,6 +1386,36 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       // Support both response formats for compatibility
       if (result && (result.ok || result.submitted)) {
         success('Marks Saved', 'Marks saved successfully');
+
+        // IMPORTANT: clear local caches so reopening shows latest saved marks
+        setMarksCache(prev => {
+          const next = new Map(prev);
+          next.delete(selectedExam.examId);
+          return next;
+        });
+
+        // PERF: don't block on a slow status refresh call.
+        // We just saved marks for the currently opened class roster, so we can mark this exam as complete locally.
+        try {
+          const totalStudents = Array.isArray(marksRows) ? marksRows.length : 0;
+          const enteredCount = totalStudents;
+          const missingCount = Math.max(0, totalStudents - enteredCount);
+          const complete = totalStudents > 0 && enteredCount >= totalStudents;
+          setMarksEntryStatus(prev => ({
+            ...prev,
+            [selectedExam.examId]: {
+              examId: selectedExam.examId,
+              class: selectedExam.class || '',
+              enteredCount,
+              totalStudents,
+              missingCount,
+              complete
+            }
+          }));
+        } catch (e) {
+          // ignore optimistic status update failures
+        }
+
         setShowMarksForm(false);
       } else {
         const errorMsg = result?.error || 'Failed to save marks';

@@ -330,6 +330,13 @@ const SchemeApprovalsView = ({
         </div>
       </div>
 
+      {filteredSchemes.length === 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-8 text-center border border-gray-200 dark:border-gray-700">
+          <p className="text-gray-700 dark:text-gray-200 font-medium">No schemes found.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Try changing the status/teacher filters.</p>
+        </div>
+      )}
+
       {/* Table Section */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">

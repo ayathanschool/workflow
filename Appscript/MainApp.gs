@@ -135,6 +135,10 @@
       _clearRequestCache(); // PERFORMANCE: Clear cache at start of each request
       // Run bootstrap ONLY when explicitly requested (bootstrap is expensive)
       if (action === 'admin.bootstrap') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
         _bootstrapSheets();
         return _respond({ success: true, message: 'Bootstrap completed' });
       }
@@ -156,6 +160,10 @@
       
       // Debug: Check current date/time in IST
       if (action === 'checkDate') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
         const now = new Date();
         const todayISO = _todayISO();
         const dayName = _dayName(todayISO);
@@ -174,6 +182,10 @@
       
       // Debug: Check cache status
       if (action === 'debugCache') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
         try {
           const cache = CacheService.getScriptCache();
           const keysJson = cache.get('_cache_keys') || '[]';
@@ -308,6 +320,10 @@
       }
       
       if (action === 'debugExamsSheet') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
         // Debug endpoint to check Exams sheet state
         try {
           const sh = _getSheet('Exams');
@@ -328,6 +344,10 @@
       }
       
       if (action === 'warmCache') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
         // Warm up caches to improve initial load performance
         try {
           appLog('INFO', 'warmCache', 'Starting cache warming');
@@ -412,6 +432,10 @@
       
       // DEBUG: Test endpoint for ClassSubjects
       if (action === 'testGetClassSubjects') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
         return _respond(testGetClassSubjectsAPI());
       }
       
@@ -727,6 +751,10 @@
       
       // === DEBUG ROUTES ===
       if (action === 'debugSubstitutions') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
         const sh = _getSheet('Substitutions');
         const headers = _headers(sh);
         const allRows = _rows(sh).map(r => _indexByHeader(r, headers));
@@ -741,6 +769,10 @@
       
       // Lightweight storage diagnostics to verify bound spreadsheet and sheet status
       if (action === 'diagnoseStorage') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
         try {
           const ss = _ss();
           const schemesSh = _getSheet('Schemes');
@@ -764,6 +796,10 @@
       }
       
       if (action === 'debugSubstitutionsForDate') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
         const date = e.parameter.date || new Date().toISOString().split('T')[0];
         const normalizedQueryDate = _isoDateString(date);
         
@@ -860,6 +896,10 @@
       _clearRequestCache(); // PERFORMANCE: Clear cache at start of each request
       // Run bootstrap ONLY when explicitly requested (bootstrap is expensive)
       if (action === 'admin.bootstrap') {
+        const email = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
         _bootstrapSheets();
         return _respond({ success: true, message: 'Bootstrap completed' });
       }
@@ -936,6 +976,10 @@
       }
       
       if (action === 'debugExamsSheet') {
+        const email = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
         // Debug endpoint to check Exams sheet state
         try {
           const sh = _getSheet('Exams');
@@ -1427,6 +1471,10 @@
       }
       // Debug: role parsing details for a given email (useful to confirm HM recognition)
       if (action === 'debugRole') {
+        const requesterEmail = (data.requesterEmail || e.parameter.requesterEmail || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(requesterEmail)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
         const email = (data.email || e.parameter.email || '').trim();
         return _respond(debugUserRoles(email));
       }
@@ -1531,6 +1579,10 @@
 
       // Simple diagnostic: reveals LessonPlans sheet headers and detects status column
       if (action === 'diagnoseLessonPlanHeaders') {
+        const email = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
         return _respond(_handleDiagnoseLessonPlanHeaders());
       }
       

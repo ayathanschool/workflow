@@ -78,6 +78,8 @@ function setCacheEntry(key, data, duration = CACHE_DURATION) {
 async function getJSON(url, cacheDuration = CACHE_DURATION) {
   const startMark = `api-get-${Date.now()}`;
   perfMonitor.mark(startMark);
+  const requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const requestTime = new Date().toISOString();
   
   // Skip caching for NO_CACHE requests
   if (cacheDuration === NO_CACHE) {
@@ -96,7 +98,7 @@ async function getJSON(url, cacheDuration = CACHE_DURATION) {
       } catch (err) {
         console.error('API GET failed', url, err);
         if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url } }));
+          window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url, requestId, time: requestTime } }));
         }
         throw new Error(`Failed to fetch ${url}: ${String(err && err.message ? err.message : err)}`);
       }
@@ -137,7 +139,7 @@ async function getJSON(url, cacheDuration = CACHE_DURATION) {
     } catch (err) {
       console.error('API GET failed', url, err);
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url } }));
+        window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url, requestId, time: requestTime } }));
       }
       throw new Error(`Failed to fetch ${url}: ${String(err && err.message ? err.message : err)}`);
     }
@@ -150,6 +152,8 @@ async function getJSON(url, cacheDuration = CACHE_DURATION) {
 async function postJSON(url, payload) {
   const startMark = `api-post-${Date.now()}`;
   perfMonitor.mark(startMark);
+  const requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const requestTime = new Date().toISOString();
   
   // Smart cache invalidation using enhanced cache
   const action = payload?.action || '';
@@ -201,7 +205,7 @@ async function postJSON(url, payload) {
       const text = await res.text().catch(() => '');
       const err = new Error(`HTTP ${res.status} ${text}`);
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('api-error', { detail: { message: err.message, url, status: res.status } }));
+        window.dispatchEvent(new CustomEvent('api-error', { detail: { message: err.message, url, status: res.status, requestId, time: requestTime } }));
       }
       throw err;
     }
@@ -212,7 +216,7 @@ async function postJSON(url, payload) {
   } catch (err) {
     console.error('API POST failed', url, err);
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url } }));
+      window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url, requestId, time: requestTime } }));
     }
     const e2 = new Error(`Failed to post ${url}: ${String(err && err.message ? err.message : err)}`);
     throw e2;
@@ -489,11 +493,6 @@ export async function getTeacherDailyData(email, date) {
   return result?.data || result || { success: false, timetable: {}, reports: [] };
 }
 
-// Debug function to check exam marks data
-export async function debugExamMarks() {
-  return getJSON(`${BASE_URL}?action=debugExamMarks`);
-}
-
 export async function submitDailyReport(data) {
   return postJSON(`${BASE_URL}?action=submitDailyReport`, data)
 }
@@ -606,14 +605,6 @@ export async function getDailyTimetableWithSubstitutions(date, options = {}) {
 export async function getAssignedSubstitutions(date, options = {}) {
   const { noCache = false } = options || {};
   const q = new URLSearchParams({ action: 'getAssignedSubstitutions', date })
-  if (noCache) q.append('_', String(Date.now()))
-  return getJSON(`${BASE_URL}?${q.toString()}`)
-}
-
-// Debug endpoint to check raw substitutions data
-export async function debugSubstitutions(date, options = {}) {
-  const { noCache = false } = options || {};
-  const q = new URLSearchParams({ action: 'debugSubstitutions', date })
   if (noCache) q.append('_', String(Date.now()))
   return getJSON(`${BASE_URL}?${q.toString()}`)
 }

@@ -10,6 +10,7 @@ import {
   getTeacherWeeklyTimetable
 } from "./api";
 import { todayIST } from "./utils/dateUtils";
+import { confirmDestructive } from "./utils/confirm";
 
 const COMPLETION_LEVELS = [
   { value: 0, label: '0% - Not Started', icon: '⭕', color: 'bg-gray-50 border-gray-200' },
@@ -681,9 +682,28 @@ export default function DailyReportModern({ user }) {
         if (cascadeOption === 'cascade' && cascadePreview[key]) {
           console.log('🔄 Executing cascade...');
           try {
+            const sessionsToUpdate = cascadePreview[key].sessionsToReschedule || [];
+
+            const ok = confirmDestructive({
+              title: 'Reschedule remaining sessions?',
+              lines: [
+                `This will move ${sessionsToUpdate.length} session(s) to future dates.`,
+                `Class: ${period.class || '-'}`,
+                `Subject: ${period.subject || '-'}`,
+                `Period: ${Number(period.period) || '-'}`,
+                `Date: ${date || '-'}`
+              ]
+            });
+
+            if (!ok) {
+              setMessage({ text: 'ℹ️ Report submitted. Reschedule cancelled.', type: 'info' });
+              // Skip executeCascade
+              return;
+            }
+
             const cascadePayload = {
               currentLpId: plan.lpId,
-              sessionsToUpdate: cascadePreview[key].sessionsToReschedule,
+              sessionsToUpdate: sessionsToUpdate,
               dailyReportContext: {
                 date,
                 teacherEmail: email,

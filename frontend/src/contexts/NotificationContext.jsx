@@ -56,8 +56,15 @@ export const NotificationProvider = ({ children }) => {
 
   // Save notifications to localStorage
   useEffect(() => {
-    if (notifications.length > 0) {
-      localStorage.setItem('notifications', JSON.stringify(notifications));
+    try {
+      if (notifications.length > 0) {
+        localStorage.setItem('notifications', JSON.stringify(notifications));
+      } else {
+        // Important: if we don't clear this, auto-closed notifications reappear on next page load.
+        localStorage.removeItem('notifications');
+      }
+    } catch (e) {
+      console.error('Error saving notifications:', e);
     }
   }, [notifications]);
 

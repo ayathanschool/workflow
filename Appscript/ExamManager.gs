@@ -453,6 +453,12 @@ function _fetchExams(params) {
  * Submit exam marks for students
  */
 function submitExamMarks(data) {
+  const __t0 = Date.now();
+  const __timings = {};
+  const __mark = function(k) {
+    __timings[k] = Date.now() - __t0;
+  };
+
   const examId = data.examId || '';
   const marks = Array.isArray(data.marks) ? data.marks : [];
   const teacherEmail = String(data.teacherEmail || data.email || '').toLowerCase().trim();
@@ -460,14 +466,42 @@ function submitExamMarks(data) {
   if (!examId) return { error: 'Missing examId' };
   if (marks.length === 0) return { error: 'No marks data provided' };
   if (!teacherEmail) return { error: 'Missing teacherEmail' };
+  __mark('validated');
+
+  // Helper: find all matching row numbers for an exact value in a column.
+  // Uses TextFinder (server-side) to avoid pulling full columns into JS.
+  const _findAllRowsByExactMatch_ = function(sh, col1, target) {
+    try {
+      const lastRow = sh.getLastRow();
+      if (lastRow < 2) return [];
+      const rowCount = lastRow - 1;
+      const range = sh.getRange(2, col1, rowCount, 1);
+      const matches = range.createTextFinder(String(target)).matchEntireCell(true).findAll();
+      if (!matches || matches.length === 0) return [];
+      return matches.map(function(r) { return r.getRow(); });
+    } catch (e) {
+      return [];
+    }
+  };
   
   // Get exam details
   const examSh = _getSheet('Exams');
   const examHeaders = _headers(examSh);
-  const exams = _rows(examSh).map(r => _indexByHeader(r, examHeaders));
-  const exam = exams.find(e => e.examId === examId);
+  // PERF: avoid mapping all exams; fetch only the target row.
+  const examExamIdCol = examHeaders.indexOf('examId') + 1;
+  let exam = null;
+  if (examExamIdCol > 0 && examSh.getLastRow() >= 2) {
+    const rowCount = examSh.getLastRow() - 1;
+    const rng = examSh.getRange(2, examExamIdCol, rowCount, 1);
+    const found = rng.createTextFinder(String(examId)).matchEntireCell(true).findNext();
+    if (found) {
+      const rowValues = examSh.getRange(found.getRow(), 1, 1, examHeaders.length).getValues()[0];
+      exam = _indexByHeader(rowValues, examHeaders);
+    }
+  }
   
   if (!exam) return { error: 'Exam not found' };
+  __mark('examLookup');
 
   // Permission check for marks submission:
   // 1. Super Admin - allowed for all
@@ -476,19 +510,30 @@ function submitExamMarks(data) {
   // 4. Subject Teacher - allowed if they teach this subject in this class
   
   const isSuperAdmin = _isSuperAdminSafe(teacherEmail);
-  if (isSuperAdmin) {
-    appLog('INFO', 'submitExamMarks', 'Super Admin access granted for ' + teacherEmail);
-  } else {
+  if (!isSuperAdmin) {
     // Get user details
     const userSh = _getSheet('Users');
     const userHeaders = _headers(userSh);
-    const users = _rows(userSh).map(r => _indexByHeader(r, userHeaders));
-    const user = users.find(u => String(u.email||'').toLowerCase() === teacherEmail);
+    // PERF: avoid mapping all users; fetch only the matching user row.
+    const emailCol = userHeaders.indexOf('email') + 1;
+    let user = null;
+    if (emailCol > 0 && userSh.getLastRow() >= 2) {
+      const urc = userSh.getLastRow() - 1;
+      const ur = userSh.getRange(2, emailCol, urc, 1)
+        .createTextFinder(String(teacherEmail))
+        .matchEntireCell(true)
+        .findNext();
+      if (ur) {
+        const userRowValues = userSh.getRange(ur.getRow(), 1, 1, userHeaders.length).getValues()[0];
+        user = _indexByHeader(userRowValues, userHeaders);
+      }
+    }
     
     if (!user) {
       appLog('ERROR', 'submitExamMarks', 'User not found: ' + teacherEmail);
       return { error: 'User not found. Please contact administrator.' };
     }
+    __mark('userLookup');
     
     // Check if HM
     const roles = String(user.roles || '').toLowerCase();
@@ -526,18 +571,7 @@ function submitExamMarks(data) {
       // Also check if user has "Class Teacher" role (general class teacher)
       const hasClassTeacherRole = roles.includes('class teacher') || roles.includes('classteacher');
       
-      appLog('INFO', 'submitExamMarks', {
-        email: teacherEmail,
-        examClass: exam.class,
-        examClassNorm: examClassNorm,
-        classTeacherFor: classTeacherFor,
-        isClassTeacher: isClassTeacher,
-        hasClassTeacherRole: hasClassTeacherRole,
-        roles: roles
-      });
-      
       if (isClassTeacher || hasClassTeacherRole) {
-        appLog('INFO', 'submitExamMarks', 'Class Teacher access granted for ' + teacherEmail + ' on class ' + exam.class);
       } else {
         // Check if subject teacher for this class+subject combination
         const hasPermission = userCanCreateExam(teacherEmail, String(exam.class || ''), String(exam.subject || ''));
@@ -545,27 +579,118 @@ function submitExamMarks(data) {
           appLog('ERROR', 'submitExamMarks', 'Permission denied for ' + teacherEmail + ' on ' + exam.class + ' ' + exam.subject);
           return { error: 'You do not have permission to submit marks for this exam. Only HM, Class Teachers, or Subject Teachers can submit marks.' };
         }
-        appLog('INFO', 'submitExamMarks', 'Subject Teacher access granted for ' + teacherEmail);
       }
     }
   }
+  __mark('permissionCheck');
   
   const marksSh = _getSheet('ExamMarks');
   _ensureHeaders(marksSh, SHEETS.ExamMarks);
   const now = new Date().toISOString();
+  __mark('sheetReady');
   
-  // Get existing marks to check for updates vs inserts
+  // PERFORMANCE: build a fast index of existing marks rows for this examId+admNo
   const marksHeaders = _headers(marksSh);
-  const existingMarks = _rows(marksSh).map((r, idx) => ({
-    data: _indexByHeader(r, marksHeaders),
-    rowIndex: idx + 2 // +2 because: 1-based index + header row
-  }));
-  
+  const examIdCol = marksHeaders.indexOf('examId') + 1;
+  const admNoCol = marksHeaders.indexOf('admNo') + 1;
+  const colCount = SHEETS.ExamMarks.length;
+
+  const existingRowByKey = {};
+  let existingBlock = null;
+  let existingBlockStartRow = 0;
+  let existingBlockRowCount = 0;
+  if (examIdCol > 0 && admNoCol > 0 && marksSh.getLastRow() >= 2) {
+    const target = String(examId).trim();
+    const lastRowAll = marksSh.getLastRow();
+    const rowCountAll = lastRowAll - 1;
+
+    // Strategy:
+    // 1) Try TextFinder first to locate matching rows for this examId.
+    //    This is very fast when marks for an exam are stored contiguously (common case).
+    // 2) Only fall back to scanning the whole sheet (2 columns) if matches are not found or are extremely sparse.
+    const rows = _findAllRowsByExactMatch_(marksSh, examIdCol, target);
+    if (rows.length > 0) {
+      var minRow = rows[0];
+      var maxRow = rows[0];
+      for (var r = 1; r < rows.length; r++) {
+        if (rows[r] < minRow) minRow = rows[r];
+        if (rows[r] > maxRow) maxRow = rows[r];
+      }
+
+      const span = (maxRow - minRow) + 1;
+      const isDense = span <= (rows.length * 2 + 10);
+      const canRewriteBlock = isDense && span <= 800;
+
+      // If the matches are very sparse, reading the whole [min..max] block is expensive.
+      // In that case, fall back to scanning 2 columns across the sheet.
+      const isVerySparse = span > (rows.length * 6 + 50) || span > 2000;
+      if (!isVerySparse) {
+        const block = marksSh.getRange(minRow, 1, span, colCount).getValues();
+        const exIdx = examIdCol - 1;
+        const admIdx = admNoCol - 1;
+
+        for (var j = 0; j < block.length; j++) {
+          if (String(block[j][exIdx] || '').trim() !== target) continue;
+          const adm3 = String(block[j][admIdx] || '').trim();
+          if (!adm3) continue;
+          existingRowByKey[target + '|' + adm3] = minRow + j;
+        }
+
+        if (canRewriteBlock) {
+          existingBlock = block;
+          existingBlockStartRow = minRow;
+          existingBlockRowCount = span;
+        }
+      } else {
+        // Sparse rows: scan only examId+admNo across the full sheet.
+        const startCol = Math.min(examIdCol, admNoCol);
+        const endCol = Math.max(examIdCol, admNoCol);
+        const width = endCol - startCol + 1;
+        const block2 = marksSh.getRange(2, startCol, rowCountAll, width).getValues();
+        const exIdx2 = examIdCol - startCol;
+        const admIdx2 = admNoCol - startCol;
+        for (var i = 0; i < rowCountAll; i++) {
+          if (String(block2[i][exIdx2] || '').trim() !== target) continue;
+          const adm = String(block2[i][admIdx2] || '').trim();
+          if (!adm) continue;
+          existingRowByKey[target + '|' + adm] = i + 2;
+        }
+      }
+    } else {
+      // No TextFinder matches (unexpected). Fall back to scanning 2 columns.
+      const startCol3 = Math.min(examIdCol, admNoCol);
+      const endCol3 = Math.max(examIdCol, admNoCol);
+      const width3 = endCol3 - startCol3 + 1;
+      const block3 = marksSh.getRange(2, startCol3, rowCountAll, width3).getValues();
+      const exIdx3 = examIdCol - startCol3;
+      const admIdx3 = admNoCol - startCol3;
+      for (var k = 0; k < rowCountAll; k++) {
+        if (String(block3[k][exIdx3] || '').trim() !== target) continue;
+        const adm2 = String(block3[k][admIdx3] || '').trim();
+        if (!adm2) continue;
+        existingRowByKey[target + '|' + adm2] = k + 2;
+      }
+    }
+  }
+  __mark('existingIndex');
+
+  const totalMax = (function() {
+    const n = Number(exam.totalMax);
+    if (Number.isFinite(n) && n > 0) return n;
+    const im = Number(exam.internalMax) || 0;
+    const em = Number(exam.externalMax) || 0;
+    return (im + em) || 100;
+  })();
+
+  const updates = []; // { rowIndex:number, values:any[] }
+  const inserts = []; // any[][]
+
   // Process each student's marks
   for (const studentMark of marks) {
     // Accept both ce/te (old) and internal/external (new) field names
-    let ce = parseInt(studentMark.ce ?? studentMark.internal);
+    let ce = parseInt(studentMark.ce ?? studentMark.internal, 10);
     if (isNaN(ce)) ce = 0;
+
     const rawExternal = (studentMark.te ?? studentMark.external);
     const extStr = String(rawExternal || '').trim().toUpperCase();
     const isAbsent = extStr === 'A' || extStr === 'ABSENT';
@@ -575,30 +700,27 @@ function submitExamMarks(data) {
     let grade;
 
     if (isAbsent) {
-      // Persist explicit Absent status
       teStored = 'A';
-      total = ce; // Only internal contributes when external is Absent
+      total = ce;
       grade = 'Absent';
-      Logger.log(`[Marks Submission] Student: ${studentMark.studentName}, CE: ${ce}, TE: A (Absent), Total: ${total}/${exam.totalMax}, Grade: Absent`);
     } else {
-      const teNum = parseInt(rawExternal) || 0;
+      const teNum = parseInt(rawExternal, 10) || 0;
       teStored = teNum;
       total = ce + teNum;
-      const percentage = (total / exam.totalMax) * 100;
+      const percentage = totalMax > 0 ? (total / totalMax) * 100 : 0;
       grade = _calculateGradeFromBoundaries(percentage, exam.class);
-      Logger.log(`[Marks Submission] Student: ${studentMark.studentName}, CE: ${ce}, TE: ${teNum}, Total: ${total}/${exam.totalMax}, Percentage: ${percentage.toFixed(2)}%, Grade: ${grade}`);
     }
-    
-    // Invalidate cache for this exam
-    invalidateCache('exam_marks_examid:' + examId);
-    
+
+    const adm = String(studentMark.admNo || '').trim();
+    const key = String(examId) + '|' + adm;
+
     const markData = [
       examId,
       exam.class,
       exam.subject,
       data.teacherEmail || '',
       data.teacherName || '',
-      studentMark.admNo || '',
+      adm,
       studentMark.studentName || '',
       exam.examType,
       ce,
@@ -607,23 +729,59 @@ function submitExamMarks(data) {
       grade,
       now
     ];
-    
-    // Check if this student already has marks for this exam
-    const existingMark = existingMarks.find(m => 
-      m.data.examId === examId && 
-      String(m.data.admNo || '').trim() === String(studentMark.admNo || '').trim()
-    );
-    
-    if (existingMark) {
-      // Update existing row
-      const range = marksSh.getRange(existingMark.rowIndex, 1, 1, markData.length);
-      range.setValues([markData]);
-      Logger.log(`[Marks Update] Updated existing marks for ${studentMark.studentName} (Row ${existingMark.rowIndex})`);
+
+    const existingRow = existingRowByKey[key] || 0;
+    if (existingRow) {
+      updates.push({ rowIndex: existingRow, values: markData });
     } else {
-      // Insert new row
-      marksSh.appendRow(markData);
-      Logger.log(`[Marks Insert] Added new marks for ${studentMark.studentName}`);
+      inserts.push(markData);
     }
+  }
+  __mark('preparedRows');
+
+  // Batch update existing rows (group contiguous ranges to reduce API calls)
+  if (updates.length > 0) {
+    // Fast path: if we have the existing rows loaded as one block, update it in-memory and write once.
+    if (existingBlock && existingBlockStartRow > 0 && existingBlockRowCount > 0) {
+      for (var u = 0; u < updates.length; u++) {
+        const rel = updates[u].rowIndex - existingBlockStartRow;
+        if (rel >= 0 && rel < existingBlock.length) {
+          existingBlock[rel] = updates[u].values;
+        }
+      }
+      marksSh.getRange(existingBlockStartRow, 1, existingBlock.length, colCount).setValues(existingBlock);
+    } else {
+    updates.sort(function(a, b) { return a.rowIndex - b.rowIndex; });
+    let start = 0;
+    while (start < updates.length) {
+      let end = start;
+      while (end + 1 < updates.length && updates[end + 1].rowIndex === updates[end].rowIndex + 1) {
+        end++;
+      }
+      const firstRow = updates[start].rowIndex;
+      const rows = (end - start) + 1;
+      const block = [];
+      for (var j = start; j <= end; j++) block.push(updates[j].values);
+      marksSh.getRange(firstRow, 1, rows, colCount).setValues(block);
+      start = end + 1;
+    }
+    }
+  }
+  __mark('updatedRows');
+
+  // Batch append new rows
+  if (inserts.length > 0) {
+    const appendAt = marksSh.getLastRow() + 1;
+    marksSh.getRange(appendAt, 1, inserts.length, colCount).setValues(inserts);
+  }
+  __mark('insertedRows');
+
+  // Clear the specific getExamMarks cache key so UI reflects changes immediately
+  try {
+    const cache = CacheService.getScriptCache();
+    cache.remove(generateCacheKey('exam_marks', { examId: examId }));
+  } catch (ee) {
+    // ignore cache clear errors
   }
   
   // Audit log: Exam marks submission
@@ -643,8 +801,9 @@ function submitExamMarks(data) {
     description: `Exam marks submitted for ${marks.length} students in ${exam.class} ${exam.subject}`,
     severity: AUDIT_SEVERITY.INFO
   });
+  __mark('auditLogged');
   
-  return { ok: true };
+  return { ok: true, timingsMs: __timings };
 }
 
 /**
@@ -660,9 +819,39 @@ function getExamMarks(examId) {
 function _fetchExamMarks(examId) {
   const sh = _getSheet('ExamMarks');
   const headers = _headers(sh);
-  const list = _rows(sh).map(r => _indexByHeader(r, headers));
-  
-  return list.filter(mark => mark.examId === examId);
+
+  // PERF: avoid reading the entire ExamMarks sheet for a single exam.
+  const examIdCol = headers.indexOf('examId') + 1;
+  const lastRow = sh.getLastRow();
+  if (examIdCol <= 0 || lastRow < 2) return [];
+
+  const target = String(examId || '').trim();
+  const rowCount = lastRow - 1;
+  const range = sh.getRange(2, examIdCol, rowCount, 1);
+  let matches = [];
+  try {
+    matches = range.createTextFinder(target).matchEntireCell(true).findAll();
+  } catch (e) {
+    matches = [];
+  }
+  if (!matches || matches.length === 0) return [];
+
+  var minRow = matches[0].getRow();
+  var maxRow = matches[0].getRow();
+  for (var m = 1; m < matches.length; m++) {
+    const rr = matches[m].getRow();
+    if (rr < minRow) minRow = rr;
+    if (rr > maxRow) maxRow = rr;
+  }
+
+  const block = sh.getRange(minRow, 1, (maxRow - minRow) + 1, headers.length).getValues();
+  const out = [];
+  const exIdx = examIdCol - 1;
+  for (var r = 0; r < block.length; r++) {
+    if (String(block[r][exIdx] || '').trim() !== target) continue;
+    out.push(_indexByHeader(block[r], headers));
+  }
+  return out;
 }
 
 /**
@@ -728,8 +917,20 @@ function getExamMarksEntryStatusBatch(examIds, params) {
     if (filterByTeacher) {
       const userSh = _getSheet('Users');
       const userHeaders = _headers(userSh);
-      const users = _rows(userSh).map(r => _indexByHeader(r, userHeaders));
-      const user = users.find(u => String(u.email || '').toLowerCase() === teacherEmail);
+      // PERF: fetch only the matching user row.
+      const emailCol = userHeaders.indexOf('email') + 1;
+      let user = null;
+      if (emailCol > 0 && userSh.getLastRow() >= 2) {
+        const rc = userSh.getLastRow() - 1;
+        const found = userSh.getRange(2, emailCol, rc, 1)
+          .createTextFinder(String(teacherEmail))
+          .matchEntireCell(true)
+          .findNext();
+        if (found) {
+          const rowValues = userSh.getRange(found.getRow(), 1, 1, userHeaders.length).getValues()[0];
+          user = _indexByHeader(rowValues, userHeaders);
+        }
+      }
       if (user) {
         const rolesLower = String(user.roles || '').toLowerCase();
         teacherCtx.hasClassTeacherRole = rolesLower.includes('class teacher') || rolesLower.includes('classteacher');
@@ -744,93 +945,135 @@ function getExamMarksEntryStatusBatch(examIds, params) {
     const examsSh = _getSheet('Exams');
     _ensureHeaders(examsSh, SHEETS.Exams);
     const examsHeaders = _headers(examsSh);
-    const examsList = _rows(examsSh).map(r => _indexByHeader(r, examsHeaders));
-
     const examMetaById = {};
-    for (const ex of examsList) {
-      const exId = String(ex.examId || '').trim();
-      if (!exId || !idSet.has(exId)) continue;
-      
-      const exClassRaw = String(ex.class || '').trim();
-      const exSubject = String(ex.subject || '').trim();
-      
-      // Filter by teacher permissions: allow if class teacher for this class OR subject teacher
-      if (filterByTeacher) {
-        const permClassUpper = normalizeClassForPermission(exClassRaw);
-        const examClassNormLower = normClass(exClassRaw);
-        const numOnly = function(s) { const m = String(s || '').match(/\d+/); return m ? m[0] : ''; };
-        const examClassNum = numOnly(exClassRaw);
+    // PERF: fetch only the requested exam rows.
+    const examIdCol = examsHeaders.indexOf('examId') + 1;
+    if (examIdCol > 0 && examsSh.getLastRow() >= 2) {
+      const rc = examsSh.getLastRow() - 1;
+      const idRange = examsSh.getRange(2, examIdCol, rc, 1);
 
-        const isClassTeacherForThis = teacherCtx.classTeacherFor.some(c => {
-          const cNorm = normClass(c);
-          const cNum = numOnly(c);
-          return cNorm === examClassNormLower || (examClassNum && cNum === examClassNum);
-        });
+      for (const targetId of ids) {
+        const found = idRange.createTextFinder(String(targetId)).matchEntireCell(true).findNext();
+        if (!found) continue;
+        const rowValues = examsSh.getRange(found.getRow(), 1, 1, examsHeaders.length).getValues()[0];
+        const ex = _indexByHeader(rowValues, examsHeaders);
 
-        const isAllowed = isClassTeacherForThis || teacherCtx.hasClassTeacherRole || userCanCreateExam(teacherEmail, permClassUpper, exSubject);
-        if (!isAllowed) continue;
+        const exId = String(ex.examId || '').trim();
+        if (!exId || !idSet.has(exId)) continue;
+
+        const exClassRaw = String(ex.class || '').trim();
+        const exSubject = String(ex.subject || '').trim();
+
+        if (filterByTeacher) {
+          const permClassUpper = normalizeClassForPermission(exClassRaw);
+          const examClassNormLower = normClass(exClassRaw);
+          const numOnly = function(s) { const m = String(s || '').match(/\d+/); return m ? m[0] : ''; };
+          const examClassNum = numOnly(exClassRaw);
+
+          const isClassTeacherForThis = teacherCtx.classTeacherFor.some(c => {
+            const cNorm = normClass(c);
+            const cNum = numOnly(c);
+            return cNorm === examClassNormLower || (examClassNum && cNum === examClassNum);
+          });
+
+          const isAllowed = isClassTeacherForThis || teacherCtx.hasClassTeacherRole || userCanCreateExam(teacherEmail, permClassUpper, exSubject);
+          if (!isAllowed) continue;
+        }
+
+        examMetaById[exId] = {
+          examId: exId,
+          classRaw: exClassRaw,
+          classNorm: normClass(exClassRaw)
+        };
       }
-      
-      examMetaById[exId] = {
-        examId: exId,
-        classRaw: exClassRaw,
-        classNorm: normClass(exClassRaw)
-      };
     }
 
-    // Build student sets per class
+    // Build student sets per class (only for involved classes)
     const studentsSh = _getSheet('Students');
     _ensureHeaders(studentsSh, SHEETS.Students);
     const studentsHeaders = _headers(studentsSh);
-    const studentsList = _rows(studentsSh).map(r => _indexByHeader(r, studentsHeaders));
-
+    const classNormSet = new Set(Object.keys(examMetaById).map(function(k) { return examMetaById[k].classNorm; }));
     /** @type {Object<string, Set<string>>} */
     const studentsByClass = {};
-    for (const st of studentsList) {
-      const clsNorm = normClass(st.class);
-      const adm = normAdmNo(st.admNo);
-      if (!clsNorm || !adm) continue;
-      if (!studentsByClass[clsNorm]) studentsByClass[clsNorm] = new Set();
-      studentsByClass[clsNorm].add(adm);
+    const classCol = studentsHeaders.indexOf('class') + 1;
+    const admCol = studentsHeaders.indexOf('admNo') + 1;
+    const lastStudentRow = studentsSh.getLastRow();
+    if (classCol > 0 && admCol > 0 && lastStudentRow >= 2 && classNormSet.size > 0) {
+      const rc = lastStudentRow - 1;
+      const classVals = studentsSh.getRange(2, classCol, rc, 1).getValues();
+      const admVals = studentsSh.getRange(2, admCol, rc, 1).getValues();
+      for (var i = 0; i < rc; i++) {
+        const clsNorm = normClass(classVals[i][0]);
+        if (!clsNorm || !classNormSet.has(clsNorm)) continue;
+        const adm = normAdmNo(admVals[i][0]);
+        if (!adm) continue;
+        if (!studentsByClass[clsNorm]) studentsByClass[clsNorm] = new Set();
+        studentsByClass[clsNorm].add(adm);
+      }
     }
 
     // Count entered marks per examId (unique students)
     const marksSh = _getSheet('ExamMarks');
     _ensureHeaders(marksSh, SHEETS.ExamMarks);
     const marksHeaders = _headers(marksSh);
-    const marksList = _rows(marksSh).map(r => _indexByHeader(r, marksHeaders));
-
     /** @type {Object<string, Set<string>>} */
     const enteredByExamId = {};
-    for (const mk of marksList) {
-      const exId = String(mk.examId || '').trim();
-      if (!exId || !idSet.has(exId)) continue;
-      const meta = examMetaById[exId];
-      if (!meta) continue;
+    const marksExamIdCol = marksHeaders.indexOf('examId') + 1;
+    const marksAdmCol = marksHeaders.indexOf('admNo') + 1;
+    const ceCol = marksHeaders.indexOf('ce') + 1;
+    const teCol = marksHeaders.indexOf('te') + 1;
+    const totalCol = marksHeaders.indexOf('total') + 1;
+    const marksLast = marksSh.getLastRow();
+    if (marksExamIdCol > 0 && marksAdmCol > 0 && marksLast >= 2) {
+      const rc = marksLast - 1;
+      const idRange = marksSh.getRange(2, marksExamIdCol, rc, 1);
 
-      const adm = normAdmNo(mk.admNo);
-      if (!adm) continue;
+      for (const exId of ids) {
+        const meta = examMetaById[exId];
+        if (!meta) continue;
+        const expectedSet = studentsByClass[meta.classNorm] || new Set();
+        if (expectedSet.size === 0) continue;
 
-      const expectedSet = studentsByClass[meta.classNorm];
-      if (!expectedSet || !expectedSet.has(adm)) continue;
+        let matches = [];
+        try {
+          matches = idRange.createTextFinder(String(exId)).matchEntireCell(true).findAll();
+        } catch (e) {
+          matches = [];
+        }
+        if (!matches || matches.length === 0) continue;
 
-      // Only count as entered if there are actual marks (not all zeros/empty)
-      // Allow 'A' for absent, or any non-zero marks
-      const ce = String(mk.ce ?? '').trim();
-      const te = String(mk.te ?? '').trim();
-      const total = String(mk.total ?? '').trim();
-      
-      const isAbsent = (te.toUpperCase() === 'A' || te.toUpperCase() === 'ABSENT');
-      const hasActualMarks = (
-        (ce !== '' && ce !== '0' && parseFloat(ce) > 0) ||
-        (te !== '' && te !== '0' && parseFloat(te) > 0 && !isAbsent) ||
-        isAbsent
-      );
-      
-      if (!hasActualMarks) continue;
+        var minRow = matches[0].getRow();
+        var maxRow = matches[0].getRow();
+        for (var m = 1; m < matches.length; m++) {
+          const rr = matches[m].getRow();
+          if (rr < minRow) minRow = rr;
+          if (rr > maxRow) maxRow = rr;
+        }
 
-      if (!enteredByExamId[exId]) enteredByExamId[exId] = new Set();
-      enteredByExamId[exId].add(adm);
+        const block = marksSh.getRange(minRow, 1, (maxRow - minRow) + 1, marksHeaders.length).getValues();
+        const exIdx = marksExamIdCol - 1;
+        const admIdx = marksAdmCol - 1;
+        const ceIdx = ceCol > 0 ? (ceCol - 1) : -1;
+        const teIdx = teCol > 0 ? (teCol - 1) : -1;
+        const totalIdx = totalCol > 0 ? (totalCol - 1) : -1;
+
+        for (var i = 0; i < block.length; i++) {
+          if (String(block[i][exIdx] || '').trim() !== String(exId)) continue;
+          const adm = normAdmNo(block[i][admIdx]);
+          if (!adm || !expectedSet.has(adm)) continue;
+
+          const ce = (ceIdx >= 0) ? String(block[i][ceIdx] ?? '').trim() : '';
+          const te = (teIdx >= 0) ? String(block[i][teIdx] ?? '').trim() : '';
+          const total = (totalIdx >= 0) ? String(block[i][totalIdx] ?? '').trim() : '';
+          const teU = te.toUpperCase();
+          const isAbsent = (teU === 'A' || teU === 'ABSENT');
+          const hasEntry = isAbsent || ce !== '' || te !== '' || total !== '';
+          if (!hasEntry) continue;
+
+          if (!enteredByExamId[exId]) enteredByExamId[exId] = new Set();
+          enteredByExamId[exId].add(adm);
+        }
+      }
     }
 
     const result = [];
@@ -868,6 +1111,15 @@ function getExamMarksEntryStatusBatch(examIds, params) {
  * @returns {{success:boolean, exams:Array<{examId:string, class:string, subject:string, examType:string, examName:string, date:string, createdAt:string, enteredCount:number, totalStudents:number, missingCount:number, complete:boolean}>}}
  */
 function getExamMarksEntryStatusAll(params) {
+  const cacheKey = generateCacheKey('marks_entry_status_all', {
+    class: (params || {}).class,
+    examType: (params || {}).examType,
+    subject: (params || {}).subject,
+    limit: (params || {}).limit,
+    teacherEmail: (params || {}).teacherEmail,
+    role: (params || {}).role
+  });
+  return getCachedData(cacheKey, function() {
   try {
     const p = params || {};
     const limit = Number(p.limit || 0) || 0;
@@ -1019,20 +1271,16 @@ function getExamMarksEntryStatusAll(params) {
       const expectedSet = studentsByClass[meta.classNorm];
       if (!expectedSet || !expectedSet.has(adm)) continue;
 
-      // Only count as entered if there are actual marks (not all zeros/empty)
-      // Allow 'A' for absent, or any non-zero marks
+      // Count as entered if teacher has submitted a row for the student.
+      // This must treat 0 as a valid score (entered), and treat 'A' as absent (entered).
       const ce = String(mk.ce ?? '').trim();
       const te = String(mk.te ?? '').trim();
       const total = String(mk.total ?? '').trim();
       
       const isAbsent = (te.toUpperCase() === 'A' || te.toUpperCase() === 'ABSENT');
-      const hasActualMarks = (
-        (ce !== '' && ce !== '0' && parseFloat(ce) > 0) ||
-        (te !== '' && te !== '0' && parseFloat(te) > 0 && !isAbsent) ||
-        isAbsent
-      );
+      const hasEntry = isAbsent || ce !== '' || te !== '' || total !== '';
       
-      if (!hasActualMarks) continue;
+      if (!hasEntry) continue;
 
       if (!enteredByExamId[exId]) enteredByExamId[exId] = new Set();
       enteredByExamId[exId].add(adm);
@@ -1081,6 +1329,7 @@ function getExamMarksEntryStatusAll(params) {
     appLog('ERROR', 'getExamMarksEntryStatusAll', 'Error: ' + error.message);
     return { success: false, exams: [], error: error.message };
   }
+  }, CACHE_TTL.SHORT);
 }
 
 /**
@@ -1135,51 +1384,88 @@ function _generateExamId(examType, className, subject) {
 /**
  * Calculate grade from percentage using grade boundaries
  */
-function _calculateGradeFromBoundaries(percentage, className) {
+// PERFORMANCE NOTE
+// Reading GradeBoundaries for every student is very expensive.
+// Cache grade boundaries in-memory for the lifetime of the script execution.
+var __GRADE_BOUNDARIES_INDEX__ = null; // { [normalizedGroup: string]: Array<{minPercentage:number,maxPercentage:number,grade:string}> }
+
+function _normalizeStandardGroupLabel_(g) {
+  return String(g || '')
+    .toLowerCase()
+    .replace(/std\s*/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function _getGradeBoundariesIndex_() {
+  if (__GRADE_BOUNDARIES_INDEX__) return __GRADE_BOUNDARIES_INDEX__;
+  __GRADE_BOUNDARIES_INDEX__ = {};
+
   try {
-    const standardGroup = _standardGroup(className);
-    
-    Logger.log(`[Grade Calculation] Class: ${className}, Standard Group: ${standardGroup}, Percentage: ${percentage}`);
-    
     const gbSh = _getSheet('GradeBoundaries');
     _ensureHeaders(gbSh, SHEETS.GradeBoundaries);
     const gbHeaders = _headers(gbSh);
-    const boundaries = _rows(gbSh).map(r => _indexByHeader(r, gbHeaders));
-    
-    // Find boundaries for this standard group - normalize labels ('Std 9-12' vs '9-12')
-    const normalizeGroup = g => String(g || '')
-      .toLowerCase()
-      .replace(/std\s*/g, '')
-      .replace(/\s+/g, '')
-      .trim();
-    const targetGroup = normalizeGroup(standardGroup);
-    const applicableBoundaries = boundaries.filter(b => normalizeGroup(b.standardGroup) === targetGroup);
-    
-    Logger.log(`[Grade Calculation] Found ${applicableBoundaries.length} boundaries for ${standardGroup}`);
-    
-    if (applicableBoundaries.length === 0) {
-      Logger.log(`[Grade Calculation] No boundaries found, using fallback`);
+    const rows = _rows(gbSh);
+    const boundaries = rows.map(r => _indexByHeader(r, gbHeaders));
+
+    for (const b of boundaries) {
+      const groupKey = _normalizeStandardGroupLabel_(b.standardGroup);
+      if (!groupKey) continue;
+
+      const minP = Number(b.minPercentage);
+      const maxP = (b.maxPercentage === '' || b.maxPercentage === null || b.maxPercentage === undefined)
+        ? 100
+        : Number(b.maxPercentage);
+
+      const entry = {
+        minPercentage: Number.isFinite(minP) ? minP : 0,
+        maxPercentage: Number.isFinite(maxP) ? maxP : 100,
+        grade: String(b.grade || '').trim()
+      };
+
+      if (!__GRADE_BOUNDARIES_INDEX__[groupKey]) __GRADE_BOUNDARIES_INDEX__[groupKey] = [];
+      __GRADE_BOUNDARIES_INDEX__[groupKey].push(entry);
+    }
+
+    // Sort each group's boundaries by minPercentage descending (fast lookup from top grade)
+    Object.keys(__GRADE_BOUNDARIES_INDEX__).forEach(k => {
+      __GRADE_BOUNDARIES_INDEX__[k].sort((a, b) => (b.minPercentage || 0) - (a.minPercentage || 0));
+    });
+  } catch (e) {
+    // Keep cache empty and allow fallback grading.
+    try { appLog('WARN', 'gradeBoundariesCache', 'Failed to build cache: ' + (e && e.message ? e.message : e)); } catch (ee) {}
+  }
+
+  return __GRADE_BOUNDARIES_INDEX__;
+}
+
+function _calculateGradeFromBoundaries(percentage, className) {
+  try {
+    const standardGroup = _standardGroup(className);
+
+    const targetGroup = _normalizeStandardGroupLabel_(standardGroup);
+    const idx = _getGradeBoundariesIndex_();
+    const applicable = idx[targetGroup] || [];
+
+    if (!applicable || applicable.length === 0) {
       return _calculateGradeFallback(percentage);
     }
-    
-    // Sort by minPercentage descending to check from highest grade first
-    applicableBoundaries.sort((a, b) => (Number(b.minPercentage) || 0) - (Number(a.minPercentage) || 0));
-    
-    for (const boundary of applicableBoundaries) {
+
+    const pct = Number(percentage);
+    const safePct = Number.isFinite(pct) ? pct : 0;
+
+    for (const boundary of applicable) {
       const minPercent = Number(boundary.minPercentage) || 0;
-      const maxPercent = Number(boundary.maxPercentage) || 100;
-      
-      if (percentage >= minPercent && percentage <= maxPercent) {
-        Logger.log(`[Grade Calculation] Matched: ${boundary.grade} (${minPercent}%-${maxPercent}%)`);
+      const maxPercent = Number(boundary.maxPercentage);
+      const maxP = Number.isFinite(maxPercent) ? maxPercent : 100;
+      if (safePct >= minPercent && safePct <= maxP) {
         return boundary.grade || 'F';
       }
     }
-    
-    Logger.log(`[Grade Calculation] No matching boundary, returning F`);
+
     return 'F';
     
   } catch (error) {
-    Logger.log(`[Grade Calculation ERROR] ${error.toString()}`);
     return _calculateGradeFallback(percentage);
   }
 }
@@ -1207,30 +1493,19 @@ function _getLeastGradeForClass(className) {
   try {
     const standardGroup = _standardGroup(className);
 
-    const gbSh = _getSheet('GradeBoundaries');
-    _ensureHeaders(gbSh, SHEETS.GradeBoundaries);
-    const gbHeaders = _headers(gbSh);
-    const boundaries = _rows(gbSh).map(r => _indexByHeader(r, gbHeaders));
-
-    const normalizeGroup = g => String(g || '')
-      .toLowerCase()
-      .replace(/std\s*/g, '')
-      .replace(/\s+/g, '')
-      .trim();
-    const targetGroup = normalizeGroup(standardGroup);
-    const applicable = boundaries.filter(b => normalizeGroup(b.standardGroup) === targetGroup);
+    const targetGroup = _normalizeStandardGroupLabel_(standardGroup);
+    const idx = _getGradeBoundariesIndex_();
+    const applicable = idx[targetGroup] || [];
 
     if (applicable.length > 0) {
-      // Sort by minPercentage ascending to get the lowest grade band
-      applicable.sort((a, b) => (Number(a.minPercentage) || 0) - (Number(b.minPercentage) || 0));
-      const lowest = applicable[0];
-      return lowest.grade || 'E';
+      // Boundaries are cached sorted DESC; the lowest grade is the last one.
+      const lowest = applicable[applicable.length - 1];
+      return (lowest && lowest.grade) ? lowest.grade : 'E';
     }
 
     // If no boundaries configured, prefer 'E' as the least grade label
     return 'E';
   } catch (error) {
-    Logger.log(`[Lowest Grade ERROR] ${error.toString()}`);
     return 'E';
   }
 }

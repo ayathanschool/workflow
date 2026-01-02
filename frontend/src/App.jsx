@@ -58,6 +58,7 @@ import ThemeToggle from './components/ThemeToggle';
 import { useGoogleAuth } from './contexts/GoogleAuthContext';
 import { ToastProvider, useToast } from './hooks/useToast';
 import { useTheme } from './contexts/ThemeContext';
+import ApiErrorBanner from './components/shared/ApiErrorBanner';
 // import { useRealTimeUpdates } from './hooks/useRealTimeUpdates';
 
 // Lazy load heavy components for better performance
@@ -119,7 +120,22 @@ const App = () => {
 
   useEffect(() => {
     const handler = (e) => {
-      setApiError(e.detail && e.detail.message ? `${e.detail.message}` : String(e.detail || 'API error'));
+      const detail = e && e.detail ? e.detail : null;
+      if (!detail) {
+        setApiError({ message: 'API error' });
+        return;
+      }
+      if (typeof detail === 'string') {
+        setApiError({ message: detail });
+        return;
+      }
+      setApiError({
+        message: detail.message ? String(detail.message) : 'API error',
+        requestId: detail.requestId ? String(detail.requestId) : '',
+        time: detail.time ? String(detail.time) : '',
+        url: detail.url ? String(detail.url) : '',
+        status: detail.status
+      });
     };
     window.addEventListener('api-error', handler);
     return () => window.removeEventListener('api-error', handler);
@@ -215,24 +231,31 @@ const App = () => {
     return s;
   };
 
-  const withSubmit = async (message, fn) => {
-    setSubmitting({ active:true, message });
-    try {
-      const result = await fn();
-      // Use new notification system for success
-      success('Success!', message || 'Operation completed successfully');
-      return result;
-    } catch (err) {
-      console.error('submit error', err);
-      // Use new notification system for errors
-      error('Error!', err?.message || 'An error occurred');
-      // surface as global api-error event so other parts of app can react
-      window.dispatchEvent(new CustomEvent('api-error', { detail: { message: err?.message || String(err) } }));
-      throw err;
-    } finally {
-      setSubmitting({ active:false, message: '' });
-    }
+  const submitInFlightRef = useRef(null);
 
+  const withSubmit = async (message, fn) => {
+    // Prevent accidental double-submits; if clicked twice, return the same in-flight promise.
+    if (submitInFlightRef.current) return submitInFlightRef.current;
+
+    const p = (async () => {
+      setSubmitting({ active:true, message });
+      try {
+        const result = await fn();
+        success('Success!', message || 'Operation completed successfully');
+        return result;
+      } catch (err) {
+        console.error('submit error', err);
+        error('Error!', err?.message || 'An error occurred');
+        window.dispatchEvent(new CustomEvent('api-error', { detail: { message: err?.message || String(err) } }));
+        throw err;
+      } finally {
+        setSubmitting({ active:false, message: '' });
+        submitInFlightRef.current = null;
+      }
+    })();
+
+    submitInFlightRef.current = p;
+    return p;
   };
 
   const ViewModal = () => (
@@ -766,13 +789,20 @@ const App = () => {
 
               if (hasRole('class teacher') && uniqueTeachingClasses.length > 0) {
                 try {
-                  const studentPromises = uniqueTeachingClasses.map(cls => api.getStudents(stripStdPrefix(cls)));
-                  const studentsPerClass = await Promise.all(studentPromises);
-                  uniqueTeachingClasses.forEach((cls, idx) => {
-                    const students = studentsPerClass[idx];
+                  // PERFORMANCE: Batch fetch students for all classes in one API call.
+                  const strippedClasses = uniqueTeachingClasses
+                    .map(cls => stripStdPrefix(cls))
+                    .map(s => String(s || '').trim())
+                    .filter(Boolean);
+
+                  const studentsByClass = await api.getStudentsBatch(strippedClasses).catch(() => ({}));
+
+                  uniqueTeachingClasses.forEach((cls) => {
+                    const stripped = stripStdPrefix(cls);
+                    const students = studentsByClass?.[stripped] || studentsByClass?.[String(stripped || '').trim()] || [];
                     const count = Array.isArray(students) ? students.length : 0;
                     classStudentCounts[cls] = count;
-                    classStudentCounts[stripStdPrefix(cls)] = count;
+                    classStudentCounts[stripped] = count;
                   });
 
                   // Calculate academic performance for class teacher's classes (uses newest exam with marks)
@@ -1373,12 +1403,24 @@ const App = () => {
     const merged = { ...data, roles };
     setLocalUser(merged);
     setUser(merged);
+    try {
+      localStorage.setItem('user', JSON.stringify(merged));
+    } catch (e) {
+      console.warn('Failed to persist user session', e);
+    }
   };
 
   const handleLogout = () => {
     if (googleAuth?.user) googleAuth.logout();
     setLocalUser(null);
     setUser(null);
+    try {
+      localStorage.removeItem('user');
+    } catch (e) {
+      console.warn('Failed to clear user session', e);
+    }
+    // Clear all cached data on logout
+    api.invalidateCache.onLogout();
   };
 
   // Keep root user state in sync when googleAuth.user changes (first login or restore)
@@ -8986,7 +9028,14 @@ const App = () => {
               const id = r.id || r.reportId || `${(r.date||'').toString()}|${r.class||''}|${r.subject||''}|${r.period||''}|${String(r.teacherEmail||'').toLowerCase()}`;
               const onDelete = async () => {
                 if (!id) return alert('Missing report id');
-                if (!confirm('Delete this report? This cannot be undone.')) return;
+                if (!confirm(
+                  `Delete this report? This cannot be undone.\n\n` +
+                  `Date: ${r.date ? new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}\n` +
+                  `Teacher: ${r.teacherName || r.teacherEmail || '-'}\n` +
+                  `Class: ${r.class || '-'}\n` +
+                  `Subject: ${r.subject || '-'}\n` +
+                  `Period: ${r.period || '-'}\n`
+                )) return;
                 try {
                   setDeletingId(id);
                   const res = await api.deleteDailyReport(id, user.email);
@@ -9113,7 +9162,14 @@ const App = () => {
                   const id = r.id || r.reportId || `${(r.date||'').toString()}|${r.class||''}|${r.subject||''}|${r.period||''}|${String(r.teacherEmail||'').toLowerCase()}`;
                   const onDelete = async () => {
                     if (!id) return alert('Missing report id');
-                    if (!confirm('Delete this report? This cannot be undone.')) return;
+                    if (!confirm(
+                      `Delete this report? This cannot be undone.\n\n` +
+                      `Date: ${r.date || '-'}\n` +
+                      `Teacher: ${r.teacherName || r.teacherEmail || '-'}\n` +
+                      `Class: ${r.class || '-'}\n` +
+                      `Subject: ${r.subject || '-'}\n` +
+                      `Period: ${r.period || '-'}\n`
+                    )) return;
                     try {
                       setDeletingId(id);
                       const res = await api.deleteDailyReport(id, user.email);
@@ -9399,7 +9455,13 @@ const App = () => {
                                 const isOwner = String(r.teacherEmail || '').toLowerCase() === String(email || '').toLowerCase();
                                 const onDelete = async () => {
                                   if (!id) return alert('Missing report id');
-                                  if (!confirm('Delete this report? This cannot be undone.')) return;
+                                  if (!confirm(
+                                    `Delete this report? This cannot be undone.\n\n` +
+                                    `Date: ${displayDate || '-'}\n` +
+                                    `Class: ${r.class || '-'}\n` +
+                                    `Subject: ${r.subject || '-'}\n` +
+                                    `Period: ${r.period || '-'}\n`
+                                  )) return;
                                   try {
                                     setDeletingId(id);
                                     const res = await api.deleteDailyReport(id, email);
@@ -9557,11 +9619,7 @@ const App = () => {
     if (!effectiveUser) {
       return (
         <>
-          {apiError && (
-            <div className="fixed top-4 right-4 z-50">
-              <div className="bg-red-100 text-red-800 px-4 py-2 rounded shadow">{apiError}</div>
-            </div>
-          )}
+          <ApiErrorBanner error={apiError} onDismiss={() => setApiError(null)} />
           {googleAuth?.loading && !effectiveUser ? (
             <LoadingSplash message="Restoring session..." />
           ) : (
@@ -9707,14 +9765,7 @@ const App = () => {
         {/* Global submit overlay rendered at app root */}
         <SubmitOverlay />
         <LessonModal />
-        {apiError && (
-          <div className="fixed top-4 right-4 z-50">
-            <div className="bg-red-100 text-red-800 px-4 py-2 rounded shadow flex items-center space-x-3">
-              <div>{apiError}</div>
-              <button onClick={() => setApiError(null)} className="text-sm text-red-600">Dismiss</button>
-            </div>
-          </div>
-        )}
+        <ApiErrorBanner error={apiError} onDismiss={() => setApiError(null)} />
         
         <div className="flex h-screen">
           <Sidebar />

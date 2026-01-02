@@ -118,8 +118,11 @@ function logAudit(params) {
       severity,               // severity
       now                     // createdAt
     ];
-    
-    sh.appendRow(auditRecord);
+
+    // PERF: appendRow() becomes slow as the sheet grows.
+    // Writing directly to the next row via setValues is typically faster and more predictable.
+    const nextRow = Math.max(sh.getLastRow(), 1) + 1;
+    sh.getRange(nextRow, 1, 1, auditRecord.length).setValues([auditRecord]);
     
     // Log to Apps Script console for debugging
     console.log(`AUDIT: ${action} ${entityType} ${entityId} by ${userEmail}`);

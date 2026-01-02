@@ -3,6 +3,7 @@ import {
   Search, Filter, Download, Calendar, DollarSign, Eye,
   ChevronDown, ChevronUp, Printer, X, CheckCircle, XCircle
 } from 'lucide-react';
+  import { confirmDestructive } from '../../utils/confirm';
 
 const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
   const [filters, setFilters] = useState({
@@ -428,7 +429,19 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
                           </button>
                           {!isVoid && onVoidReceipt && (
                             <button
-                              onClick={() => onVoidReceipt(t.receiptNo)}
+                              onClick={() => {
+                                const ok = confirmDestructive({
+                                  title: 'Void this receipt?',
+                                  lines: [
+                                    `Receipt No: ${t.receiptNo}`,
+                                    `Student: ${t.name || '-'} (${t.admNo || '-'})`,
+                                    `Class: ${t.class || '-'}`,
+                                    `Amount: ₹${totalAmount.toLocaleString('en-IN')}`
+                                  ]
+                                });
+                                if (!ok) return;
+                                onVoidReceipt(t.receiptNo);
+                              }}
                               className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors"
                               title="Void Receipt"
                             >
