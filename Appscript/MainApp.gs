@@ -4880,78 +4880,11 @@
       const totalPeriods = periodsPerWeek * teachingWeeks;
       const periodsRemaining = periodsPerWeek * weeksRemaining;
       
-      // Parse events (support old and new structures)
+      // No additional event tracking - use only ExamsHolidaysEventsStart/End from AcademicCalendar
       const events = [];
-      const eventDatesStr = String(termInfo.eventDates || '').trim();
-      const eventNamesStr = String(termInfo.eventNames || '').trim();
-      const eventsStr = String(termInfo.events || '').trim(); // New: comma-separated "YYYY-MM-DD|Name"
-
-      if (eventsStr) {
-        const pairs = eventsStr.split(',').map(x => x.trim()).filter(Boolean);
-        pairs.forEach(pair => {
-          const parts = pair.split('|');
-          const dStr = parts[0] ? parts[0].trim() : '';
-          const name = (parts[1] || '').trim();
-          const eventDate = _coerceToDate(dStr);
-          if (eventDate && eventDate > today) {
-            const eventDayName = _dayNameIST(eventDate);
-            const affectedPeriods = teacherPeriods.filter(p => (p.dayOfWeek || '').toLowerCase() === eventDayName.toLowerCase());
-            if (affectedPeriods.length > 0) {
-              events.push({ date: _isoDateIST(eventDate), name, periodsLost: affectedPeriods.length });
-            }
-          }
-        });
-      } else {
-        // Fallback: separate eventDates + eventNames columns
-        const eventDates = eventDatesStr ? eventDatesStr.split(',').map(d => d.trim()) : [];
-        const eventNames = eventNamesStr ? eventNamesStr.split(',').map(n => n.trim()) : [];
-        for (let i = 0; i < Math.min(eventDates.length, eventNames.length); i++) {
-          const eventDate = _coerceToDate(eventDates[i]);
-          if (eventDate && eventDate > today) {
-            const eventDayName = _dayNameIST(eventDate);
-            const affectedPeriods = teacherPeriods.filter(p => (p.dayOfWeek || '').toLowerCase() === eventDayName.toLowerCase());
-            if (affectedPeriods.length > 0) {
-              events.push({ date: _isoDateIST(eventDate), name: eventNames[i], periodsLost: affectedPeriods.length });
-            }
-          }
-        }
-      }
-
-      // Add explicit exam days impact if provided
-      const examDatesStr = String(termInfo.examDates || '').trim(); // New: comma-separated ISO dates
-      if (examDatesStr) {
-        const examDates = examDatesStr.split(',').map(s => s.trim()).filter(Boolean);
-        examDates.forEach(dStr => {
-          const d = _coerceToDate(dStr);
-          if (d && d > today) {
-            const eventDayName = _dayNameIST(d);
-            const affectedPeriods = teacherPeriods.filter(p => (p.dayOfWeek || '').toLowerCase() === eventDayName.toLowerCase());
-            if (affectedPeriods.length > 0) {
-              events.push({ date: _isoDateIST(d), name: 'Exam Day', periodsLost: affectedPeriods.length });
-            }
-          }
-        });
-      }
-
-      // Add holiday impact if provided
-      const holidaysStr = String(termInfo.holidays || '').trim(); // New: comma-separated ISO dates
-      if (holidaysStr) {
-        const holidays = holidaysStr.split(',').map(s => s.trim()).filter(Boolean);
-        holidays.forEach(dStr => {
-          const d = _coerceToDate(dStr);
-          if (d && d > today) {
-            const eventDayName = _dayNameIST(d);
-            const affectedPeriods = teacherPeriods.filter(p => (p.dayOfWeek || '').toLowerCase() === eventDayName.toLowerCase());
-            if (affectedPeriods.length > 0) {
-              events.push({ date: _isoDateIST(d), name: 'Holiday', periodsLost: affectedPeriods.length });
-            }
-          }
-        });
-      }
-      
-      const totalPeriodsLost = events.reduce((sum, e) => sum + e.periodsLost, 0);
-      const usablePeriods = totalPeriods - totalPeriodsLost - Math.ceil(totalPeriods * 0.05); // 5% buffer
-      const usablePeriodsRemaining = periodsRemaining - totalPeriodsLost;
+      const totalPeriodsLost = 0;
+      const usablePeriods = totalPeriods - Math.ceil(totalPeriods * 0.05); // 5% buffer
+      const usablePeriodsRemaining = periodsRemaining;
       
       // 4. Get Syllabus requirements
       const syllabusData = _getCachedSheetData('Syllabus');

@@ -471,8 +471,9 @@ function _calculateLessonPlanningDateRange() {
       // Skip rows without a valid term name, startDate, or endDate
       if (!term.term || !String(term.term).trim() || !term.startDate || !term.endDate) continue;
       
-      const termStart = new Date(term.startDate);
-      const termEnd = new Date(term.endDate);
+      const termStart = _coerceToDate(term.startDate);
+      const termEnd = _coerceToDate(term.endDate);
+      if (!termStart || !termEnd) continue; // Skip if dates couldn't be parsed
       termStart.setHours(0, 0, 0, 0);
       termEnd.setHours(0, 0, 0, 0);
       
