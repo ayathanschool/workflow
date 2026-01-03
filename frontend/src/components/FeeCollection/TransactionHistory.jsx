@@ -3,9 +3,29 @@ import {
   Search, Filter, Download, Calendar, DollarSign, Eye,
   ChevronDown, ChevronUp, Printer, X, CheckCircle, XCircle
 } from 'lucide-react';
-  import { confirmDestructive } from '../../utils/confirm';
+import { confirmDestructive } from '../../utils/confirm';
 
 const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
+  const TIME_ZONE = 'Asia/Kolkata';
+  const toYMDInTimeZone = (dateInput, timeZone = TIME_ZONE) => {
+    if (!dateInput) return '';
+    const date = dateInput instanceof Date ? dateInput : new Date(dateInput);
+    if (Number.isNaN(date.getTime())) return '';
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).formatToParts(date);
+    const year = parts.find(p => p.type === 'year')?.value;
+    const month = parts.find(p => p.type === 'month')?.value;
+    const day = parts.find(p => p.type === 'day')?.value;
+    if (!year || !month || !day) return '';
+    return `${year}-${month}-${day}`;
+  };
+
+  const normalizeText = (value) => String(value ?? '').trim();
+
   const [filters, setFilters] = useState({
     search: '',
     class: '',
@@ -23,13 +43,17 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
   const [selectedReceipt, setSelectedReceipt] = useState(null);
 
   // Get unique values for filters
-  const classes = [...new Set((transactions || []).map(t => t.class))].filter(Boolean).sort();
-  const feeHeads = [...new Set((transactions || []).map(t => t.feeHead))].filter(Boolean).sort();
-  const modes = [...new Set((transactions || []).map(t => t.mode))].filter(Boolean).sort();
+  const classes = [...new Set((transactions || []).map(t => normalizeText(t.class)))].filter(Boolean).sort();
+  const feeHeads = [...new Set((transactions || []).map(t => normalizeText(t.feeHead)))].filter(Boolean).sort();
+  const modes = [...new Set((transactions || []).map(t => normalizeText(t.mode)))].filter(Boolean).sort();
 
   // Apply filters
   const filteredTransactions = (transactions || [])
     .filter(t => {
+      const tClass = normalizeText(t.class);
+      const tFeeHead = normalizeText(t.feeHead);
+      const tMode = normalizeText(t.mode);
+
       // Search filter
       if (filters.search) {
         const term = filters.search.toLowerCase();
@@ -37,18 +61,18 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
           String(t.admNo).toLowerCase().includes(term) ||
           t.name?.toLowerCase().includes(term) ||
           t.receiptNo?.toLowerCase().includes(term) ||
-          t.class?.toLowerCase().includes(term)
+          tClass.toLowerCase().includes(term)
         )) return false;
       }
 
       // Class filter
-      if (filters.class && t.class !== filters.class) return false;
+      if (filters.class && tClass !== filters.class) return false;
 
       // Fee head filter
-      if (filters.feeHead && t.feeHead !== filters.feeHead) return false;
+      if (filters.feeHead && tFeeHead !== filters.feeHead) return false;
 
       // Mode filter
-      if (filters.mode && t.mode !== filters.mode) return false;
+      if (filters.mode && tMode !== filters.mode) return false;
 
       // Status filter
       const isVoid = String(t.void || '').toUpperCase().startsWith('Y');
@@ -56,8 +80,13 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
       if (filters.status === 'voided' && !isVoid) return false;
 
       // Date range
-      if (filters.dateFrom && t.date < filters.dateFrom) return false;
-      if (filters.dateTo && t.date > filters.dateTo) return false;
+      // IMPORTANT: Google Sheets dates often come as UTC midnight-ish timestamps (e.g. 2026-01-02T18:30Z)
+      // which represents 2026-01-03 in IST. So we must compare using the IST date.
+      if (filters.dateFrom || filters.dateTo) {
+        const transactionYMD = toYMDInTimeZone(t.date);
+        if (filters.dateFrom && transactionYMD < filters.dateFrom) return false;
+        if (filters.dateTo && transactionYMD > filters.dateTo) return false;
+      }
 
       // Amount range
       const totalAmount = (Number(t.amount) || 0) + (Number(t.fine) || 0);
@@ -69,7 +98,9 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
     .sort((a, b) => {
       let comparison = 0;
       if (sortBy === 'date') {
-        comparison = (a.date || '').localeCompare(b.date || '');
+        const aTime = a.date ? new Date(a.date).getTime() : 0;
+        const bTime = b.date ? new Date(b.date).getTime() : 0;
+        comparison = aTime - bTime;
       } else if (sortBy === 'amount') {
         const aTotal = (Number(a.amount) || 0) + (Number(a.fine) || 0);
         const bTotal = (Number(b.amount) || 0) + (Number(b.fine) || 0);
@@ -103,19 +134,29 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
     });
   };
 
+  const filterToday = () => {
+    const today = toYMDInTimeZone(new Date());
+    setFilters(prev => ({
+      ...prev,
+      dateFrom: today,
+      dateTo: today
+    }));
+    setShowFilters(false); // Close filters panel
+  };
+
   const exportToCSV = () => {
     const headers = ['Date', 'Receipt No', 'Adm No', 'Student Name', 'Class', 'Fee Head', 'Amount', 'Fine', 'Total', 'Mode', 'Status'];
     const rows = filteredTransactions.map(t => [
-      t.date,
+      toYMDInTimeZone(t.date),
       t.receiptNo,
       t.admNo,
       t.name,
-      t.class,
-      t.feeHead,
+      normalizeText(t.class),
+      normalizeText(t.feeHead),
       t.amount,
       t.fine,
       (Number(t.amount) || 0) + (Number(t.fine) || 0),
-      t.mode,
+      normalizeText(t.mode),
       String(t.void || '').toUpperCase().startsWith('Y') ? 'Voided' : 'Valid'
     ]);
 
@@ -124,7 +165,7 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `transactions_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `transactions_${toYMDInTimeZone(new Date())}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -154,6 +195,14 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={filterToday}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2"
+            title="Filter today's transactions"
+          >
+            <Calendar className="h-4 w-4" />
+            Today
+          </button>
           <button
             onClick={() => setShowFilters(!showFilters)}
             className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
@@ -356,6 +405,12 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
                     )}
                   </div>
                 </th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                  Fine
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                  Total
+                </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                   Mode
                 </th>
@@ -367,7 +422,7 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               {filteredTransactions.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
+                  <td colSpan="9" className="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
                     No transactions found
                   </td>
                 </tr>
@@ -384,7 +439,7 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
                       }`}
                     >
                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                        {t.date ? new Date(t.date).toLocaleDateString() : '-'}
+                        {t.date ? new Date(t.date).toLocaleDateString('en-IN', { timeZone: TIME_ZONE }) : '-'}
                       </td>
                       <td className="px-4 py-3 text-sm font-mono font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
                         {t.receiptNo}
@@ -404,14 +459,13 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
                         {t.feeHead}
                       </td>
                       <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                        <div>
-                          <p className="font-semibold">₹{totalAmount.toLocaleString('en-IN')}</p>
-                          {t.fine > 0 && (
-                            <p className="text-xs text-orange-600 dark:text-orange-400">
-                              (+ ₹{Number(t.fine).toLocaleString('en-IN')} fine)
-                            </p>
-                          )}
-                        </div>
+                        ₹{Number(t.amount).toLocaleString('en-IN')}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right text-orange-600 dark:text-orange-400 whitespace-nowrap font-medium">
+                        {Number(t.fine) > 0 ? `₹${Number(t.fine).toLocaleString('en-IN')}` : '-'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right font-semibold text-green-600 dark:text-green-400 whitespace-nowrap">
+                        ₹{totalAmount.toLocaleString('en-IN')}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
                         <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
