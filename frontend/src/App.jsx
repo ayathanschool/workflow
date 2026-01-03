@@ -5226,7 +5226,8 @@ const App = () => {
       try {
         console.debug('🔵 Single approval - lpId:', lpId, 'status:', status);
         setRowSubmitting(prev => ({ ...prev, [lpId]: true }));
-        const response = await api.updateLessonPlanStatus(lpId, status);
+        const requesterEmail = memoizedUser?.email || '';
+        const response = await api.updateLessonPlanStatus(lpId, status, '', requesterEmail);
         console.debug('🔵 Single approval response:', response);
         
         // Check for error in response

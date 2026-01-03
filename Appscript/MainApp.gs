@@ -2268,13 +2268,29 @@
   function _handleUpdateLessonPlanStatus(data) {
     try {
       Logger.log(`Updating lesson plan status: ${JSON.stringify(data)}`);
-      const { lpId, status, reviewComments, remarks } = data;
+      const { lpId, status, reviewComments, remarks, requesterEmail } = data;
       
       // Accept either reviewComments or remarks (frontend compatibility)
       const comments = reviewComments || remarks || '';
       
       if (!lpId || !status) {
         return _respond({ error: 'Lesson plan ID and status are required' });
+      }
+      
+      // ROLE CHECK: Only HM or Super Admin can approve lesson plans (status='Ready')
+      if (status === 'Ready') {
+        if (!requesterEmail) {
+          Logger.log('AUTHORIZATION FAILED: No requester email provided for approval');
+          return _respond({ error: 'Authorization required: User email must be provided for approval' });
+        }
+        
+        const isAuthorized = _isHMOrSuperAdminSafe(requesterEmail);
+        if (!isAuthorized) {
+          Logger.log(`AUTHORIZATION FAILED: User ${requesterEmail} is not HM or Super Admin`);
+          return _respond({ error: 'Unauthorized: Only Headmaster or Super Admin can approve lesson plans' });
+        }
+        
+        Logger.log(`✅ Authorization passed: ${requesterEmail} is HM or Super Admin`);
       }
       
       const sh = _getSheet('LessonPlans');
@@ -6154,21 +6170,20 @@
         return _respond({ success: false, error: 'Invalid target status' });
       }
 
-      // Optional HM role enforcement if requesterEmail provided (robust via helper)
-      try {
-        if (requesterEmail) {
-          var isHM = false;
-          try {
-            isHM = (typeof userHasRole === 'function' && (userHasRole(requesterEmail, 'hm') || userHasRole(requesterEmail, 'headmaster')));
-          } catch (ee) { isHM = false; }
-          if (!isHM) {
-            var roleInfo = {};
-            try { roleInfo = (typeof debugUserRoles === 'function') ? debugUserRoles(requesterEmail) : {}; } catch (di) { roleInfo = { debugError: di && di.message ? di.message : String(di) }; }
-            return _respond({ success: false, error: 'Not authorized for bulk approvals (HM required)', roleInfo: roleInfo });
-          }
+      // ROLE CHECK: Only HM or Super Admin can perform bulk approvals
+      if (targetStatus === 'Ready') {
+        if (!requesterEmail) {
+          Logger.log('[BulkChapter] AUTHORIZATION FAILED: No requester email provided for approval');
+          return _respond({ success: false, error: 'Authorization required: User email must be provided for approval' });
         }
-      } catch (eRole) {
-        Logger.log(`[BulkChapter] role check warning: ${eRole && eRole.message}`);
+        
+        const isAuthorized = _isHMOrSuperAdminSafe(requesterEmail);
+        if (!isAuthorized) {
+          Logger.log(`[BulkChapter] AUTHORIZATION FAILED: User ${requesterEmail} is not HM or Super Admin`);
+          return _respond({ success: false, error: 'Unauthorized: Only Headmaster or Super Admin can approve lesson plans' });
+        }
+        
+        Logger.log(`[BulkChapter] ✅ Authorization passed: ${requesterEmail} is HM or Super Admin`);
       }
 
       // For approval to Ready, require completeness of chapter

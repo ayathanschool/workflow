@@ -102,7 +102,8 @@ export default function HMLessonPlanApproval({ currentUser }) {
     setBulkState({ working: true, result: null });
     try {
       const ids = Array.from(selection);
-      const res = await batchUpdateLessonPlanStatus(ids, 'Ready', 'Approved');
+      const requesterEmail = currentUser?.email || '';
+      const res = await batchUpdateLessonPlanStatus(ids, 'Ready', 'Approved', requesterEmail);
       const unwrapped = res && (res.data || res);
       const ok = !!(unwrapped && (unwrapped.success || unwrapped.ok));
       setBulkState({ working: false, result: unwrapped });
