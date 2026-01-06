@@ -4104,6 +4104,7 @@ const App = () => {
     const [paceTracking, setPaceTracking] = useState(null);
     const [loadingPaceTracking, setLoadingPaceTracking] = useState(false);
     const [selectedPeriod, setSelectedPeriod] = useState(null);
+    const [focusPeriodOverride, setFocusPeriodOverride] = useState(null);
 
     const [lessonPlansToday, setLessonPlansToday] = useState([]);
     const [loadingLessonPlansToday, setLoadingLessonPlansToday] = useState(false);
@@ -4285,6 +4286,13 @@ const App = () => {
 
   const currentPeriod = getCurrentPeriod();
 
+  // Keep focus period aligned to the live period unless user overrides via Prev/Next.
+  useEffect(() => {
+    if (focusPeriodOverride != null) return;
+    if (currentPeriod == null) return;
+    // No-op: focus is derived below. (Hook retained for future-proofing.)
+  }, [currentPeriod, focusPeriodOverride]);
+
   // Lazy-load lesson plans for today so we can show chapter/session in live and selected periods.
   useEffect(() => {
     const shouldLoad = Boolean(currentPeriod || selectedPeriod);
@@ -4439,7 +4447,9 @@ const App = () => {
         
         {/* Live Period - Class-wise View Only */}
         {(() => {
-          const focusPeriod = currentPeriod || 1;
+          const MIN_PERIOD = 1;
+          const MAX_PERIOD = 8;
+          const focusPeriod = (focusPeriodOverride != null ? focusPeriodOverride : currentPeriod) || 1;
           const periodRows = (dailyReportsData?.reports || [])
             .filter(r => String(r?.period || '').trim() === String(focusPeriod))
             .sort((a, b) => {
@@ -4472,9 +4482,33 @@ const App = () => {
                     {new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})} • Last updated: {lastRefresh.toLocaleTimeString()}
                   </p>
                 </div>
-                {loadingLessonPlansToday && (
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Loading lesson plans…</div>
-                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setFocusPeriodOverride(prev => {
+                      const base = (prev != null ? prev : (currentPeriod || 1));
+                      return Math.max(MIN_PERIOD, Number(base || 1) - 1);
+                    })}
+                    disabled={focusPeriod <= MIN_PERIOD}
+                    className="px-3 py-2 border rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                    title="Previous period"
+                  >
+                    Prev
+                  </button>
+                  <button
+                    onClick={() => setFocusPeriodOverride(prev => {
+                      const base = (prev != null ? prev : (currentPeriod || 1));
+                      return Math.min(MAX_PERIOD, Number(base || 1) + 1);
+                    })}
+                    disabled={focusPeriod >= MAX_PERIOD}
+                    className="px-3 py-2 border rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                    title="Next period"
+                  >
+                    Next
+                  </button>
+                  {loadingLessonPlansToday && (
+                    <div className="text-xs text-gray-500 dark:text-gray-400">Loading lesson plans…</div>
+                  )}
+                </div>
               </div>
 
               {dailyReportsData.reports.length === 0 && (
@@ -4517,6 +4551,10 @@ const App = () => {
                     const subject = row?.subject || '';
                     const cls = row?.class || '';
                     const isSubmitted = row?.submitted || false;
+                    const isSubstitutionPeriod =
+                      row?.isSubstitution === true ||
+                      String(row?.isSubstitution || '').toLowerCase() === 'true' ||
+                      (row?.absentTeacher && String(row.absentTeacher).trim() !== '');
 
                     return (
                       <div
@@ -4533,6 +4571,10 @@ const App = () => {
                           isSubmitted
                             ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-900/40'
                             : 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-900/40'
+                        } ${
+                          isSubstitutionPeriod
+                            ? 'ring-2 ring-amber-400 dark:ring-amber-500 ring-inset'
+                            : ''
                         }`}
                       >
                         {/* Mobile: Vertical card layout */}
@@ -4674,12 +4716,20 @@ const App = () => {
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {periodClasses.map((classData, idx) => (
+                        (() => {
+                          const isSubstitutionPeriod =
+                            classData?.isSubstitution === true ||
+                            String(classData?.isSubstitution || '').toLowerCase() === 'true' ||
+                            (classData?.absentTeacher && String(classData.absentTeacher).trim() !== '');
+                          return (
                         <div 
                           key={idx}
                           className={`border-2 rounded-lg p-4 transition-all hover:shadow-md ${
                             classData.submitted 
                               ? 'border-green-300 bg-green-50' 
                               : 'border-orange-300 bg-orange-50'
+                          } ${
+                            isSubstitutionPeriod ? 'ring-2 ring-amber-400 ring-inset' : ''
                           }`}
                         >
                           <div className="flex justify-between items-start mb-2">
@@ -4723,6 +4773,8 @@ const App = () => {
                             )}
                           </div>
                         </div>
+                          );
+                        })()
                       ))}
                     </div>
                   </div>
