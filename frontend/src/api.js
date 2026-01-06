@@ -25,6 +25,49 @@ export { invalidateCache }; // Export for components to use
 const __DEV_LOG__ = !!import.meta.env.DEV && (import.meta.env.VITE_VERBOSE_API === 'true');
 const devLog = (...args) => { if (__DEV_LOG__) console.log('[api]', ...args); };
 
+function _getStoredGoogleSession() {
+  try {
+    if (typeof window === 'undefined') return null;
+    const raw = window.localStorage.getItem('sf_google_session');
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function _getStoredAuthToken() {
+  const s = _getStoredGoogleSession();
+  return s && s.idToken ? String(s.idToken) : '';
+}
+
+function _getStoredAuthEmail() {
+  const s = _getStoredGoogleSession();
+  const email = s && s.user && s.user.email ? String(s.user.email) : '';
+  return email ? email.toLowerCase() : '';
+}
+
+function _urlHasToken(url) {
+  try {
+    return /[?&](token|idToken|id_token)=/i.test(String(url || ''));
+  } catch {
+    return false;
+  }
+}
+
+function _appendTokenToUrl(url, token) {
+  if (!token) return url;
+  if (_urlHasToken(url)) return url;
+  const sep = String(url).includes('?') ? '&' : '?';
+  return `${url}${sep}token=${encodeURIComponent(token)}`;
+}
+
+function _cacheKeyForUrl(url) {
+  const email = _getStoredAuthEmail();
+  // Keep caches stable across token refresh by keying on user email.
+  return email ? `${url}::auth=${encodeURIComponent(email)}` : url;
+}
+
 function normalizeClassParam(value) {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
@@ -80,14 +123,18 @@ async function getJSON(url, cacheDuration = CACHE_DURATION) {
   perfMonitor.mark(startMark);
   const requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const requestTime = new Date().toISOString();
+
+  const authToken = _getStoredAuthToken();
+  const fetchUrl = _appendTokenToUrl(url, authToken);
+  const cacheKey = _cacheKeyForUrl(url);
   
   // Skip caching for NO_CACHE requests
   if (cacheDuration === NO_CACHE) {
-    const inflightKey = `NO_CACHE:${url}`;
+    const inflightKey = `NO_CACHE:${cacheKey}`;
     return withInFlight(inflightKey, async () => {
-      devLog('GET (no cache)', url);
+      devLog('GET (no cache)', fetchUrl);
       try {
-        const res = await fetch(url, { method: 'GET' });
+        const res = await fetch(fetchUrl, { method: 'GET' });
         if (!res.ok) {
           const text = await res.text().catch(() => '');
           throw new Error(`HTTP ${res.status} ${text}`);
@@ -96,9 +143,9 @@ async function getJSON(url, cacheDuration = CACHE_DURATION) {
         perfMonitor.measure(startMark, `GET ${url.split('?')[0]}`);
         return data;
       } catch (err) {
-        console.error('API GET failed', url, err);
+        console.error('API GET failed', fetchUrl, err);
         if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url, requestId, time: requestTime } }));
+          window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url: fetchUrl, requestId, time: requestTime } }));
         }
         throw new Error(`Failed to fetch ${url}: ${String(err && err.message ? err.message : err)}`);
       }
@@ -106,16 +153,16 @@ async function getJSON(url, cacheDuration = CACHE_DURATION) {
   }
 
   // Check if we have a cached response
-  const cached = enhancedCache.get(url, 'GET');
+  const cached = enhancedCache.get(cacheKey, 'GET');
   if (cached) {
     perfMonitor.measure(startMark, `GET (cached) ${url.split('?')[0]}`);
     return cached;
   }
   
   // Check if request is already in-flight (deduplication)
-  const pending = enhancedCache.getPendingRequest(url, 'GET');
+  const pending = enhancedCache.getPendingRequest(cacheKey, 'GET');
   if (pending) {
-    devLog('GET (dedupe)', url);
+    devLog('GET (dedupe)', fetchUrl);
     perfMonitor.measure(startMark, `GET (deduped) ${url.split('?')[0]}`);
     return pending;
   }
@@ -123,8 +170,8 @@ async function getJSON(url, cacheDuration = CACHE_DURATION) {
   // Make new request and register it as pending
   const requestPromise = (async () => {
     try {
-      devLog('GET (fetch)', url);
-      const res = await fetch(url, { method: 'GET' });
+      devLog('GET (fetch)', fetchUrl);
+      const res = await fetch(fetchUrl, { method: 'GET' });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
         throw new Error(`HTTP ${res.status} ${text}`);
@@ -132,21 +179,21 @@ async function getJSON(url, cacheDuration = CACHE_DURATION) {
       const data = await res.json();
       
       // Cache the result
-      enhancedCache.set(url, data, 'GET');
+      enhancedCache.set(cacheKey, data, 'GET');
       perfMonitor.measure(startMark, `GET (fresh) ${url.split('?')[0]}`);
       
       return data;
     } catch (err) {
-      console.error('API GET failed', url, err);
+      console.error('API GET failed', fetchUrl, err);
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url, requestId, time: requestTime } }));
+        window.dispatchEvent(new CustomEvent('api-error', { detail: { message: String(err.message || err), url: fetchUrl, requestId, time: requestTime } }));
       }
       throw new Error(`Failed to fetch ${url}: ${String(err && err.message ? err.message : err)}`);
     }
   })();
   
   // Register as pending and return
-  return enhancedCache.setPendingRequest(url, requestPromise, 'GET');
+  return enhancedCache.setPendingRequest(cacheKey, requestPromise, 'GET');
 }
 
 async function postJSON(url, payload) {
@@ -154,6 +201,15 @@ async function postJSON(url, payload) {
   perfMonitor.mark(startMark);
   const requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const requestTime = new Date().toISOString();
+
+  // Attach token to payload (Apps Script reads from body, avoids preflight).
+  try {
+    const token = _getStoredAuthToken();
+    if (token && payload && typeof payload === 'object') {
+      const hasToken = !!(payload.token || payload.id_token || payload.idToken);
+      if (!hasToken) payload.token = token;
+    }
+  } catch {}
   
   // Smart cache invalidation using enhanced cache
   const action = payload?.action || '';
@@ -483,13 +539,14 @@ export async function getPlannedLessonsForDate(email, date) {
 
 // BATCH: Get teacher's full daily data (timetable + reports) in ONE call
 // Performance: Reduces 2 API calls to 1 call
+// IMPORTANT: NO_CACHE because reports change frequently during the day
 export async function getTeacherDailyData(email, date) {
   const q = new URLSearchParams({
     action: "getTeacherDailyData",
     email,
     date
   });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
   return result?.data || result || { success: false, timetable: {}, reports: [] };
 }
 
@@ -704,6 +761,64 @@ export async function addSubstitution(data) {
 
 export async function deleteSubstitution(substitutionId) {
   return postJSON(`${BASE_URL}?action=deleteSubstitution`, { substitutionId })
+}
+
+// ===== PERIOD EXCHANGE FUNCTIONS =====
+export async function createPeriodExchange(exchangeData) {
+  const params = new URLSearchParams({
+    action: 'createPeriodExchange',
+    date: exchangeData.date,
+    teacher1Email: exchangeData.teacher1Email,
+    teacher1Name: exchangeData.teacher1Name,
+    period1: exchangeData.period1,
+    class1: exchangeData.class1,
+    subject1: exchangeData.subject1,
+    teacher2Email: exchangeData.teacher2Email,
+    teacher2Name: exchangeData.teacher2Name,
+    period2: exchangeData.period2,
+    class2: exchangeData.class2,
+    subject2: exchangeData.subject2,
+    note: exchangeData.note || '',
+    createdBy: exchangeData.createdBy
+  });
+  const response = await getJSON(`${BASE_URL}?${params.toString()}`);
+  return response?.data || response;
+}
+
+export async function getPeriodExchangesForDate(date) {
+  const params = new URLSearchParams({
+    action: 'getPeriodExchangesForDate',
+    date
+  });
+  const response = await getJSON(`${BASE_URL}?${params.toString()}`);
+  return response?.data || response;
+}
+
+export async function deletePeriodExchange(exchangeData) {
+  const params = new URLSearchParams({
+    action: 'deletePeriodExchange',
+    date: exchangeData.date,
+    teacher1Email: exchangeData.teacher1Email,
+    teacher2Email: exchangeData.teacher2Email,
+    period1: exchangeData.period1,
+    period2: exchangeData.period2
+  });
+  const response = await getJSON(`${BASE_URL}?${params.toString()}`);
+  return response?.data || response;
+}
+
+// Substitution reporting helper: suggest Ready lesson plans for teacher+class+subject
+export async function getSuggestedPlansForSubstitution(teacherEmail, cls, subject, date = '', period = '') {
+  const params = new URLSearchParams({
+    action: 'getSuggestedPlansForSubstitution',
+    teacherEmail,
+    class: cls,
+    subject
+  });
+  if (date) params.set('date', date);
+  if (period !== '' && period !== null && period !== undefined) params.set('period', String(period));
+  const response = await getJSON(`${BASE_URL}?${params.toString()}`, NO_CACHE);
+  return response?.data || response;
 }
 
 // HM Insights (basic)

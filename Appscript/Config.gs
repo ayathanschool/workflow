@@ -8,14 +8,34 @@
  * Set GEMINI_API_KEY to enable AI-generated lesson plan suggestions
  * Get your free API key from: https://aistudio.google.com/app/apikey
  */
-const GEMINI_API_KEY = 'AIzaSyB-5NtZuNY5h4JfnCkO3WO7yv2_OGWmMrM';
-const AI_SUGGESTIONS_ENABLED = true; // Set to false to disable AI features
+// SECURITY: Never hardcode secrets in source control.
+// Configure this in Apps Script: Project Settings → Script Properties
+// Key: GEMINI_API_KEY
+const GEMINI_API_KEY = (function () {
+  try {
+    return String(PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY') || '').trim();
+  } catch (_e) {
+    return '';
+  }
+})();
+
+// Enable AI features only when a key is configured.
+const AI_SUGGESTIONS_ENABLED = !!GEMINI_API_KEY; // Set to false to disable AI features
 
 /**
- * Your Google Spreadsheet ID (staging)
- * NOTE: For production, update this in the prod Apps Script deployment.
+ * Your Google Spreadsheet ID
+ *
+ * Production: set Script Property `SPREADSHEET_ID`.
+ * Fallback: this hardcoded ID remains for backwards compatibility.
  */
-const SPREADSHEET_ID = '1PWD9XxQlnYcIgZqgY4LcnM4YgG0ciAtAYRVhv6lWKRg';
+const SPREADSHEET_ID = (function () {
+  try {
+    var id = String(PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID') || '').trim();
+    if (id) return id;
+  } catch (_e) {}
+  // Legacy fallback (previous staging/default spreadsheet)
+  return '1PWD9XxQlnYcIgZqgY4LcnM4YgG0ciAtAYRVhv6lWKRg';
+})();
 
 /**
  * All the sheets (tabs) in your spreadsheet and what columns they have
@@ -46,9 +66,10 @@ const SHEETS = {
   // System will skip these date ranges when showing available lesson plan dates
   AcademicCalendar: ['term','startDate','endDate','ExamsHolidaysEventsStart','ExamsHolidaysEventsEnd'],
   
-  // === SUBSTITUTION SYSTEM (2 sheets) ===  
+  // === SUBSTITUTION SYSTEM (3 sheets) ===  
   Substitutions: ['date','period','class','absentTeacher','regularSubject','substituteTeacher','substituteSubject','note','acknowledged','acknowledgedBy','acknowledgedAt','createdAt'],
   SubstitutionNotifications: ['id','recipient','title','message','type','data','acknowledged','acknowledgedAt','createdAt'],
+  PeriodExchanges: ['date','teacher1Email','teacher1Name','period1','class1','subject1','teacher2Email','teacher2Name','period2','class2','subject2','note','createdBy','createdAt'],
   
   // === EXAM MANAGEMENT (5 sheets) ===
   Exams: ['examId','creatorEmail','creatorName','class','subject','examType','hasInternalMarks','internalMax','externalMax','totalMax','date','createdAt','examName'],

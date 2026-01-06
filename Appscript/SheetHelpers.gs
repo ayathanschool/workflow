@@ -1207,6 +1207,59 @@ function _verifyGoogleIdToken(idToken, expectedClientId) {
   }
 }
 
+function _verifyGoogleAccessToken(accessToken, expectedClientId) {
+  try {
+    if (!accessToken) return { success: false, error: 'Missing access_token' };
+
+    // tokeninfo for access tokens
+    var tokenInfoUrl = 'https://oauth2.googleapis.com/tokeninfo?access_token=' + encodeURIComponent(accessToken);
+    var tokenRes = UrlFetchApp.fetch(tokenInfoUrl, { muteHttpExceptions: true, method: 'get' });
+    var tokenStatus = tokenRes.getResponseCode();
+    if (tokenStatus < 200 || tokenStatus >= 300) {
+      return { success: false, error: 'Tokeninfo request failed', status: tokenStatus, body: tokenRes.getContentText() };
+    }
+    var info = JSON.parse(tokenRes.getContentText() || '{}');
+
+    // Best-effort client/audience check (fields differ between token types)
+    if (expectedClientId) {
+      var issuedTo = String(info.issued_to || '');
+      var audience = String(info.audience || info.aud || '');
+      if (issuedTo && issuedTo !== expectedClientId) {
+        return { success: false, error: 'Invalid issued_to', issued_to: issuedTo };
+      }
+      if (!issuedTo && audience && audience !== expectedClientId) {
+        return { success: false, error: 'Invalid audience', aud: audience };
+      }
+    }
+
+    // Fetch user profile (email) using the access token
+    var userinfoRes = UrlFetchApp.fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      muteHttpExceptions: true,
+      method: 'get',
+      headers: { Authorization: 'Bearer ' + accessToken }
+    });
+    var us = userinfoRes.getResponseCode();
+    if (us < 200 || us >= 300) {
+      return { success: false, error: 'Userinfo request failed', status: us, body: userinfoRes.getContentText() };
+    }
+    var profile = JSON.parse(userinfoRes.getContentText() || '{}');
+    var email = String(profile.email || '').toLowerCase();
+    var emailVerified = String(profile.email_verified || profile.verified_email || '').toLowerCase();
+    if (!email) {
+      return { success: false, error: 'Email missing in token' };
+    }
+
+    return {
+      success: true,
+      tokenInfo: { tokeninfo: info, userinfo: profile },
+      email: email,
+      emailVerified: emailVerified === 'true' || emailVerified === '1'
+    };
+  } catch (e) {
+    return { success: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
 function _getUserByEmail(email) {
   try {
     var sh = _getSheet('Users');
@@ -1227,16 +1280,46 @@ function _getUserByEmail(email) {
   }
 }
 
+// Helper: Get teacher display name from Users sheet (with caching)
+function _getTeacherDisplayName(email) {
+  if (!email) return '';
+  var emailLower = String(email).toLowerCase().trim();
+  if (!emailLower) return '';
+  
+  // Check cache first
+  var cacheKey = 'teacher_name_' + emailLower;
+  var cached = getCachedData(cacheKey, null, 0); // Check only, don't fetch
+  if (cached) return cached;
+  
+  // Lookup in Users sheet
+  var user = _getUserByEmail(emailLower);
+  var displayName = user && user.name ? user.name : emailLower;
+  
+  // Cache for 15 minutes (names rarely change)
+  try {
+    CacheService.getScriptCache().put(cacheKey, displayName, 900);
+  } catch (e) {
+    // Cache failure is non-critical
+  }
+  
+  return displayName;
+}
+
 // Public helper: verify token and return user profile + roles
 function verifyGoogleLogin(idToken) {
   try {
     var settings = _getCachedSettings();
     var expectedClientId = settings['GOOGLE_OAUTH_CLIENT_ID'] || '';
+    // Accept either ID token (JWT) or OAuth access token.
+    // Frontend may provide an access_token depending on login flow.
     var check = _verifyGoogleIdToken(idToken, expectedClientId);
+    if (!check.success) {
+      check = _verifyGoogleAccessToken(idToken, expectedClientId);
+    }
     if (!check.success) return { success: false, error: check.error || 'Token verification failed', details: check };
     var user = _getUserByEmail(check.email);
     if (!user) return { success: false, error: 'User not found in directory', email: check.email };
-    return { success: true, user: user, emailVerified: check.emailVerified };
+    return { success: true, user: user, email: check.email, emailVerified: check.emailVerified, tokenInfo: check.tokenInfo || null };
   } catch (e) {
     return { success: false, error: e && e.message ? e.message : String(e) };
   }

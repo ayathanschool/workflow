@@ -40,8 +40,14 @@ export async function warmupCache(user) {
  */
 export async function warmupBackendCache() {
   try {
+    let token = '';
+    try {
+      const s = JSON.parse(localStorage.getItem('sf_google_session') || '{}');
+      token = s?.idToken ? String(s.idToken) : '';
+    } catch {}
+    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
     const response = await fetch(
-      `${import.meta.env.VITE_API_BASE_URL}?action=warmCache`,
+      `${import.meta.env.VITE_API_BASE_URL}?action=warmCache${tokenParam}`,
       { method: 'GET' }
     );
     

@@ -5,6 +5,114 @@
   */
   const TZ = 'Asia/Kolkata';
 
+  // Request-scoped auth context (set per request when auth is required)
+  var REQUEST_AUTH_CTX = null;
+
+  function _getScriptProp_(key) {
+    try {
+      return String(PropertiesService.getScriptProperties().getProperty(key) || '');
+    } catch (_e) {
+      return '';
+    }
+  }
+
+  function _isTruthy_(val) {
+    var v = String(val || '').trim().toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes' || v === 'y' || v === 'on';
+  }
+
+  function _isProductionAuthEnabled_() {
+    return _isTruthy_(_getScriptProp_('AUTH_REQUIRED')) || _isTruthy_(_getScriptProp_('PRODUCTION_MODE'));
+  }
+
+  function _actionIsPublic_(action) {
+    var a = String(action || '').trim();
+    if (!a) return true;
+    return a === 'ping' || a === 'login' || a === 'googleLogin' || a === 'auth.verify';
+  }
+
+  function _actionIsSensitive_(action) {
+    var a = String(action || '').trim();
+    if (!a) return false;
+    if (/^admin\./i.test(a)) return true;
+    if (/^debug/i.test(a)) return true;
+    if (a === 'checkDate') return true;
+    // Maintenance / backfill endpoints (should never be public)
+    if (a === 'syncSessionDependencies') return true;
+    return false;
+  }
+
+  function _actionRequiresAuth_(action) {
+    if (_actionIsPublic_(action)) return false;
+    // Always protect debug/admin endpoints even when global auth is off
+    if (_actionIsSensitive_(action)) return true;
+    // Global enforcement for production
+    return _isProductionAuthEnabled_();
+  }
+
+  function _extractRequestToken_(e, data) {
+    // Token may arrive via query params, JSON body, or Authorization header (best effort)
+    try {
+      if (e && e.parameter) {
+        var t = (e.parameter.token || e.parameter.id_token || e.parameter.idToken || '').trim();
+        if (t) return t;
+      }
+    } catch (_e1) {}
+
+    try {
+      if (data && typeof data === 'object') {
+        var dt = String(data.token || data.id_token || data.idToken || '').trim();
+        if (dt) return dt;
+      }
+    } catch (_e2) {}
+
+    // Apps Script doesn't reliably toggle request headers, but keep best-effort support.
+    try {
+      var bearer = String((e && e.headers && e.headers.Authorization) || '').trim();
+      if (/^Bearer\s+/i.test(bearer)) return bearer.replace(/^Bearer\s+/i, '').trim();
+    } catch (_e3) {}
+
+    // Some clients may send "Authorization" inside JSON string (non-standard).
+    try {
+      var raw = (e && e.postData && e.postData.contents) ? String(e.postData.contents) : '';
+      var m = raw.match(/Authorization"\s*:\s*"Bearer\s+([^\"]+)/i);
+      if (m && m[1]) return String(m[1]).trim();
+    } catch (_e4) {}
+
+    return '';
+  }
+
+  function _getRequestAuthContext_(e, data) {
+    if (REQUEST_AUTH_CTX) return REQUEST_AUTH_CTX;
+    var token = _extractRequestToken_(e, data);
+    if (!token) return { success: false, error: 'Missing token' };
+    try {
+      var res = verifyGoogleLogin(token);
+      if (!res || !res.success) return { success: false, error: (res && res.error) ? res.error : 'Token verification failed', details: res };
+      var email = String(res.email || '').toLowerCase().trim();
+      if (!email) return { success: false, error: 'Email missing in token' };
+      REQUEST_AUTH_CTX = {
+        success: true,
+        email: email,
+        emailVerified: !!res.emailVerified,
+        tokenInfo: res.tokenInfo || null
+      };
+      return REQUEST_AUTH_CTX;
+    } catch (err) {
+      return { success: false, error: String(err && err.message ? err.message : err) };
+    }
+  }
+
+  function _ensureAuthenticatedOrRespond_(e, data, action) {
+    REQUEST_AUTH_CTX = null;
+    if (!_actionRequiresAuth_(action)) return null;
+    var ctx = _getRequestAuthContext_(e, data);
+    if (!ctx || !ctx.success) {
+      return _respond({ success: false, error: (ctx && ctx.error) ? ctx.error : 'Authorization required' }, 401);
+    }
+    return null;
+  }
+
   /** Returns "YYYY-MM-DD" for *today* in IST */
   function _todayISO() {
     const now = new Date();
@@ -72,7 +180,10 @@
       // ignore and fall back
     }
     try {
-      var email = String(userEmail || '').toLowerCase().trim();
+      // Never trust client-supplied email for privilege checks.
+      // If request auth context exists, it takes precedence.
+      var effectiveEmail = (REQUEST_AUTH_CTX && REQUEST_AUTH_CTX.email) ? REQUEST_AUTH_CTX.email : userEmail;
+      var email = String(effectiveEmail || '').toLowerCase().trim();
       if (!email) return false;
       var sh = _getSheet('Users');
       if (!sh) return false;
@@ -101,7 +212,8 @@
     }
     try {
       if (_isSuperAdminSafe(userEmail)) return true;
-      var email = String(userEmail || '').toLowerCase().trim();
+      var effectiveEmail = (REQUEST_AUTH_CTX && REQUEST_AUTH_CTX.email) ? REQUEST_AUTH_CTX.email : userEmail;
+      var email = String(effectiveEmail || '').toLowerCase().trim();
       if (!email) return false;
       var sh = _getSheet('Users');
       if (!sh) return false;
@@ -133,6 +245,11 @@
     const action = (e.parameter.action || '').trim();
     try {
       _clearRequestCache(); // PERFORMANCE: Clear cache at start of each request
+
+      // Enforce authentication (configurable) and always protect sensitive endpoints.
+      var authResp = _ensureAuthenticatedOrRespond_(e, null, action);
+      if (authResp) return authResp;
+
       // Run bootstrap ONLY when explicitly requested (bootstrap is expensive)
       if (action === 'admin.bootstrap') {
         const email = (e.parameter.email || '').toLowerCase().trim();
@@ -310,6 +427,42 @@
           note: e.parameter.note || ''
         };
         return _respond(assignSubstitution(substitutionData));
+      }
+      
+      // === PERIOD EXCHANGE ROUTES ===
+      if (action === 'createPeriodExchange') {
+        const exchangeData = {
+          date: e.parameter.date || '',
+          teacher1Email: e.parameter.teacher1Email || '',
+          teacher1Name: e.parameter.teacher1Name || '',
+          period1: e.parameter.period1 || '',
+          class1: e.parameter.class1 || '',
+          subject1: e.parameter.subject1 || '',
+          teacher2Email: e.parameter.teacher2Email || '',
+          teacher2Name: e.parameter.teacher2Name || '',
+          period2: e.parameter.period2 || '',
+          class2: e.parameter.class2 || '',
+          subject2: e.parameter.subject2 || '',
+          note: e.parameter.note || '',
+          createdBy: e.parameter.createdBy || ''
+        };
+        return _respond(createPeriodExchange(exchangeData));
+      }
+      
+      if (action === 'getPeriodExchangesForDate') {
+        const date = e.parameter.date || '';
+        return _respond(getPeriodExchangesForDate(date));
+      }
+      
+      if (action === 'deletePeriodExchange') {
+        const exchangeData = {
+          date: e.parameter.date || '',
+          teacher1Email: e.parameter.teacher1Email || '',
+          teacher2Email: e.parameter.teacher2Email || '',
+          period1: e.parameter.period1 || '',
+          period2: e.parameter.period2 || ''
+        };
+        return _respond(deletePeriodExchange(exchangeData));
       }
       
       // === EXAM ROUTES ===
@@ -620,6 +773,11 @@
       if (action === 'getTeacherDailyData') {
         return _handleGetTeacherDailyData(e.parameter);
       }
+
+      // Teacher helper: suggest Ready lesson plans for substitution periods (optional attach)
+      if (action === 'getSuggestedPlansForSubstitution') {
+        return _handleGetSuggestedPlansForSubstitution(e.parameter);
+      }
       
       // === SESSION COMPLETION TRACKING GET ROUTES ===
       // TeacherPerformance dashboard removed
@@ -634,11 +792,9 @@
       
       // === DAILY REPORT ROUTES ===
       if (action === 'getTeacherDailyReportsForDate') {
-        const email = String(e.parameter.email || '').toLowerCase().trim();
-        const date = String(e.parameter.date || _todayISO()).trim();
-        const key = generateCacheKey('getTeacherDailyReportsForDate', { email: email, date: date });
-        const dataOut = getCachedData(key, function() { return _handleGetTeacherDailyReportsForDate(e.parameter); }, CACHE_TTL.SHORT);
-        return _respond(dataOut);
+        // This handler already caches and returns a JSON TextOutput via _respond().
+        // Do NOT wrap again here, otherwise the cache stores a TextOutput and the response becomes double-wrapped.
+        return _handleGetTeacherDailyReportsForDate(e.parameter);
       }
       
       if (action === 'checkCascadingIssues') {
@@ -894,6 +1050,11 @@
     
     try {
       _clearRequestCache(); // PERFORMANCE: Clear cache at start of each request
+
+      // Enforce authentication (configurable) and always protect sensitive endpoints.
+      var authResp = _ensureAuthenticatedOrRespond_(e, data, action);
+      if (authResp) return authResp;
+
       // Run bootstrap ONLY when explicitly requested (bootstrap is expensive)
       if (action === 'admin.bootstrap') {
         const email = (data.email || e.parameter.email || '').toLowerCase().trim();
@@ -1265,12 +1426,35 @@
             return _respond({ ok: false, error: 'plan_required', message: 'A Ready lesson plan is required for this period. Please prepare and get it approved before submitting the report.' });
           }
 
+          // Optional: for substitution reports, allow attaching a Ready plan for the SAME teacher+class+subject
+          // (teacher manually chooses a plan; not auto-cascade).
+          let attachedPlan = null;
+          try {
+            const lpId = String(data.lessonPlanId || '').trim();
+            if (isSubstitution && lpId) {
+              attachedPlan = lessonPlans.find(p => {
+                const idMatch = String(p.lpId || p.lessonPlanId || p.planId || p.id || '').trim() === lpId;
+                const emailMatch = String(p.teacherEmail || '').trim().toLowerCase() === teacherEmail;
+                const classMatch = String(p.class || '').trim() === reportClass;
+                const subjectMatch = String(p.subject || '').trim() === reportSubject;
+                return idMatch && emailMatch && classMatch && subjectMatch && isFetchableStatus(p.status);
+              }) || null;
+            }
+          } catch (apErr) {
+            attachedPlan = null;
+          }
+
           // Objectives/methods: for substitution require a free-text answer; for planned, auto-fill if missing
           var objectivesVal = String(data.objectives || '').trim();
           var activitiesVal = String(data.activities || '').trim();
           if (isSubstitution) {
+            // If a valid plan was attached, auto-fill from it when missing.
+            if (attachedPlan) {
+              if (!objectivesVal) objectivesVal = String(attachedPlan.learningObjectives || attachedPlan.objectives || '').trim();
+              if (!activitiesVal) activitiesVal = String(attachedPlan.teachingMethods || attachedPlan.activities || '').trim();
+            }
             if (!objectivesVal) {
-              return _respond({ ok: false, error: 'sub_note_required', message: 'Please describe what you did in this substitution period.' });
+              return _respond({ ok: false, error: 'sub_note_required', message: 'Please describe what you did in this substitution period (or select a lesson plan).' });
             }
           } else {
             if (!objectivesVal) objectivesVal = String(matchingPlan.learningObjectives || '').trim();
@@ -1290,11 +1474,32 @@
               totalSessionsVal = 1;
             }
           }
+          // For substitution with attached plan, allow total sessions from that plan/scheme as well.
+          if (isSubstitution && attachedPlan) {
+            if (!totalSessionsVal) {
+              const directTs = Number(attachedPlan.totalSessions || attachedPlan.noOfSessions || 0);
+              if (!isNaN(directTs) && directTs > 0) totalSessionsVal = directTs;
+            }
+            if (!totalSessionsVal && attachedPlan.schemeId) {
+              try {
+                const schemeSheet2 = _getSheet('Schemes');
+                const schemeHeaders2 = _headers(schemeSheet2);
+                const schemes2 = _rows(schemeSheet2).map(row => _indexByHeader(row, schemeHeaders2));
+                const scheme2 = schemes2.find(s => String(s.schemeId || '').trim() === String(attachedPlan.schemeId || '').trim());
+                totalSessionsVal = Number(scheme2 && scheme2.noOfSessions ? scheme2.noOfSessions : 1);
+              } catch (e4) {
+                // ignore
+              }
+            }
+          }
           if (!totalSessionsVal) totalSessionsVal = 1;
 
           const now = new Date().toISOString();
           const reportId = _uuid();
           const inferredPlanType = isSubstitution ? 'substitution' : 'in plan';
+          const attachedPlanId = attachedPlan ? String(attachedPlan.lpId || attachedPlan.lessonPlanId || attachedPlan.planId || attachedPlan.id || '').trim() : '';
+          const attachedChapter = attachedPlan ? String(attachedPlan.chapter || '').trim() : '';
+          const attachedSession = attachedPlan ? Number(attachedPlan.session || attachedPlan.sessionNo || 0) : 0;
           const rowData = [
             reportId,
             data.date || '',
@@ -1304,9 +1509,9 @@
             data.subject || '',
             Number(data.period || 0),
             inferredPlanType,
-            String((!isSubstitution && matchingPlan && matchingPlan.lpId) || data.lessonPlanId || ''),
-            String((!isSubstitution && matchingPlan && matchingPlan.chapter) || ''),
-            Number((!isSubstitution && (data.sessionNo || matchingPlan.session)) || 0),
+            String((!isSubstitution && matchingPlan && matchingPlan.lpId) || attachedPlanId || data.lessonPlanId || ''),
+            String((!isSubstitution && matchingPlan && matchingPlan.chapter) || attachedChapter || data.chapter || ''),
+            Number((!isSubstitution && (data.sessionNo || matchingPlan.session)) || attachedSession || Number(data.sessionNo || 0) || 0),
             Number(totalSessionsVal || 1),
             Number(data.completionPercentage || 0),
             data.chapterStatus || '',
@@ -1443,7 +1648,156 @@
             absentCascade = { attempted: true, success: false, error: abErr && abErr.message };
           }
 
-          return _respond({ ok: true, submitted: true, autoCascade: autoCascade, absentCascade: absentCascade, isSubstitution });
+          // NEW: If this was a substitution where the SUBSTITUTE teacher attached their own plan,
+          // pull back the teacher's future sessions for the same chapter by shifting each session
+          // into the previous session's existing scheduled slot.
+          // This matches the requested behavior: show only the next session plan, and when used,
+          // shift remaining sessions earlier starting from the reporting date.
+          let substitutePullback = null;
+          try {
+            if (isSubstitution && attachedPlan && attachedPlanId) {
+              const attachedIso = _isoDateIST(attachedPlan.selectedDate || attachedPlan.date);
+              const reportIso = reportDate; // already normalized
+              const attachedPeriod = String(attachedPlan.selectedPeriod || attachedPlan.period || '').trim();
+
+              const compareSlot = (dateA, periodA, dateB, periodB) => {
+                const a = String(dateA || '').trim();
+                const b = String(dateB || '').trim();
+                if (!a || !b) return 0;
+                if (a < b) return -1;
+                if (a > b) return 1;
+                const pa = Number(periodA || 0);
+                const pb = Number(periodB || 0);
+                if (pa < pb) return -1;
+                if (pa > pb) return 1;
+                return 0;
+              };
+
+              // Only apply pullback if the attached plan was scheduled after the report slot (date+period)
+              if (attachedIso && reportIso && compareSlot(reportIso, reportPeriod, attachedIso, attachedPeriod) < 0) {
+                const lpSh2 = lpSheet; // already loaded
+                const lpH2 = lpHeaders;
+                const colSelectedDate = lpH2.indexOf('selectedDate') + 1;
+                const colSelectedPeriod = lpH2.indexOf('selectedPeriod') + 1;
+                const colOriginalDate = lpH2.indexOf('originalDate') + 1;
+                const colOriginalPeriod = lpH2.indexOf('originalPeriod') + 1;
+
+                const chapterKey = String(attachedPlan.chapter || '').trim();
+                const targetSession = Number(attachedPlan.session || attachedPlan.sessionNo || 0);
+
+                // Find the chain of plans in the same chapter
+                const chain = lessonPlans
+                  .filter(p => {
+                    const id = String(p.lpId || p.lessonPlanId || p.planId || p.id || '').trim();
+                    if (!id) return false;
+                    const emailMatch = String(p.teacherEmail || '').trim().toLowerCase() === teacherEmail;
+                    const classMatch = String(p.class || '').trim() === reportClass;
+                    const subjectMatch = String(p.subject || '').trim() === reportSubject;
+                    const chapterMatch = chapterKey ? (String(p.chapter || '').trim() === chapterKey) : true;
+                    const statusOk = isFetchableStatus(p.status);
+                    const sess = Number(p.session || p.sessionNo || 0);
+                    return emailMatch && classMatch && subjectMatch && chapterMatch && statusOk && sess >= targetSession;
+                  })
+                  .sort((a, b) => Number(a.session || a.sessionNo || 0) - Number(b.session || b.sessionNo || 0));
+
+                const idxAttach = chain.findIndex(p => {
+                  const id = String(p.lpId || p.lessonPlanId || p.planId || p.id || '').trim();
+                  return id === attachedPlanId;
+                });
+
+                if (idxAttach < 0) {
+                  substitutePullback = { attempted: true, success: false, reason: 'attached_plan_not_in_chain' };
+                } else {
+                  const oldSlots = chain.map(p => ({
+                    date: _isoDateIST(p.selectedDate || p.date),
+                    period: String(p.selectedPeriod || p.period || '').trim()
+                  }));
+
+                  const moves = [];
+                  let updatedCount = 0;
+                  // Update each plan row
+                  chain.forEach((p, i) => {
+                    if (i < idxAttach) return;
+                    const id = String(p.lpId || p.lessonPlanId || p.planId || p.id || '').trim();
+                    const rowIndex = lessonPlans.findIndex(x => String(x.lpId || x.lessonPlanId || x.planId || x.id || '').trim() === id);
+                    if (rowIndex < 0) return;
+                    const sheetRow = rowIndex + 2;
+                    const oldDate = _isoDateIST(p.selectedDate || p.date);
+                    const oldPeriod = String(p.selectedPeriod || p.period || '').trim();
+                    if (!oldDate) return;
+
+                    let newDate = '';
+                    let newPeriod = '';
+
+                    // For the attached plan itself: move it to the reporting date/period
+                    if (id === attachedPlanId) {
+                      newDate = reportIso;
+                      newPeriod = String(reportPeriod);
+                    } else {
+                      // Shift later sessions into the previous session's ORIGINAL scheduled slot
+                      const prev = oldSlots[i - 1];
+                      if (prev && prev.date) {
+                        newDate = prev.date;
+                        newPeriod = String(prev.period || '').trim();
+                      }
+                    }
+
+                    // Only write if we have valid new date
+                    if (!newDate) return;
+
+                    // Preserve original fields if present and blank
+                    try {
+                      if (colOriginalDate > 0 && colOriginalPeriod > 0) {
+                        const origDateVal = String(lpSh2.getRange(sheetRow, colOriginalDate).getValue() || '').trim();
+                        const origPerVal = String(lpSh2.getRange(sheetRow, colOriginalPeriod).getValue() || '').trim();
+                        if (!origDateVal) lpSh2.getRange(sheetRow, colOriginalDate).setValue(oldDate);
+                        if (!origPerVal) lpSh2.getRange(sheetRow, colOriginalPeriod).setValue(oldPeriod);
+                      }
+                    } catch (_ignoreOrig) {}
+
+                    if (colSelectedDate > 0) lpSh2.getRange(sheetRow, colSelectedDate).setValue(newDate);
+                    if (colSelectedPeriod > 0) lpSh2.getRange(sheetRow, colSelectedPeriod).setValue(newPeriod);
+
+                    moves.push({ lpId: id, oldDate: oldDate, oldPeriod: oldPeriod, newDate: newDate, newPeriod: newPeriod });
+                    updatedCount++;
+                  });
+
+                  substitutePullback = {
+                    attempted: true,
+                    success: updatedCount > 0,
+                    updatedCount: updatedCount,
+                    moves: moves
+                  };
+                }
+              } else {
+                substitutePullback = { attempted: false, reason: 'not_after_report_date' };
+              }
+            }
+          } catch (spErr) {
+            substitutePullback = { attempted: true, success: false, error: spErr && spErr.message };
+          }
+
+          // CRITICAL: Invalidate caches so UI refreshes immediately
+          try {
+            const cache = CacheService.getScriptCache();
+            const keys = [
+              'teacher_reports_' + teacherEmail + '_' + reportDate,
+              'teacher_daily_' + teacherEmail + '_' + reportDate,
+              'daily_timetable_' + reportDate,
+              'planned_lessons_' + teacherEmail + '_' + reportDate,
+              generateCacheKey('getTeacherDailyReportsForDate', { email: teacherEmail, date: reportDate }),
+              generateCacheKey('getTeacherDailyData', { email: teacherEmail, date: reportDate }),
+              // Substitution plan picker cache (best-effort)
+              generateCacheKey('suggestedPlansForSubstitution', { teacherEmail: teacherEmail, cls: reportClass, subject: reportSubject, date: reportDate, period: String(reportPeriod) })
+            ];
+            appLog('INFO', 'Clearing caches', { keys: keys });
+            keys.forEach(k => cache.remove(k));
+            appLog('INFO', 'Cache cleared successfully', { count: keys.length });
+          } catch (cacheErr) {
+            appLog('ERROR', 'Cache invalidation failed', { error: cacheErr.message });
+          }
+          
+          return _respond({ ok: true, submitted: true, autoCascade: autoCascade, absentCascade: absentCascade, substitutePullback: substitutePullback, isSubstitution });
         } catch (err) {
           appLog('ERROR', 'submitDailyReport failed', { message: err.message, stack: err.stack });
           return _respond({ error: 'Failed to submit: ' + err.message });
@@ -2740,19 +3094,27 @@
           error: 'Missing required parameters: email, date' 
         });
       }
+
+      const emailNorm = String(email || '').toLowerCase().trim();
+      const dateNorm = _normalizeQueryDate(date);
       
       // Get timetable data
-      const timetableResult = getTeacherDailyTimetable(email, date);
+      const timetable = getTeacherDailyTimetable(emailNorm, dateNorm);
       
       // Get submitted reports
-      const reportsResult = _handleGetTeacherDailyReportsForDate({ email, date });
-      const reports = reportsResult?.data || [];
+      // IMPORTANT: _handleGetTeacherDailyReportsForDate() returns a JSON TextOutput, so it can't be used here.
+      // Use the raw fetcher (optionally cached) so we return a real array in this batch endpoint.
+      const reportsCacheKey = 'teacher_reports_' + emailNorm + '_' + dateNorm;
+      const reports = getCachedData(reportsCacheKey, function() {
+        return _fetchTeacherDailyReportsForDate(emailNorm, dateNorm);
+      }, CACHE_TTL.SHORT);
       
       return _respond({
         success: true,
-        date: date,
-        timetable: timetableResult,
-        reports: reports,
+        date: dateNorm,
+        timetable: timetable,
+        timetableWithReports: timetable,
+        reports: Array.isArray(reports) ? reports : [],
         combined: true
       });
       
@@ -2793,6 +3155,167 @@
       
     } catch (error) {
       Logger.log('[BATCH] Error: ' + error.message);
+      return _respond({ success: false, error: error.message });
+    }
+  }
+
+  /**
+  * Suggest Ready lesson plans for a substitution period.
+  * Purpose: allow substitute teacher to optionally attach one of their Ready plans
+  * for the same class+subject while reporting a substitution slot.
+  *
+  * Params:
+  * - teacherEmail (required)
+  * - class (required)
+  * - subject (required)
+  * - date (optional; used only for sorting preference)
+  */
+  function _handleGetSuggestedPlansForSubstitution(params) {
+    try {
+      const teacherEmail = String(params.teacherEmail || params.email || '').toLowerCase().trim();
+      const cls = String(params.class || params.cls || '').trim();
+      const subject = String(params.subject || '').trim();
+      const date = params.date ? _normalizeQueryDate(params.date) : '';
+      const reportPeriod = String(params.period || '').trim();
+
+      if (!teacherEmail || !cls || !subject) {
+        return _respond({ success: false, error: 'Missing required parameters: teacherEmail, class, subject' }, 400);
+      }
+
+      const cacheKey = generateCacheKey('suggestedPlansForSubstitution', { teacherEmail, cls, subject, date, period: reportPeriod });
+      const out = getCachedData(cacheKey, function() {
+        const sh = _getSheet('LessonPlans');
+        const headers = _headers(sh);
+        const rows = _rows(sh).map(r => _indexByHeader(r, headers));
+        const isFetchableStatus = (s) => _isPlanReadyForTeacher(s);
+
+        const _norm = (v) => String(v || '')
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, ' ');
+
+        const _normClass = (v) => _norm(v)
+          .replace(/^std\s*/i, '')
+          .replace(/\s+/g, '');
+
+        const _normSubject = (v) => _norm(v)
+          .replace(/\s+/g, ' ');
+
+        const clsKey = _normClass(cls);
+        const subjectKey = _normSubject(subject);
+
+        let plans = rows.filter(p => {
+          if (!p) return false;
+          const emailMatch = String(p.teacherEmail || '').toLowerCase().trim() === teacherEmail;
+          const classMatch = _normClass(p.class) === clsKey;
+          const subjectMatch = _normSubject(p.subject) === subjectKey;
+          return emailMatch && classMatch && subjectMatch && isFetchableStatus(p.status);
+        });
+
+        const toISO = (v) => {
+          const d = _normalizeQueryDate(v);
+          return d || '';
+        };
+
+        plans.sort((a, b) => {
+          // Prefer plans on/after the requested date, then by date, then by period, then by session
+          const ad = toISO(a.selectedDate || a.date);
+          const bd = toISO(b.selectedDate || b.date);
+          const aAfter = date ? (ad >= date) : true;
+          const bAfter = date ? (bd >= date) : true;
+          if (aAfter !== bAfter) return aAfter ? -1 : 1;
+          const ds = String(ad || '').localeCompare(String(bd || ''));
+          if (ds !== 0) return ds;
+          const ap = Number(a.selectedPeriod || a.period || 0);
+          const bp = Number(b.selectedPeriod || b.period || 0);
+          if (ap !== bp) return ap - bp;
+          const asn = Number(a.session || a.sessionNo || 0);
+          const bsn = Number(b.session || b.sessionNo || 0);
+          return asn - bsn;
+        });
+
+        // Return a compact list (top 20)
+        const compact = plans.slice(0, 20).map(p => ({
+          lpId: String(p.lpId || p.lessonPlanId || p.planId || p.id || '').trim(),
+          class: String(p.class || '').trim(),
+          subject: String(p.subject || '').trim(),
+          chapter: String(p.chapter || '').trim(),
+          sessionNo: Number(p.session || p.sessionNo || 0),
+          totalSessions: Number(p.totalSessions || p.noOfSessions || 0),
+          selectedDate: toISO(p.selectedDate || p.date) || '',
+          selectedPeriod: String(p.selectedPeriod || p.period || '').trim(),
+          learningObjectives: String(p.learningObjectives || p.objectives || '').trim(),
+          teachingMethods: String(p.teachingMethods || p.activities || '').trim(),
+          status: String(p.status || '').trim()
+        })).filter(x => x.lpId);
+
+        // Determine the next plan (the first one after sorting)
+        const nextPlan = compact.length ? compact[0] : null;
+
+        const compareSlot = (dateA, periodA, dateB, periodB) => {
+          const a = String(dateA || '').trim();
+          const b = String(dateB || '').trim();
+          if (!a || !b) return 0;
+          if (a < b) return -1;
+          if (a > b) return 1;
+          const pa = Number(periodA || 0);
+          const pb = Number(periodB || 0);
+          if (pa < pb) return -1;
+          if (pa > pb) return 1;
+          return 0;
+        };
+
+        let pullbackPreview = [];
+        if (nextPlan && nextPlan.chapter) {
+          const chain = compact
+            .filter(p => String(p.chapter || '').trim() === String(nextPlan.chapter || '').trim())
+            .sort((a, b) => Number(a.sessionNo || 0) - Number(b.sessionNo || 0));
+
+          const selectedSess = Number(nextPlan.sessionNo || 0);
+          const attachedDate = String(nextPlan.selectedDate || '').trim();
+          const attachedPeriod = String(nextPlan.selectedPeriod || '').trim();
+
+          // Only show preview when the attached plan is scheduled AFTER the report slot.
+          const canPullback = date && reportPeriod
+            ? (compareSlot(date, reportPeriod, attachedDate, attachedPeriod) < 0)
+            : (date ? (String(attachedDate || '') > String(date || '')) : true);
+
+          if (canPullback) {
+            const idx = chain.findIndex(p => String(p.lpId || '').trim() === String(nextPlan.lpId || '').trim());
+            if (idx >= 0) {
+              const oldSlots = chain.map(p => ({
+                date: String(p.selectedDate || '').trim(),
+                period: String(p.selectedPeriod || '').trim()
+              }));
+
+              pullbackPreview = chain
+                .filter((p, i) => i > idx && Number(p.sessionNo || 0) > selectedSess)
+                .map((p, i) => {
+                  const curIdx = chain.findIndex(x => String(x.lpId || '').trim() === String(p.lpId || '').trim());
+                  const prev = oldSlots[curIdx - 1];
+                  const cur = oldSlots[curIdx];
+                  return {
+                    lpId: p.lpId,
+                    chapter: p.chapter,
+                    sessionNo: p.sessionNo,
+                    oldDate: cur && cur.date,
+                    oldPeriod: cur && cur.period,
+                    newDate: prev && prev.date,
+                    newPeriod: prev && prev.period
+                  };
+                })
+                .filter(x => x.lpId && x.oldDate && x.newDate)
+                .slice(0, 12);
+            }
+          }
+        }
+
+        return { success: true, plans: compact, nextPlan: nextPlan, pullbackPreview: pullbackPreview };
+      }, CACHE_TTL.SHORT);
+
+      return _respond(out);
+    } catch (error) {
+      Logger.log('[getSuggestedPlansForSubstitution] Error: ' + error.message);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -2871,9 +3394,8 @@
       const allSchemes = _rows(schemeSheet).map(row => _indexByHeader(row, schemeHeaders));
       const schemeMap = {};
       allSchemes.forEach(scheme => {
-        if (scheme.schemeId) {
-          schemeMap[scheme.schemeId] = scheme;
-        }
+        const sid = String(scheme.schemeId || '').trim();
+        if (sid) schemeMap[sid] = scheme;
       });
       
       // Build response with period-indexed lessons
@@ -2887,8 +3409,9 @@
         const uniqueKey = String(plan.uniqueKey || '').trim() || `${String(email || '').trim().toLowerCase()}|${queryDate}|${periodVal}`;
         
         let totalSessions = 1;
-        if (plan.schemeId && schemeMap[plan.schemeId]) {
-          totalSessions = Number(schemeMap[plan.schemeId].noOfSessions || 1);
+        const planSchemeId = String(plan.schemeId || '').trim();
+        if (planSchemeId && schemeMap[planSchemeId]) {
+          totalSessions = Number(schemeMap[planSchemeId].noOfSessions || 1);
         }
 
         const entry = {
@@ -3018,7 +3541,8 @@
             const schemeSheet = _getSheet('Schemes');
             const schemeHeaders = _headers(schemeSheet);
             const schemes = _rows(schemeSheet).map(row => _indexByHeader(row, schemeHeaders));
-            const matchingScheme = schemes.find(scheme => scheme.schemeId === matchingPlan.schemeId);
+            const planSchemeId = String(matchingPlan.schemeId || '').trim();
+            const matchingScheme = schemes.find(scheme => String(scheme.schemeId || '').trim() === planSchemeId);
             
             if (matchingScheme && matchingScheme.noOfSessions) {
               totalSessions = Number(matchingScheme.noOfSessions);
@@ -3099,7 +3623,10 @@
     
     const reports = allReports.filter(report => {
       // Skip invalid reports
-      if (!report || !report.date || !report.teacherEmail) return false;
+      if (!report || !report.date || !report.teacherEmail) {
+        Logger.log(`Skipping invalid report: ${JSON.stringify(report)}`);
+        return false;
+      }
       
       // Use IST helper to normalize report date - handles Date objects, strings, numbers
       const reportDate = _isoDateIST(report.date);
@@ -3109,9 +3636,7 @@
       const dateMatch = reportDate === queryDate;
       const emailMatch = reportEmail === email;
       
-      if (emailMatch) {
-        Logger.log(`Report for ${reportEmail} on ${reportDate} (type: ${typeof report.date}): dateMatch=${dateMatch}, emailMatch=${emailMatch}, queryDate=${queryDate}`);
-      }
+      Logger.log(`Report check: email="${reportEmail}" (match:${emailMatch}), date="${reportDate}" (match:${dateMatch}), period=${report.period}, class=${report.class}, subject=${report.subject}`);
       
       return dateMatch && emailMatch;
     }).map(report => ({
@@ -3134,10 +3659,11 @@
   function _handleGetDailyReportsForDate(params) {
     try {
       const date = params.date || _todayISO();
+      const normalizedDate = _isoDateString(date);
       
       // CRITICAL: Parse the date string correctly for IST
       // When client sends "2025-11-24", interpret as IST midnight
-      const dayName = _dayName(date); // Get the day of week for this date
+      const dayName = _dayName(normalizedDate); // Get the day of week for this date
       
       // Enhanced logging for timezone debugging
       const now = new Date();
@@ -3148,34 +3674,24 @@
       Logger.log(`=== Daily Reports Request ===`);
       Logger.log(`Current time (IST): ${istNow}`);
       Logger.log(`Today (IST): ${todayISO} = ${todayDayName}`);
-      Logger.log(`Requested date: ${date} = ${dayName}`);
+      Logger.log(`Requested date: ${normalizedDate} = ${dayName}`);
       Logger.log(`Date match: ${date === todayISO ? 'YES (today)' : 'NO (different day)'}`);
       
       // Verify date parsing
       const testDate = new Date(date + 'T00:00:00');
       Logger.log(`Test parse: ${date} -> ${testDate.toISOString()} -> ${Utilities.formatDate(testDate, TZ, 'EEEE, dd MMM yyyy')}`);
       
-      // Get timetable periods for THIS DAY ONLY
-      const ttSh = _getSheet('Timetable');
-      const ttHeaders = _headers(ttSh);
-      const allTimetable = _rows(ttSh).map(row => _indexByHeader(row, ttHeaders));
-      
-      Logger.log(`Total timetable entries: ${allTimetable.length}`);
-      
-      // Log unique days in timetable for debugging
-      const uniqueDays = [...new Set(allTimetable.map(tt => tt.dayOfWeek))];
-      Logger.log(`Days in timetable: ${uniqueDays.join(', ')}`);
-      Logger.log(`Normalized days: ${uniqueDays.map(d => _normalizeDayName(d)).join(', ')}`);
-      Logger.log(`Looking for day: ${dayName} (normalized: ${_normalizeDayName(dayName)})`);
-      
-      // Filter for today's day
-      const todayTimetable = allTimetable.filter(tt => _normalizeDayName(tt.dayOfWeek) === _normalizeDayName(dayName));
-      Logger.log(`Timetable entries for ${dayName}: ${todayTimetable.length}`);
+      // Get timetable periods for THIS DAY ONLY (WITH substitutions/exchanges applied)
+      // IMPORTANT: HM Live Period view should reflect substitutions immediately.
+      // So we bypass long-lived timetable caches and use the merged daily timetable.
+      const mergedDaily = _fetchDailyTimetableWithSubstitutions(normalizedDate);
+      const todayTimetable = Array.isArray(mergedDaily && mergedDaily.timetable) ? mergedDaily.timetable : [];
+      Logger.log(`Merged timetable entries for ${normalizedDate} (${dayName}): ${todayTimetable.length}`);
       
       // Get all daily reports for this date
       const drSh = _getSheet('DailyReports');
       const drHeaders = _headers(drSh);
-      const queryDate = _normalizeQueryDate(date);  // Use helper to normalize query date once
+      const queryDate = _normalizeQueryDate(normalizedDate);  // Use helper to normalize query date once
       const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders))
         .filter(report => {
           if (!report || !report.date) return false;
@@ -3191,7 +3707,11 @@
       // Create a map of submitted reports by key (teacherEmail|class|subject|period)
       const reportMap = {};
       allReports.forEach(report => {
-        const key = `${report.teacherEmail}|${report.class}|${report.subject}|${report.period}`;
+        const reportTeacher = String(report.teacherEmail || '').toLowerCase().trim();
+        const reportClass = String(report.class || '').trim();
+        const reportSubject = String(report.subject || '').trim();
+        const reportPeriod = String(report.period || '').trim();
+        const key = `${reportTeacher}|${reportClass}|${reportSubject}|${reportPeriod}`;
         reportMap[key] = report;
       });
       
@@ -3215,11 +3735,20 @@
         const periods = teacherPeriods[teacherEmail];
         
         periods.forEach(tt => {
-          const key = `${teacherEmail}|${tt.class}|${tt.subject}|${tt.period}`;
+          const key = `${teacherEmail}|${String(tt.class || '').trim()}|${String(tt.subject || '').trim()}|${String(tt.period || '').trim()}`;
           const report = reportMap[key];
           
           result.push({
-            teacher: tt.teacherName || tt.teacher || teacherEmail,
+            teacher: (() => {
+              const rawName = tt.teacherName || tt.teacher || teacherEmail;
+              const rawStr = String(rawName || '').trim();
+              // If name looks like an email, try Users directory for display name
+              if (rawStr.includes('@')) {
+                const u = _getUserByEmail(rawStr);
+                if (u && u.name) return u.name;
+              }
+              return rawStr;
+            })(),
             teacherEmail: teacherEmail,
             class: tt.class || '',
             subject: tt.subject || '',

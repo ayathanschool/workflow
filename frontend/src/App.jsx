@@ -4202,8 +4202,8 @@ const App = () => {
         const today = new Date().toISOString().split('T')[0];
         const response = await api.getDailyReportsForDate(today);
         const data = response?.data || response;
-        
-        if (data.reports && data.reports.length > 0) {
+
+        if (!Array.isArray(data?.reports) || data.reports.length === 0) {
           console.warn('⚠️ NO REPORTS FOUND - Check backend logs for timetable data');
         }
         
@@ -9336,6 +9336,26 @@ const App = () => {
       URL.revokeObjectURL(url);
     };
 
+    const getCompletionLabel = useCallback((r) => {
+      const pct = Number(r?.completionPercentage);
+      if (!isNaN(pct)) {
+        if (pct <= 0) return 'Not Started';
+        if (pct < 50) return 'Started';
+        if (pct < 75) return 'Half Done';
+        if (pct < 100) return 'Almost Done';
+        return 'Complete';
+      }
+      return r?.chapterStatus || r?.completed || r?.lessonProgressTracked || r?.status || '-';
+    }, []);
+
+    const isVerifiedReport = useCallback((r) => {
+      const v = r?.verified;
+      if (v === true) return true;
+      if (typeof v === 'number') return v !== 0;
+      if (typeof v === 'string') return ['true', 'yes', '1', 'y', 't', 'verified', 'TRUE'].includes(v.trim().toLowerCase()) || v.trim() === 'TRUE';
+      return false;
+    }, []);
+
     return (
       <div className="space-y-6">
         <div className="flex justify-between items-center">
@@ -9452,7 +9472,7 @@ const App = () => {
                                   if (/^\d{4}-\d{2}-\d{2}T/.test(s)) return s.split('T')[0];
                                   return s;
                                 })();
-                                const completedVal = r.completed || r.lessonProgressTracked || r.status || '-';
+                                const completedVal = getCompletionLabel(r);
                                 const isOwner = String(r.teacherEmail || '').toLowerCase() === String(email || '').toLowerCase();
                                 const onDelete = async () => {
                                   if (!id) return alert('Missing report id');
@@ -9489,7 +9509,7 @@ const App = () => {
                                     <td className="px-2 py-2 text-xs">{completedVal}</td>
                                     <td className="px-2 py-2 text-xs text-gray-600 max-w-[180px] truncate" title={r.notes || ''}>{r.notes || '-'}</td>
                                     <td className="px-2 py-2 text-xs">
-                                      {r.verified === 'TRUE' ? (
+                                      {isVerifiedReport(r) ? (
                                         <div className="flex flex-col gap-1">
                                           <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">✓ Verified</span>
                                           {r.verifiedBy && (<span className="text-[10px] text-gray-500">by {r.verifiedBy.split('@')[0]}</span>)}
@@ -9501,7 +9521,7 @@ const App = () => {
                                           {r.reopenedBy && (<span className="text-[10px] text-gray-500">by {r.reopenedBy.split('@')[0]}</span>)}
                                         </div>
                                       ) : (
-                                        <span className="text-xs text-gray-400">Pending</span>
+                                        <span className="text-xs text-gray-700">Submitted</span>
                                       )}
                                     </td>
                                     <td className="px-2 py-2 text-xs text-right">
@@ -9566,7 +9586,7 @@ const App = () => {
                           if (/^\d{4}-\d{2}-\d{2}T/.test(s)) return s.split('T')[0];
                           return s;
                         })();
-                        const completedVal = r.completed || r.lessonProgressTracked || r.status || '-';
+                        const completedVal = getCompletionLabel(r);
                         return (
                         <tr key={id || `${r.date}|${r.class}|${r.subject}|${r.period}`}> 
                           <td className="px-2 py-2 text-xs text-gray-900">{displayDate}</td>
@@ -9579,7 +9599,7 @@ const App = () => {
                           <td className="px-2 py-2 text-xs">{completedVal}</td>
                           <td className="px-2 py-2 text-xs text-gray-600 max-w-[180px] truncate" title={r.notes || ''}>{r.notes || '-'}</td>
                           <td className="px-2 py-2 text-xs">
-                            {r.verified === 'TRUE' ? (
+                            {isVerifiedReport(r) ? (
                               <div className="flex flex-col gap-1">
                                 <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">✓ Verified</span>
                                 {r.verifiedBy && (<span className="text-[10px] text-gray-500">by {r.verifiedBy.split('@')[0]}</span>)}
@@ -9591,7 +9611,7 @@ const App = () => {
                                 {r.reopenedBy && (<span className="text-[10px] text-gray-500">by {r.reopenedBy.split('@')[0]}</span>)}
                               </div>
                             ) : (
-                              <span className="text-xs text-gray-400">Pending</span>
+                              <span className="text-xs text-gray-700">Submitted</span>
                             )}
                           </td>
                         </tr>

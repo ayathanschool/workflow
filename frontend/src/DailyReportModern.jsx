@@ -7,7 +7,8 @@ import {
   submitDailyReport,
   checkChapterCompletion,
   getPlannedLessonsForDate,
-  getTeacherWeeklyTimetable
+  getTeacherWeeklyTimetable,
+  getSuggestedPlansForSubstitution
 } from "./api";
 import { todayIST } from "./utils/dateUtils";
 import { confirmDestructive } from "./utils/confirm";
@@ -47,6 +48,10 @@ export default function DailyReportModern({ user }) {
   const [cascadePreview, setCascadePreview] = useState({});
   const [cascadeMoves, setCascadeMoves] = useState({});
   const [cascadeLoading, setCascadeLoading] = useState({});
+  // Substitution: optional lesson plan suggestions (manual selection)
+  // Stored per periodKey: { nextPlan, pullbackPreview }
+  const [suggestedSubPlans, setSuggestedSubPlans] = useState({});
+  const [suggestedSubPlansLoading, setSuggestedSubPlansLoading] = useState({});
   // Fallback tracking
   const [fallbackInfo, setFallbackInfo] = useState({ used: false, weeklyCount: 0, matchedCount: 0, dayName: '' });
   
@@ -102,7 +107,44 @@ export default function DailyReportModern({ user }) {
     return idx;
   }, [lessonPlans, normalizePeriod, normalizeText]);
 
-  const periodKey = (p) => `${p.period}|${p.class}|${p.subject}`;
+  const periodKey = (p) => `${String(p.period || '')}|${p.class}|${p.subject}`;
+
+  // Load suggested Ready plans for a substitution period (optional picker)
+  useEffect(() => {
+    if (!expandedPeriod) return;
+    if (!Array.isArray(periods) || periods.length === 0) return;
+    if (!email) return;
+
+    const p = periods.find(x => periodKey(x) === expandedPeriod);
+    if (!p || !p.isSubstitution) return;
+
+    // Avoid refetch if already loaded (even if empty array)
+    if (Object.prototype.hasOwnProperty.call(suggestedSubPlans, expandedPeriod)) return;
+    if (suggestedSubPlansLoading[expandedPeriod]) return;
+
+    const cls = String(p.class || '').trim();
+    const subject = String(p.substituteSubject || p.subject || '').trim();
+    if (!cls || !subject) {
+      setSuggestedSubPlans(prev => ({ ...prev, [expandedPeriod]: [] }));
+      return;
+    }
+
+    (async () => {
+      setSuggestedSubPlansLoading(prev => ({ ...prev, [expandedPeriod]: true }));
+      try {
+        const res = await getSuggestedPlansForSubstitution(email, cls, subject, date, p.period);
+        const payload = res?.data || res;
+        const plans = Array.isArray(payload?.plans) ? payload.plans : (Array.isArray(payload) ? payload : []);
+        const nextPlan = payload?.nextPlan || plans[0] || null;
+        const pullbackPreview = Array.isArray(payload?.pullbackPreview) ? payload.pullbackPreview : [];
+        setSuggestedSubPlans(prev => ({ ...prev, [expandedPeriod]: { nextPlan, pullbackPreview } }));
+      } catch (_e) {
+        setSuggestedSubPlans(prev => ({ ...prev, [expandedPeriod]: { nextPlan: null, pullbackPreview: [] } }));
+      } finally {
+        setSuggestedSubPlansLoading(prev => ({ ...prev, [expandedPeriod]: false }));
+      }
+    })();
+  }, [expandedPeriod, periods, email, date, suggestedSubPlans, suggestedSubPlansLoading]);
 
   const loadData = useCallback(async () => {
     if (!email || !date) {
@@ -233,7 +275,8 @@ export default function DailyReportModern({ user }) {
       if (Array.isArray(reportsData)) {
         reportsData.forEach(report => {
           // Use pipe-delimited key consistent with periodKey()
-          const key = `${report.period}|${report.class}|${report.subject}`;
+          // Normalize period to string to match timetable entries
+          const key = `${String(report.period || '')}|${report.class}|${report.subject}`;
           reportsMap[key] = report;
         });
       }
@@ -404,7 +447,13 @@ export default function DailyReportModern({ user }) {
         setCascadePreview(prev => ({ ...prev, [key]: { success: false, sessionsToReschedule: [], error: 'Missing API base URL (set VITE_API_BASE_URL)' } }));
         return;
       }
-      const response = await fetch(`${base}?action=getCascadePreview&lpId=${lpId}&teacherEmail=${email}&originalDate=${date}`);
+      let token = '';
+      try {
+        const s = JSON.parse(localStorage.getItem('sf_google_session') || '{}');
+        token = s?.idToken ? String(s.idToken) : '';
+      } catch {}
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+      const response = await fetch(`${base}?action=getCascadePreview&lpId=${lpId}&teacherEmail=${email}&originalDate=${date}${tokenParam}`);
       const result = await response.json();
       
       console.log('🔍 Cascade API Response:', result);
@@ -539,25 +588,35 @@ export default function DailyReportModern({ user }) {
 
     // If substitution period: require only answer box (what done) and skip plan validations
     if (period?.isSubstitution) {
+      const lessonPlanId = String((draft.lessonPlanId || '').trim());
       const whatDone = String((draft.subNotes || draft.objectives || '').trim());
-      if (!whatDone) {
-        setMessage({ text: '❌ Please describe what you did in this substitution period', type: 'error' });
+      if (!lessonPlanId && !whatDone) {
+        setMessage({ text: '❌ Please describe what you did, or select a ready lesson plan for this substitution period', type: 'error' });
         return;
       }
 
       setSubmitting(prev => ({ ...prev, [key]: true }));
       setMessage({ text: '', type: '' });
       try {
+        const taughtSubject = period.substituteSubject || period.subject;
+        const completionPct = lessonPlanId ? Number(draft.completionPercentage || 0) : 0;
+        const sessionNo = lessonPlanId ? Number(draft.sessionNo || 0) : 0;
+        const totalSessions = lessonPlanId ? Number(draft.totalSessions || 0) : 0;
         const payload = {
           date,
           teacherEmail: email,
           teacherName,
           class: period.class,
-          subject: period.subject,
+          subject: taughtSubject,
           period: Number(period.period),
-          objectives: whatDone, // store in objectives field
-          activities: '',
-          completionPercentage: 0,
+          lessonPlanId: lessonPlanId || '',
+          // If a lesson plan is attached, leave objectives empty to let backend auto-fill from the plan.
+          // Optional notes go into activities so objectives can come from plan.
+          objectives: lessonPlanId ? '' : whatDone,
+          activities: lessonPlanId ? whatDone : '',
+          completionPercentage: isNaN(completionPct) ? 0 : completionPct,
+          sessionNo: isNaN(sessionNo) ? 0 : sessionNo,
+          totalSessions: isNaN(totalSessions) ? 0 : totalSessions,
           isSubstitution: true,
           absentTeacher: period.absentTeacher || '',
           regularSubject: period.regularSubject || '',
@@ -571,7 +630,10 @@ export default function DailyReportModern({ user }) {
           setDrafts(prev => { const n = { ...prev }; delete n[key]; return n; });
           setExpandedPeriod(null);
           const absentInfo = result?.absentCascade;
-          if (absentInfo?.attempted && absentInfo?.success) {
+          const pullback = result?.substitutePullback;
+          if (pullback?.attempted && pullback?.success && pullback?.updatedCount) {
+            setMessage({ text: `✅ Substitution submitted. Your future lesson plans were pulled back (${pullback.updatedCount} plan(s) updated).`, type: 'success' });
+          } else if (absentInfo?.attempted && absentInfo?.success) {
             setMessage({ text: `✅ Substitution submitted. Absent teacher plan rescheduled (${absentInfo.updatedCount} session(s)).`, type: 'success' });
           } else {
             setMessage({ text: '✅ Substitution report submitted successfully.', type: 'success' });
@@ -639,7 +701,7 @@ export default function DailyReportModern({ user }) {
         lessonPlanId: draft.lessonPlanId || plan?.lpId || "",
         chapter: chapter,
         sessionNo: Number(draft.sessionNo || plan?.session || 1),
-        totalSessions: Number(draft.totalSessions || plan?.totalSessions || 1),
+        totalSessions: Number(draft.totalSessions || plan?.totalSessions || plan?.noOfSessions || 1),
         completionPercentage: completionPercentage,
         chapterStatus: draft.chapterCompleted ? 'Chapter Complete' : 'Session Complete',
         deviationReason: deviationReason,
@@ -712,10 +774,16 @@ export default function DailyReportModern({ user }) {
                 period: Number(period.period)
               }
             };
+            try {
+              const s = JSON.parse(localStorage.getItem('sf_google_session') || '{}');
+              const token = s?.idToken ? String(s.idToken) : '';
+              if (token) cascadePayload.token = token;
+            } catch {}
             const baseExec = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_GAS_WEB_APP_URL || import.meta.env.VITE_APP_SCRIPT_URL;
             if (!baseExec) throw new Error('Missing API base URL for cascade execution (set VITE_API_BASE_URL)');
             const cascadeRes = await fetch(`${baseExec}?action=executeCascade`, {
               method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
               body: JSON.stringify(cascadePayload)
             });
             const cascadeData = await cascadeRes.json();
@@ -756,6 +824,18 @@ export default function DailyReportModern({ user }) {
           ...prev,
           [key]: { ...payload, reportId: result.reportId }
         }));
+
+        // CRITICAL: Invalidate frontend caches so data refreshes properly
+        try {
+          // Import the cache manager to clear cached data
+          const { cacheManager } = await import('./utils/cacheManager.js');
+          // Clear caches for this teacher/date so next fetch gets fresh data
+          cacheManager.deletePattern(`teacher_.*_${date}`);
+          cacheManager.deletePattern(`daily_timetable_${date}`);
+          console.log('✅ Frontend caches invalidated after submission');
+        } catch (cacheErr) {
+          console.warn('⚠️ Cache invalidation failed:', cacheErr);
+        }
 
         // Clear draft and cascade preview
         setDrafts(prev => {
@@ -955,7 +1035,7 @@ export default function DailyReportModern({ user }) {
               const isExpanded = expandedPeriod === key;
               const isSubmitted = !!report;
               const isSubmitting = submitting[key] || false;
-              const planKey = `${period.period}|${period.class}|${period.subject}`;
+              const planKey = `${String(period.period || '')}|${period.class}|${period.subject}`;
               // Attempt direct key lookup first
               let plan = lessonPlans[planKey] || null;
               // Fallback: some backends key lesson plans by uniqueKey: teacherEmail|YYYY-MM-DD|period
@@ -985,6 +1065,8 @@ export default function DailyReportModern({ user }) {
                   draft={draft}
                   report={report}
                   plan={plan}
+                  substitutionPlanData={suggestedSubPlans[key] || { nextPlan: null, pullbackPreview: [] }}
+                  substitutionPlansLoading={!!suggestedSubPlansLoading[key]}
                   cascadePreview={cascadePreview[key]}
                   cascadeLoading={!!cascadeLoading[key]}
                   cascadeMoves={cascadeMoves}
@@ -1016,6 +1098,8 @@ function PeriodCard({
   draft = {}, 
   report = null, 
   plan = null,
+  substitutionPlanData = { nextPlan: null, pullbackPreview: [] },
+  substitutionPlansLoading = false,
   cascadePreview = null,
   cascadeLoading = false,
   cascadeMoves = {},
@@ -1031,10 +1115,33 @@ function PeriodCard({
   const objectives = data.objectives || plan?.learningObjectives || "";
   const teachingMethods = data.activities || plan?.teachingMethods || "";
   const _resources = data.resources || plan?.resourcesRequired || "";
-  const sessionNo = data.sessionNo || plan?.sessionNo || 1;
-  const totalSessions = data.totalSessions || plan?.totalSessions || 1;
+  const sessionNo = data.sessionNo || plan?.sessionNo || plan?.session || 1;
+  const totalSessions = data.totalSessions || plan?.totalSessions || plan?.noOfSessions || 1;
   const completionPercentage = data.completionPercentage || 0;
   const isSub = !!period.isSubstitution;
+  const selectedSubPlanId = String(data.lessonPlanId || '').trim();
+  const nextPlan = substitutionPlanData && substitutionPlanData.nextPlan ? substitutionPlanData.nextPlan : null;
+  const pullbackPreview = substitutionPlanData && Array.isArray(substitutionPlanData.pullbackPreview) ? substitutionPlanData.pullbackPreview : [];
+  const selectedSubPlan = isSub && selectedSubPlanId && nextPlan && String(nextPlan.lpId || '').trim() === selectedSubPlanId ? nextPlan : null;
+  const inPlanMode = isSub && !!selectedSubPlanId;
+  const effectivePlan = (isSub && selectedSubPlan) ? selectedSubPlan : plan;
+  const showPlannedFields = !isSub || inPlanMode;
+
+  // When selecting "In plan", prefill the reporting draft from the plan (still editable where allowed)
+  const handleSubPlanSelect = (value) => {
+    onUpdate('lessonPlanId', value);
+    if (!value) return;
+    if (!nextPlan) return;
+    const id = String(nextPlan.lpId || '').trim();
+    if (id && String(value).trim() === id) {
+      if (nextPlan.chapter) onUpdate('chapter', String(nextPlan.chapter));
+      if (nextPlan.sessionNo) onUpdate('sessionNo', Number(nextPlan.sessionNo));
+      if (nextPlan.totalSessions) onUpdate('totalSessions', Number(nextPlan.totalSessions));
+      if (nextPlan.learningObjectives) onUpdate('objectives', String(nextPlan.learningObjectives));
+      if (nextPlan.teachingMethods) onUpdate('activities', String(nextPlan.teachingMethods));
+      if (!data.completionPercentage && data.completionPercentage !== 0) onUpdate('completionPercentage', 0);
+    }
+  };
 
   return (
     <div className={`bg-white rounded-xl shadow-md transition-all duration-300 ${
@@ -1117,21 +1224,74 @@ function PeriodCard({
               {period.absentTeacher && (
                 <div className="text-sm text-amber-700 mt-1">Absent Teacher: {period.absentTeacher} • Regular Subject: {period.regularSubject || '-'}</div>
               )}
+
+              <div className="mt-3">
+                <label className="block text-sm font-medium text-amber-900 mb-2">
+                  Use your ready lesson plan (optional)
+                </label>
+                <select
+                  value={selectedSubPlanId}
+                  onChange={(e) => handleSubPlanSelect(e.target.value)}
+                  className="w-full px-4 py-2 border border-amber-300 bg-white rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                >
+                  <option value="">No plan (write notes)</option>
+                  {nextPlan && String(nextPlan.lpId || '').trim() && (
+                    <option value={String(nextPlan.lpId || '').trim()}>
+                      In plan — {String(nextPlan.chapter || 'Lesson Plan').trim()}
+                      {nextPlan.sessionNo ? ` (S${nextPlan.sessionNo}` : ''}
+                      {(nextPlan.sessionNo && nextPlan.totalSessions) ? `/${nextPlan.totalSessions})` : (nextPlan.sessionNo ? ')' : '')}
+                      {nextPlan.selectedDate ? ` • ${nextPlan.selectedDate}` : ''}
+                      {nextPlan.selectedPeriod ? ` • P${nextPlan.selectedPeriod}` : ''}
+                    </option>
+                  )}
+                </select>
+                {substitutionPlansLoading && (
+                  <div className="text-xs text-amber-700 mt-1">Loading suggested plans…</div>
+                )}
+              </div>
+
+              {selectedSubPlan && (
+                <div className="mt-3 bg-green-50 border border-green-200 rounded-lg p-3">
+                  <div className="text-sm font-medium text-green-900">Selected plan: {selectedSubPlan.chapter || 'Lesson Plan'}</div>
+                  <div className="text-xs text-green-700 mt-1">
+                    {(selectedSubPlan.sessionNo && selectedSubPlan.totalSessions) ? `Session ${selectedSubPlan.sessionNo} of ${selectedSubPlan.totalSessions}` : ''}
+                    {selectedSubPlan.selectedDate ? ` • ${selectedSubPlan.selectedDate}` : ''}
+                    {selectedSubPlan.selectedPeriod ? ` • P${selectedSubPlan.selectedPeriod}` : ''}
+                  </div>
+                  {selectedSubPlan.learningObjectives && (
+                    <div className="text-xs text-green-700 mt-2">
+                      <strong>Objectives:</strong> {String(selectedSubPlan.learningObjectives).substring(0, 160)}{String(selectedSubPlan.learningObjectives).length > 160 ? '…' : ''}
+                    </div>
+                  )}
+                  {pullbackPreview.length > 0 && (
+                    <div className="mt-3 text-xs text-green-800">
+                      <div className="font-medium">Other sessions will be shifted earlier:</div>
+                      <div className="mt-1 space-y-1">
+                        {pullbackPreview.map(m => (
+                          <div key={m.lpId}>
+                            S{m.sessionNo}: {m.oldDate} P{m.oldPeriod} → {m.newDate} P{m.newPeriod}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
-          {/* Show lesson plan details if available and not substitution */}
-          {!isSub && plan ? (
+          {/* Show lesson plan details if available and planned fields are shown */}
+          {showPlannedFields && effectivePlan ? (
             <div className="bg-green-50 border border-green-200 rounded-lg p-4">
               <div className="flex items-start gap-3">
                 <div className="text-2xl">📚</div>
                 <div className="flex-1">
-                  <div className="font-medium text-green-900">Lesson Plan: {plan.chapter}</div>
-                  <div className="text-sm text-green-700 mt-1">Session {plan.session} of {plan.totalSessions}</div>
-                  <div className="text-xs text-green-600 mt-1">Plan ID: {plan.lpId}</div>
-                  {plan.learningObjectives && (
+                  <div className="font-medium text-green-900">Lesson Plan: {effectivePlan.chapter}</div>
+                  <div className="text-sm text-green-700 mt-1">Session {effectivePlan.sessionNo || effectivePlan.session} of {effectivePlan.totalSessions || effectivePlan.noOfSessions || 1}</div>
+                  <div className="text-xs text-green-600 mt-1">Plan ID: {effectivePlan.lpId}</div>
+                  {effectivePlan.learningObjectives && (
                     <div className="text-xs text-green-700 mt-2">
-                      <strong>Objectives:</strong> {plan.learningObjectives.substring(0, 100)}...
+                      <strong>Objectives:</strong> {String(effectivePlan.learningObjectives).substring(0, 100)}...
                     </div>
                   )}
                 </div>
@@ -1160,16 +1320,16 @@ function PeriodCard({
             </div>
           ))}
 
-          {/* Substitution simplified form */}
-          {isSub ? (
+          {/* Substitution form: notes-only OR in-plan (planned reporting fields) */}
+          {isSub && !inPlanMode ? (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                What did you do in this period? <span className="text-red-500">*</span>
+                {selectedSubPlanId ? 'Notes (optional)' : 'What did you do in this period?'} {!selectedSubPlanId && (<span className="text-red-500">*</span>)}
               </label>
               <textarea
                 value={data.subNotes || data.objectives || ''}
                 onChange={(e) => { onUpdate('subNotes', e.target.value); onUpdate('objectives', e.target.value); }}
-                placeholder="Briefly describe the activities/coverage during substitution"
+                placeholder={selectedSubPlanId ? "Optional: add any notes about what you did" : "Briefly describe the activities/coverage during substitution"}
                 rows={4}
                 className="w-full px-4 py-2 border border-amber-300 bg-amber-50 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent resize-none"
               />
@@ -1183,16 +1343,16 @@ function PeriodCard({
               </label>
               <input
                 type="text"
-                value={chapter}
+                value={data.chapter || effectivePlan?.chapter || ""}
                 readOnly
                 disabled={true}
                 onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()}
-                placeholder={plan ? "From lesson plan" : "No planned chapter – prepare a lesson plan"}
+                placeholder={effectivePlan ? "From lesson plan" : "No planned chapter – prepare a lesson plan"}
                 className={`w-full px-4 py-2 border rounded-lg bg-gray-100 ${
-                  plan ? 'border-blue-300' : 'border-red-300'
+                  effectivePlan ? 'border-blue-300' : 'border-red-300'
                 }`}
               />
-              {!plan && (
+              {!effectivePlan && (
                 <p className="mt-1 text-xs text-red-600">No planned chapter found for this period. Please prepare a lesson plan first.</p>
               )}
             </div>
@@ -1225,14 +1385,14 @@ function PeriodCard({
           )}
 
           {/* Learning Objectives */}
-          {!isSub && plan && (
+          {showPlannedFields && effectivePlan && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Learning Objectives (from Lesson Plan) 
                 <span className="text-blue-600 text-xs ml-2">✏️ Editable</span>
               </label>
               <textarea
-                value={objectives}
+                value={data.objectives || effectivePlan?.learningObjectives || ""}
                 onChange={(e) => onUpdate('objectives', e.target.value)}
                 placeholder="Learning objectives from lesson plan..."
                 rows={3}
@@ -1242,14 +1402,14 @@ function PeriodCard({
           )}
 
           {/* Teaching Methods/Activities */}
-          {!isSub && plan && plan.teachingMethods && (
+          {showPlannedFields && effectivePlan && (effectivePlan.teachingMethods || effectivePlan.activities) && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Teaching Methods (from Lesson Plan)
                 <span className="text-blue-600 text-xs ml-2">✏️ Editable</span>
               </label>
               <textarea
-                value={teachingMethods}
+                value={data.activities || effectivePlan?.teachingMethods || effectivePlan?.activities || ""}
                 onChange={(e) => onUpdate('activities', e.target.value)}
                 placeholder="Teaching methods from lesson plan..."
                 rows={3}
@@ -1259,7 +1419,7 @@ function PeriodCard({
           )}
 
           {/* Completion Percentage */}
-          {!isSub && (
+          {showPlannedFields && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-3">
               Session Completion level <span className="text-red-500">*</span>
@@ -1371,7 +1531,7 @@ function PeriodCard({
           )}
 
           {/* Learning Objectives - show for all cases when completion > 0 */}
-          {!isSub && completionPercentage > 0 && !plan && (
+          {showPlannedFields && completionPercentage > 0 && !effectivePlan && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Learning Objectives <span className="text-red-500">*</span>
@@ -1387,7 +1547,7 @@ function PeriodCard({
           )}
 
           {/* Activities - show for all cases when completion > 0 */}
-          {!isSub && completionPercentage > 0 && !plan && (
+          {showPlannedFields && completionPercentage > 0 && !effectivePlan && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Activities

@@ -42,10 +42,16 @@ const ModernFeeCollection = ({ user, apiBaseUrl }) => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
+      let token = '';
+      try {
+        const s = JSON.parse(localStorage.getItem('sf_google_session') || '{}');
+        token = s?.idToken ? String(s.idToken) : '';
+      } catch {}
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
       const [studentsRes, feeHeadsRes, transactionsRes] = await Promise.all([
-        fetch(`${apiBaseUrl}?action=getStudents`, { cache: 'no-store' }),
-        fetch(`${apiBaseUrl}?action=feeheads`, { cache: 'no-store' }),
-        fetch(`${apiBaseUrl}?action=transactions`, { cache: 'no-store' })
+        fetch(`${apiBaseUrl}?action=getStudents${tokenParam}`, { cache: 'no-store' }),
+        fetch(`${apiBaseUrl}?action=feeheads${tokenParam}`, { cache: 'no-store' }),
+        fetch(`${apiBaseUrl}?action=transactions${tokenParam}`, { cache: 'no-store' })
       ]);
 
       const studentsData = await studentsRes.json();
@@ -106,7 +112,13 @@ const ModernFeeCollection = ({ user, apiBaseUrl }) => {
   // Lightweight refresh used by "New Payment" button: update transactions only
   const refreshTransactionsOnly = useCallback(async () => {
     try {
-      const res = await fetch(`${apiBaseUrl}?action=transactions`, { cache: 'no-store' });
+      let token = '';
+      try {
+        const s = JSON.parse(localStorage.getItem('sf_google_session') || '{}');
+        token = s?.idToken ? String(s.idToken) : '';
+      } catch {}
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+      const res = await fetch(`${apiBaseUrl}?action=transactions${tokenParam}`, { cache: 'no-store' });
       const json = await res.json();
       const extractArray = (response) => {
         if (Array.isArray(response)) return response;

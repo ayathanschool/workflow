@@ -41,10 +41,16 @@ const FeeCollectionModule = ({ user, apiBaseUrl }) => {
     setLoading(true);
     setError('');
     try {
+      let token = '';
+      try {
+        const s = JSON.parse(localStorage.getItem('sf_google_session') || '{}');
+        token = s?.idToken ? String(s.idToken) : '';
+      } catch {}
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
       const [studentsRes, feeHeadsRes, transactionsRes] = await Promise.all([
-        fetch(`${apiBaseUrl}?action=getStudents`, { cache: 'no-store' }).then(r => r.json()),
-        fetch(`${apiBaseUrl}?action=feeheads`, { cache: 'no-store' }).then(r => r.json()),
-        fetch(`${apiBaseUrl}?action=transactions`, { cache: 'no-store' }).then(r => r.json())
+        fetch(`${apiBaseUrl}?action=getStudents${tokenParam}`, { cache: 'no-store' }).then(r => r.json()),
+        fetch(`${apiBaseUrl}?action=feeheads${tokenParam}`, { cache: 'no-store' }).then(r => r.json()),
+        fetch(`${apiBaseUrl}?action=transactions${tokenParam}`, { cache: 'no-store' }).then(r => r.json())
       ]);
 
       // Helper to safely extract array from various response shapes
@@ -118,6 +124,11 @@ const FeeCollectionModule = ({ user, apiBaseUrl }) => {
     setLoading(true);
     setError('');
     try {
+      let token = '';
+      try {
+        const s = JSON.parse(localStorage.getItem('sf_google_session') || '{}');
+        token = s?.idToken ? String(s.idToken) : '';
+      } catch {}
       const response = await fetch(apiBaseUrl, {
         method: 'POST',
         // Use text/plain to avoid preflight with Apps Script
@@ -129,7 +140,8 @@ const FeeCollectionModule = ({ user, apiBaseUrl }) => {
           name: paymentForm.name,
           cls: paymentForm.class,
           mode: paymentForm.mode,
-          items: paymentForm.selectedFees.filter(f => f.amount > 0)
+          items: paymentForm.selectedFees.filter(f => f.amount > 0),
+          ...(token ? { token } : {})
         })
       });
 

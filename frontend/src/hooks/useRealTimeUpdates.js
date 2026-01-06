@@ -1,6 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNotifications } from '../contexts/NotificationContext';
 
+function getStoredAuthToken() {
+  try {
+    const raw = localStorage.getItem('sf_google_session');
+    if (!raw) return '';
+    const parsed = JSON.parse(raw);
+    return parsed?.idToken ? String(parsed.idToken) : '';
+  } catch {
+    return '';
+  }
+}
+
 export const useRealTimeUpdates = (user, interval = 30000) => {
   // Temporarily disabled to prevent error loops
   const [isPolling, setIsPolling] = useState(false);
@@ -14,13 +25,16 @@ export const useRealTimeUpdates = (user, interval = 30000) => {
 
     try {
       setIsPolling(true);
+
+      const token = getStoredAuthToken();
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
       
       // Check for new lesson plan approvals
-      const lessonPlans = await fetch(`${import.meta.env.VITE_GAS_WEB_APP_URL}?action=getTeacherLessonPlans&email=${user.email}`)
+      const lessonPlans = await fetch(`${import.meta.env.VITE_GAS_WEB_APP_URL}?action=getTeacherLessonPlans&email=${user.email}${tokenParam}`)
         .then(res => res.json());
       
       // Check for new notifications (this would be a new API endpoint)
-      const notifications = await fetch(`${import.meta.env.VITE_GAS_WEB_APP_URL}?action=getNotifications&email=${user.email}&since=${lastUpdate || ''}`)
+      const notifications = await fetch(`${import.meta.env.VITE_GAS_WEB_APP_URL}?action=getNotifications&email=${user.email}&since=${lastUpdate || ''}${tokenParam}`)
         .then(res => res.json())
         .catch(() => ({ data: [] }));
 
@@ -170,6 +184,7 @@ export const useDataSync = () => {
     setSyncStatus('syncing');
     
     try {
+      const token = getStoredAuthToken();
       // Sync data to server
       const response = await fetch(`${import.meta.env.VITE_GAS_WEB_APP_URL}`, {
         method: 'POST',
@@ -178,7 +193,8 @@ export const useDataSync = () => {
         },
         body: new URLSearchParams({
           action: `sync${dataType}`,
-          data: JSON.stringify(data)
+          data: JSON.stringify(data),
+          ...(token ? { token } : {})
         })
       });
 

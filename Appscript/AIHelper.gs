@@ -15,7 +15,7 @@ function getAILessonSuggestions(context) {
     if (!AI_SUGGESTIONS_ENABLED || !GEMINI_API_KEY) {
       return {
         success: false,
-        error: 'AI suggestions are not enabled. Please configure GEMINI_API_KEY in Config.gs'
+        error: 'AI suggestions are not enabled. Please configure GEMINI_API_KEY in Script Properties (Project Settings)'
       };
     }
 

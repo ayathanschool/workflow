@@ -192,6 +192,11 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
     setStep(4); // Move to receipt step immediately
     
     try {
+      let token = '';
+      try {
+        const s = JSON.parse(localStorage.getItem('sf_google_session') || '{}');
+        token = s?.idToken ? String(s.idToken) : '';
+      } catch {}
       const response = await fetch(apiBaseUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -202,7 +207,8 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
           name: selectedStudent.name,
           cls: selectedStudent.class,
           mode: paymentForm.mode,
-          items
+          items,
+          ...(token ? { token } : {})
         })
       });
 
