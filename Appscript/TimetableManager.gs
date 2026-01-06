@@ -483,30 +483,52 @@ function getAvailableTeachers(date, period) {
   const busyTeachers = busyTeacherRows.map(r => String(r.teacherEmail || '').toLowerCase());
   Logger.log(`[getAvailableTeachers] Busy teacher emails: ${JSON.stringify(busyTeachers)}`);
   
-  // Get teachers already assigned as substitutes for this date/period
+  // Get substitution data for this date/period
   const substitutionsSh = _getSheet('Substitutions');
   const substitutionsHeaders = _headers(substitutionsSh);
-  const assignedSubstitutes = _rows(substitutionsSh)
+  const substitutionsForPeriod = _rows(substitutionsSh)
     .map(r => _indexByHeader(r, substitutionsHeaders))
     .filter(r => 
       _isoDateString(r.date) === normalizedDate &&
       String(r.period) === String(period)
-    )
-    .map(r => String(r.substituteTeacher || '').toLowerCase());
+    );
+  
+  Logger.log(`[getAvailableTeachers] Substitutions for this period: ${substitutionsForPeriod.length}`);
+  
+  // Teachers who are substituting (now busy)
+  const assignedSubstitutes = substitutionsForPeriod
+    .map(r => String(r.substituteTeacher || '').toLowerCase())
+    .filter(email => email);
+  
+  // Teachers who are absent (now free - remove from busy list)
+  const absentTeachers = substitutionsForPeriod
+    .map(r => String(r.absentTeacher || '').toLowerCase())
+    .filter(email => email);
   
   Logger.log(`[getAvailableTeachers] Assigned substitutes: ${assignedSubstitutes.length}`);
+  Logger.log(`[getAvailableTeachers] Absent teachers (freed up): ${absentTeachers.length}`);
   
-  // Filter available teachers (not busy and not already assigned)
+  // Filter available teachers
+  // LOGIC: Free if NOT in timetable OR (in timetable but marked absent)
+  //        AND NOT already assigned as substitute elsewhere
   const availableTeachers = allTeachers.filter(teacher => {
     const teacherEmail = String(teacher.email || '').toLowerCase();
-    const isBusy = busyTeachers.includes(teacherEmail);
-    const isAssigned = assignedSubstitutes.includes(teacherEmail);
+    const isBusyInTimetable = busyTeachers.includes(teacherEmail);
+    const isAbsent = absentTeachers.includes(teacherEmail);
+    const isSubstituting = assignedSubstitutes.includes(teacherEmail);
     
-    if (isBusy || isAssigned) {
-      Logger.log(`[getAvailableTeachers] Excluding ${teacher.name} (${teacherEmail}): busy=${isBusy}, assigned=${isAssigned}`);
+    // Teacher is FREE if:
+    // 1. Not in timetable at all, OR
+    // 2. In timetable but marked as absent (substitution exists)
+    // AND
+    // 3. Not already assigned as substitute
+    const isFree = (!isBusyInTimetable || isAbsent) && !isSubstituting;
+    
+    if (!isFree) {
+      Logger.log(`[getAvailableTeachers] Excluding ${teacher.name} (${teacherEmail}): timetable=${isBusyInTimetable}, absent=${isAbsent}, substituting=${isSubstituting}`);
     }
     
-    return !isBusy && !isAssigned;
+    return isFree;
   });
   
   Logger.log(`[getAvailableTeachers] Available teachers: ${availableTeachers.length}`);

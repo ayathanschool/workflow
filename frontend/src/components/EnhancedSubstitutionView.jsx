@@ -3,10 +3,14 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as api from '../api';
 import { useToast } from '../hooks/useToast';
 import { formatDateForInput, formatLocalDate, periodToTimeString } from '../utils/dateUtils';
+import PeriodExchangeTab from './PeriodExchangeTab';
 
 const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
   // Notification system
   const { success: notifySuccess, error: _notifyError, info: notifyInfo } = useToast();
+  
+  // Active tab state
+  const [activeTab, setActiveTab] = useState('substitutions'); // 'substitutions' or 'exchanges'
   
   // State Management
   const [selectedDate, setSelectedDate] = useState(formatDateForInput(new Date()));
@@ -713,45 +717,82 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-          Substitution Management
+          Substitution & Period Exchange Management
         </h2>
         <div className="flex gap-2">
-          <button
-            onClick={shareToWhatsApp}
-            disabled={substitutionData.length === 0}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-semibold shadow-lg"
-            title="Share substitutions via WhatsApp"
-          >
-            <Share2 className="w-5 h-5" />
-            Share WhatsApp
-          </button>
-          <button
-            onClick={refreshAllData}
-            disabled={loading}
-            className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 transition-colors"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-          <button
-            onClick={exportToPDF}
-            className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-          >
-            <FileText className="w-4 h-4" />
-            PDF
-          </button>
-          <button
-            onClick={exportToExcel}
-            className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            Excel
-          </button>
+          {activeTab === 'substitutions' && (
+            <>
+              <button
+                onClick={shareToWhatsApp}
+                disabled={substitutionData.length === 0}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-semibold shadow-lg"
+                title="Share substitutions via WhatsApp"
+              >
+                <Share2 className="w-5 h-5" />
+                Share WhatsApp
+              </button>
+              <button
+                onClick={refreshAllData}
+                disabled={loading}
+                className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 transition-colors"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+              <button
+                onClick={exportToPDF}
+                className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              >
+                <FileText className="w-4 h-4" />
+                PDF
+              </button>
+              <button
+                onClick={exportToExcel}
+                className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                Excel
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Controls */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm">
+      {/* Tabs */}
+      <div className="flex border-b border-gray-200 dark:border-gray-700">
+        <button
+          onClick={() => setActiveTab('substitutions')}
+          className={`px-6 py-3 font-medium transition-colors ${
+            activeTab === 'substitutions'
+              ? 'border-b-2 border-blue-600 text-blue-600'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+          }`}
+        >
+          Substitutions
+        </button>
+        <button
+          onClick={() => setActiveTab('exchanges')}
+          className={`px-6 py-3 font-medium transition-colors ${
+            activeTab === 'exchanges'
+              ? 'border-b-2 border-purple-600 text-purple-600'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+          }`}
+        >
+          Period Exchanges
+        </button>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'exchanges' ? (
+        <PeriodExchangeTab 
+          selectedDate={selectedDate}
+          currentUser={user}
+          onRefresh={refreshAllData}
+        />
+      ) : (
+        <>
+          {/* Controls */}
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-sm">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
           {/* Date Picker */}
           <div>
@@ -1260,6 +1301,8 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
           <p className="text-sm">Click "Fetch Timetable" to load data.</p>
         </div>
       )}
+    </>
+  )}
     </div>
   );
 };

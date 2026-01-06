@@ -520,3 +520,161 @@ function _handleAbsentTeacherLessonPlan(absentTeacher, date, period, className, 
     };
   }
 }
+
+/**
+ * ====== PERIOD EXCHANGE SYSTEM ======
+ * Allows two teachers to swap their periods
+ */
+
+/**
+ * Create a period exchange between two teachers
+ * Example: Teacher A (Period 3, 6A, English) <-> Teacher B (Period 3, 7B, Math)
+ * Result: A teaches 7B Math P3, B teaches 6A English P3
+ */
+function createPeriodExchange(data) {
+  const sh = _getSheet('PeriodExchanges');
+  _ensureHeaders(sh, SHEETS.PeriodExchanges);
+  const now = new Date().toISOString();
+  
+  const normalizedDate = _isoDateString(data.date || '');
+  
+  if (!normalizedDate) {
+    return { error: 'Valid date is required' };
+  }
+  
+  // Validate required fields
+  if (!data.teacher1Email || !data.teacher2Email) {
+    return { error: 'Both teacher emails are required' };
+  }
+  
+  if (!data.period1 || !data.period2) {
+    return { error: 'Both period numbers are required' };
+  }
+  
+  if (!data.class1 || !data.class2) {
+    return { error: 'Both class names are required' };
+  }
+  
+  // Check if exchange already exists for this combination
+  const headers = _headers(sh);
+  const existing = _rows(sh)
+    .map(r => _indexByHeader(r, headers))
+    .find(r => {
+      const rowDate = _isoDateString(r.date);
+      const t1 = String(r.teacher1Email || '').toLowerCase();
+      const t2 = String(r.teacher2Email || '').toLowerCase();
+      const dt1 = String(data.teacher1Email || '').toLowerCase();
+      const dt2 = String(data.teacher2Email || '').toLowerCase();
+      
+      // Check both directions of the exchange
+      return rowDate === normalizedDate && (
+        (t1 === dt1 && t2 === dt2 && r.period1 === data.period1 && r.period2 === data.period2) ||
+        (t1 === dt2 && t2 === dt1 && r.period1 === data.period2 && r.period2 === data.period1)
+      );
+    });
+  
+  if (existing) {
+    return { error: 'Period exchange already exists for these teachers and periods' };
+  }
+  
+  const exchangeData = [
+    normalizedDate,
+    data.teacher1Email || '',
+    data.teacher1Name || '',
+    data.period1 || '',
+    data.class1 || '',
+    data.subject1 || '',
+    data.teacher2Email || '',
+    data.teacher2Name || '',
+    data.period2 || '',
+    data.class2 || '',
+    data.subject2 || '',
+    data.note || '',
+    data.createdBy || '',
+    now // createdAt
+  ];
+  
+  // Append row
+  const nextRow = sh.getLastRow() + 1;
+  sh.getRange(nextRow, 1, 1, exchangeData.length).setValues([exchangeData]);
+  
+  // Force the date cell to be plain text format
+  sh.getRange(nextRow, 1).setNumberFormat('@STRING@');
+  
+  // Invalidate caches
+  invalidateCache('period_exchanges');
+  invalidateCache('timetable');
+  
+  Logger.log(`[createPeriodExchange] Created exchange: ${data.teacher1Email} <-> ${data.teacher2Email} on ${normalizedDate}`);
+  
+  return { 
+    success: true,
+    message: 'Period exchange created successfully',
+    exchangeId: nextRow
+  };
+}
+
+/**
+ * Get all period exchanges for a specific date
+ */
+function getPeriodExchangesForDate(date) {
+  const normalizedDate = _isoDateString(date);
+  
+  const cacheKey = 'period_exchanges_' + normalizedDate;
+  return getCachedData(cacheKey, function() {
+    return _fetchPeriodExchangesForDate(normalizedDate);
+  }, CACHE_TTL.SHORT);
+}
+
+function _fetchPeriodExchangesForDate(normalizedDate) {
+  const sh = _getSheet('PeriodExchanges');
+  const headers = _headers(sh);
+  const allRows = _rows(sh).map(r => _indexByHeader(r, headers));
+  
+  const exchanges = allRows.filter(r => {
+    const rowDate = _isoDateString(r.date);
+    return rowDate === normalizedDate;
+  });
+  
+  Logger.log(`[getPeriodExchangesForDate] Found ${exchanges.length} exchanges for ${normalizedDate}`);
+  
+  return {
+    date: normalizedDate,
+    exchanges
+  };
+}
+
+/**
+ * Delete a period exchange
+ */
+function deletePeriodExchange(data) {
+  const sh = _getSheet('PeriodExchanges');
+  const headers = _headers(sh);
+  const rows = sh.getDataRange().getValues();
+  
+  const normalizedDate = _isoDateString(data.date);
+  
+  // Find the row to delete
+  for (let i = 1; i < rows.length; i++) {
+    const row = _indexByHeader(rows[i], headers);
+    const rowDate = _isoDateString(row.date);
+    
+    if (rowDate === normalizedDate &&
+        String(row.teacher1Email || '').toLowerCase() === String(data.teacher1Email || '').toLowerCase() &&
+        String(row.teacher2Email || '').toLowerCase() === String(data.teacher2Email || '').toLowerCase() &&
+        String(row.period1) === String(data.period1) &&
+        String(row.period2) === String(data.period2)) {
+      
+      sh.deleteRow(i + 1);
+      
+      // Invalidate caches
+      invalidateCache('period_exchanges');
+      invalidateCache('timetable');
+      
+      Logger.log(`[deletePeriodExchange] Deleted exchange at row ${i + 1}`);
+      return { success: true, message: 'Period exchange deleted successfully' };
+    }
+  }
+  
+  return { error: 'Period exchange not found' };
+}
