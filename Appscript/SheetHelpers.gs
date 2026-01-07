@@ -1266,14 +1266,49 @@ function _getUserByEmail(email) {
     var hdr = _headers(sh);
     var rows = _rows(sh).map(function(r){ return _indexByHeader(r, hdr); });
     var target = String(email || '').toLowerCase().trim();
-    var u = rows.find(function(row){ return String(row.email || '').toLowerCase().trim() === target; });
+
+    function _pickFieldCI(obj, candidates) {
+      if (!obj) return '';
+      var keys = Object.keys(obj);
+      var keyMap = {};
+      for (var i = 0; i < keys.length; i++) {
+        var k = String(keys[i] || '');
+        keyMap[k.toLowerCase().trim()] = k;
+      }
+      for (var j = 0; j < candidates.length; j++) {
+        var cand = String(candidates[j] || '').toLowerCase().trim();
+        if (!cand) continue;
+        if (Object.prototype.hasOwnProperty.call(obj, candidates[j])) {
+          var direct = obj[candidates[j]];
+          return direct === null || direct === undefined ? '' : direct;
+        }
+        var realKey = keyMap[cand];
+        if (realKey && Object.prototype.hasOwnProperty.call(obj, realKey)) {
+          var v = obj[realKey];
+          return v === null || v === undefined ? '' : v;
+        }
+      }
+      return '';
+    }
+
+    var u = rows.find(function(row){
+      var rowEmail = _pickFieldCI(row, ['email', 'teacherEmail', 'Email', 'TeacherEmail']);
+      return String(rowEmail || '').toLowerCase().trim() === target;
+    });
     if (!u) return null;
+
+    var emailVal = _pickFieldCI(u, ['email', 'teacherEmail', 'Email', 'TeacherEmail']);
+    var nameVal = _pickFieldCI(u, ['name', 'teacherName', 'Name', 'TeacherName']);
+    var rolesVal = _pickFieldCI(u, ['roles', 'role', 'Roles', 'Role']);
+    var classesVal = _pickFieldCI(u, ['classes', 'class', 'Classes', 'Class']);
+    var subjectsVal = _pickFieldCI(u, ['subjects', 'subject', 'Subjects', 'Subject']);
+
     return {
-      email: String(u.email || '').toLowerCase(),
-      name: u.name || u.email || '',
-      roles: u.roles || u.role || '',
-      classes: u.classes || '',
-      subjects: u.subjects || ''
+      email: String(emailVal || '').toLowerCase().trim(),
+      name: nameVal || emailVal || '',
+      roles: rolesVal || '',
+      classes: classesVal || '',
+      subjects: subjectsVal || ''
     };
   } catch (e) {
     return null;
@@ -1561,7 +1596,7 @@ function suggestLessonPlansBulk(params) {
   var lock;
   try {
     var teacherEmail = params && params.teacherEmail;
-    var teacherName = params && params.teacherName;
+    var teacherName = '';
     var cls = params && params.class;
     var subject = params && params.subject;
     var chapter = params && params.chapter;
@@ -1571,6 +1606,13 @@ function suggestLessonPlansBulk(params) {
     if (!teacherEmail || !cls || !subject || !chapter || !sessions) {
       return { success: false, error: 'Missing required parameters (teacherEmail/class/subject/chapter/sessions)' };
     }
+
+    try {
+      teacherName = _getTeacherDisplayName(teacherEmail);
+    } catch (e) {
+      teacherName = '';
+    }
+    if (!teacherName) teacherName = String(teacherEmail).toLowerCase();
 
     lock = LockService.getDocumentLock();
     lock.waitLock(28000);

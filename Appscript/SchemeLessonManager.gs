@@ -1204,7 +1204,7 @@ function createSchemeLessonPlan(lessonPlanData) {
     const finalStatus = lessonPlanData.status === 'submitted' ? 'Pending Review' : (lessonPlanData.status || 'draft');
     
     // Get teacher name from Users sheet instead of using the passed name
-    let teacherName = lessonPlanData.teacherName || '';
+    let teacherName = '';
     try {
       const usersSheet = _getSheet('Users');
       const usersHeaders = _headers(usersSheet);
@@ -1218,6 +1218,7 @@ function createSchemeLessonPlan(lessonPlanData) {
     } catch (err) {
       Logger.log(`Warning: Could not fetch teacher name from Users sheet: ${err.message}`);
     }
+    if (!teacherName) teacherName = String(lessonPlanData.teacherEmail || '').toLowerCase().trim();
     
     const rowObject = {
       lpId: lpId,
@@ -1379,7 +1380,7 @@ function createBulkSchemeLessonPlans(bulkData) {
     const errors = [];
     
     // Get teacher name from Users sheet instead of using the passed name
-    let teacherName = bulkData.teacherName || '';
+    let teacherName = '';
     try {
       const usersSheet = _getSheet('Users');
       const usersHeaders = _headers(usersSheet);
@@ -1393,6 +1394,7 @@ function createBulkSchemeLessonPlans(bulkData) {
     } catch (err) {
       Logger.log(`Warning: Could not fetch teacher name from Users sheet: ${err.message}`);
     }
+    if (!teacherName) teacherName = String(bulkData.teacherEmail || '').toLowerCase().trim();
     
     // Create lesson plans for each session
     for (let i = 0; i < sessionCount; i++) {

@@ -1357,6 +1357,18 @@
           const reportPeriod = Number(data.period || 0);
           appLog('DEBUG', 'duplicateCheck params', { date: reportDate, email: teacherEmail, class: reportClass, subject: reportSubject, period: reportPeriod });
 
+          // Always use the canonical teacher name from Users sheet (not Google profile)
+          let teacherNameForRow = '';
+          try {
+            const u = _getUserByEmail(teacherEmail);
+            teacherNameForRow = (u && u.name) ? String(u.name).trim() : '';
+          } catch (_e) {
+            teacherNameForRow = '';
+          }
+          if (!teacherNameForRow) {
+            teacherNameForRow = String(data.teacherEmail || '').trim();
+          }
+
           SpreadsheetApp.flush();
           const existingReports = _rows(sh).map(row => _indexByHeader(row, headers));
           appLog('DEBUG', 'existingReports count', { count: existingReports.length });
@@ -1504,7 +1516,7 @@
             reportId,
             data.date || '',
             data.teacherEmail || '',
-            data.teacherName || '',
+            teacherNameForRow,
             data.class || '',
             data.subject || '',
             Number(data.period || 0),
@@ -2336,17 +2348,13 @@
       
       // Lookup teacher name from Users sheet to ensure consistency
       const teacherEmail = (data.email || '').toLowerCase().trim();
-      let teacherName = data.teacherName || '';
-      
-      const usersSh = _getSheet('Users');
-      const usersHeaders = _headers(usersSh);
-      const users = _rows(usersSh).map(r => _indexByHeader(r, usersHeaders));
-      const teacher = users.find(u => String(u.email || '').toLowerCase() === teacherEmail);
-      
-      if (teacher && teacher.name) {
-        teacherName = teacher.name; // Use name from Users sheet
-        Logger.log(`Using teacher name from Users sheet: ${teacherName}`);
+      let teacherName = '';
+      try {
+        teacherName = _getTeacherDisplayName(teacherEmail);
+      } catch (_e) {
+        teacherName = '';
       }
+      if (!teacherName) teacherName = teacherEmail;
       
       // Match the order of headers: schemeId, teacherEmail, teacherName, class, subject, term, unit, chapter, month, noOfSessions, status, createdAt, approvedAt, academicYear, content
       const line = [

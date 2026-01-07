@@ -462,6 +462,13 @@ function submitExamMarks(data) {
   const examId = data.examId || '';
   const marks = Array.isArray(data.marks) ? data.marks : [];
   const teacherEmail = String(data.teacherEmail || data.email || '').toLowerCase().trim();
+  let teacherNameForRow = '';
+  try {
+    teacherNameForRow = _getTeacherDisplayName(teacherEmail);
+  } catch (_e) {
+    teacherNameForRow = '';
+  }
+  if (!teacherNameForRow) teacherNameForRow = teacherEmail;
   
   if (!examId) return { error: 'Missing examId' };
   if (marks.length === 0) return { error: 'No marks data provided' };
@@ -718,8 +725,8 @@ function submitExamMarks(data) {
       examId,
       exam.class,
       exam.subject,
-      data.teacherEmail || '',
-      data.teacherName || '',
+      teacherEmail,
+      teacherNameForRow,
       adm,
       studentMark.studentName || '',
       exam.examType,
@@ -789,8 +796,8 @@ function submitExamMarks(data) {
     action: AUDIT_ACTIONS.SUBMIT,
     entityType: AUDIT_ENTITIES.EXAM_MARKS,
     entityId: examId,
-    userEmail: data.teacherEmail || '',
-    userName: data.teacherName || '',
+    userEmail: teacherEmail,
+    userName: teacherNameForRow,
     userRole: 'Teacher',
     afterData: {
       examId: examId,
