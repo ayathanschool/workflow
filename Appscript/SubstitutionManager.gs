@@ -8,81 +8,187 @@
  * Assign a substitute teacher for an absent teacher
  */
 function assignSubstitution(data) {
+  const result = assignSubstitutionsBatch({
+    date: data && data.date,
+    substitutions: [data],
+    sendNotifications: true
+  });
+
+  if (!result || !result.success) {
+    return { error: (result && result.error) || 'Failed to assign substitution' };
+  }
+
+  const firstCascade =
+    result.cascadeResults &&
+    result.cascadeResults[0] &&
+    result.cascadeResults[0].result
+      ? result.cascadeResults[0].result
+      : null;
+
+  return {
+    submitted: true,
+    cascadeInfo: firstCascade
+  };
+}
+
+/**
+ * Bulk assign substitutions for a full day in one click.
+ * This avoids repeated per-period sheet writes by using a single setValues() call.
+ *
+ * Payload example:
+ * {
+ *   date: "2026-01-09",
+ *   substitutions: [
+ *     { period:"1", class:"6A", absentTeacher:"a@x.com", regularSubject:"Eng", substituteTeacher:"b@x.com" },
+ *     { period:"2", class:"6A", absentTeacher:"a@x.com", regularSubject:"Eng", substituteTeacher:"c@x.com" }
+ *   ],
+ *   sendNotifications: true
+ * }
+ */
+function assignSubstitutionsBatch(payload) {
   const sh = _getSheet('Substitutions');
   _ensureHeaders(sh, SHEETS.Substitutions);
+
   const now = new Date().toISOString();
-  
-  const normalizedDate = _isoDateString(data.date || '');
-  
+  const normalizedDate = _isoDateString((payload && payload.date) || '');
+
   if (!normalizedDate) {
-    return { error: 'Valid date is required' };
+    return { success: false, error: 'Valid date is required' };
   }
-  
-  // Check if substitution already exists for this combination
+
+  const substitutions = Array.isArray(payload && payload.substitutions)
+    ? payload.substitutions
+    : [];
+
+  if (!substitutions.length) {
+    return { success: false, error: 'No substitutions provided' };
+  }
+
+  // Read existing once, build a key set to avoid duplicates.
+  // Keep comparisons aligned with existing assignSubstitution():
+  // - date exact after iso normalization
+  // - period exact
+  // - class exact
+  // - absentTeacher case-insensitive
   const headers = _headers(sh);
-  const existing = _rows(sh)
-    .map(r => _indexByHeader(r, headers))
-    .find(r => 
-      _isoDateString(r.date) === normalizedDate &&
-      r.period === data.period &&
-      r.class === data.class &&
-      String(r.absentTeacher || '').toLowerCase() === String(data.absentTeacher || '').toLowerCase()
-    );
-  
-  if (existing) {
-    return { error: 'Substitution already exists for this time slot' };
-  }
-  
-  const substitutionData = [
-    normalizedDate,
-    data.period || '',
-    data.class || '',
-    data.absentTeacher || '',
-    data.regularSubject || '',
-    data.substituteTeacher || '',
-    data.substituteSubject || data.regularSubject || '',
-    data.note || '',
-    'FALSE', // acknowledged
-    '', // acknowledgedBy
-    '', // acknowledgedAt
-    now // createdAt
-  ];
-  
-  // Append row and force date column to be stored as text
-  const nextRow = sh.getLastRow() + 1;
-  sh.getRange(nextRow, 1, 1, substitutionData.length).setValues([substitutionData]);
-  
-  // Force the date cell to be plain text format to prevent automatic date conversion
-  sh.getRange(nextRow, 1).setNumberFormat('@STRING@');
-  
-  // Send notification to substitute teacher
-  if (data.substituteTeacher) {
-    _sendSubstitutionNotification(data);
-  }
-  
-  // AUTO-CASCADE: Check if absent teacher has a lesson plan for this slot and cascade it
-  let cascadeResult = null;
-  try {
-    cascadeResult = _handleAbsentTeacherLessonPlan(
-      data.absentTeacher,
+  const existingKeys = new Set(
+    _rows(sh)
+      .map(r => _indexByHeader(r, headers))
+      .map(r => _subKey(_isoDateString(r.date), r.period, r.class, r.absentTeacher))
+  );
+
+  const rowsToAppend = [];
+  const created = [];
+  const errors = [];
+  const cascadeResults = [];
+
+  for (let idx = 0; idx < substitutions.length; idx++) {
+    const s = substitutions[idx] || {};
+
+    const period = s.period || '';
+    const className = s.class || '';
+    const absentTeacher = s.absentTeacher || '';
+
+    const key = _subKey(normalizedDate, period, className, absentTeacher);
+    if (existingKeys.has(key)) {
+      errors.push({ index: idx, error: 'Substitution already exists for this time slot', item: s });
+      continue;
+    }
+
+    existingKeys.add(key);
+
+    const regularSubject = s.regularSubject || '';
+    const substituteTeacher = s.substituteTeacher || '';
+    const substituteSubject = s.substituteSubject || regularSubject || '';
+    const note = s.note || '';
+
+    rowsToAppend.push([
       normalizedDate,
-      data.period,
-      data.class,
-      data.regularSubject
-    );
-  } catch (cascadeErr) {
-    Logger.log(`[assignSubstitution] Cascade error: ${cascadeErr.message}`);
-    // Don't fail substitution if cascade fails
+      period,
+      className,
+      absentTeacher,
+      regularSubject,
+      substituteTeacher,
+      substituteSubject,
+      note,
+      'FALSE', // acknowledged
+      '', // acknowledgedBy
+      '', // acknowledgedAt
+      now // createdAt
+    ]);
+
+    created.push({
+      date: normalizedDate,
+      period: period,
+      class: className,
+      absentTeacher: absentTeacher,
+      regularSubject: regularSubject,
+      substituteTeacher: substituteTeacher,
+      substituteSubject: substituteSubject,
+      note: note
+    });
   }
-  
-  // Invalidate substitution caches since data changed
+
+  if (!rowsToAppend.length) {
+    return { success: false, error: 'No substitutions created', createdCount: 0, errors: errors };
+  }
+
+  // Write once (fast)
+  const nextRow = sh.getLastRow() + 1;
+  sh.getRange(nextRow, 1, rowsToAppend.length, rowsToAppend[0].length).setValues(rowsToAppend);
+
+  // Force all appended date cells to text format to prevent automatic date conversion
+  sh.getRange(nextRow, 1, rowsToAppend.length, 1).setNumberFormat('@STRING@');
+
+  const sendNotifications = (payload && payload.sendNotifications) !== false;
+
+  // Notifications and cascade are best-effort per row
+  for (let i = 0; i < created.length; i++) {
+    const item = created[i];
+
+    if (sendNotifications && item.substituteTeacher) {
+      try {
+        _sendSubstitutionNotification(item);
+      } catch (notifyErr) {
+        errors.push({ index: i, error: 'Notification failed: ' + notifyErr.message, item: item });
+      }
+    }
+
+    try {
+      const cascade = _handleAbsentTeacherLessonPlan(
+        item.absentTeacher,
+        normalizedDate,
+        item.period,
+        item.class,
+        item.regularSubject
+      );
+      cascadeResults.push({ index: i, key: _subKey(normalizedDate, item.period, item.class, item.absentTeacher), result: cascade });
+    } catch (cascadeErr) {
+      Logger.log(`[assignSubstitutionsBatch] Cascade error: ${cascadeErr.message}`);
+      cascadeResults.push({ index: i, key: _subKey(normalizedDate, item.period, item.class, item.absentTeacher), error: cascadeErr.message });
+    }
+  }
+
+  // Invalidate caches once
   invalidateCache('substitutions');
-  invalidateCache('timetable'); // Also invalidate timetable cache
-  
-  return { 
-    submitted: true, 
-    cascadeInfo: cascadeResult 
+  invalidateCache('timetable');
+
+  return {
+    success: true,
+    date: normalizedDate,
+    createdCount: created.length,
+    errors: errors,
+    cascadeResults: cascadeResults
   };
+}
+
+function _subKey(dateIso, period, className, absentTeacher) {
+  return [
+    String(dateIso || '').trim(),
+    String(period || '').trim(),
+    String(className || '').trim(),
+    String(absentTeacher || '').trim().toLowerCase()
+  ].join('|');
 }
 
 /**

@@ -32,6 +32,10 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
   const [selectedPeriod, setSelectedPeriod] = useState(null);
   const [availableTeachers, setAvailableTeachers] = useState([]);
   const [loadingTeachers, setLoadingTeachers] = useState(false);
+
+  // Batch/day submission
+  const [batchMode, setBatchMode] = useState(false);
+  const [pendingSubstitutions, setPendingSubstitutions] = useState([]);
   
   // Assignment Form States
   const [assignmentForm, setAssignmentForm] = useState({
@@ -344,6 +348,19 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
     }
   }, [selectedDate, dataRefreshKey]);
 
+  // When date changes, reset any queued (pending) substitutions
+  useEffect(() => {
+    setPendingSubstitutions([]);
+  }, [selectedDate]);
+
+  const _pendingKey = (sub) => {
+    const date = String(sub?.date || '').trim();
+    const period = String(sub?.period || '').trim();
+    const cls = String(sub?.class || '').trim().toLowerCase();
+    const absent = String(sub?.absentTeacher || '').trim().toLowerCase();
+    return `${date}|${period}|${cls}|${absent}`;
+  };
+
   // Filter timetable data - MEMOIZED for performance
   const filteredTimetable = useMemo(() => 
     timetableData.filter(item => {
@@ -353,6 +370,17 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
     }),
     [timetableData, teacherFilter, classFilter]
   );
+
+  const sortedPendingSubstitutions = useMemo(() => {
+    const items = Array.isArray(pendingSubstitutions) ? [...pendingSubstitutions] : [];
+    items.sort((a, b) => {
+      const pA = parseInt(a?.period, 10) || 0;
+      const pB = parseInt(b?.period, 10) || 0;
+      if (pA !== pB) return pA - pB;
+      return String(a?.class || '').localeCompare(String(b?.class || ''));
+    });
+    return items;
+  }, [pendingSubstitutions]);
 
   // Get period time display using the utility function and custom times if available
   const getPeriodTime = (period) => {
@@ -442,88 +470,149 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
         note: assignmentForm.note || '',
       };
 
-      const response = await api.addSubstitution(substitutionData);
-      
-      logApiCall('addSubstitution', substitutionData, response);
-
-      // Handle different response formats - be more lenient with success detection
-      const isSuccess = (
-        response?.success === true || 
-        response?.submitted === true ||
-        response?.status === 'success' || 
-        response?.message?.toLowerCase().includes('success')
-      );
-
-      if (isSuccess) {
-        // Close modal first
-        setShowAssignModal(false);
-        
-        // Show success message with notification info
-        const teacherName = availableTeachers.find(t => t.email === assignmentForm.substituteTeacher)?.name || assignmentForm.substituteTeacher;
-        const successMsg = `✅ Successfully assigned ${teacherName} to Period ${selectedPeriod.period} - ${selectedPeriod.class}. 
-📧 Notification sent to teacher's email.`;
-        setSuccessMessage(successMsg);
-        console.log('Setting success message:', successMsg);
-        
-        // Add toast notification for HM (auto-closes)
-        notifySuccess(
-          'Substitution Assigned',
-          `${teacherName} assigned to Period ${selectedPeriod.period} - ${selectedPeriod.class}. Email notification sent.`,
-          { autoClose: true, duration: 5000 }
-        );
-        
-        // Also add to bell icon notification center (persistent)
-        const absentTeacherName = selectedPeriod.teacherName || selectedPeriod.teacherEmail || 'Unknown Teacher';
-        notifyInfo(
-          'Substitution Assigned',
-          `${teacherName} has been assigned to cover Period ${selectedPeriod.period} for ${selectedPeriod.class} (${absentTeacherName}). Subject: ${assignmentForm.substituteSubject || selectedPeriod.subject}`,
-          { 
-            autoClose: false, // Keep in bell icon
-            metadata: {
-              type: 'substitution-confirmation',
-              date: selectedDate,
-              period: selectedPeriod.period,
-              class: selectedPeriod.class,
-              substituteTeacher: teacherName,
-              absentTeacher: absentTeacherName
-            }
-          }
-        );
-        
-        // Clear form
-        setAssignmentForm({
-          substituteTeacher: '',
-          substituteSubject: '',
-          note: ''
+      if (batchMode) {
+        setPendingSubstitutions(prev => {
+          const next = Array.isArray(prev) ? [...prev] : [];
+          const newKey = _pendingKey(substitutionData);
+          const idx = next.findIndex(p => _pendingKey(p) === newKey);
+          if (idx >= 0) next[idx] = substitutionData;
+          else next.push(substitutionData);
+          return next;
         });
-        
-        // Small delay to ensure modal closes before refresh
-        setTimeout(async () => {
-          try {
-            console.log('Refreshing data after assignment...');
-            console.log('Current timetable data before refresh:', timetableData.length, 'entries');
-            // Refresh data
-            await fetchSubstitutionData();
-            await fetchTimetableData();
-            console.log('Data refresh completed');
-            console.log('Timetable data after refresh:', timetableData.length, 'entries');
-          } catch (refreshError) {
-            console.error('Error refreshing data:', refreshError);
-          }
-        }, 500);
-        
-        // Clear success message after 5 seconds
-        setTimeout(() => {
-          setSuccessMessage('');
-        }, 5000);
-        
+
+        setShowAssignModal(false);
+
+        const teacherName = availableTeachers.find(t => t.email === assignmentForm.substituteTeacher)?.name || assignmentForm.substituteTeacher;
+        const queuedMsg = `🧾 Added to day list: ${teacherName} for Period ${selectedPeriod.period} - ${selectedPeriod.class}.\n➡️ Click "Submit All" to finish.`;
+        setSuccessMessage(queuedMsg);
+
+        notifyInfo(
+          'Queued for Day Submission',
+          `${teacherName} queued for Period ${selectedPeriod.period} - ${selectedPeriod.class}.`,
+          { autoClose: true, duration: 4000 }
+        );
+
+        setTimeout(() => setSuccessMessage(''), 5000);
       } else {
-        setError(response?.error || response?.message || 'Failed to assign substitute');
+        const response = await api.addSubstitution(substitutionData);
+
+        logApiCall('addSubstitution', substitutionData, response);
+
+        // Handle different response formats - be more lenient with success detection
+        const isSuccess = (
+          response?.success === true ||
+          response?.submitted === true ||
+          response?.status === 'success' ||
+          response?.message?.toLowerCase().includes('success')
+        );
+
+        if (isSuccess) {
+          // Close modal first
+          setShowAssignModal(false);
+
+          // Show success message with notification info
+          const teacherName = availableTeachers.find(t => t.email === assignmentForm.substituteTeacher)?.name || assignmentForm.substituteTeacher;
+          const successMsg = `✅ Successfully assigned ${teacherName} to Period ${selectedPeriod.period} - ${selectedPeriod.class}. \n📧 Notification sent to teacher's email.`;
+          setSuccessMessage(successMsg);
+          console.log('Setting success message:', successMsg);
+
+          // Add toast notification for HM (auto-closes)
+          notifySuccess(
+            'Substitution Assigned',
+            `${teacherName} assigned to Period ${selectedPeriod.period} - ${selectedPeriod.class}. Email notification sent.`,
+            { autoClose: true, duration: 5000 }
+          );
+
+          // Also add to bell icon notification center (persistent)
+          const absentTeacherName = selectedPeriod.teacherName || selectedPeriod.teacherEmail || 'Unknown Teacher';
+          notifyInfo(
+            'Substitution Assigned',
+            `${teacherName} has been assigned to cover Period ${selectedPeriod.period} for ${selectedPeriod.class} (${absentTeacherName}). Subject: ${assignmentForm.substituteSubject || selectedPeriod.subject}`,
+            {
+              autoClose: false, // Keep in bell icon
+              metadata: {
+                type: 'substitution-confirmation',
+                date: selectedDate,
+                period: selectedPeriod.period,
+                class: selectedPeriod.class,
+                substituteTeacher: teacherName,
+                absentTeacher: absentTeacherName
+              }
+            }
+          );
+
+          // Clear form
+          setAssignmentForm({
+            substituteTeacher: '',
+            substituteSubject: '',
+            note: ''
+          });
+
+          // Small delay to ensure modal closes before refresh
+          setTimeout(async () => {
+            try {
+              console.log('Refreshing data after assignment...');
+              console.log('Current timetable data before refresh:', timetableData.length, 'entries');
+              // Refresh data
+              await fetchSubstitutionData();
+              await fetchTimetableData();
+              console.log('Data refresh completed');
+              console.log('Timetable data after refresh:', timetableData.length, 'entries');
+            } catch (refreshError) {
+              console.error('Error refreshing data:', refreshError);
+            }
+          }, 500);
+
+          // Clear success message after 5 seconds
+          setTimeout(() => {
+            setSuccessMessage('');
+          }, 5000);
+        } else {
+          setError(response?.error || response?.message || 'Failed to assign substitute');
+        }
       }
     } catch (err) {
       console.error('Error assigning substitute:', err);
       setError('Network error while assigning substitute: ' + (err.message || err));
       logApiCall('addSubstitution', {}, { error: err.message || String(err) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitPendingSubstitutions = async () => {
+    if (!pendingSubstitutions || pendingSubstitutions.length === 0) return;
+    try {
+      setLoading(true);
+      setError('');
+      setSuccessMessage('');
+
+      const response = await api.assignSubstitutionsBatch({
+        date: selectedDate,
+        substitutions: pendingSubstitutions,
+        sendNotifications: true
+      });
+
+      logApiCall('assignSubstitutionsBatch', { date: selectedDate, count: pendingSubstitutions.length }, response);
+
+      const createdCount = response?.createdCount ?? response?.data?.createdCount;
+      const errors = response?.errors ?? response?.data?.errors;
+      const errorCount = Array.isArray(errors) ? errors.length : 0;
+
+      const msg = `✅ Submitted ${createdCount || pendingSubstitutions.length} substitutions for ${selectedDate}.` +
+        (errorCount ? `\n⚠️ Skipped/failed: ${errorCount}` : '');
+      setSuccessMessage(msg);
+
+      notifySuccess('Day Substitutions Submitted', msg, { autoClose: true, duration: 6000 });
+
+      setPendingSubstitutions([]);
+      await fetchSubstitutionData();
+      await fetchTimetableData();
+
+      setTimeout(() => setSuccessMessage(''), 7000);
+    } catch (err) {
+      console.error('Error submitting batch substitutions:', err);
+      setError('Failed to submit day substitutions: ' + (err?.message || String(err)));
     } finally {
       setLoading(false);
     }
@@ -857,8 +946,8 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
           </div>
         </div>
 
-        {/* Toggle View */}
-        <div className="flex items-center gap-4">
+        {/* Toggle View + Batch Submit */}
+        <div className="flex items-center gap-4 flex-wrap">
           <button
             onClick={() => {
               const newValue = !showWithSubstitutions;
@@ -886,7 +975,87 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
           >
             {showDebugInfo ? 'Hide Debug Info' : 'Show Debug Info'}
           </button>
+
+          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <input
+              type="checkbox"
+              checked={batchMode}
+              onChange={(e) => setBatchMode(!!e.target.checked)}
+              className="h-4 w-4"
+            />
+            Batch submit (one click)
+          </label>
+
+          {batchMode && (
+            <div className="flex items-center gap-2">
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                Pending: <span className="font-semibold">{pendingSubstitutions.length}</span>
+              </div>
+              <button
+                onClick={submitPendingSubstitutions}
+                disabled={loading || pendingSubstitutions.length === 0}
+                className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                  loading || pendingSubstitutions.length === 0
+                    ? 'bg-gray-400 cursor-not-allowed text-white'
+                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                }`}
+              >
+                Submit All
+              </button>
+              <button
+                onClick={() => setPendingSubstitutions([])}
+                disabled={loading || pendingSubstitutions.length === 0}
+                className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                  loading || pendingSubstitutions.length === 0
+                    ? 'bg-gray-200 dark:bg-gray-700 cursor-not-allowed text-gray-400'
+                    : 'bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200'
+                }`}
+              >
+                Clear
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* Pending list preview (batch mode) */}
+        {batchMode && pendingSubstitutions.length > 0 && (
+          <div className="mt-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-semibold text-blue-900 dark:text-blue-200">
+                Pending substitutions (not submitted yet)
+              </div>
+              <div className="text-xs text-blue-800 dark:text-blue-300">
+                Total: {pendingSubstitutions.length}
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="bg-blue-100 dark:bg-blue-900/40">
+                    <th className="p-2 border border-blue-200 dark:border-blue-800 text-left">Period</th>
+                    <th className="p-2 border border-blue-200 dark:border-blue-800 text-left">Class</th>
+                    <th className="p-2 border border-blue-200 dark:border-blue-800 text-left">Absent</th>
+                    <th className="p-2 border border-blue-200 dark:border-blue-800 text-left">Substitute</th>
+                    <th className="p-2 border border-blue-200 dark:border-blue-800 text-left">Subject</th>
+                    <th className="p-2 border border-blue-200 dark:border-blue-800 text-left">Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedPendingSubstitutions.map((sub, i) => (
+                    <tr key={_pendingKey(sub) || i} className="bg-white/60 dark:bg-gray-800/40">
+                      <td className="p-2 border border-blue-200 dark:border-blue-800">{sub.period}</td>
+                      <td className="p-2 border border-blue-200 dark:border-blue-800">{sub.class}</td>
+                      <td className="p-2 border border-blue-200 dark:border-blue-800">{sub.absentTeacher}</td>
+                      <td className="p-2 border border-blue-200 dark:border-blue-800">{sub.substituteTeacher}</td>
+                      <td className="p-2 border border-blue-200 dark:border-blue-800">{sub.substituteSubject || sub.regularSubject}</td>
+                      <td className="p-2 border border-blue-200 dark:border-blue-800">{sub.note || ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Error Display */}
@@ -1282,10 +1451,10 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
                 {loading ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Assigning...
+                    {batchMode ? 'Adding...' : 'Assigning...'}
                   </>
                 ) : (
-                  'Assign Substitute'
+                  batchMode ? 'Add to Day List' : 'Assign Substitute'
                 )}
               </button>
             </div>

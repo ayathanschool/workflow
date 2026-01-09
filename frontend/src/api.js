@@ -640,6 +640,14 @@ export async function assignSubstitution(data) {
   return response?.data || response;
 }
 
+export async function assignSubstitutionsBatch(payload) {
+  const response = await postJSON(`${BASE_URL}`, {
+    action: 'assignSubstitutionsBatch',
+    ...(payload || {})
+  });
+  return response?.data || response;
+}
+
 // Fetch all schemes submitted by a particular teacher (regardless of status).
 // Returns an array of scheme objects with fields: schemeId, class, subject,
 // chapter, month, term, unit, noOfSessions, and status.  This allows

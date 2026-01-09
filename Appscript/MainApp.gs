@@ -1285,6 +1285,10 @@
       if (action === 'assignSubstitution') {
         return _respond(assignSubstitution(data));
       }
+
+      if (action === 'assignSubstitutionsBatch') {
+        return _respond(assignSubstitutionsBatch(data));
+      }
       
       if (action === 'deleteSubstitution') {
         return _respond(deleteSubstitution(data));
@@ -3761,6 +3765,22 @@
             class: tt.class || '',
             subject: tt.subject || '',
             period: Number(tt.period || 0),
+            startTime: (() => {
+              try {
+                const t = _getPeriodTiming(tt.period, dayName, tt.class);
+                return t && t.start ? t.start : '';
+              } catch (_e) {
+                return '';
+              }
+            })(),
+            endTime: (() => {
+              try {
+                const t = _getPeriodTiming(tt.period, dayName, tt.class);
+                return t && t.end ? t.end : '';
+              } catch (_e) {
+                return '';
+              }
+            })(),
             // Substitution/exchange metadata (so HM live view can highlight correctly)
             isSubstitution: tt.isSubstitution === true || String(tt.isSubstitution || '').toLowerCase() === 'true',
             absentTeacher: tt.absentTeacher || '',
@@ -6004,7 +6024,7 @@
                 const key = dStr + '|' + parseInt(String(per.period).trim(),10);
                 if (!occupiedSlots.includes(key) && !usedNewSlots.has(key)) {
                   usedNewSlots.add(key);
-                  const timing = _getPeriodTiming(per.period, dayName);
+                  const timing = _getPeriodTiming(per.period, dayName, className);
                   return {
                     date: dStr,
                     period: per.period,
