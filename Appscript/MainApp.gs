@@ -6008,9 +6008,13 @@
       });
 
       const usedNewSlots = new Set();
-      function _findNextAvailablePeriod(startDateStr) {
+      // Track which period we're cascading FROM to avoid reassigning to that same slot
+      const missedSlot = originalDate ? String(originalDate).split('T')[0] + '|' + parseInt(String(currentPlan.selectedPeriod || '').trim(), 10) : null;
+      
+      function _findNextAvailablePeriod(startDateStr, skipPeriodsBefore = null) {
         let dStr = startDateStr;
         let safety = 0;
+        let isFirstDay = true;
         while (safety < 60) { // cap search to 60 working days
           const parts = dStr.split('-');
           const dObj = new Date(parts[0], parts[1]-1, parts[2]);
@@ -6021,7 +6025,19 @@
               // sort by period number
               periodsToday.sort((a,b) => parseInt(a.period)-parseInt(b.period));
               for (const per of periodsToday) {
-                const key = dStr + '|' + parseInt(String(per.period).trim(),10);
+                const periodNum = parseInt(String(per.period).trim(), 10);
+                const key = dStr + '|' + periodNum;
+                
+                // On the first day of search, skip periods before or equal to the missed period
+                if (isFirstDay && skipPeriodsBefore !== null && periodNum <= skipPeriodsBefore) {
+                  continue;
+                }
+                
+                // Skip the missed slot itself
+                if (missedSlot && key === missedSlot) {
+                  continue;
+                }
+                
                 if (!occupiedSlots.includes(key) && !usedNewSlots.has(key)) {
                   usedNewSlots.add(key);
                   const timing = _getPeriodTiming(per.period, dayName, className);
@@ -6037,16 +6053,32 @@
           }
           // advance to next working day
           dStr = _nextWorkingDay(dStr);
+          isFirstDay = false;
           safety++;
         }
         return null; // not found
       }
 
       const proposedCascade = [];
+      const missedPeriod = parseInt(String(currentPlan.selectedPeriod || '').trim(), 10);
+      
       for (let idx = 0; idx < remainingSessions.length; idx++) {
         const sess = remainingSessions[idx];
-        const newDateCandidate = _nextWorkingDay(sess.currentDate); // base forward one working day
-        const slot = _findNextAvailablePeriod(newDateCandidate);
+        // For first session (the one being missed), try same day first from next period
+        // For subsequent sessions, we can use previously assigned date
+        let startSearchDate = sess.currentDate;
+        let skipPeriodsBefore = null;
+        
+        if (idx === 0) {
+          // First session is the missed one - search from same day, skip periods before/equal to missed period
+          skipPeriodsBefore = missedPeriod;
+        } else if (proposedCascade[idx - 1]) {
+          // Continue from where we left off (could be same or next day)
+          startSearchDate = proposedCascade[idx - 1].proposedDate;
+          skipPeriodsBefore = parseInt(proposedCascade[idx - 1].proposedPeriod);
+        }
+        
+        const slot = _findNextAvailablePeriod(startSearchDate, skipPeriodsBefore);
         // Preserve each session's own planned content instead of rolling back
         const sourceContent = sess;
         if (!slot) {
