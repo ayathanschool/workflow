@@ -81,26 +81,44 @@ function _fetchTeacherDailyTimetable(identifier, date) {
   
   Logger.log(`[getTeacherDailyTimetable] Getting timetable for ${idLower} on ${normalizedDate}`);
   
-  // Get regular timetable for this teacher
-  const sh = _getSheet('Timetable');
-  const headers = _headers(sh);
-  const regularPeriods = _rows(sh)
-    .map(r => _indexByHeader(r, headers))
-    .filter(r => {
-      const te = String(r.teacherEmail || '').toLowerCase();
-      const tn = String(r.teacherName || '').toLowerCase();
-      return (te === idLower || tn === idLower) && 
-             _normalizeDayName(r.dayOfWeek) === _normalizeDayName(dayName);
-    });
+  // Get regular timetable periods for this teacher/day.
+  // PERFORMANCE: Prefer the cached weekly timetable (LONG TTL) to avoid scanning the full Timetable sheet.
+  let regularPeriods = [];
+  try {
+    const weekly = getTeacherWeeklyTimetable(identifier);
+    const dayEntry = Array.isArray(weekly)
+      ? weekly.find(d => String(d?.date || '') === normalizedDate)
+      : null;
+    regularPeriods = Array.isArray(dayEntry?.periods) ? dayEntry.periods : [];
+  } catch (e) {
+    regularPeriods = [];
+  }
+
+  // Fallback: direct sheet scan if weekly lookup failed or requested date isn't in the cached 7-day window.
+  if (!Array.isArray(regularPeriods) || regularPeriods.length === 0) {
+    const sh = _getSheet('Timetable');
+    const headers = _headers(sh);
+    regularPeriods = _rows(sh)
+      .map(r => _indexByHeader(r, headers))
+      .filter(r => {
+        const te = String(r.teacherEmail || '').toLowerCase();
+        const tn = String(r.teacherName || '').toLowerCase();
+        return (te === idLower || tn === idLower) &&
+               _normalizeDayName(r.dayOfWeek) === _normalizeDayName(dayName);
+      });
+  }
   
   Logger.log(`[getTeacherDailyTimetable] Found ${regularPeriods.length} regular periods`);
   
-  // Get substitutions for this date
-  const substitutionsSh = _getSheet('Substitutions');
-  const substitutionsHeaders = _headers(substitutionsSh);
-  const allSubstitutions = _rows(substitutionsSh)
-    .map(r => _indexByHeader(r, substitutionsHeaders))
-    .filter(r => _isoDateString(r.date) === normalizedDate);
+  // Get substitutions for this date.
+  // PERFORMANCE: Reuse the cached per-date substitution read (SHORT TTL).
+  let allSubstitutions = [];
+  try {
+    const subsRes = getSubstitutionsForDate(normalizedDate);
+    allSubstitutions = Array.isArray(subsRes?.substitutions) ? subsRes.substitutions : [];
+  } catch (e) {
+    allSubstitutions = [];
+  }
   
   Logger.log(`[getTeacherDailyTimetable] Found ${allSubstitutions.length} substitutions for date`);
   
@@ -148,32 +166,54 @@ function _fetchTeacherDailyTimetable(identifier, date) {
   finalPeriods.sort((a, b) => (parseInt(a.period) || 0) - (parseInt(b.period) || 0));
   
   // Enrich with session progress (chapter name and session number)
+  // PERFORMANCE: Build a latest-by-(class,subject) index in ONE pass.
   try {
-    const sessionProgressSh = _getSheet('SessionProgress');
-    const sessionProgressHeaders = _headers(sessionProgressSh);
-    const allSessionProgress = _rows(sessionProgressSh)
-      .map(r => _indexByHeader(r, sessionProgressHeaders));
-    
-    finalPeriods.forEach(period => {
-      // Find the latest session progress for this class-subject combination
-      const matchingProgress = allSessionProgress
-        .filter(sp => 
-          String(sp.class || '').toLowerCase() === String(period.class || '').toLowerCase() &&
-          String(sp.subject || '').toLowerCase() === String(period.subject || '').toLowerCase()
-        )
-        .sort((a, b) => {
-          // Sort by date descending to get most recent
-          const dateA = new Date(a.sessionDate || 0);
-          const dateB = new Date(b.sessionDate || 0);
-          return dateB - dateA;
-        });
-      
-      if (matchingProgress.length > 0) {
-        const latest = matchingProgress[0];
-        period.chapterName = latest.chapterName || '';
-        period.sessionNumber = latest.sessionNumber || '';
-      }
+    const needKeys = new Set();
+    finalPeriods.forEach(p => {
+      const cls = String(p?.class || '').toLowerCase().trim();
+      const subj = String(p?.subject || '').toLowerCase().trim();
+      if (cls && subj) needKeys.add(cls + '|' + subj);
     });
+
+    if (needKeys.size > 0) {
+      const sessionProgressSh = _getSheet('SessionProgress');
+      const sessionProgressHeaders = _headers(sessionProgressSh);
+      const rows = _rows(sessionProgressSh).map(r => _indexByHeader(r, sessionProgressHeaders));
+      const latestByKey = {};
+
+      const toTime = (v) => {
+        const d = new Date(v || 0);
+        const t = d.getTime();
+        return isNaN(t) ? -Infinity : t;
+      };
+
+      rows.forEach(sp => {
+        const cls = String(sp?.class || '').toLowerCase().trim();
+        const subj = String(sp?.subject || '').toLowerCase().trim();
+        if (!cls || !subj) return;
+        const key = cls + '|' + subj;
+        if (!needKeys.has(key)) return;
+
+        const t = toTime(sp?.sessionDate || sp?.date || sp?.createdAt || 0);
+        const prev = latestByKey[key];
+        if (!prev || t >= prev._t) {
+          latestByKey[key] = {
+            _t: t,
+            chapterName: sp?.chapterName || sp?.chapter || '',
+            sessionNumber: sp?.sessionNumber || sp?.sessionNo || ''
+          };
+        }
+      });
+
+      finalPeriods.forEach(period => {
+        const key = String(period?.class || '').toLowerCase().trim() + '|' + String(period?.subject || '').toLowerCase().trim();
+        const latest = latestByKey[key];
+        if (latest) {
+          period.chapterName = latest.chapterName || '';
+          period.sessionNumber = latest.sessionNumber || '';
+        }
+      });
+    }
   } catch (error) {
     Logger.log(`[getTeacherDailyTimetable] Warning: Could not enrich with session progress - ${error.message}`);
   }
