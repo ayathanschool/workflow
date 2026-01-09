@@ -1954,11 +1954,60 @@ function _formatTime(timeValue) {
 /**
  * Get period timing from Settings sheet
  */
-function _getPeriodTiming(periodNumber, dayName) {
+function _getPeriodTiming(periodNumber, dayName, className) {
   try {
     const settingsSheet = _getSheet('Settings');
     const settingsHeaders = _headers(settingsSheet);
     const settingsData = _rows(settingsSheet).map(row => _indexByHeader(row, settingsHeaders));
+
+    // Optional: class-specific overrides (supports board-exam schedules like 10A/10B)
+    // Settings key: periodTimesByClass
+    // Value (JSON): {
+    //   "10A": [{"period":1,"label":"1","start":"08:50","end":"11:10"}, ...],
+    //   "10B": {"weekday":[...],"friday":[...]},
+    //   "10-G1": {"default":[...]}
+    // }
+    try {
+      const byClassRow = settingsData.find(r => String(r.key || '').trim() === 'periodTimesByClass');
+      const classKey = String(className || '').trim();
+      if (byClassRow && byClassRow.value && classKey) {
+        let byClass = null;
+        try {
+          byClass = JSON.parse(byClassRow.value);
+        } catch (_pe) {
+          byClass = null;
+        }
+
+        if (byClass && typeof byClass === 'object') {
+          const entry = byClass[classKey];
+          if (entry) {
+            const isFriday = _normalizeDayName(dayName) === 'friday';
+            let arr = null;
+            if (Array.isArray(entry)) {
+              arr = entry;
+            } else if (typeof entry === 'object') {
+              if (isFriday && Array.isArray(entry.friday)) arr = entry.friday;
+              else if (!isFriday && Array.isArray(entry.weekday)) arr = entry.weekday;
+              else if (Array.isArray(entry.default)) arr = entry.default;
+              else if (Array.isArray(entry.periods)) arr = entry.periods;
+            }
+
+            if (Array.isArray(arr)) {
+              const p = arr.find(x => parseInt(x.period, 10) === parseInt(periodNumber, 10));
+              if (p && p.start && p.end) {
+                return {
+                  start: p.start,
+                  end: p.end,
+                  label: p.label || ''
+                };
+              }
+            }
+          }
+        }
+      }
+    } catch (_ignored) {
+      // fall through to global schedule
+    }
     
     // Determine which setting to use based on day
     const isFriday = _normalizeDayName(dayName) === 'friday';
@@ -1989,7 +2038,8 @@ function _getPeriodTiming(periodNumber, dayName) {
     if (periodTiming) {
       return {
         start: periodTiming.start,
-        end: periodTiming.end
+        end: periodTiming.end,
+        label: periodTiming.label || ''
       };
     }
     

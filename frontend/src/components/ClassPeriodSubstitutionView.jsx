@@ -254,7 +254,7 @@ export default function ClassPeriodSubstitutionView({ user, periodTimes }) {
       )}
       
       {/* Timetable - Classes as rows, Periods as columns */}
-      <div className={`${theme === 'dark' ? 'bg-gray-800' : 'bg-white'} p-4 rounded-lg shadow-sm overflow-x-auto`}>
+      <div className={`${theme === 'dark' ? 'bg-gray-800' : 'bg-white'} p-4 rounded-lg shadow-sm`}>
         <h2 className={`text-xl font-semibold mb-4 ${theme === 'dark' ? 'text-gray-200' : 'text-gray-900'}`}>
           Timetable for {formatLocalDate(date)}
         </h2>
@@ -264,15 +264,15 @@ export default function ClassPeriodSubstitutionView({ user, periodTimes }) {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
           </div>
         ) : classes.length > 0 && periods.length > 0 ? (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-w-full">
             <table className="min-w-full border-collapse">
               <thead>
                 <tr className={`${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}>
-                  <th className={`px-6 py-3 text-left text-xs font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'} uppercase tracking-wider border`}>
+                  <th className={`px-3 py-2 text-left text-xs font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'} uppercase tracking-wider border`}>
                     Class / Period
                   </th>
                   {periods.map(period => (
-                    <th key={period} className={`px-6 py-3 text-left text-xs font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'} uppercase tracking-wider border text-center`}>
+                    <th key={period} className={`px-3 py-2 text-left text-xs font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'} uppercase tracking-wider border text-center`}>
                       <div>Period {period}</div>
                       <div className="text-xs font-normal normal-case">{periodTimeMap[period] || ''}</div>
                     </th>
@@ -282,7 +282,7 @@ export default function ClassPeriodSubstitutionView({ user, periodTimes }) {
               <tbody className="divide-y">
                 {classes.map(className => (
                   <tr key={className} className={`${theme === 'dark' ? 'bg-gray-800 hover:bg-gray-750' : 'bg-white hover:bg-gray-50'}`}>
-                    <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'} border`}>
+                    <td className={`px-3 py-2 whitespace-nowrap text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'} border`}>
                       {className}
                     </td>
                     {periods.map(period => {
@@ -291,7 +291,7 @@ export default function ClassPeriodSubstitutionView({ user, periodTimes }) {
                       const hasSubstitution = !!substitution;
                       
                       return (
-                        <td key={`${className}-${period}`} className={`px-4 py-3 text-sm border ${hasSubstitution ? (theme === 'dark' ? 'bg-green-900/20' : 'bg-green-50') : ''}`}>
+                        <td key={`${className}-${period}`} className={`px-3 py-2 text-sm border ${hasSubstitution ? (theme === 'dark' ? 'bg-green-900/20' : 'bg-green-50') : ''}`}>
                           {entry ? (
                             <div>
                               <div className={`${theme === 'dark' ? 'text-gray-200' : 'text-gray-900'} font-medium`}>

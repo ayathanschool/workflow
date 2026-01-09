@@ -226,14 +226,46 @@ function _fetchDailyTimetableWithSubstitutions(normalizedDate) {
   if (substitutions.length > 0) {
     Logger.log(`[getDailyTimetableWithSubstitutions] Sample substitution: ${JSON.stringify(substitutions[0])}`);
   }
+
+  // Helper: case-insensitive field access (handles headers like "Substitute Subject" vs "substituteSubject")
+  function _ttGetFieldCI(obj, candidates) {
+    if (!obj) return '';
+    const keys = Object.keys(obj);
+    const keyMap = {};
+    for (let i = 0; i < keys.length; i++) {
+      const k = String(keys[i] || '');
+      keyMap[k.toLowerCase().trim()] = k;
+    }
+    for (let j = 0; j < candidates.length; j++) {
+      const candRaw = candidates[j];
+      const cand = String(candRaw || '').toLowerCase().trim();
+      if (!cand) continue;
+
+      // direct
+      if (Object.prototype.hasOwnProperty.call(obj, candRaw)) {
+        const v = obj[candRaw];
+        return v === null || v === undefined ? '' : v;
+      }
+      // mapped
+      const realKey = keyMap[cand];
+      if (realKey && Object.prototype.hasOwnProperty.call(obj, realKey)) {
+        const v2 = obj[realKey];
+        return v2 === null || v2 === undefined ? '' : v2;
+      }
+    }
+    return '';
+  }
   
   // Apply substitutions
   const finalTimetable = timetableEntries.map(entry => {
     const substitution = substitutions.find(sub => {
       // Normalize period comparison (could be string or number)
-      const periodMatch = String(sub.period) === String(entry.period);
-      const classMatch = String(sub.class || '').toLowerCase() === String(entry.class || '').toLowerCase();
-      const teacherMatch = String(sub.absentTeacher || '').toLowerCase() === String(entry.teacherEmail || '').toLowerCase();
+      const subPeriod = _ttGetFieldCI(sub, ['period', 'Period']);
+      const subClass = _ttGetFieldCI(sub, ['class', 'Class']);
+      const subAbsentTeacher = _ttGetFieldCI(sub, ['absentTeacher', 'absent teacher', 'AbsentTeacher', 'Absent Teacher']);
+      const periodMatch = String(subPeriod) === String(entry.period);
+      const classMatch = String(subClass || '').toLowerCase() === String(entry.class || '').toLowerCase();
+      const teacherMatch = String(subAbsentTeacher || '').toLowerCase() === String(entry.teacherEmail || '').toLowerCase();
       
       if (periodMatch && classMatch && !teacherMatch) {
         Logger.log(`[Substitution] Period ${sub.period} Class ${sub.class}: Teacher mismatch - sub.absentTeacher="${sub.absentTeacher}" vs entry.teacherEmail="${entry.teacherEmail}"`);
@@ -243,19 +275,30 @@ function _fetchDailyTimetableWithSubstitutions(normalizedDate) {
     });
     
     if (substitution) {
-      Logger.log(`[Substitution] Applying substitution for Period ${entry.period}, Class ${entry.class}: ${entry.teacherEmail} -> ${substitution.substituteTeacher}`);
+      const substituteTeacher = _ttGetFieldCI(substitution, ['substituteTeacher', 'substitute teacher', 'SubstituteTeacher', 'Substitute Teacher']);
+      const regularSubject = _ttGetFieldCI(substitution, ['regularSubject', 'regular subject', 'RegularSubject', 'Regular Subject']) || entry.subject;
+      const substituteSubject = _ttGetFieldCI(substitution, ['substituteSubject', 'substitute subject', 'SubstituteSubject', 'Substitute Subject']) || '';
+      const absentTeacher = _ttGetFieldCI(substitution, ['absentTeacher', 'absent teacher', 'AbsentTeacher', 'Absent Teacher']) || entry.teacherEmail;
+      const note = _ttGetFieldCI(substitution, ['note', 'Note']) || '';
+
+      Logger.log(`[Substitution] Applying substitution for Period ${entry.period}, Class ${entry.class}: ${entry.teacherEmail} -> ${substituteTeacher}`);
       return {
         class: entry.class || '',
         dayOfWeek: entry.dayOfWeek || dayName,
         period: entry.period || '',
-        subject: substitution.substituteSubject || entry.subject,
-        teacherEmail: substitution.substituteTeacher,
-        teacherName: substitution.substituteTeacher, // You might want to lookup the actual name
+        subject: substituteSubject || entry.subject,
+        teacherEmail: substituteTeacher,
+        teacherName: substituteTeacher, // Display name resolved later (Users directory)
         originalTeacher: entry.teacherEmail,
         originalTeacherName: entry.teacherName,
         originalSubject: entry.subject,
         isSubstitution: true,
-        substitutionNote: substitution.note || ''
+        // include substitution metadata for HM/Admin live views
+        absentTeacher: absentTeacher,
+        regularSubject: regularSubject,
+        substituteTeacher: substituteTeacher,
+        substituteSubject: substituteSubject || regularSubject,
+        substitutionNote: note
       };
     }
     

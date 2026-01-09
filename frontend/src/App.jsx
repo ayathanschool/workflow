@@ -104,7 +104,8 @@ const App = () => {
     allowNextWeekOnly: false,    // Next-week-only restriction disabled
     periodTimes: null,           // Will store custom period times if available
     periodTimesWeekday: null,    // Monday-Thursday period times
-    periodTimesFriday: null      // Friday period times
+    periodTimesFriday: null,     // Friday period times
+    periodTimesByClass: null     // Optional per-class overrides
   });
   
   // Create a memoized version of appSettings to avoid unnecessary re-renders
@@ -114,7 +115,8 @@ const App = () => {
       allowNextWeekOnly: false,
       periodTimes: null,
       periodTimesWeekday: null,
-      periodTimesFriday: null
+      periodTimesFriday: null,
+      periodTimesByClass: null
     };
   }, [appSettings]);
 
@@ -156,7 +158,8 @@ const App = () => {
             allowNextWeekOnly: false, // Ignore sheet value; do not restrict to next week
             periodTimes: settings.periodTimes || settings.periodTimesWeekday || null,
             periodTimesWeekday: settings.periodTimesWeekday || null,
-            periodTimesFriday: settings.periodTimesFriday || null
+            periodTimesFriday: settings.periodTimesFriday || null,
+            periodTimesByClass: settings.periodTimesByClass || null
           };
           setAppSettings(newSettings);
         }
@@ -4179,7 +4182,7 @@ const App = () => {
       if (document.hidden) return;
       
       try {
-        const today = new Date().toISOString().split('T')[0];
+        const today = todayIST();
         const response = await api.getDailyReportsForDate(today);
         const data = response?.data || response;
         setDailyReportsData({
@@ -4200,7 +4203,7 @@ const App = () => {
   useEffect(() => {
     async function loadTodayReports() {
       try {
-        const today = new Date().toISOString().split('T')[0];
+        const today = todayIST();
         const response = await api.getDailyReportsForDate(today);
         const data = response?.data || response;
 
@@ -4303,7 +4306,7 @@ const App = () => {
     async function loadLessonPlansForToday() {
       try {
         setLoadingLessonPlansToday(true);
-        const today = new Date().toISOString().split('T')[0];
+        const today = todayIST();
         const response = await api.getLessonPlansForDate(today);
         const result = response?.data || response;
         const plans = Array.isArray(result?.lessonPlans) ? result.lessonPlans : (Array.isArray(result) ? result : []);
