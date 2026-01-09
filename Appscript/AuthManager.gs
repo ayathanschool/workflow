@@ -95,6 +95,10 @@ function handleBasicLogin(email, password) {
     .map(c => c.trim())
     .filter(c => c.length > 0);
 
+  // Issue a short-lived session token so production auth can validate basic-logins.
+  // CacheService max TTL is 6 hours.
+  const sessionToken = _issueBasicSessionToken_(email);
+
   return {
     name: found.name || '',
     email: found.email || '',
@@ -102,8 +106,29 @@ function handleBasicLogin(email, password) {
     classes: classes,
     subjects: subjects,
     classTeacherFor: classTeacherFor,
+    sessionToken: sessionToken,
     loginMethod: 'basic'
   };
+}
+
+/**
+ * Create a short-lived session token for password logins.
+ * Stored in ScriptCache for up to 6 hours.
+ */
+function _issueBasicSessionToken_(email) {
+  try {
+    const e = String(email || '').toLowerCase().trim();
+    if (!e) return '';
+    const token = 'sess_' + _uuid();
+    const cache = CacheService.getScriptCache();
+    const ttlSeconds = 6 * 60 * 60;
+    cache.put('sess:' + token, e, ttlSeconds);
+    cache.put('sess_email:' + e, token, ttlSeconds);
+    return token;
+  } catch (err) {
+    try { appLog('ERROR', '_issueBasicSessionToken_', err.message); } catch (_e) {}
+    return '';
+  }
 }
 
 /**

@@ -10,6 +10,7 @@ Write-Host ""
 $appscriptPath = "d:\www\wwww\Appscript"
 
 $files = @(
+    "AuthManager.gs",
     "MainApp.gs",
     "ExamManager.gs",
     "CacheService.gs",
