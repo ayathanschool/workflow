@@ -576,7 +576,10 @@
       }
       
       if (action === 'getGradeTypes') {
-        return _respond(getGradeTypes());
+        // Cache for 15 minutes - grade types rarely change
+        const key = generateCacheKey('gradeTypes', {});
+        const dataOut = getCachedData(key, function() { return getGradeTypes(); }, CACHE_TTL.LONG);
+        return _respond(dataOut);
       }
       
       if (action === 'getClassSubjects') {
@@ -679,26 +682,31 @@
       
       // === HM DASHBOARD ===
       if (action === 'getHmInsights') {
-        const sSh = _getSheet('Schemes');
-        const sHeaders = _headers(sSh);
-        const schemes = _rows(sSh).map(r => _indexByHeader(r, sHeaders));
-        const pendingPlanCount = schemes.filter(s => String(s.status||'').toLowerCase() === 'pending').length;
+        // Cache for 2 minutes - data changes frequently but not every second
+        const key = generateCacheKey('hmInsights', {});
+        const dataOut = getCachedData(key, function() {
+          const sSh = _getSheet('Schemes');
+          const sHeaders = _headers(sSh);
+          const schemes = _rows(sSh).map(r => _indexByHeader(r, sHeaders));
+          const pendingPlanCount = schemes.filter(s => String(s.status||'').toLowerCase() === 'pending').length;
 
-        const lSh = _getSheet('LessonPlans');
-        const lHeaders = _headers(lSh);
-        const lps = _rows(lSh).map(r => _indexByHeader(r, lHeaders));
-        const pendingLessonCount = lps.filter(p => String(p.status||'') === 'Pending Review').length;
+          const lSh = _getSheet('LessonPlans');
+          const lHeaders = _headers(lSh);
+          const lps = _rows(lSh).map(r => _indexByHeader(r, lHeaders));
+          const pendingLessonCount = lps.filter(p => String(p.status||'') === 'Pending Review').length;
 
-        // Get teacher count (users with 'teacher' or 'class teacher' roles)
-        const uSh = _getSheet('Users');
-        const uHeaders = _headers(uSh);
-        const users = _rows(uSh).map(r => _indexByHeader(r, uHeaders));
-        const teacherCount = users.filter(u => {
-          const roles = String(u.roles || '').toLowerCase();
-          return roles.includes('teacher') || roles.includes('class teacher');
-        }).length;
+          // Get teacher count (users with 'teacher' or 'class teacher' roles)
+          const uSh = _getSheet('Users');
+          const uHeaders = _headers(uSh);
+          const users = _rows(uSh).map(r => _indexByHeader(r, uHeaders));
+          const teacherCount = users.filter(u => {
+            const roles = String(u.roles || '').toLowerCase();
+            return roles.includes('teacher') || roles.includes('class teacher');
+          }).length;
 
-        return _respond({ planCount: pendingPlanCount, lessonCount: pendingLessonCount, teacherCount });
+          return { planCount: pendingPlanCount, lessonCount: pendingLessonCount, teacherCount };
+        }, CACHE_TTL.SHORT);
+        return _respond(dataOut);
       }
       
       // === SCHEME MANAGEMENT ROUTES ===
@@ -807,7 +815,11 @@
       }
       
       if (action === 'getLessonPlansForDate') {
-        return _handleGetLessonPlansForDate(e.parameter);
+        const date = (e.parameter.date || _todayISO()).trim();
+        // Cache for 2 minutes - lesson plans may be added/updated frequently
+        const key = generateCacheKey('lessonPlansForDate', { date });
+        const dataOut = getCachedData(key, function() { return _handleGetLessonPlansForDate(e.parameter); }, CACHE_TTL.SHORT);
+        return dataOut; // Already wrapped in _respond by handler
       }
       
       if (action === 'getMissingSubmissions') {
@@ -877,7 +889,10 @@
       
       if (action === 'getSyllabusPaceTracking') {
         const term = (e.parameter.term || '').trim();
-        return _respond(getSyllabusPaceTracking(term));
+        // Cache for 10 minutes - syllabus pace is expensive to calculate
+        const key = generateCacheKey('syllabusPaceTracking', { term });
+        const dataOut = getCachedData(key, function() { return getSyllabusPaceTracking(term); }, CACHE_TTL.MEDIUM);
+        return _respond(dataOut);
       }
       
       if (action === 'syncSessionDependencies') {
@@ -1026,7 +1041,10 @@
         if (!_isHMOrSuperAdminSafe(email)) {
           return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
         }
-        return _respond(getAllUsers());
+        // Cache for 5 minutes - users don't change frequently
+        const key = generateCacheKey('allUsers', {});
+        const dataOut = getCachedData(key, function() { return getAllUsers(); }, CACHE_TTL.MEDIUM);
+        return _respond(dataOut);
       }
       
       // === OTHER ESSENTIAL ROUTES ===

@@ -4099,7 +4099,6 @@ const App = () => {
   };
 
   const HMDashboardView = ({ insights: insightsProp }) => {
-    console.debug('🚀 HMDashboardView rendering with insights:', insightsProp);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [dailyReportsData, setDailyReportsData] = useState({ reports: [], stats: {} });
     const [autoRefresh, setAutoRefresh] = useState(true);
@@ -4164,7 +4163,23 @@ const App = () => {
           setLoadingMissingPlans(false);
         }
       }
-      loadMissingPlans();
+      
+      async function loadPaceTracking() {
+        setLoadingPaceTracking(true);
+        try {
+          const response = await api.getSyllabusPaceTracking('Term 2');
+          if (response?.success) {
+            setPaceTracking(response);
+          }
+        } catch (err) {
+          console.error('Failed to load pace tracking:', err);
+        } finally {
+          setLoadingPaceTracking(false);
+        }
+      }
+      
+      // Load both in parallel for faster initial load
+      Promise.all([loadMissingPlans(), loadPaceTracking()]);
     }, []);
 
   // Update current time every minute
@@ -4223,24 +4238,6 @@ const App = () => {
     loadTodayReports();
   }, []);
   
-  // Load syllabus pace tracking
-  useEffect(() => {
-    async function loadPaceTracking() {
-      setLoadingPaceTracking(true);
-      try {
-        const response = await api.getSyllabusPaceTracking('Term 2');
-        if (response?.success) {
-          setPaceTracking(response);
-        }
-      } catch (err) {
-        console.error('Failed to load pace tracking:', err);
-      } finally {
-        setLoadingPaceTracking(false);
-      }
-    }
-    loadPaceTracking();
-  }, []);
-
   // Determine current period based on time
   const getCurrentPeriod = () => {
     const hour = currentTime.getHours();
