@@ -1371,7 +1371,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         class: selectedExam.class,
         subject: selectedExam.subject,
         teacherEmail: user.email,
-        teacherName: user.name || user.email,
+        teacherName: user.name,
         marks
       });
       
@@ -1669,7 +1669,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
             class: exam.class,
             subject: exam.subject,
             teacherEmail: user.email,
-            teacherName: user.name || user.email,
+            teacherName: user.name,
             marks: marksData
           });
 

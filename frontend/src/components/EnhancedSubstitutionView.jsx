@@ -100,7 +100,7 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
     try {
       // supportTeacher may be an object { name, email } or a string
       const supportIdentifier = typeof supportTeacher === 'object' ? (supportTeacher.email || supportTeacher.name) : supportTeacher;
-      const supportDisplayName = typeof supportTeacher === 'object' ? (supportTeacher.name || supportTeacher.email) : supportTeacher;
+      const supportDisplayName = typeof supportTeacher === 'object' ? (supportTeacher.name) : supportTeacher;
       
       console.log('Assigning IT Lab support:', { date: selectedDate, period, class: classname, support: supportIdentifier });
       
@@ -455,7 +455,7 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
         setShowAssignModal(false);
         
         // Show success message with notification info
-        const teacherName = availableTeachers.find(t => t.email === assignmentForm.substituteTeacher)?.name || assignmentForm.substituteTeacher;
+        const teacherName = availableTeachers.find(t => t.email === assignmentForm.substituteTeacher)?.name;
         const successMsg = `✅ Successfully assigned ${teacherName} to Period ${selectedPeriod.period} - ${selectedPeriod.class}. 
 📧 Notification sent to teacher's email.`;
         setSuccessMessage(successMsg);

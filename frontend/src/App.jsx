@@ -6554,8 +6554,8 @@ const App = () => {
               >
                 <option value="">All Teachers</option>
                 {allTeachers.map((teacher, idx) => (
-                  <option key={`teacher-${idx}`} value={teacher.name || teacher.email}>
-                    {teacher.name || teacher.email}
+                  <option key={`teacher-${idx}`} value={teacher.name}>
+                    {teacher.name}
                   </option>
                 ))}
               </select>
@@ -6716,7 +6716,7 @@ const App = () => {
                   >
                     <option value="">Select Teacher</option>
                     {absentTeachers.map(teacher => (
-                      <option key={(teacher.email||teacher.name)} value={(teacher.email||teacher.name)}>{teacher.name || teacher.email}</option>
+                      <option key={(teacher.email||teacher.name)} value={(teacher.name)}>{teacher.name}</option>
                     ))}
                   </select>
                 </div>
@@ -6834,7 +6834,7 @@ const App = () => {
                             substituteSubject: formData.regularSubject // Default to same subject
                           })}
                         >
-                          <div className="text-sm font-medium">{teacher.name || teacher.email}</div>
+                          <div className="text-sm font-medium">{teacher.name}</div>
                           <div className="text-xs text-gray-600">Available</div>
                         </div>
                       ))}

@@ -17,7 +17,7 @@ export default function TopBar({ user, onLogout }) {
           {googleAuth && googleAuth.user && (
             <img src={googleAuth.user.picture} alt="avatar" className="w-8 h-8 rounded-full object-cover" onError={(e)=>{e.target.style.display='none';}} />
           )}
-          <span>{user.name || user.email}</span>
+          <span>{user.name}</span>
         </div>
       )}
       <button onClick={handleLogout} className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors">
