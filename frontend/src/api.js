@@ -1892,6 +1892,15 @@ export async function getAllSubstitutions() {
   return result?.data || result || { total: 0, data: [] }
 }
 
+export async function getSubstitutionEffectiveness(params = {}) {
+  const q = new URLSearchParams({
+    action: 'getSubstitutionEffectiveness',
+    ...params
+  });
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
+  return result?.data || result;
+}
+
 
 export async function acknowledgeSubstitutionAssignment(data) {
   return postJSON(`${BASE_URL}?action=acknowledgeSubstitutionAssignment`, data);

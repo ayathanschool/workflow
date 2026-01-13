@@ -26,15 +26,18 @@ export const useRealTimeUpdates = (user, interval = 30000) => {
     try {
       setIsPolling(true);
 
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_GAS_WEB_APP_URL || import.meta.env.VITE_APP_SCRIPT_URL;
+      if (!baseUrl) return;
+
       const token = getStoredAuthToken();
       const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
       
       // Check for new lesson plan approvals
-      const lessonPlans = await fetch(`${import.meta.env.VITE_GAS_WEB_APP_URL}?action=getTeacherLessonPlans&email=${user.email}${tokenParam}`)
+      const lessonPlans = await fetch(`${baseUrl}?action=getTeacherLessonPlans&email=${user.email}${tokenParam}`)
         .then(res => res.json());
       
       // Check for new notifications (this would be a new API endpoint)
-      const notifications = await fetch(`${import.meta.env.VITE_GAS_WEB_APP_URL}?action=getNotifications&email=${user.email}&since=${lastUpdate || ''}${tokenParam}`)
+      const notifications = await fetch(`${baseUrl}?action=getNotifications&email=${user.email}&since=${lastUpdate || ''}${tokenParam}`)
         .then(res => res.json())
         .catch(() => ({ data: [] }));
 
@@ -185,8 +188,10 @@ export const useDataSync = () => {
     
     try {
       const token = getStoredAuthToken();
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_GAS_WEB_APP_URL || import.meta.env.VITE_APP_SCRIPT_URL;
+      if (!baseUrl) throw new Error('Missing API base URL');
       // Sync data to server
-      const response = await fetch(`${import.meta.env.VITE_GAS_WEB_APP_URL}`, {
+      const response = await fetch(`${baseUrl}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',

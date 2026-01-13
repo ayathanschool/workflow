@@ -555,7 +555,7 @@ frontend/src/App.jsx (import and usage)
 
 Required in `.env`:
 ```
-VITE_API_BASE_URL=https://script.google.com/macros/s/AKfycbwRt1Q36G-UsXFeiUJZZ01DeGsk6k9fahX15MrCaAnEHdcqf7lR5aO_KNfKTGKC66lR0g/exec
+VITE_API_BASE_URL=https://script.google.com/macros/s/AKfycbwdOQjBES9EJVDRkxO1EMvY5RFF1o09f66cTbsqLxfYMm1WuwBq96PbbGGQnG6teJxtDA/exec
 ```
 
 ### Build Command

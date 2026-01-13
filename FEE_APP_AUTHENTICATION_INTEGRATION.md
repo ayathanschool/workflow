@@ -612,7 +612,7 @@ This allows:
 
 **Workflow App (.env.local):**
 ```env
-VITE_API_BASE_URL=https://script.google.com/macros/s/AKfycbwRt1Q36G-UsXFeiUJZZ01DeGsk6k9fahX15MrCaAnEHdcqf7lR5aO_KNfKTGKC66lR0g/exec
+VITE_API_BASE_URL=https://script.google.com/macros/s/AKfycbwdOQjBES9EJVDRkxO1EMvY5RFF1o09f66cTbsqLxfYMm1WuwBq96PbbGGQnG6teJxtDA/exec
 VITE_GOOGLE_CLIENT_ID=507141639783-p82t258ee6tgpija52qs9pelrjigd17d.apps.googleusercontent.com
 ```
 

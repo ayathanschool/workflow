@@ -396,6 +396,73 @@
         const date = (e.parameter.date || _todayISO()).trim();
         return _respond(getSubstitutionsForDate(date));
       }
+
+      if (action === 'getTeacherSubstitutions') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        const date = (e.parameter.date || _todayISO()).trim();
+        return _respond(getTeacherSubstitutions(email, date));
+      }
+
+      if (action === 'getTeacherSubstitutionsRange') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        const startDate = (e.parameter.startDate || '').trim();
+        const endDate = (e.parameter.endDate || '').trim();
+        return _respond(getTeacherSubstitutionsRange(email, startDate, endDate));
+      }
+
+      if (action === 'getSubstitutionsRange') {
+        // HM / Super Admin only
+        const requesterEmail = (e.parameter.email || e.parameter.requesterEmail || '').toLowerCase().trim();
+        if (!_isHMOrSuperAdminSafe(requesterEmail)) {
+          return _respond({ success: false, error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        const startDate = (e.parameter.startDate || '').trim();
+        const endDate = (e.parameter.endDate || '').trim();
+        const teacherEmail = (e.parameter.teacherEmail || '').toLowerCase().trim();
+        const cls = (e.parameter.class || '').trim();
+        return _respond(getSubstitutionsRange(startDate, endDate, teacherEmail, cls));
+      }
+
+      if (action === 'getAllSubstitutions') {
+        // HM / Super Admin only (debug)
+        const requesterEmail = (e.parameter.email || e.parameter.requesterEmail || '').toLowerCase().trim();
+        if (!_isHMOrSuperAdminSafe(requesterEmail)) {
+          return _respond({ success: false, error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        return _respond(getAllSubstitutions());
+      }
+
+      if (action === 'getSubstitutionEffectiveness') {
+        // Teacher can access their own analytics; HM/Super Admin can access any.
+        const requesterEmail = (e.parameter.email || e.parameter.requesterEmail || '').toLowerCase().trim();
+        const teacherEmail = (e.parameter.teacherEmail || '').toLowerCase().trim();
+
+        const isSelf = requesterEmail && teacherEmail && requesterEmail === teacherEmail;
+        const isAdmin = _isHMOrSuperAdminSafe(requesterEmail);
+
+        if (!isSelf && !isAdmin) {
+          return _respond({ success: false, error: 'Permission denied. HM/Super Admin or self access required.' });
+        }
+
+        // Teachers must scope to themselves
+        const effectiveTeacherEmail = isAdmin ? teacherEmail : requesterEmail;
+        const startDate = (e.parameter.startDate || '').trim();
+        const endDate = (e.parameter.endDate || '').trim();
+        const cls = (e.parameter.class || '').trim();
+        const subject = (e.parameter.subject || '').trim();
+        const chapter = (e.parameter.chapter || '').trim();
+        const includeDetails = (e.parameter.includeDetails || '').trim();
+
+        return _respond(getSubstitutionEffectiveness({
+          startDate,
+          endDate,
+          teacherEmail: effectiveTeacherEmail,
+          class: cls,
+          subject,
+          chapter,
+          includeDetails
+        }));
+      }
       
       
       if (action === 'getUnacknowledgedSubstitutions') {

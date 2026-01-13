@@ -82,6 +82,7 @@ const UserManagement = lazy(() => import('./components/UserManagement'));
 const AuditLog = lazy(() => import('./components/AuditLog'));
 const AdminDataEditor = lazy(() => import('./components/AdminDataEditor'));
 const SchemeApprovalsView = lazy(() => import('./views/SchemeApprovalsView'));
+const SubstitutionAnalyticsView = lazy(() => import('./components/SubstitutionAnalyticsView'));
 
 // Keep lightweight components as regular imports
 import { periodToTimeString, todayIST, formatDateForInput, formatLocalDate } from './utils/dateUtils';
@@ -539,6 +540,7 @@ const App = () => {
         { id: 'users', label: 'User Management', icon: Users },
         { id: 'audit-log', label: 'Audit Log', icon: Shield },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
+        { id: 'substitution-analytics', label: 'Substitution Analytics', icon: BarChart2 },
         { id: 'class-data', label: 'School Data', icon: UserCheck },
         { id: 'admin-data', label: 'Admin Data', icon: Edit2 },
         { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
@@ -594,6 +596,7 @@ const App = () => {
         { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
         { id: 'daily-oversight', label: 'Daily Oversight (Enhanced)', icon: ClipboardCheck },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
+        { id: 'substitution-analytics', label: 'Substitution Analytics', icon: BarChart2 },
         { id: 'class-data', label: 'School Data', icon: UserCheck },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
@@ -1677,6 +1680,8 @@ const App = () => {
               
               case 'substitutions':
                 return <EnhancedSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
+              case 'substitution-analytics':
+                return <SubstitutionAnalyticsView user={user} />;
               case 'full-timetable':
                 return <FullTimetableView />;
               case 'users':
@@ -3688,6 +3693,8 @@ const App = () => {
     const [endDate, setEndDate] = useState('');
     const [acknowledgingId, setAcknowledgingId] = useState(null);
     const [debugInfo, setDebugInfo] = useState(null);
+    const [effectiveness, setEffectiveness] = useState(null);
+    const [effectivenessLoading, setEffectivenessLoading] = useState(false);
 
     useEffect(() => {
       // Set default date range: last 30 days to today
@@ -3726,6 +3733,27 @@ const App = () => {
         }
         
         setSubstitutions(allSubs);
+
+        // Also load reporting effectiveness for the same range.
+        try {
+          setEffectivenessLoading(true);
+          const eff = await api.getSubstitutionEffectiveness({
+            email: user.email,
+            startDate,
+            endDate,
+            teacherEmail: user.email,
+            includeDetails: '1'
+          });
+          if (eff?.success === false) {
+            setEffectiveness(null);
+          } else {
+            setEffectiveness(eff);
+          }
+        } catch {
+          setEffectiveness(null);
+        } finally {
+          setEffectivenessLoading(false);
+        }
       } catch (error) {
         console.error('Error loading substitutions:', error);
       } finally {
@@ -3776,6 +3804,37 @@ const App = () => {
       return String(sub.acknowledged).toLowerCase() === 'true';
     };
 
+    const normClass = (v) => String(v || '').trim().toLowerCase().replace(/\s+/g, '');
+    const reportInfoByKey = useMemo(() => {
+      const m = new Map();
+      const details = Array.isArray(effectiveness?.details) ? effectiveness.details : [];
+      for (const d of details) {
+        if (!d) continue;
+        const k = `${String(d.date || '').trim()}|${String(d.period || '').trim()}|${normClass(d.class)}`;
+        m.set(k, d);
+      }
+      return m;
+    }, [effectiveness]);
+
+    const getReportInfo = (sub) => {
+      const k = `${String(sub?.date || '').trim()}|${String(sub?.period || '').trim()}|${normClass(sub?.class)}`;
+      return reportInfoByKey.get(k) || null;
+    };
+
+    const effTotals = effectiveness?.totals || null;
+    const effClassStats = Array.isArray(effectiveness?.classStats) ? effectiveness.classStats : [];
+    const effChapterStats = useMemo(() => {
+      const details = Array.isArray(effectiveness?.details) ? effectiveness.details : [];
+      const agg = new Map();
+      for (const d of details) {
+        if (!d || d.reported !== true) continue;
+        const ch = String(d.reportChapter || '').trim() || 'No chapter';
+        if (!agg.has(ch)) agg.set(ch, { chapter: ch, count: 0 });
+        agg.get(ch).count += 1;
+      }
+      return Array.from(agg.values()).sort((a, b) => b.count - a.count || a.chapter.localeCompare(b.chapter));
+    }, [effectiveness]);
+
     return (
       <div className="space-y-6">
         <div className="flex justify-between items-center">
@@ -3813,6 +3872,94 @@ const App = () => {
               Refresh
             </button>
           </div>
+        </div>
+
+        {/* Reporting Effectiveness */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium text-gray-900">Substitution reporting effectiveness</div>
+              <div className="text-xs text-gray-600">Assigned vs daily reports submitted for substitutions</div>
+            </div>
+            {effectivenessLoading && <div className="text-xs text-gray-500">Loading...</div>}
+          </div>
+          {effTotals && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+              <div className="rounded-lg border border-gray-200 p-3">
+                <div className="text-xs text-gray-500">Assigned</div>
+                <div className="text-lg font-semibold text-gray-900">{effTotals.assigned}</div>
+              </div>
+              <div className="rounded-lg border border-gray-200 p-3">
+                <div className="text-xs text-gray-500">Reported</div>
+                <div className="text-lg font-semibold text-green-700">{effTotals.reported}</div>
+              </div>
+              <div className="rounded-lg border border-gray-200 p-3">
+                <div className="text-xs text-gray-500">Pending</div>
+                <div className="text-lg font-semibold text-amber-700">{effTotals.pending}</div>
+              </div>
+              <div className="rounded-lg border border-gray-200 p-3">
+                <div className="text-xs text-gray-500">Reported %</div>
+                <div className="text-lg font-semibold text-gray-900">{effTotals.reportedPct}%</div>
+              </div>
+            </div>
+          )}
+          {!effTotals && !effectivenessLoading && (
+            <div className="mt-3 text-sm text-gray-500">No analytics available for this range.</div>
+          )}
+
+          {effClassStats.length > 0 && (
+            <div className="mt-4">
+              <div className="text-sm font-medium text-gray-900 mb-2">Classwise breakdown</div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Class</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Assigned</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Reported</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Pending</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">%</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {effClassStats.map((r) => (
+                      <tr key={r.class}>
+                        <td className="px-3 py-2 text-sm text-gray-900">{r.class}</td>
+                        <td className="px-3 py-2 text-sm text-gray-700 text-right">{r.assigned}</td>
+                        <td className="px-3 py-2 text-sm text-gray-700 text-right">{r.reported}</td>
+                        <td className="px-3 py-2 text-sm text-amber-700 text-right">{r.pending}</td>
+                        <td className="px-3 py-2 text-sm text-gray-700 text-right">{r.reportedPct}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {effChapterStats.length > 0 && (
+            <div className="mt-4">
+              <div className="text-sm font-medium text-gray-900 mb-2">Chapterwise (reported substitutions only)</div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Chapter</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Count</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {effChapterStats.map((r) => (
+                      <tr key={r.chapter}>
+                        <td className="px-3 py-2 text-sm text-gray-900">{r.chapter}</td>
+                        <td className="px-3 py-2 text-sm text-gray-700 text-right">{r.count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Substitutions List */}
@@ -3867,6 +4014,9 @@ const App = () => {
                     const uniqueId = `${sub.date}-${sub.period}-${sub.class}`;
                     const acknowledged = isAcknowledged(sub);
                     const acknowledging = acknowledgingId === uniqueId;
+                    const rep = getReportInfo(sub);
+                    const repSubmitted = rep ? !!rep.reported : null;
+                    const repMarked = rep ? !!rep.reportMarkedSubstitution : null;
                     
                     return (
                       <div key={index} className={`p-4 rounded-lg border ${acknowledged ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'}`}>
@@ -3908,6 +4058,15 @@ const App = () => {
                           <div>
                             <span className="text-gray-500 dark:text-gray-400">Absent Teacher:</span>
                             <span className="ml-1 text-gray-900 dark:text-gray-100">{sub.absentTeacher}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-500 dark:text-gray-400">Report:</span>
+                            <span className={`ml-1 font-medium ${repSubmitted === true ? 'text-green-700 dark:text-green-400' : repSubmitted === false ? 'text-amber-700 dark:text-amber-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                              {repSubmitted === true ? 'Submitted' : repSubmitted === false ? 'Pending' : '—'}
+                            </span>
+                            {repSubmitted === true && repMarked === false && (
+                              <span className="ml-1 text-xs text-amber-700 dark:text-amber-400">(not marked substitution)</span>
+                            )}
                           </div>
                           {sub.note && (
                             <div>
@@ -3952,6 +4111,7 @@ const App = () => {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Absent Teacher</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Note</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Report</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Action</th>
                       </tr>
                     </thead>
@@ -3960,6 +4120,9 @@ const App = () => {
                         const uniqueId = `${sub.date}-${sub.period}-${sub.class}`;
                         const acknowledged = isAcknowledged(sub);
                         const acknowledging = acknowledgingId === uniqueId;
+                        const rep = getReportInfo(sub);
+                        const repSubmitted = rep ? !!rep.reported : null;
+                        const repMarked = rep ? !!rep.reportMarkedSubstitution : null;
                         
                         return (
                           <tr key={index} className={acknowledged ? 'bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}>
@@ -4003,6 +4166,14 @@ const App = () => {
                                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
                                   Pending
                                 </span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              <span className={`${repSubmitted === true ? 'text-green-700 dark:text-green-400' : repSubmitted === false ? 'text-amber-700 dark:text-amber-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                                {repSubmitted === true ? 'Submitted' : repSubmitted === false ? 'Pending' : '—'}
+                              </span>
+                              {repSubmitted === true && repMarked === false && (
+                                <span className="ml-2 text-xs text-amber-700 dark:text-amber-400">not marked substitution</span>
                               )}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -9324,6 +9495,8 @@ const App = () => {
     const [customTo, setCustomTo] = useState('');
     const [subjectFilter, setSubjectFilter] = useState('');
     const [classFilter, setClassFilter] = useState('');
+    const [chapterFilter, setChapterFilter] = useState('');
+    const [substitutionOnly, setSubstitutionOnly] = useState(false);
     const [pageSize, setPageSize] = useState(50);
     const [page, setPage] = useState(1);
     const [maxDisplay, setMaxDisplay] = useState(1000); // soft cap
@@ -9332,6 +9505,31 @@ const App = () => {
     const [groupByChapter, setGroupByChapter] = useState(false);
     const [schemeLookup, setSchemeLookup] = useState({});
     const email = user?.email || '';
+
+    const isSubstitutionReport = useCallback((r) => {
+      if (!r) return false;
+      const v = r.isSubstitution;
+      if (v === true) return true;
+      if (typeof v === 'number') return v !== 0;
+      if (typeof v === 'string') {
+        const s = v.trim().toLowerCase();
+        if (['true', 'yes', '1', 'y', 't'].includes(s)) return true;
+        if (s.includes('substitution')) return true;
+      }
+      // Backward compatibility: some older reports may miss isSubstitution but include metadata
+      if (r.absentTeacher) return true;
+      if (r.regularSubject || r.substituteSubject) return true;
+      if (String(r.planType || '').toLowerCase().includes('substi')) return true;
+      return false;
+    }, []);
+
+    const getChapterDisplay = useCallback((r) => {
+      if (!r) return '-';
+      const raw = String(r.chapter || '').trim();
+      if (raw) return raw;
+      if (isSubstitutionReport(r)) return 'Substitution period (no plan)';
+      return 'Unknown Chapter';
+    }, [isSubstitutionReport]);
 
     const computeDates = useCallback(() => {
       const today = new Date();
@@ -9402,14 +9600,26 @@ const App = () => {
       return schemeLookup[key] || '';
     }, [schemeLookup]);
 
-    const total = reports.length;
+    const filteredReports = reports
+      .filter(r => {
+        if (!r) return false;
+        if (substitutionOnly && !isSubstitutionReport(r)) return false;
+        if (chapterFilter) {
+          const needle = chapterFilter.toLowerCase().trim();
+          const hay = getChapterDisplay(r).toLowerCase();
+          if (!hay.includes(needle)) return false;
+        }
+        return true;
+      });
+
+    const total = filteredReports.length;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    const paginated = reports.slice((page - 1) * pageSize, page * pageSize);
+    const paginated = filteredReports.slice((page - 1) * pageSize, page * pageSize);
 
     const exportCSV = () => {
-      if (!reports.length) return;
+      if (!filteredReports.length) return;
       const headers = ['Date','Class','Subject','Period','Chapter','Session','Completed','Notes'];
-      const lines = [headers.join(',')].concat(reports.map(r => [r.date, r.class, r.subject, `P${r.period}`, (r.chapter||'').replace(/,/g,';'), r.sessionNo||'', r.completed||'', (r.notes||'').replace(/\n/g,' ').replace(/,/g,';')].join(',')));
+      const lines = [headers.join(',')].concat(filteredReports.map(r => [r.date, r.class, r.subject, `P${r.period}`, (getChapterDisplay(r)||'').replace(/,/g,';'), r.sessionNo||'', r.completed||'', (r.notes||'').replace(/\n/g,' ').replace(/,/g,';')].join(',')));
       const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -9466,6 +9676,11 @@ const App = () => {
             )}
             <input placeholder="Class" value={classFilter} onChange={e=>setClassFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
             <input placeholder="Subject" value={subjectFilter} onChange={e=>setSubjectFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
+            <input placeholder="Chapter" value={chapterFilter} onChange={e=>setChapterFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm" />
+            <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
+              <input type="checkbox" checked={substitutionOnly} onChange={e=>setSubstitutionOnly(e.target.checked)} />
+              Substitution only
+            </label>
             <div className="flex items-center gap-2 text-sm">
               <span className="text-gray-500">Page size</span>
               <select value={pageSize} onChange={e=>{setPageSize(Number(e.target.value)); setPage(1);}} className="px-2 py-1 border rounded-lg">
@@ -9478,7 +9693,7 @@ const App = () => {
                 {[200,500,1000].map(n=> <option key={n} value={n}>{n}</option>)}
               </select>
             </div>
-            <button onClick={exportCSV} disabled={!reports.length} className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-40">Export CSV</button>
+            <button onClick={exportCSV} disabled={!filteredReports.length} className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-40">Export CSV</button>
             <div className="ml-auto flex items-center gap-2">
               <button
                 type="button"
@@ -9498,13 +9713,13 @@ const App = () => {
               </button>
             </div>
           </div>
-          <div className="text-xs text-gray-600">Showing reports for <strong>{email}</strong> {(() => { const {from,to}=computeDates(); return `(${from} → ${to})`; })()} • {total} total{total === maxDisplay ? ' (truncated)' : ''}</div>
+          <div className="text-xs text-gray-600">Showing reports for <strong>{email}</strong> {(() => { const {from,to}=computeDates(); return `(${from} → ${to})`; })()} • {total} total</div>
         </div>
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           {(() => {
-            const base = reports;
+            const base = filteredReports;
             if (groupByClass || groupByChapter) {
-              const keyFn = (r) => groupByClass ? (r.class || 'Unknown Class') : (r.chapter || 'Unknown Chapter');
+              const keyFn = (r) => groupByClass ? (r.class || 'Unknown Class') : getChapterDisplay(r);
               const groups = {};
               for (const r of base) {
                 const k = keyFn(r);
@@ -9560,6 +9775,7 @@ const App = () => {
                                 })();
                                 const completedVal = getCompletionLabel(r);
                                 const isOwner = String(r.teacherEmail || '').toLowerCase() === String(email || '').toLowerCase();
+                                const subTag = isSubstitutionReport(r);
                                 const onDelete = async () => {
                                   if (!id) return alert('Missing report id');
                                   if (!confirm(
@@ -9589,7 +9805,16 @@ const App = () => {
                                     {!groupByClass && (<td className="px-2 py-2 text-xs text-gray-900">{r.class}</td>)}
                                     <td className="px-2 py-2 text-xs text-gray-900">{r.subject}</td>
                                     <td className="px-2 py-2 text-xs text-gray-900">P{r.period}</td>
-                                    {!groupByChapter && (<td className="px-2 py-2 text-xs text-gray-700 truncate">{r.chapter || '-'}</td>)}
+                                    {!groupByChapter && (
+                                      <td className="px-2 py-2 text-xs text-gray-700 truncate" title={subTag ? 'Substitution period' : ''}>
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          {subTag && (
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">Substitution</span>
+                                          )}
+                                          <span className="truncate">{getChapterDisplay(r)}</span>
+                                        </div>
+                                      </td>
+                                    )}
                                     <td className="px-2 py-2 text-xs text-gray-700">{r.sessionNo || '-'}</td>
                                     <td className="px-2 py-2 text-xs text-gray-700">{getTotalSessionsForReport(r) || '-'}</td>
                                     <td className="px-2 py-2 text-xs">{completedVal}</td>
@@ -9660,7 +9885,7 @@ const App = () => {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {loading && (<tr><td colSpan={10} className="px-4 py-6 text-center text-sm text-gray-500">Loading...</td></tr>)}
-                      {!loading && reports.length === 0 && (<tr><td colSpan={10} className="px-4 py-6 text-center text-sm text-gray-500">No reports in this range.</td></tr>)}
+                      {!loading && filteredReports.length === 0 && (<tr><td colSpan={10} className="px-4 py-6 text-center text-sm text-gray-500">No reports in this range.</td></tr>)}
                       {!loading && paginated.map(r => {
                         const id = r.id || r.reportId || `${(r.date||'').toString()}|${r.class||''}|${r.subject||''}|${r.period||''}|${String(r.teacherEmail||'').toLowerCase()}`;
                         const displayDate = (() => {
@@ -9673,13 +9898,21 @@ const App = () => {
                           return s;
                         })();
                         const completedVal = getCompletionLabel(r);
+                        const subTag = isSubstitutionReport(r);
                         return (
                         <tr key={id || `${r.date}|${r.class}|${r.subject}|${r.period}`}> 
                           <td className="px-2 py-2 text-xs text-gray-900">{displayDate}</td>
                           <td className="px-2 py-2 text-xs text-gray-900">{r.class}</td>
                           <td className="px-2 py-2 text-xs text-gray-900">{r.subject}</td>
                           <td className="px-2 py-2 text-xs text-gray-900">P{r.period}</td>
-                          <td className="px-2 py-2 text-xs text-gray-700 truncate">{r.chapter || '-'}</td>
+                          <td className="px-2 py-2 text-xs text-gray-700 truncate" title={subTag ? 'Substitution period' : ''}>
+                            <div className="flex items-center gap-2 min-w-0">
+                              {subTag && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">Substitution</span>
+                              )}
+                              <span className="truncate">{getChapterDisplay(r)}</span>
+                            </div>
+                          </td>
                           <td className="px-2 py-2 text-xs text-gray-700">{r.sessionNo || '-'}</td>
                           <td className="px-2 py-2 text-xs text-gray-700">{getTotalSessionsForReport(r) || '-'}</td>
                           <td className="px-2 py-2 text-xs">{completedVal}</td>

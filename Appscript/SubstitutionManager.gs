@@ -284,6 +284,242 @@ function getTeacherSubstitutionsRange(teacherEmail, startDate, endDate) {
 }
 
 /**
+ * Get substitutions for all teachers within a date range (HM/Admin analytics).
+ * Optional filters: teacherEmail (substitute teacher), cls.
+ */
+function getSubstitutionsRange(startDate, endDate, teacherEmail = '', cls = '') {
+  const normalizedStart = _isoDateString(startDate);
+  const normalizedEnd = _isoDateString(endDate);
+  const tEmail = String(teacherEmail || '').toLowerCase().trim();
+  const c = String(cls || '').trim();
+
+  const rows = _getCachedSheetData('Substitutions').data;
+  const filtered = rows.filter(r => {
+    if (!r) return false;
+    const rowDate = _isoDateString(r.date);
+    if (normalizedStart && rowDate < normalizedStart) return false;
+    if (normalizedEnd && rowDate > normalizedEnd) return false;
+    if (tEmail) {
+      const rowTeacher = String(r.substituteTeacher || '').toLowerCase().trim();
+      if (rowTeacher !== tEmail) return false;
+    }
+    if (c) {
+      const rowClass = String(r.class || '').trim();
+      if (rowClass.toLowerCase() !== c.toLowerCase()) return false;
+    }
+    return true;
+  });
+
+  // Sort by date descending, then by period
+  filtered.sort((a, b) => {
+    const dateCompare = _isoDateString(b.date).localeCompare(_isoDateString(a.date));
+    if (dateCompare !== 0) return dateCompare;
+    return (parseInt(a.period) || 0) - (parseInt(b.period) || 0);
+  });
+
+  return {
+    startDate: normalizedStart,
+    endDate: normalizedEnd,
+    teacherEmail: tEmail,
+    class: c,
+    substitutions: filtered
+  };
+}
+
+/**
+ * Get all substitutions (debug/admin use). Avoid using this on large datasets.
+ */
+function getAllSubstitutions() {
+  const rows = _getCachedSheetData('Substitutions').data;
+  return {
+    total: rows.length,
+    data: rows
+  };
+}
+
+function _normEmail(s) {
+  return String(s || '').trim().toLowerCase();
+}
+
+function _normText(s) {
+  return String(s || '').trim().toLowerCase();
+}
+
+function _normClass(s) {
+  return String(s || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function _subJoinKey(dateIso, period, cls, substituteTeacher) {
+  return [
+    String(dateIso || '').trim(),
+    String(period || '').trim(),
+    _normClass(cls),
+    _normEmail(substituteTeacher)
+  ].join('|');
+}
+
+/**
+ * Substitution effectiveness analytics.
+ * Computes assigned vs reported substitution periods by joining Substitutions + DailyReports.
+ *
+ * Params:
+ *  - startDate, endDate: YYYY-MM-DD
+ *  - teacherEmail: optional (substitute teacher)
+ *  - class: optional
+ *  - subject: optional (matches substitution subject OR report subject)
+ *  - chapter: optional (only applies when a report exists)
+ *  - includeDetails: '1'/'true' to include row-level details
+ */
+function getSubstitutionEffectiveness(params) {
+  const startDate = _isoDateString(params && params.startDate);
+  const endDate = _isoDateString(params && params.endDate);
+  const teacherEmail = _normEmail(params && params.teacherEmail);
+  const clsFilterRaw = String(params && (params.class || params.cls) || '').trim();
+  const clsFilter = _normClass(clsFilterRaw);
+  const subjectFilter = _normText(params && params.subject);
+  const chapterFilter = _normText(params && params.chapter);
+  const includeDetails = String(params && params.includeDetails || '').toLowerCase().trim();
+  const wantDetails = includeDetails === '1' || includeDetails === 'true' || includeDetails === 'yes';
+
+  if (!startDate || !endDate) {
+    return { success: false, error: 'startDate and endDate are required' };
+  }
+  if (endDate < startDate) {
+    return { success: false, error: 'endDate must be >= startDate' };
+  }
+
+  const subs = _getCachedSheetData('Substitutions').data || [];
+  const reports = _getCachedSheetData('DailyReports').data || [];
+
+  // Build a map of (date|period|class|teacher) -> report
+  const reportMap = new Map();
+  for (let i = 0; i < reports.length; i++) {
+    const r = reports[i];
+    if (!r) continue;
+    const rDate = _isoDateString(r.date);
+    if (rDate < startDate || rDate > endDate) continue;
+
+    const rTeacher = _normEmail(r.teacherEmail);
+    const key = _subJoinKey(rDate, r.period, r.class, rTeacher);
+
+    // Prefer substitution-marked reports if duplicates exist.
+    if (!reportMap.has(key)) {
+      reportMap.set(key, r);
+    } else {
+      const existing = reportMap.get(key);
+      const isSub = String(r.isSubstitution || '').toLowerCase() === 'true' || r.isSubstitution === true;
+      const exIsSub = String(existing.isSubstitution || '').toLowerCase() === 'true' || existing.isSubstitution === true;
+      if (isSub && !exIsSub) reportMap.set(key, r);
+    }
+  }
+
+  const details = [];
+  const totals = { assigned: 0, reported: 0, pending: 0, reportedPct: 0 };
+
+  const teacherAgg = new Map();
+  const classAgg = new Map();
+
+  function _bumpAgg(map, k, deltaAssigned, deltaReported) {
+    if (!map.has(k)) map.set(k, { assigned: 0, reported: 0, pending: 0, reportedPct: 0 });
+    const obj = map.get(k);
+    obj.assigned += deltaAssigned;
+    obj.reported += deltaReported;
+    obj.pending = obj.assigned - obj.reported;
+    obj.reportedPct = obj.assigned ? Math.round((obj.reported / obj.assigned) * 1000) / 10 : 0;
+  }
+
+  for (let i = 0; i < subs.length; i++) {
+    const s = subs[i];
+    if (!s) continue;
+
+    const sDate = _isoDateString(s.date);
+    if (sDate < startDate || sDate > endDate) continue;
+
+    const sTeacher = _normEmail(s.substituteTeacher);
+    if (teacherEmail && sTeacher !== teacherEmail) continue;
+
+    const sClassNorm = _normClass(s.class);
+    if (clsFilter && sClassNorm !== clsFilter) continue;
+
+    const sSubject = _normText(s.substituteSubject || s.regularSubject || s.subject);
+    if (subjectFilter && sSubject !== subjectFilter) {
+      // Also accept match against regularSubject (some rows may store only there)
+      const alt = _normText(s.regularSubject || '');
+      if (alt !== subjectFilter) continue;
+    }
+
+    const key = _subJoinKey(sDate, s.period, s.class, sTeacher);
+    const r = reportMap.get(key) || null;
+
+    // Chapter filter applies only when a report exists.
+    if (chapterFilter) {
+      const repChapter = _normText(r && r.chapter);
+      if (!repChapter || repChapter !== chapterFilter) continue;
+    }
+
+    totals.assigned += 1;
+    const hasReport = !!r;
+    if (hasReport) totals.reported += 1;
+
+    _bumpAgg(teacherAgg, sTeacher || '(unknown)', 1, hasReport ? 1 : 0);
+    _bumpAgg(classAgg, String(s.class || '').trim() || '(unknown)', 1, hasReport ? 1 : 0);
+
+    if (wantDetails) {
+      const markedSub = !!(r && (r.isSubstitution === true || String(r.isSubstitution || '').toLowerCase() === 'true'));
+      details.push({
+        date: sDate,
+        period: String(s.period || '').trim(),
+        class: String(s.class || '').trim(),
+        absentTeacher: String(s.absentTeacher || '').trim(),
+        substituteTeacher: String(s.substituteTeacher || '').trim(),
+        substituteSubject: String(s.substituteSubject || s.regularSubject || '').trim(),
+        reported: hasReport,
+        reportMarkedSubstitution: markedSub,
+        reportId: r && (r.id || r.reportId) ? (r.id || r.reportId) : '',
+        reportChapter: r && r.chapter ? String(r.chapter) : '',
+        reportSessionNo: r && r.sessionNo ? String(r.sessionNo) : '',
+        reportNotes: r && r.notes ? String(r.notes) : ''
+      });
+    }
+  }
+
+  totals.pending = totals.assigned - totals.reported;
+  totals.reportedPct = totals.assigned ? Math.round((totals.reported / totals.assigned) * 1000) / 10 : 0;
+
+  const teacherStats = Array.from(teacherAgg.entries()).map(([email, agg]) => ({
+    teacherEmail: email,
+    assigned: agg.assigned,
+    reported: agg.reported,
+    pending: agg.pending,
+    reportedPct: agg.reportedPct
+  })).sort((a, b) => (b.pending - a.pending) || (b.assigned - a.assigned) || String(a.teacherEmail).localeCompare(String(b.teacherEmail)));
+
+  const classStats = Array.from(classAgg.entries()).map(([cls, agg]) => ({
+    class: cls,
+    assigned: agg.assigned,
+    reported: agg.reported,
+    pending: agg.pending,
+    reportedPct: agg.reportedPct
+  })).sort((a, b) => (b.pending - a.pending) || (b.assigned - a.assigned) || String(a.class).localeCompare(String(b.class)));
+
+  return {
+    success: true,
+    startDate,
+    endDate,
+    filters: {
+      teacherEmail: teacherEmail,
+      class: clsFilterRaw,
+      subject: subjectFilter,
+      chapter: chapterFilter
+    },
+    totals,
+    teacherStats,
+    classStats,
+    details: wantDetails ? details : undefined
+  };
+}
+
+/**
  * Delete a substitution
  */
 function deleteSubstitution(data) {
