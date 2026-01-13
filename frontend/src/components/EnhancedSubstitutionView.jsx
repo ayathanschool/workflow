@@ -28,6 +28,10 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
   const [selectedPeriod, setSelectedPeriod] = useState(null);
   const [availableTeachers, setAvailableTeachers] = useState([]);
   const [loadingTeachers, setLoadingTeachers] = useState(false);
+
+  // Batch/day submission mode (one click)
+  const [batchMode, setBatchMode] = useState(false);
+  const [pendingSubstitutions, setPendingSubstitutions] = useState([]);
   
   // Assignment Form States
   const [assignmentForm, setAssignmentForm] = useState({
@@ -35,6 +39,47 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
     substituteSubject: '',
     note: ''
   });
+
+  // Clear pending list when date changes
+  useEffect(() => {
+    setPendingSubstitutions([]);
+  }, [selectedDate]);
+
+  const pendingKey = (s) => {
+    const d = String(s?.date || '').trim();
+    const p = String(s?.period || '').trim();
+    const c = String(s?.class || '').trim().toLowerCase();
+    const a = String(s?.absentTeacher || '').trim().toLowerCase();
+    return `${d}|${p}|${c}|${a}`;
+  };
+
+  const submitPendingSubstitutions = async () => {
+    if (!pendingSubstitutions.length) return;
+    try {
+      setLoading(true);
+      setError('');
+      setSuccessMessage('');
+
+      const payload = { date: selectedDate, substitutions: pendingSubstitutions };
+      const res = await api.assignSubstitutionsBatch(payload);
+      logApiCall('assignSubstitutionsBatch', payload, res);
+
+      const created = Number(res?.createdCount || 0);
+      if (res?.success === true || created > 0) {
+        setPendingSubstitutions([]);
+        setSuccessMessage(`✅ Submitted ${created} substitution(s) for ${selectedDate}`);
+        await fetchSubstitutionData();
+        await fetchTimetableData();
+        setTimeout(() => setSuccessMessage(''), 5000);
+      } else {
+        setError(res?.error || 'Failed to submit substitutions');
+      }
+    } catch (e) {
+      setError('Network error while submitting substitutions: ' + (e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Debug States
   const [showDebugInfo, setShowDebugInfo] = useState(true);
@@ -438,8 +483,25 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
         note: assignmentForm.note || '',
       };
 
+      if (batchMode) {
+        setPendingSubstitutions(prev => {
+          const next = Array.isArray(prev) ? prev.slice() : [];
+          const key = pendingKey(substitutionData);
+          const existingIdx = next.findIndex(x => pendingKey(x) === key);
+          if (existingIdx >= 0) next[existingIdx] = substitutionData;
+          else next.push(substitutionData);
+          return next;
+        });
+
+        setShowAssignModal(false);
+        setAssignmentForm({ substituteTeacher: '', substituteSubject: '', note: '' });
+        setSuccessMessage(`➕ Added to day list (pending): Period ${selectedPeriod.period} - ${selectedPeriod.class}`);
+        setTimeout(() => setSuccessMessage(''), 3000);
+        return;
+      }
+
       const response = await api.addSubstitution(substitutionData);
-      
+
       logApiCall('addSubstitution', substitutionData, response);
 
       // Handle different response formats - be more lenient with success detection
@@ -845,8 +907,84 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
           >
             {showDebugInfo ? 'Hide Debug Info' : 'Show Debug Info'}
           </button>
+
+          {/* Batch Mode Toggle */}
+          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 select-none">
+            <input
+              type="checkbox"
+              checked={batchMode}
+              onChange={(e) => setBatchMode(Boolean(e.target.checked))}
+              className="h-4 w-4"
+            />
+            Batch submit (one click)
+          </label>
+
+          {batchMode && (
+            <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <span className="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
+                Pending: {pendingSubstitutions.length}
+              </span>
+              <button
+                type="button"
+                disabled={loading || pendingSubstitutions.length === 0}
+                onClick={submitPendingSubstitutions}
+                className="px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
+              >
+                Submit All
+              </button>
+              <button
+                type="button"
+                disabled={loading || pendingSubstitutions.length === 0}
+                onClick={() => setPendingSubstitutions([])}
+                className="px-3 py-2 text-sm bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 disabled:opacity-60"
+              >
+                Clear
+              </button>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Pending batch queue */}
+      {batchMode && pendingSubstitutions.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+              Pending substitutions ({pendingSubstitutions.length})
+            </div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">Submit All sends them in one request.</div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-600 dark:text-gray-300">
+                  <th className="py-2 pr-4">Period</th>
+                  <th className="py-2 pr-4">Class</th>
+                  <th className="py-2 pr-4">Absent</th>
+                  <th className="py-2 pr-4">Substitute</th>
+                  <th className="py-2 pr-4">Subject</th>
+                  <th className="py-2 pr-4">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingSubstitutions
+                  .slice()
+                  .sort((a, b) => (parseInt(a?.period) || 0) - (parseInt(b?.period) || 0))
+                  .map((s, idx) => (
+                    <tr key={`${pendingKey(s)}|${idx}`} className="border-t border-gray-100 dark:border-gray-700">
+                      <td className="py-2 pr-4">{String(s?.period || '')}</td>
+                      <td className="py-2 pr-4">{String(s?.class || '')}</td>
+                      <td className="py-2 pr-4">{String(s?.absentTeacher || '')}</td>
+                      <td className="py-2 pr-4">{String(s?.substituteTeacher || '')}</td>
+                      <td className="py-2 pr-4">{String(s?.substituteSubject || s?.regularSubject || '')}</td>
+                      <td className="py-2 pr-4">{String(s?.note || '')}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Error Display */}
       {error && (
@@ -1241,10 +1379,10 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
                 {loading ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Assigning...
+                    {batchMode ? 'Adding...' : 'Assigning...'}
                   </>
                 ) : (
-                  'Assign Substitute'
+                  (batchMode ? 'Add to Day List' : 'Assign Substitute')
                 )}
               </button>
             </div>

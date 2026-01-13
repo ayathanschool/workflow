@@ -211,10 +211,23 @@ async function postJSON(url, payload) {
     }
   } catch {}
   
-  // Smart cache invalidation using enhanced cache
-  const action = payload?.action || '';
+  // Derive action (needed for cache invalidation + server routing)
+  let urlAction = '';
+  try {
+    const m = String(url || '').match(/[?&]action=([^&]+)/i);
+    if (m && m[1]) urlAction = decodeURIComponent(m[1]);
+  } catch {}
+
+  // Ensure payload contains action so both client invalidation and Apps Script doPost routing work reliably.
+  const action = String(payload?.action || urlAction || '').trim();
+  if (payload && typeof payload === 'object' && action && !payload.action) {
+    payload.action = action;
+  }
 
   if (action.includes('submit') || action.includes('create') || action.includes('update') || action.includes('delete')) {
+    // Central invalidation rules from EnhancedApiCache
+    try { enhancedCache.invalidateRelated(action); } catch {}
+
     // Clear all caches related to the action using pattern matching
     if (action.includes('DailyReport')) {
       enhancedCache.clearPattern('getDailyReport');
@@ -226,6 +239,17 @@ async function postJSON(url, payload) {
       enhancedCache.clearPattern('getLessonPlan');
       enhancedCache.clearPattern('getApprovedSchemes');
       enhancedCache.clearPattern('getAvailablePeriods');
+    }
+
+    // Many lesson-plan related actions are named submitPlan/deleteLessonPlan/etc.
+    // Treat any "*Plan*" mutation as a reason to invalidate plan-derived caches.
+    if (/plan/i.test(action)) {
+      enhancedCache.clearPattern('LessonPlan');
+      enhancedCache.clearPattern('getMissingLessonPlans');
+      enhancedCache.clearPattern('getAllMissingLessonPlans');
+      enhancedCache.clearPattern('getTeacherLessonPlans');
+      enhancedCache.clearPattern('getPlannedLessons');
+      enhancedCache.clearPattern('getPlannedLesson');
     }
     if (action.includes('Substitution') || action === 'assignSubstitution') {
       enhancedCache.clearPattern('Substitution');
@@ -242,6 +266,8 @@ async function postJSON(url, payload) {
     if (action.includes('Scheme')) {
       enhancedCache.clearPattern('Scheme');
       enhancedCache.clearPattern('getAllApprovedSchemes');
+      enhancedCache.clearPattern('getTeacherSchemes');
+      enhancedCache.clearPattern('getAllSchemes');
     }
   }
 
@@ -284,6 +310,8 @@ export function clearCache(pattern) {
   // Use advanced cache manager for pattern-based clearing
   if (pattern) {
     cacheManager.deletePattern(pattern);
+    // Also clear enhancedCache (persistent) used by getJSON()
+    try { enhancedCache.clearPattern(pattern); } catch {}
     // Also clear legacy cache for backward compatibility
     for (const [key] of apiCache) {
       if (key.includes(pattern)) {
@@ -292,6 +320,7 @@ export function clearCache(pattern) {
     }
   } else {
     cacheManager.clearAll();
+    try { enhancedCache.clear(); } catch {}
     apiCache.clear();
   }
 }
@@ -371,12 +400,14 @@ export async function submitPlan(email, planData) {
 
 export async function deleteScheme(schemeId, teacherEmail) {
   clearCache('getTeacherSchemes');
-  return postJSON(`${BASE_URL}?action=deleteScheme`, { schemeId, teacherEmail })
+  const res = await postJSON(`${BASE_URL}?action=deleteScheme`, { schemeId, teacherEmail })
+  return res?.data || res
 }
 
 export async function updateScheme(schemeId, teacherEmail, planData) {
   clearCache('getTeacherSchemes');
-  return postJSON(`${BASE_URL}?action=updateScheme`, { schemeId, teacherEmail, ...planData })
+  const res = await postJSON(`${BASE_URL}?action=updateScheme`, { schemeId, teacherEmail, ...planData })
+  return res?.data || res
 }
 
 export async function deleteLessonPlan(lpId, teacherEmail) {
@@ -647,7 +678,7 @@ export async function assignSubstitution(data) {
 // their current approval status.
 export async function getTeacherSchemes(email) {
   const q = new URLSearchParams({ action: 'getTeacherSchemes', email })
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE)
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION)
   // Unwrap response: backend wraps in {status, data, timestamp}
   return result?.data || result || []
 }
@@ -756,6 +787,15 @@ export async function addSubstitution(data) {
     note: data.note || ''
   });
   const response = await getJSON(`${BASE_URL}?${params.toString()}`);
+  return response?.data || response;
+}
+
+// Bulk/day substitution submission in one click
+export async function assignSubstitutionsBatch(payload) {
+  const response = await postJSON(`${BASE_URL}`, {
+    action: 'assignSubstitutionsBatch',
+    ...(payload || {})
+  });
   return response?.data || response;
 }
 
@@ -1880,7 +1920,7 @@ export async function getMissingLessonPlans(teacherEmail, daysAhead = 7) {
     teacherEmail,
     daysAhead
   });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
   return result?.data || result;
 }
 
@@ -1889,7 +1929,7 @@ export async function getAllMissingLessonPlans(daysAhead = 7) {
     action: 'getAllMissingLessonPlans',
     daysAhead
   });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
   return result?.data || result;
 }
 

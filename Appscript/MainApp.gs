@@ -353,9 +353,9 @@
       if (action === 'getTeacherDailyTimetable') {
         const identifier = (e.parameter.email || '').toLowerCase().trim();
         const date = (e.parameter.date || _todayISO()).trim();
-        Logger.log(`[MainApp] getTeacherDailyTimetable called: identifier=${identifier}, date=${date}`);
+        try { appLog('DEBUG', '[MainApp] getTeacherDailyTimetable', { identifier: identifier, date: date }); } catch (e) {}
         const result = getTeacherDailyTimetable(identifier, date);
-        Logger.log(`[MainApp] getTeacherDailyTimetable returned ${result.length} periods`);
+        try { appLog('DEBUG', '[MainApp] getTeacherDailyTimetable result', { periods: (result && result.periods) ? result.periods.length : (Array.isArray(result) ? result.length : null) }); } catch (e) {}
         return _respond(result);
       }
       
@@ -606,7 +606,9 @@
         // PERFORMANCE: Batch fetch students for multiple classes
         const classesParam = e.parameter.classes || '';
         const classes = classesParam.split(',').map(c => c.trim()).filter(Boolean);
-        return _respond(getStudentsBatch(classes));
+        const cacheKey = generateCacheKey('students_batch_v1', { classes: classes.slice().sort().join(',') });
+        const dataOut = getCachedData(cacheKey, function() { return getStudentsBatch(classes); }, CACHE_TTL.LONG);
+        return _respond(dataOut);
       }
       
       if (action === 'getStudentReportCard') {
@@ -1182,17 +1184,19 @@
       
       // === SUPER ADMIN MANAGEMENT ROUTES ===
       if (action === 'deleteLessonPlan') {
-        if (!_isSuperAdminSafe(data.email)) {
-          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        // Back-compat: allow Super Admin hard-delete; non-admin flows are handled later
+        // via `_handleDeleteLessonPlan(data)` which enforces teacher ownership/status.
+        if (_isSuperAdminSafe(data.email)) {
+          return _respond(deleteLessonPlan(data.lessonPlanId));
         }
-        return _respond(deleteLessonPlan(data.lessonPlanId));
       }
       
       if (action === 'deleteScheme') {
-        if (!_isSuperAdminSafe(data.email)) {
-          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        // Back-compat: allow Super Admin hard-delete; non-admin flows are handled later
+        // via `_handleDeleteScheme(data)` which enforces teacher ownership/status.
+        if (_isSuperAdminSafe(data.email)) {
+          return _respond(deleteScheme(data.schemeId));
         }
-        return _respond(deleteScheme(data.schemeId));
       }
       
       if (action === 'deleteReport') {
@@ -1282,6 +1286,10 @@
       }
       
       // === SUBSTITUTION ROUTES ===
+      if (action === 'assignSubstitutionsBatch') {
+        return _respond(assignSubstitutionsBatch(data));
+      }
+
       if (action === 'assignSubstitution') {
         return _respond(assignSubstitution(data));
       }
@@ -1823,15 +1831,6 @@
         const reason = (data.reason || e.parameter.reason || '').trim();
         return _respond(reopenDailyReport(reportId, requesterEmail, reason));
       }
-      // Debug: role parsing details for a given email (useful to confirm HM recognition)
-      if (action === 'debugRole') {
-        const requesterEmail = (data.requesterEmail || e.parameter.requesterEmail || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(requesterEmail)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
-        }
-        const email = (data.email || e.parameter.email || '').trim();
-        return _respond(debugUserRoles(email));
-      }
       if (action === 'notifyMissingSubmissions') {
         return _respond(_handleNotifyMissingSubmissions(data));
       }
@@ -2335,18 +2334,22 @@
       const schemeId = _generateId('SCH_');
       
       // Lookup teacher name from Users sheet to ensure consistency
-      const teacherEmail = (data.email || '').toLowerCase().trim();
-      let teacherName = data.teacherName || '';
-      
-      const usersSh = _getSheet('Users');
-      const usersHeaders = _headers(usersSh);
-      const users = _rows(usersSh).map(r => _indexByHeader(r, usersHeaders));
-      const teacher = users.find(u => String(u.email || '').toLowerCase() === teacherEmail);
-      
-      if (teacher && teacher.name) {
-        teacherName = teacher.name; // Use name from Users sheet
+      const teacherEmail = String(data.teacherEmail || data.email || '').toLowerCase().trim();
+      let teacherName = String(data.teacherName || '').trim();
+
+
+      // Prefer directory name; also self-heal if frontend sent an email in teacherName
+      const u = _getUserByEmail(teacherEmail);
+      const dirName = u && u.name ? String(u.name || '').trim() : '';
+      if (dirName && dirName.indexOf('@') === -1) {
+        teacherName = dirName;
         Logger.log(`Using teacher name from Users sheet: ${teacherName}`);
+      } else if (teacherName && teacherName.indexOf('@') !== -1 && dirName) {
+        // If Users has something but it's still email-like, keep teacherName (but at least normalize)
+        teacherName = teacherEmail;
       }
+
+      if (!teacherName) teacherName = teacherEmail;
       
       // Match the order of headers: schemeId, teacherEmail, teacherName, class, subject, term, unit, chapter, month, noOfSessions, status, createdAt, approvedAt, academicYear, content
       const line = [
@@ -3433,12 +3436,8 @@
         };
 
         lessonsByPeriod[periodKey] = entry;
-        lessonsByPeriod[uniqueKey] = entry;
-        
-        Logger.log(`[BATCH] Mapped lesson ${plan.lpId} to ${periodKey}`);
       });
-      
-    // If the day is marked non-teaching AND there are no matching Ready plans, return empty but keep metadata.
+
     if (isNonTeachingDay && matchingPlans.length === 0) {
       Logger.log(`[BATCH] ${queryDate} is non-teaching (${nonTeachingReason}) and has no Ready plans for ${email}`);
       return {
@@ -4466,36 +4465,6 @@
     } catch (error) {
       Logger.log(`ERROR in _handleSyncSessionDependencies: ${error.message}`);
       return _respond({ success: false, error: error.message });
-    }
-  }
-
-  /**
-  * Test function for scheme-based lesson planning
-  */
-  function testSchemeLessonPlanningAPI() {
-    try {
-      console.log('Testing Scheme-Based Lesson Planning API...');
-      
-      const teachersResult = getAllTeachers();
-      console.log(`Teachers found: ${teachersResult.length}`);
-      
-      if (teachersResult.length > 0) {
-        const testTeacher = teachersResult[0].email;
-        console.log(`Testing with teacher: ${testTeacher}`);
-        
-        const schemesResult = getApprovedSchemesForLessonPlanning(testTeacher);
-        console.log(`Schemes Result: ${JSON.stringify(schemesResult)}`);
-        
-        const startDate = new Date().toISOString().split('T')[0];
-        const endDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        
-        const periodsResult = getAvailablePeriodsForLessonPlan(testTeacher, startDate, endDate);
-        console.log(`Periods Result: ${JSON.stringify(periodsResult)}`);
-      }
-      
-      console.log('Test completed successfully');
-    } catch (error) {
-      console.error(`Error in test: ${error.message}`);
     }
   }
 
@@ -5943,8 +5912,8 @@
         return _isoDateIST(d);
       }
 
-      // Build proposed cascade: shift every affected session forward by ONE working day
-      // and roll content so teacher restarts from session 1 while choosing NEXT AVAILABLE period for class+subject
+      // Build proposed cascade: shift every affected session forward to the NEXT AVAILABLE timetable slot
+      // (same day if there is a later period; otherwise next working day), while choosing an available period for class+subject
       // Prepare timetable for teacher filtered to matching class & subject
       const timetableSheet = _getSheet('Timetable');
       const ttHeaders = _headers(timetableSheet);
@@ -5972,7 +5941,7 @@
       });
 
       const usedNewSlots = new Set();
-      function _findNextAvailablePeriod(startDateStr) {
+      function _findNextAvailablePeriod(startDateStr, startAfterPeriodOpt) {
         let dStr = startDateStr;
         let safety = 0;
         while (safety < 60) { // cap search to 60 working days
@@ -5985,10 +5954,15 @@
               // sort by period number
               periodsToday.sort((a,b) => parseInt(a.period)-parseInt(b.period));
               for (const per of periodsToday) {
+                if (dStr === startDateStr && startAfterPeriodOpt !== undefined && startAfterPeriodOpt !== null && startAfterPeriodOpt !== '') {
+                  const pNum = parseInt(String(per.period).trim(), 10);
+                  const afterNum = parseInt(String(startAfterPeriodOpt).trim(), 10);
+                  if (!isNaN(pNum) && !isNaN(afterNum) && pNum <= afterNum) continue;
+                }
                 const key = dStr + '|' + parseInt(String(per.period).trim(),10);
                 if (!occupiedSlots.includes(key) && !usedNewSlots.has(key)) {
                   usedNewSlots.add(key);
-                  const timing = _getPeriodTiming(per.period, dayName);
+                  const timing = _getPeriodTiming(per.period, dayName, per.class);
                   return {
                     date: dStr,
                     period: per.period,
@@ -6009,8 +5983,8 @@
       const proposedCascade = [];
       for (let idx = 0; idx < remainingSessions.length; idx++) {
         const sess = remainingSessions[idx];
-        const newDateCandidate = _nextWorkingDay(sess.currentDate); // base forward one working day
-        const slot = _findNextAvailablePeriod(newDateCandidate);
+        // Base: same date, but after the missed period; if no later periods that day, _findNextAvailablePeriod will roll forward
+        const slot = _findNextAvailablePeriod(sess.currentDate, sess.currentPeriod);
         // Preserve each session's own planned content instead of rolling back
         const sourceContent = sess;
         if (!slot) {
@@ -6043,7 +6017,7 @@
         success: true,
         needsCascade: true,
         canCascade: true,
-        mode: 'forward-one-day-with-content-roll',
+        mode: 'forward-to-next-slot',
         chapter: chapter,
         totalSessionsAffected: proposedCascade.length,
         sessionsToReschedule: proposedCascade,
