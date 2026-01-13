@@ -1150,7 +1150,7 @@ function PeriodCard({
       {/* Card Header */}
       <div
         className={`p-6 cursor-pointer ${isSubmitted ? 'bg-green-50' : (isSub ? 'bg-amber-50' : 'hover:bg-gray-50')} rounded-t-xl transition-colors`}
-        onClick={!isSubmitted ? onToggle : undefined}
+        onClick={onToggle}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -1191,32 +1191,77 @@ function PeriodCard({
                 <span>✓</span>
                 <span>Submitted</span>
               </div>
-            ) : (
-              isSub ? (
-                <div className="px-4 py-2 bg-amber-100 text-amber-700 rounded-full font-medium text-sm">
-                  Substitution
-                </div>
-              ) : (
-              <button
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggle();
-                }}
-              >
-                <svg className={`w-6 h-6 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              )
-            )}
+            ) : isSub ? (
+              <div className="px-4 py-2 bg-amber-100 text-amber-700 rounded-full font-medium text-sm">
+                Substitution
+              </div>
+            ) : null}
+
+            {/* Expand/Collapse */}
+            <button
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggle();
+              }}
+              aria-label={isExpanded ? 'Collapse' : 'Expand'}
+            >
+              <svg className={`w-6 h-6 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
           </div>
         </div>
       </div>
 
       {/* Expanded Form */}
-      {isExpanded && !isSubmitted && (
+      {isExpanded && (
         <div className="p-6 border-t border-gray-100 space-y-6 max-h-[calc(100vh-200px)] overflow-y-auto">
+          {isSubmitted ? (
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">Submitted report (read-only)</div>
+                  <div className="text-xs text-gray-500 mt-1">You can view details here, but editing is disabled after submission.</div>
+                </div>
+                {report?.createdAt ? (
+                  <div className="text-xs text-gray-500">Submitted: {String(report.createdAt)}</div>
+                ) : null}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <div className="text-xs font-medium text-gray-500">Chapter</div>
+                  <div className="text-sm text-gray-900 mt-1 break-words">{chapter || '—'}</div>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <div className="text-xs font-medium text-gray-500">Session</div>
+                  <div className="text-sm text-gray-900 mt-1">{sessionNo ? `${sessionNo} / ${totalSessions || 1}` : '—'}</div>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 md:col-span-2">
+                  <div className="text-xs font-medium text-gray-500">Objectives</div>
+                  <div className="text-sm text-gray-900 mt-1 whitespace-pre-wrap break-words">{objectives || '—'}</div>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 md:col-span-2">
+                  <div className="text-xs font-medium text-gray-500">Activities / Teaching Methods</div>
+                  <div className="text-sm text-gray-900 mt-1 whitespace-pre-wrap break-words">{teachingMethods || '—'}</div>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 md:col-span-2">
+                  <div className="text-xs font-medium text-gray-500">Notes</div>
+                  <div className="text-sm text-gray-900 mt-1 whitespace-pre-wrap break-words">{data?.notes || '—'}</div>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 md:col-span-2">
+                  <div className="text-xs font-medium text-gray-500">Difficulties</div>
+                  <div className="text-sm text-gray-900 mt-1 whitespace-pre-wrap break-words">{data?.difficulties || '—'}</div>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 md:col-span-2">
+                  <div className="text-xs font-medium text-gray-500">Next Session Plan</div>
+                  <div className="text-sm text-gray-900 mt-1 whitespace-pre-wrap break-words">{data?.nextSessionPlan || '—'}</div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
           {/* Substitution banner */}
           {isSub && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
@@ -1688,6 +1733,8 @@ function PeriodCard({
               )}
             </button>
           </div>
+            </>
+          )}
         </div>
       )}
     </div>

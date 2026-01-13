@@ -2179,40 +2179,5 @@ function deleteExamMarks(examId) {
  * DEBUG FUNCTION: Test ClassSubjects sheet reading
  * Run this manually to see what's in the ClassSubjects sheet
  */
-function testClassSubjects() {
-  try {
-    const sh = _getSheet('ClassSubjects');
-    if (!sh) {
-      Logger.log('❌ ClassSubjects sheet not found!');
-      return;
-    }
-    
-    Logger.log('✅ ClassSubjects sheet found');
-    Logger.log('Last row: ' + sh.getLastRow());
-    
-    const headers = _headers(sh);
-    const rows = _rows(sh).map(r => _indexByHeader(r, headers));
-    
-    Logger.log('Total rows: ' + rows.length);
-    Logger.log('Headers: ' + JSON.stringify(headers));
-    
-    // Test the actual getClassSubjects function
-    Logger.log('\n=== Testing getClassSubjects("10A") ===');
-    const result = getClassSubjects('10A');
-    Logger.log('Result: ' + JSON.stringify(result));
-    
-    return result;
-    
-  } catch (error) {
-    Logger.log('❌ Error: ' + error.message);
-    return { error: error.message };
-  }
-}
-
-/**
- * TEST ENDPOINT: Direct API test for getClassSubjects
- * Call this from the frontend to bypass any caching
- */
-function testGetClassSubjectsAPI() {
-  return getClassSubjects('10A');
-}
+// testClassSubjects() removed (debug-only).
+// testGetClassSubjectsAPI() removed (debug-only).

@@ -29,9 +29,9 @@ function _getCachedSheetData(sheetName) {
       headers: headers,
       data: rows.map(row => _indexByHeader(row, headers))
     };
-    Logger.log(`[CACHE] Loaded ${sheetName}: ${rows.length} rows`);
+    try { appLog('DEBUG', `[CACHE] Loaded ${sheetName}: ${rows.length} rows`); } catch (e) {}
   } else {
-    Logger.log(`[CACHE HIT] ${sheetName}`);
+    try { appLog('DEBUG', `[CACHE HIT] ${sheetName}`); } catch (e) {}
   }
   return REQUEST_SHEET_CACHE[sheetName];
 }
@@ -50,9 +50,9 @@ function _getCachedSettings() {
         REQUEST_SETTINGS_CACHE[key] = row.value;
       }
     });
-    Logger.log(`[CACHE] Loaded Settings: ${Object.keys(REQUEST_SETTINGS_CACHE).length} keys`);
+    try { appLog('DEBUG', `[CACHE] Loaded Settings: ${Object.keys(REQUEST_SETTINGS_CACHE).length} keys`); } catch (e) {}
   } else {
-    Logger.log(`[CACHE HIT] Settings`);
+    try { appLog('DEBUG', `[CACHE HIT] Settings`); } catch (e) {}
   }
   return REQUEST_SETTINGS_CACHE;
 }
@@ -354,54 +354,6 @@ function _updateCell(sheet, rowIndex, columnName, value, headers = null) {
 /**
  * Get daily reports for a teacher within date range
  */
-function getDailyReports(teacherEmail, startDate = null, endDate = null, cls = '', subject = '') {
-  try {
-    const sheet = _getSheet('DailyReports');
-    const headers = _headers(sheet);
-    const allReports = _rows(sheet).map(row => _indexByHeader(row, headers));
-    
-    let filteredReports = allReports.filter(report => {
-      // Safety: ensure report is object and teacherEmail coerced to string
-      if (!report || typeof report !== 'object') return false;
-      const emailMatch = String(report.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
-      const classMatch = !cls || (report.class || '') === cls;
-      const subjectMatch = !subject || (report.subject || '') === subject;
-      
-      let dateMatch = true;
-      if (startDate || endDate) {
-        const reportDate = new Date(report.date);
-        if (startDate) dateMatch = dateMatch && reportDate >= new Date(startDate);
-        if (endDate) dateMatch = dateMatch && reportDate <= new Date(endDate);
-      }
-      
-      return emailMatch && classMatch && subjectMatch && dateMatch;
-    });
-    
-    // Normalize date to IST yyyy-MM-dd for consistent display and filtering
-    const TZ = 'Asia/Kolkata';
-    filteredReports = filteredReports.map(r => {
-      const out = Object.assign({}, r);
-      try {
-        if (r.date) {
-          const d = new Date(r.date);
-          if (!isNaN(d.getTime())) {
-            out.date = Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
-          }
-        }
-      } catch (e) { /* ignore */ }
-      return out;
-    });
-
-    // Sort by date descending (string yyyy-MM-dd safe lexicographically by date parse)
-    filteredReports.sort((a, b) => new Date(b.date) - new Date(a.date));
-    
-    return filteredReports;
-  } catch (error) {
-    console.error(`Error getting daily reports: ${error.message}`);
-    return { success: false, error: error.message };
-  }
-}
-
 /**
  * Get all teachers function (placeholder - should be implemented in AuthManager.gs)
  */
@@ -688,10 +640,7 @@ function verifyDailyReport(reportId, verifierEmail) {
       isHM = userHasRole(verifierEmail, 'hm') || userHasRole(verifierEmail, 'headmaster');
     } catch (e) { /* ignore */ }
     if (!isHM) {
-      // Provide enriched debug info when authorization fails
-      var roleInfo = {};
-      try { roleInfo = debugUserRoles(verifierEmail); } catch (e) { roleInfo = { debugError: e && e.message ? e.message : String(e) }; }
-      return { success: false, error: 'Not authorized (HM role not detected)', roleInfo: roleInfo };
+      return { success: false, error: 'Not authorized (HM role not detected)' };
     }
 
     const sh = _getSheet('DailyReports');
@@ -950,36 +899,6 @@ function userHasRole(email, role) {
   }
 }
 
-/**
- * Debug helper: inspect how roles are parsed for a user and if HM matches
- */
-function debugUserRoles(email) {
-  try {
-    const targetEmail = String(email || '').toLowerCase().trim();
-    const usersSheet = _getSheet('Users');
-    const headers = _headers(usersSheet);
-    const rows = _rows(usersSheet).map(r => _indexByHeader(r, headers));
-    const user = rows.find(u => String(u.email || '').toLowerCase().trim() === targetEmail);
-    if (!user) return { found: false, email: targetEmail };
-    const rawRoles = String(user.roles || user.role || '');
-    const tokens = rawRoles.toLowerCase().split(/[^a-z]+/).filter(Boolean);
-    const joined = tokens.join('');
-    const hmSynonyms = ['hm', 'headmaster', 'headteacher', 'headmistress', 'principal'];
-    const has = (t) => tokens.includes(t) || joined.indexOf(t) !== -1;
-    const hmMatched = hmSynonyms.some(has) || (tokens.includes('head') && (tokens.includes('master') || tokens.includes('teacher') || tokens.includes('mistress')));
-    return {
-      found: true,
-      email: targetEmail,
-      rawRoles: rawRoles,
-      tokens: tokens,
-      joined: joined,
-      hmMatched: hmMatched
-    };
-  } catch (e) {
-    return { error: e && e.message ? e.message : String(e) };
-  }
-}
-
 // ===== In-app Notifications Helper =====
 function _addNotification(email, type, message, payloadObj) {
   try {
@@ -997,28 +916,6 @@ function _addNotification(email, type, message, payloadObj) {
     sh.appendRow(row);
   } catch (e) {
     console.error('_addNotification error', e);
-  }
-}
-
-// ===== Email Notification Helper =====
-// Lightweight wrapper so callers can safely check typeof sendEmailNotification === 'function'
-function sendEmailNotification(toEmail, subject, body) {
-  try {
-    if (!toEmail) return false;
-    subject = subject || 'Notification';
-    body = body || '';
-    // MailApp is available in Google Apps Script runtime
-    MailApp.sendEmail({
-      to: String(toEmail),
-      subject: String(subject),
-      htmlBody: String(body),
-      name: 'EnhanceFlow'
-    });
-    return true;
-  } catch (e) {
-    // Keep silent failures from breaking flow; log for diagnostics
-    try { console.error('sendEmailNotification error', e && e.message ? e.message : String(e)); } catch (ee) {}
-    return false;
   }
 }
 
@@ -1266,14 +1163,42 @@ function _getUserByEmail(email) {
     var hdr = _headers(sh);
     var rows = _rows(sh).map(function(r){ return _indexByHeader(r, hdr); });
     var target = String(email || '').toLowerCase().trim();
-    var u = rows.find(function(row){ return String(row.email || '').toLowerCase().trim() === target; });
+
+    function _pickFieldCI(obj, candidates) {
+      if (!obj) return '';
+      var keys = Object.keys(obj);
+      var lowerMap = {};
+      keys.forEach(function(k){ lowerMap[String(k).toLowerCase().trim()] = k; });
+      for (var i = 0; i < candidates.length; i++) {
+        var want = String(candidates[i] || '').toLowerCase().trim();
+        if (want && lowerMap.hasOwnProperty(want)) {
+          var realKey = lowerMap[want];
+          return obj[realKey];
+        }
+      }
+      return '';
+    }
+
+    var u = rows.find(function(row){
+      var e = _pickFieldCI(row, ['email', 'teacherEmail', 'teacher email', 'e-mail', 'mail']);
+      return String(e || '').toLowerCase().trim() === target;
+    });
     if (!u) return null;
+
+    var emailVal = _pickFieldCI(u, ['email', 'teacherEmail', 'teacher email', 'e-mail', 'mail']);
+    var nameVal = _pickFieldCI(u, ['name', 'teacherName', 'teacher name', 'fullName', 'full name', 'displayName', 'display name']);
+    var rolesVal = _pickFieldCI(u, ['roles', 'role']);
+    var classesVal = _pickFieldCI(u, ['classes', 'class']);
+    var subjectsVal = _pickFieldCI(u, ['subjects', 'subject']);
+    var classTeacherForVal = _pickFieldCI(u, ['classTeacherFor', 'class teacher for', 'classTeacher', 'class teacher']);
+
     return {
-      email: String(u.email || '').toLowerCase(),
-      name: u.name || u.email || '',
-      roles: u.roles || u.role || '',
-      classes: u.classes || '',
-      subjects: u.subjects || ''
+      email: String(emailVal || '').toLowerCase().trim(),
+      name: String(nameVal || emailVal || '').trim(),
+      roles: String(rolesVal || '').trim(),
+      classes: String(classesVal || '').trim(),
+      subjects: String(subjectsVal || '').trim(),
+      classTeacherFor: String(classTeacherForVal || '').trim()
     };
   } catch (e) {
     return null;
@@ -1288,12 +1213,29 @@ function _getTeacherDisplayName(email) {
   
   // Check cache first
   var cacheKey = 'teacher_name_' + emailLower;
-  var cached = getCachedData(cacheKey, null, 0); // Check only, don't fetch
-  if (cached) return cached;
+  try {
+    var cached = CacheService.getScriptCache().get(cacheKey);
+    if (cached) {
+      // Self-heal: if cached value looks like an email, re-check Users once
+      var cStr = String(cached || '').trim();
+      if (cStr && cStr.indexOf('@') !== -1) {
+        var uCheck = _getUserByEmail(emailLower);
+        var nCheck = uCheck && uCheck.name ? String(uCheck.name).trim() : '';
+        if (nCheck && nCheck.indexOf('@') === -1 && nCheck.toLowerCase() !== cStr.toLowerCase()) {
+          try { CacheService.getScriptCache().put(cacheKey, nCheck, 900); } catch (_e2) {}
+          return nCheck;
+        }
+      }
+      return cStr;
+    }
+  } catch (e) {
+    // Cache failure is non-critical
+  }
   
   // Lookup in Users sheet
   var user = _getUserByEmail(emailLower);
   var displayName = user && user.name ? user.name : emailLower;
+  displayName = String(displayName || '').trim();
   
   // Cache for 15 minutes (names rarely change)
   try {
@@ -1305,21 +1247,82 @@ function _getTeacherDisplayName(email) {
   return displayName;
 }
 
+// Debug/admin helper: clear cached teacher display name for one email
+function clearTeacherNameCache(email) {
+  var emailLower = String(email || '').toLowerCase().trim();
+  if (!emailLower) return { success: false, error: 'Missing email' };
+  var cacheKey = 'teacher_name_' + emailLower;
+  try {
+    CacheService.getScriptCache().remove(cacheKey);
+  } catch (e) {
+    return { success: false, error: e && e.message ? e.message : String(e) };
+  }
+  return { success: true, email: emailLower };
+}
+
 // Public helper: verify token and return user profile + roles
 function verifyGoogleLogin(idToken) {
   try {
+    // PERFORMANCE: Token verification is expensive (UrlFetchApp to Google). Cache results briefly.
+    var tokenStr = String(idToken || '').trim();
+    if (tokenStr) {
+      try {
+        var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, tokenStr, Utilities.Charset.UTF_8);
+        var hash = Utilities.base64EncodeWebSafe(digest).slice(0, 32);
+        var cacheKey = 'auth_verify_v1:' + hash;
+        var cachedJson = CacheService.getScriptCache().get(cacheKey);
+        if (cachedJson) {
+          return JSON.parse(cachedJson);
+        }
+      } catch (_cacheReadErr) {
+        // Cache failure is non-critical
+      }
+    }
+
     var settings = _getCachedSettings();
     var expectedClientId = settings['GOOGLE_OAUTH_CLIENT_ID'] || '';
     // Accept either ID token (JWT) or OAuth access token.
     // Frontend may provide an access_token depending on login flow.
-    var check = _verifyGoogleIdToken(idToken, expectedClientId);
+    var check = _verifyGoogleIdToken(tokenStr, expectedClientId);
     if (!check.success) {
-      check = _verifyGoogleAccessToken(idToken, expectedClientId);
+      check = _verifyGoogleAccessToken(tokenStr, expectedClientId);
     }
-    if (!check.success) return { success: false, error: check.error || 'Token verification failed', details: check };
+    if (!check.success) {
+      var fail = { success: false, error: check.error || 'Token verification failed', details: check };
+      // Cache failures briefly to avoid hammering Google on repeated bad tokens.
+      if (tokenStr) {
+        try {
+          var digest2 = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, tokenStr, Utilities.Charset.UTF_8);
+          var hash2 = Utilities.base64EncodeWebSafe(digest2).slice(0, 32);
+          CacheService.getScriptCache().put('auth_verify_v1:' + hash2, JSON.stringify(fail), 60);
+        } catch (_cacheWriteErr1) {}
+      }
+      return fail;
+    }
+
     var user = _getUserByEmail(check.email);
-    if (!user) return { success: false, error: 'User not found in directory', email: check.email };
-    return { success: true, user: user, email: check.email, emailVerified: check.emailVerified, tokenInfo: check.tokenInfo || null };
+    if (!user) {
+      var notFound = { success: false, error: 'User not found in directory', email: check.email };
+      if (tokenStr) {
+        try {
+          var digest3 = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, tokenStr, Utilities.Charset.UTF_8);
+          var hash3 = Utilities.base64EncodeWebSafe(digest3).slice(0, 32);
+          CacheService.getScriptCache().put('auth_verify_v1:' + hash3, JSON.stringify(notFound), 60);
+        } catch (_cacheWriteErr2) {}
+      }
+      return notFound;
+    }
+
+    var ok = { success: true, user: user, email: check.email, emailVerified: check.emailVerified, tokenInfo: check.tokenInfo || null };
+    // Cache success for a short window. Token expiry varies; keep conservative TTL.
+    if (tokenStr) {
+      try {
+        var digest4 = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, tokenStr, Utilities.Charset.UTF_8);
+        var hash4 = Utilities.base64EncodeWebSafe(digest4).slice(0, 32);
+        CacheService.getScriptCache().put('auth_verify_v1:' + hash4, JSON.stringify(ok), 300);
+      } catch (_cacheWriteErr3) {}
+    }
+    return ok;
   } catch (e) {
     return { success: false, error: e && e.message ? e.message : String(e) };
   }

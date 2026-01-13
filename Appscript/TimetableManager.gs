@@ -26,11 +26,8 @@ function _fetchTeacherWeeklyTimetable(identifier) {
     days.push({ date: iso, dayName });
   }
   
-  // Get timetable data
-  const sh = _getSheet('Timetable');
-  const headers = _headers(sh);
-  const list = _rows(sh)
-    .map(r => _indexByHeader(r, headers))
+  // Get timetable data (request-scoped cache)
+  const list = _getCachedSheetData('Timetable').data
     .filter(r => {
       const te = String(r.teacherEmail || '').toLowerCase();
       const tn = String(r.teacherName || '').toLowerCase();
@@ -79,13 +76,10 @@ function _fetchTeacherDailyTimetable(identifier, date) {
   const dayName = _dayName(normalizedDate);
   const idLower = identifier.toLowerCase();
   
-  Logger.log(`[getTeacherDailyTimetable] Getting timetable for ${idLower} on ${normalizedDate}`);
+  try { appLog('DEBUG', `[getTeacherDailyTimetable] Getting timetable for ${idLower} on ${normalizedDate}`); } catch (e) {}
   
-  // Get regular timetable for this teacher
-  const sh = _getSheet('Timetable');
-  const headers = _headers(sh);
-  const regularPeriods = _rows(sh)
-    .map(r => _indexByHeader(r, headers))
+  // Get regular timetable for this teacher (request-scoped cache)
+  const regularPeriods = _getCachedSheetData('Timetable').data
     .filter(r => {
       const te = String(r.teacherEmail || '').toLowerCase();
       const tn = String(r.teacherName || '').toLowerCase();
@@ -93,16 +87,13 @@ function _fetchTeacherDailyTimetable(identifier, date) {
              _normalizeDayName(r.dayOfWeek) === _normalizeDayName(dayName);
     });
   
-  Logger.log(`[getTeacherDailyTimetable] Found ${regularPeriods.length} regular periods`);
+  try { appLog('DEBUG', `[getTeacherDailyTimetable] Found ${regularPeriods.length} regular periods`); } catch (e) {}
   
-  // Get substitutions for this date
-  const substitutionsSh = _getSheet('Substitutions');
-  const substitutionsHeaders = _headers(substitutionsSh);
-  const allSubstitutions = _rows(substitutionsSh)
-    .map(r => _indexByHeader(r, substitutionsHeaders))
+  // Get substitutions for this date (request-scoped cache)
+  const allSubstitutions = _getCachedSheetData('Substitutions').data
     .filter(r => _isoDateString(r.date) === normalizedDate);
   
-  Logger.log(`[getTeacherDailyTimetable] Found ${allSubstitutions.length} substitutions for date`);
+  try { appLog('DEBUG', `[getTeacherDailyTimetable] Found ${allSubstitutions.length} substitutions for date`); } catch (e) {}
   
   // Build final period list
   const finalPeriods = [];
@@ -121,14 +112,14 @@ function _fetchTeacherDailyTimetable(identifier, date) {
         isSubstitution: false
       });
     } else {
-      Logger.log(`[getTeacherDailyTimetable] Excluding period ${period.period} ${period.class} - teacher is absent`);
+      try { appLog('DEBUG', `[getTeacherDailyTimetable] Excluding period ${period.period} ${period.class} - teacher is absent`); } catch (e) {}
     }
   });
   
   // Add substitution periods where this teacher is the substitute
   allSubstitutions.forEach(sub => {
     if (String(sub.substituteTeacher || '').toLowerCase() === idLower) {
-      Logger.log(`[getTeacherDailyTimetable] Adding substitution period ${sub.period} ${sub.class}`);
+      try { appLog('DEBUG', `[getTeacherDailyTimetable] Adding substitution period ${sub.period} ${sub.class}`); } catch (e) {}
       finalPeriods.push({
         class: sub.class || '',
         dayOfWeek: dayName,
@@ -149,36 +140,36 @@ function _fetchTeacherDailyTimetable(identifier, date) {
   
   // Enrich with session progress (chapter name and session number)
   try {
-    const sessionProgressSh = _getSheet('SessionProgress');
-    const sessionProgressHeaders = _headers(sessionProgressSh);
-    const allSessionProgress = _rows(sessionProgressSh)
-      .map(r => _indexByHeader(r, sessionProgressHeaders));
-    
+    const allSessionProgress = _getCachedSheetData('SessionProgress').data;
+
+    // Build a single-pass index of latest progress per class+subject.
+    const latestByKey = new Map();
+    const toKey = (cls, subj) => `${String(cls || '').trim().toLowerCase()}|${String(subj || '').trim().toLowerCase()}`;
+
+    allSessionProgress.forEach(sp => {
+      const key = toKey(sp.class, sp.subject);
+      if (key === '|') return;
+      const d = new Date(sp.sessionDate || 0);
+      const t = isNaN(d.getTime()) ? 0 : d.getTime();
+      const prev = latestByKey.get(key);
+      if (!prev || t >= prev._t) {
+        latestByKey.set(key, { _t: t, chapterName: sp.chapterName || '', sessionNumber: sp.sessionNumber || '' });
+      }
+    });
+
     finalPeriods.forEach(period => {
-      // Find the latest session progress for this class-subject combination
-      const matchingProgress = allSessionProgress
-        .filter(sp => 
-          String(sp.class || '').toLowerCase() === String(period.class || '').toLowerCase() &&
-          String(sp.subject || '').toLowerCase() === String(period.subject || '').toLowerCase()
-        )
-        .sort((a, b) => {
-          // Sort by date descending to get most recent
-          const dateA = new Date(a.sessionDate || 0);
-          const dateB = new Date(b.sessionDate || 0);
-          return dateB - dateA;
-        });
-      
-      if (matchingProgress.length > 0) {
-        const latest = matchingProgress[0];
+      const key = toKey(period.class, period.subject);
+      const latest = latestByKey.get(key);
+      if (latest) {
         period.chapterName = latest.chapterName || '';
         period.sessionNumber = latest.sessionNumber || '';
       }
     });
   } catch (error) {
-    Logger.log(`[getTeacherDailyTimetable] Warning: Could not enrich with session progress - ${error.message}`);
+    try { appLog('WARN', `[getTeacherDailyTimetable] Could not enrich with session progress`, { error: error && error.message ? error.message : String(error) }); } catch (e) {}
   }
   
-  Logger.log(`[getTeacherDailyTimetable] Returning ${finalPeriods.length} periods (${allSubstitutions.filter(s => String(s.substituteTeacher || '').toLowerCase() === idLower).length} substitutions)`);
+  try { appLog('DEBUG', `[getTeacherDailyTimetable] Returning ${finalPeriods.length} periods (${allSubstitutions.filter(s => String(s.substituteTeacher || '').toLowerCase() === idLower).length} substitutions)`); } catch (e) {}
   
   return {
     date: normalizedDate,
@@ -204,46 +195,38 @@ function getDailyTimetableWithSubstitutions(date) {
 function _fetchDailyTimetableWithSubstitutions(normalizedDate) {
   const dayName = _dayName(normalizedDate);
   
-  Logger.log(`[getDailyTimetableWithSubstitutions] Date: ${normalizedDate}, DayName: ${dayName}`);
+  try { appLog('DEBUG', `[getDailyTimetableWithSubstitutions] Date: ${normalizedDate}, DayName: ${dayName}`); } catch (e) {}
   
-  // Get regular timetable
-  const timetableSh = _getSheet('Timetable');
-  const timetableHeaders = _headers(timetableSh);
-  const timetableEntries = _rows(timetableSh)
-    .map(r => _indexByHeader(r, timetableHeaders))
+  // Get regular timetable (request-scoped cache)
+  const timetableEntries = _getCachedSheetData('Timetable').data
     .filter(r => _normalizeDayName(r.dayOfWeek) === _normalizeDayName(dayName));
   
-  Logger.log(`[getDailyTimetableWithSubstitutions] Found ${timetableEntries.length} timetable entries for ${dayName}`);
+  try { appLog('DEBUG', `[getDailyTimetableWithSubstitutions] Found ${timetableEntries.length} timetable entries for ${dayName}`); } catch (e) {}
   
-  // Get substitutions for this date
-  const substitutionsSh = _getSheet('Substitutions');
-  const substitutionsHeaders = _headers(substitutionsSh);
-  const substitutions = _rows(substitutionsSh)
-    .map(r => _indexByHeader(r, substitutionsHeaders))
+  // Get substitutions for this date (request-scoped cache)
+  const substitutions = _getCachedSheetData('Substitutions').data
     .filter(r => _isoDateString(r.date) === normalizedDate);
   
-  Logger.log(`[getDailyTimetableWithSubstitutions] Found ${substitutions.length} substitutions for ${normalizedDate}`);
+  try { appLog('DEBUG', `[getDailyTimetableWithSubstitutions] Found ${substitutions.length} substitutions for ${normalizedDate}`); } catch (e) {}
   if (substitutions.length > 0) {
-    Logger.log(`[getDailyTimetableWithSubstitutions] Sample substitution: ${JSON.stringify(substitutions[0])}`);
+    try { appLog('DEBUG', `[getDailyTimetableWithSubstitutions] Sample substitution`, substitutions[0]); } catch (e) {}
   }
   
+  // Build substitution index for O(n+m) apply
+  const subIndex = new Map();
+  const subKey = (p, cls, absent) => `${String(p || '').trim()}|${String(cls || '').trim().toLowerCase()}|${String(absent || '').trim().toLowerCase()}`;
+  substitutions.forEach(sub => {
+    const key = subKey(sub.period, sub.class, sub.absentTeacher);
+    if (!subIndex.has(key)) subIndex.set(key, sub);
+  });
+
   // Apply substitutions
   const finalTimetable = timetableEntries.map(entry => {
-    const substitution = substitutions.find(sub => {
-      // Normalize period comparison (could be string or number)
-      const periodMatch = String(sub.period) === String(entry.period);
-      const classMatch = String(sub.class || '').toLowerCase() === String(entry.class || '').toLowerCase();
-      const teacherMatch = String(sub.absentTeacher || '').toLowerCase() === String(entry.teacherEmail || '').toLowerCase();
-      
-      if (periodMatch && classMatch && !teacherMatch) {
-        Logger.log(`[Substitution] Period ${sub.period} Class ${sub.class}: Teacher mismatch - sub.absentTeacher="${sub.absentTeacher}" vs entry.teacherEmail="${entry.teacherEmail}"`);
-      }
-      
-      return periodMatch && classMatch && teacherMatch;
-    });
+    const key = subKey(entry.period, entry.class, entry.teacherEmail);
+    const substitution = subIndex.get(key);
     
     if (substitution) {
-      Logger.log(`[Substitution] Applying substitution for Period ${entry.period}, Class ${entry.class}: ${entry.teacherEmail} -> ${substitution.substituteTeacher}`);
+      try { appLog('DEBUG', `[Substitution] Applying substitution`, { period: entry.period, class: entry.class, from: entry.teacherEmail, to: substitution.substituteTeacher }); } catch (e) {}
       return {
         class: entry.class || '',
         dayOfWeek: entry.dayOfWeek || dayName,
@@ -277,7 +260,7 @@ function _fetchDailyTimetableWithSubstitutions(normalizedDate) {
     return (parseInt(a.period) || 0) - (parseInt(b.period) || 0);
   });
   
-  Logger.log(`[getDailyTimetableWithSubstitutions] Returning ${finalTimetable.length} entries (${substitutions.length} with substitutions)`);
+  try { appLog('DEBUG', `[getDailyTimetableWithSubstitutions] Returning ${finalTimetable.length} entries (${substitutions.length} with substitutions)`); } catch (e) {}
   
   return {
     date: normalizedDate,
@@ -290,9 +273,7 @@ function _fetchDailyTimetableWithSubstitutions(normalizedDate) {
  * Get all classes from the timetable
  */
 function getAllClasses() {
-  const sh = _getSheet('Timetable');
-  const headers = _headers(sh);
-  const list = _rows(sh).map(r => _indexByHeader(r, headers));
+  const list = _getCachedSheetData('Timetable').data;
   
   const classes = [...new Set(list.map(r => r.class).filter(Boolean))];
   return classes.sort();
@@ -304,11 +285,8 @@ function getAllClasses() {
 function getClassTimetable(className, date) {
   const normalizedDate = _isoDateString(date);
   const dayName = _dayName(normalizedDate);
-  
-  const sh = _getSheet('Timetable');
-  const headers = _headers(sh);
-  const list = _rows(sh)
-    .map(r => _indexByHeader(r, headers))
+
+  const list = _getCachedSheetData('Timetable').data
     .filter(r => 
       r.class === className && 
       _normalizeDayName(r.dayOfWeek) === _normalizeDayName(dayName)
@@ -372,16 +350,13 @@ function _getDayOfWeek(dateString) {
  */
 function getAssignedSubstitutionsForDate(date) {
   const normalizedDate = _isoDateString(date);
-  
-  Logger.log(`[getAssignedSubstitutionsForDate] Getting substitutions for date: ${normalizedDate}`);
-  
-  const sh = _getSheet('Substitutions');
-  const headers = _headers(sh);
-  const substitutions = _rows(sh)
-    .map(r => _indexByHeader(r, headers))
+
+  try { appLog('DEBUG', `[getAssignedSubstitutionsForDate]`, { date: normalizedDate }); } catch (e) {}
+
+  const substitutions = _getCachedSheetData('Substitutions').data
     .filter(r => _isoDateString(r.date) === normalizedDate);
-  
-  Logger.log(`[getAssignedSubstitutionsForDate] Found ${substitutions.length} substitutions`);
+
+  try { appLog('DEBUG', `[getAssignedSubstitutionsForDate] Found`, { count: substitutions.length }); } catch (e) {}
   
   return substitutions.map(sub => ({
     date: normalizedDate,
@@ -402,39 +377,24 @@ function getAssignedSubstitutionsForDate(date) {
 function getAvailableTeachers(date, period) {
   const normalizedDate = _isoDateString(date);
   const dayName = _dayName(normalizedDate);
-  
-  Logger.log(`[getAvailableTeachers] ========== START ==========`);
-  Logger.log(`[getAvailableTeachers] Date: ${normalizedDate}, Day: ${dayName}, Period: ${period}`);
-  
-  // Get all teachers from Users sheet
-  const usersSh = _getSheet('Users');
-  const usersHeaders = _headers(usersSh);
-  Logger.log(`[getAvailableTeachers] Users sheet headers: ${JSON.stringify(usersHeaders)}`);
-  
-  const allUsers = _rows(usersSh).map(r => _indexByHeader(r, usersHeaders));
-  Logger.log(`[getAvailableTeachers] Total users in Users sheet: ${allUsers.length}`);
-  
-  if (allUsers.length > 0) {
-    Logger.log(`[getAvailableTeachers] Sample user row: ${JSON.stringify(allUsers[0])}`);
-  }
+
+  try { appLog('DEBUG', `[getAvailableTeachers] Start`, { date: normalizedDate, day: dayName, period: String(period || '') }); } catch (e) {}
+
+  // Get all teachers from Users sheet (request-scoped cache)
+  const allUsers = _getCachedSheetData('Users').data;
   
   let allTeachers = allUsers.filter(u => {
     const roles = String(u.roles || '').toLowerCase();
     const hasTeacherRole = roles.includes('teacher') || roles.includes('class teacher');
-    if (!hasTeacherRole && u.email) {
-      Logger.log(`[getAvailableTeachers] User ${u.email} has roles: "${u.roles}" - excluded`);
-    }
     return hasTeacherRole;
   });
-  
-  Logger.log(`[getAvailableTeachers] Total teachers in Users sheet: ${allTeachers.length}`);
+
+  try { appLog('DEBUG', `[getAvailableTeachers] Teachers from Users`, { count: allTeachers.length }); } catch (e) {}
   
   // FALLBACK: If no teachers found in Users sheet, extract from Timetable
   if (allTeachers.length === 0) {
-    Logger.log(`[getAvailableTeachers] WARNING: No teachers found in Users sheet. Falling back to Timetable sheet.`);
-    const timetableSh = _getSheet('Timetable');
-    const timetableHeaders = _headers(timetableSh);
-    const timetableRows = _rows(timetableSh).map(r => _indexByHeader(r, timetableHeaders));
+    try { appLog('WARN', `[getAvailableTeachers] No teachers in Users; fallback to Timetable`); } catch (e) {}
+    const timetableRows = _getCachedSheetData('Timetable').data;
     
     // Extract unique teachers from timetable
     const teacherMap = {};
@@ -451,69 +411,61 @@ function getAvailableTeachers(date, period) {
     });
     
     allTeachers = Object.values(teacherMap);
-    Logger.log(`[getAvailableTeachers] Extracted ${allTeachers.length} unique teachers from Timetable`);
+    try { appLog('DEBUG', `[getAvailableTeachers] Teachers from Timetable fallback`, { count: allTeachers.length }); } catch (e) {}
   }
-  
-  if (allTeachers.length > 0) {
-    Logger.log(`[getAvailableTeachers] Sample teacher: ${JSON.stringify(allTeachers[0])}`);
-  }
-  
-  // Get timetable entries for this day and period
-  const timetableSh = _getSheet('Timetable');
-  const timetableHeaders = _headers(timetableSh);
-  Logger.log(`[getAvailableTeachers] Timetable sheet headers: ${JSON.stringify(timetableHeaders)}`);
-  
-  const allTimetableRows = _rows(timetableSh).map(r => _indexByHeader(r, timetableHeaders));
-  Logger.log(`[getAvailableTeachers] Total timetable rows: ${allTimetableRows.length}`);
-  
-  if (allTimetableRows.length > 0) {
-    Logger.log(`[getAvailableTeachers] Sample timetable row: ${JSON.stringify(allTimetableRows[0])}`);
-  }
+
+  // Get timetable entries for this day and period (request-scoped cache)
+  const allTimetableRows = _getCachedSheetData('Timetable').data;
   
   const busyTeacherRows = allTimetableRows.filter(r => 
     _normalizeDayName(r.dayOfWeek) === _normalizeDayName(dayName) &&
     String(r.period) === String(period)
   );
-  
-  Logger.log(`[getAvailableTeachers] Matching timetable rows for ${dayName} Period ${period}: ${busyTeacherRows.length}`);
-  if (busyTeacherRows.length > 0) {
-    Logger.log(`[getAvailableTeachers] Sample busy row: ${JSON.stringify(busyTeacherRows[0])}`);
-  }
+
+  try { appLog('DEBUG', `[getAvailableTeachers] Busy rows`, { count: busyTeacherRows.length }); } catch (e) {}
   
   const busyTeachers = busyTeacherRows.map(r => String(r.teacherEmail || '').toLowerCase());
-  Logger.log(`[getAvailableTeachers] Busy teacher emails: ${JSON.stringify(busyTeachers)}`);
+
+  // If a substitution exists for this date/period, the absent teacher should be considered free
+  // (their timetable slot is being covered by someone else).
+  const absentTeachersForThisSlot = _getCachedSheetData('Substitutions').data
+    .filter(r =>
+      _isoDateString(r.date) === normalizedDate &&
+      String(r.period) === String(period)
+    )
+    .map(r => String(r.absentTeacher || '').toLowerCase().trim())
+    .filter(Boolean);
+
+  const absentTeacherSet = new Set(absentTeachersForThisSlot);
+  const effectiveBusyTeachers = busyTeachers.filter(t => !absentTeacherSet.has(String(t || '').toLowerCase()));
+
+  try {
+    appLog('DEBUG', `[getAvailableTeachers] Freed absent teachers`, {
+      count: absentTeacherSet.size,
+      freed: Array.from(absentTeacherSet).slice(0, 5)
+    });
+  } catch (e) {}
   
   // Get teachers already assigned as substitutes for this date/period
-  const substitutionsSh = _getSheet('Substitutions');
-  const substitutionsHeaders = _headers(substitutionsSh);
-  const assignedSubstitutes = _rows(substitutionsSh)
-    .map(r => _indexByHeader(r, substitutionsHeaders))
+  const assignedSubstitutes = _getCachedSheetData('Substitutions').data
     .filter(r => 
       _isoDateString(r.date) === normalizedDate &&
       String(r.period) === String(period)
     )
     .map(r => String(r.substituteTeacher || '').toLowerCase());
-  
-  Logger.log(`[getAvailableTeachers] Assigned substitutes: ${assignedSubstitutes.length}`);
+
+  try { appLog('DEBUG', `[getAvailableTeachers] Assigned substitutes`, { count: assignedSubstitutes.length }); } catch (e) {}
   
   // Filter available teachers (not busy and not already assigned)
   const availableTeachers = allTeachers.filter(teacher => {
     const teacherEmail = String(teacher.email || '').toLowerCase();
-    const isBusy = busyTeachers.includes(teacherEmail);
+    const isBusy = effectiveBusyTeachers.includes(teacherEmail);
     const isAssigned = assignedSubstitutes.includes(teacherEmail);
-    
-    if (isBusy || isAssigned) {
-      Logger.log(`[getAvailableTeachers] Excluding ${teacher.name} (${teacherEmail}): busy=${isBusy}, assigned=${isAssigned}`);
-    }
-    
+
     return !isBusy && !isAssigned;
   });
-  
-  Logger.log(`[getAvailableTeachers] Available teachers: ${availableTeachers.length}`);
-  if (availableTeachers.length > 0) {
-    Logger.log(`[getAvailableTeachers] Available: ${availableTeachers.map(t => t.name).join(', ')}`);
-  }
-  Logger.log(`[getAvailableTeachers] ========== END ==========`);
+
+  try { appLog('DEBUG', `[getAvailableTeachers] End`, { available: availableTeachers.length }); } catch (e) {}
   
   return availableTeachers.map(t => ({
     name: t.name || '',
@@ -535,15 +487,8 @@ function getFullTimetable() {
 }
 
 function _fetchFullTimetable() {
-  const sh = _getSheet('Timetable');
-  const headers = _headers(sh);
-  const timetable = _rows(sh).map(r => _indexByHeader(r, headers));
-  
-  Logger.log(`[getFullTimetable] Total entries from sheet: ${timetable.length}`);
-  if (timetable.length > 0) {
-    Logger.log(`[getFullTimetable] Sample entry: ${JSON.stringify(timetable[0])}`);
-    Logger.log(`[getFullTimetable] Classes found: ${[...new Set(timetable.map(e => e.class))].join(', ')}`);
-  }
+  const timetable = _getCachedSheetData('Timetable').data;
+  try { appLog('DEBUG', `[getFullTimetable]`, { count: timetable.length }); } catch (e) {}
   
   // Return flat array for frontend exam subject loading
   const result = timetable.map(entry => ({
@@ -555,7 +500,7 @@ function _fetchFullTimetable() {
     period: entry.period || ''
   }));
   
-  Logger.log(`[getFullTimetable] Returning ${result.length} timetable entries`);
+  try { appLog('DEBUG', `[getFullTimetable] Returning`, { count: result.length }); } catch (e) {}
   
   return result;
 }
@@ -566,26 +511,22 @@ function _fetchFullTimetable() {
  * Sheet columns: class, dayOfWeek, period, subject, teacherEmail, teacherName
  */
 function getFullTimetableFiltered(cls, subject, teacher, date) {
-  const sh = _getSheet('Timetable');
-  const headers = _headers(sh);
-  let timetable = _rows(sh).map(r => _indexByHeader(r, headers));
-  
-  Logger.log(`[getFullTimetableFiltered] Total entries before filtering: ${timetable.length}`);
-  Logger.log(`[getFullTimetableFiltered] Filters - class: ${cls}, subject: ${subject}, teacher: ${teacher}, date: ${date}`);
+  let timetable = _getCachedSheetData('Timetable').data;
+  try { appLog('DEBUG', `[getFullTimetableFiltered] Start`, { count: timetable.length, class: cls, subject: subject, teacher: teacher, date: date }); } catch (e) {}
   
   // Apply filters
   if (cls && cls !== '') {
     timetable = timetable.filter(entry => 
       String(entry.class || '').toLowerCase() === String(cls).toLowerCase()
     );
-    Logger.log(`[getFullTimetableFiltered] After class filter: ${timetable.length}`);
+    try { appLog('DEBUG', `[getFullTimetableFiltered] After class filter`, { count: timetable.length }); } catch (e) {}
   }
   
   if (subject && subject !== '') {
     timetable = timetable.filter(entry => 
       String(entry.subject || '').toLowerCase().includes(String(subject).toLowerCase())
     );
-    Logger.log(`[getFullTimetableFiltered] After subject filter: ${timetable.length}`);
+    try { appLog('DEBUG', `[getFullTimetableFiltered] After subject filter`, { count: timetable.length }); } catch (e) {}
   }
   
   if (teacher && teacher !== '') {
@@ -594,7 +535,7 @@ function getFullTimetableFiltered(cls, subject, teacher, date) {
       String(entry.teacherEmail || '').toLowerCase().includes(teacherLower) ||
       String(entry.teacherName || '').toLowerCase().includes(teacherLower)
     );
-    Logger.log(`[getFullTimetableFiltered] After teacher filter: ${timetable.length}`);
+    try { appLog('DEBUG', `[getFullTimetableFiltered] After teacher filter`, { count: timetable.length }); } catch (e) {}
   }
   
   if (date && date !== '') {
@@ -602,7 +543,7 @@ function getFullTimetableFiltered(cls, subject, teacher, date) {
     timetable = timetable.filter(entry => 
       _normalizeDayName(entry.dayOfWeek) === _normalizeDayName(dayName)
     );
-    Logger.log(`[getFullTimetableFiltered] After date filter: ${timetable.length}`);
+    try { appLog('DEBUG', `[getFullTimetableFiltered] After date filter`, { count: timetable.length }); } catch (e) {}
   }
   
   // Group by day and period
@@ -629,7 +570,7 @@ function getFullTimetableFiltered(cls, subject, teacher, date) {
     });
   });
   
-  Logger.log(`[getFullTimetableFiltered] Days after grouping: ${Object.keys(dayMap).join(', ')}`);
+  try { appLog('DEBUG', `[getFullTimetableFiltered] Days`, { days: Object.keys(dayMap) }); } catch (e) {}
   
   // Convert to array format expected by frontend
   const daysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -654,7 +595,7 @@ function getFullTimetableFiltered(cls, subject, teacher, date) {
     }
   });
   
-  Logger.log(`[getFullTimetableFiltered] Returning ${result.length} days with structured periods`);
+  try { appLog('DEBUG', `[getFullTimetableFiltered] Returning`, { days: result.length }); } catch (e) {}
   
   return result;
 }

@@ -58,36 +58,10 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           
           return matchesTeacher && matchesClass && matchesSubject;
         });
-
-        // Also consider lesson plans as "started" work. This prevents teachers from
-        // preparing a new chapter/scheme while previous chapter lesson plans exist but
-        // the chapter is not yet marked "Chapter Complete" in daily reports.
-        let teacherPlans = [];
-        try {
-          const lpSh = _getSheet('LessonPlans');
-          const lpHeaders = _headers(lpSh);
-          const allPlans = _rows(lpSh).map(row => _indexByHeader(row, lpHeaders));
-          teacherPlans = allPlans.filter(p => {
-            if (!p || typeof p !== 'object') return false;
-            const matchesTeacher = String(p.teacherEmail || '').toLowerCase().trim() === String(scheme.teacherEmail || '').toLowerCase().trim();
-            const matchesClass = String(p.class || '').trim() === String(scheme.class || '').trim();
-            const matchesSubject = String(p.subject || '').trim() === String(scheme.subject || '').trim();
-
-            // Ignore cancelled/rejected plans
-            const st = String(p.status || '').toLowerCase().trim();
-            if (st === 'cancelled' || st === 'rejected') return false;
-
-            return matchesTeacher && matchesClass && matchesSubject;
-          });
-        } catch (lpErr) {
-          Logger.log(`Warning: could not load LessonPlans for gating: ${lpErr.message}`);
-          teacherPlans = [];
-        }
         
-        // If absolutely nothing exists yet (no reports and no lesson plans), allow first chapter.
-        // If lesson plans exist but no reports yet, treat chapters as started-but-not-completed.
-        if (teacherReports.length === 0 && teacherPlans.length === 0) {
-          Logger.log(`No previous reports or lesson plans - allowing first chapter session 1`);
+        // Check if this is the very first chapter (no reports exist yet)
+        if (teacherReports.length === 0) {
+          Logger.log(`No previous reports - allowing first chapter session 1`);
           return {
             allowed: true,
             reason: 'first_chapter',
@@ -95,18 +69,14 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           };
         }
         
-        // Get all unique chapters that have been started (daily reports OR lesson plans)
-        const startedFromReports = teacherReports
+        // Get all unique chapters that have been started (have daily reports)
+        // Collect distinct non-empty chapter names previously started
+        const startedChapters = [...new Set(teacherReports
           .map(r => String(r.chapter || '').trim())
-          .filter(name => name);
-        const startedFromPlans = teacherPlans
-          .map(p => String(p.chapter || '').trim())
-          .filter(name => name);
-
-        const startedChapters = [...new Set(startedFromReports.concat(startedFromPlans))];
+          .filter(name => name))];
         Logger.log(`Started chapters for ${scheme.teacherEmail}: ${startedChapters.join(', ')}`);
         
-        // Check if the current chapter being prepared already has reports/plans
+        // Check if the current chapter being prepared already has reports
         const currentChapterStarted = startedChapters.includes(String(chapter.name || ''));
         
         if (currentChapterStarted) {
@@ -133,12 +103,7 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
             String(report.chapter || '') === chapterName
           );
           
-          // If there are no daily reports for this chapter yet, it's not completed.
-          // (Even if lesson plans exist, completion is only proven by "Chapter Complete" marking.)
-          if (chapterReports.length === 0) {
-            incompletedChapters.push(chapterName);
-            continue;
-          }
+          if (chapterReports.length === 0) continue;
           
           // Find ALL session numbers that exist for this chapter (including extended)
           const sessionNumbers = chapterReports
@@ -408,7 +373,7 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
       // CRITICAL FIX: Check if CURRENT session we're trying to create is beyond the original count
       // This means previous session MUST be the last original session and MUST be marked complete
       if (sessionNum > originalSessionCount) {
-        // Trying to create extended session - previous session MUST be last original and marked complete
+        // Trying to create extended session - previous session MUST be last original session and marked complete
         const isMarkedComplete = String(previousSessionReport.completed || '').toLowerCase().includes('chapter complete');
         
         Logger.log(`Attempting to create extended session ${sessionNum} (beyond original ${originalSessionCount}). Previous session ${sessionNum - 1} marked complete: ${isMarkedComplete}, completed field: "${previousSessionReport.completed}"`);
@@ -960,7 +925,7 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
           return occupied.date === dateString && occupied.period === periodNum;
         });
         
-        const periodTiming = _getPeriodTiming(period.period, dayName);
+        const periodTiming = _getPeriodTiming(period.period, dayName, period.class);
         
         availableSlots.push({
           date: dateString,
@@ -1952,43 +1917,95 @@ function _formatTime(timeValue) {
 /**
  * Get period timing from Settings sheet
  */
-function _getPeriodTiming(periodNumber, dayName) {
+// Cache for period timings (300 seconds = 5 minutes)
+const PERIOD_TIMING_CACHE_KEY = 'periodTimingsCache';
+const PERIOD_TIMING_CACHE_TTL = 300;
+
+function _getPeriodTiming(periodNumber, dayName, className) {
   try {
+    const cache = CacheService.getScriptCache();
+    const cacheKey = `${PERIOD_TIMING_CACHE_KEY}_${dayName}_${className || 'default'}`;
+    
+    // Try to get from cache first
+    let periodTimingsData = cache.get(cacheKey);
+    if (periodTimingsData) {
+      try {
+        const cached = JSON.parse(periodTimingsData);
+        const periodTiming = cached.find(p => String(p.period) === String(periodNumber));
+        if (periodTiming) {
+          return { start: periodTiming.start, end: periodTiming.end };
+        }
+      } catch (cacheParseError) {
+        // Cache corrupted, continue to fetch fresh
+        Logger.log(`Cache parse error: ${cacheParseError.message}`);
+      }
+    }
+    
+    // Not in cache, fetch from Settings sheet
     const settingsSheet = _getSheet('Settings');
     const settingsHeaders = _headers(settingsSheet);
     const settingsData = _rows(settingsSheet).map(row => _indexByHeader(row, settingsHeaders));
     
-    // Determine which setting to use based on day
+    // Check for class-specific timing first (if className provided)
+    if (className) {
+      const classByClassSetting = settingsData.find(row => (row.key || '').trim() === 'periodTimesByClass');
+      if (classByClassSetting && classByClassSetting.value) {
+        try {
+          const classTimings = JSON.parse(classByClassSetting.value);
+          if (classTimings[className]) {
+            let classSchedule = classTimings[className];
+            // Handle both array format and object format (weekday/friday)
+            if (Array.isArray(classSchedule)) {
+              // Direct array format
+              cache.put(cacheKey, JSON.stringify(classSchedule), PERIOD_TIMING_CACHE_TTL);
+              const periodTiming = classSchedule.find(p => String(p.period) === String(periodNumber));
+              if (periodTiming) {
+                return { start: periodTiming.start, end: periodTiming.end };
+              }
+            } else if (classSchedule.weekday || classSchedule.friday) {
+              // Object format with weekday/friday keys
+              const isFriday = _normalizeDayName(dayName) === 'friday';
+              const daySchedule = isFriday ? (classSchedule.friday || classSchedule.weekday) : classSchedule.weekday;
+              if (daySchedule) {
+                cache.put(cacheKey, JSON.stringify(daySchedule), PERIOD_TIMING_CACHE_TTL);
+                const periodTiming = daySchedule.find(p => String(p.period) === String(periodNumber));
+                if (periodTiming) {
+                  return { start: periodTiming.start, end: periodTiming.end };
+                }
+              }
+            }
+          }
+        } catch (parseError) {
+          Logger.log(`Error parsing class-specific timings: ${parseError.message}`);
+        }
+      }
+    }
+    
+    // Fall back to global period times
     const isFriday = _normalizeDayName(dayName) === 'friday';
     const settingKey = isFriday ? 'periodTimes (Friday)' : 'periodTimes (Monday to Thursday)';
     
-    // Find the setting row
-    const periodTimesSetting = settingsData.find(row => 
-      (row.key || '').trim() === settingKey
-    );
+    const periodTimesSetting = settingsData.find(row => (row.key || '').trim() === settingKey);
     
     if (!periodTimesSetting || !periodTimesSetting.value) {
       Logger.log(`No period times found for ${settingKey}, using defaults`);
       return _getDefaultPeriodTiming(periodNumber);
     }
     
-    // Parse the JSON value
     let periodTimings;
     try {
       periodTimings = JSON.parse(periodTimesSetting.value);
+      // Cache the parsed timings
+      cache.put(cacheKey, JSON.stringify(periodTimings), PERIOD_TIMING_CACHE_TTL);
     } catch (parseError) {
       Logger.log(`Error parsing period times JSON: ${parseError.message}`);
       return _getDefaultPeriodTiming(periodNumber);
     }
     
-    // Find the specific period
-    const periodTiming = periodTimings.find(p => parseInt(p.period) === parseInt(periodNumber));
+    const periodTiming = periodTimings.find(p => String(p.period) === String(periodNumber));
     
     if (periodTiming) {
-      return {
-        start: periodTiming.start,
-        end: periodTiming.end
-      };
+      return { start: periodTiming.start, end: periodTiming.end };
     }
     
     Logger.log(`Period ${periodNumber} not found in settings, using default`);
@@ -2087,144 +2104,6 @@ function _findRemainingLessonPlans(teacherEmail, classValue, subject, chapter, a
 }
 
 /**
- * Handle chapter completion check - called after daily report submission
- */
-function _handleCheckChapterCompletion(data) {
-  try {
-    Logger.log('=== CHECKING CHAPTER COMPLETION ===');
-    Logger.log(`Data: ${JSON.stringify(data)}`);
-    
-    const remainingPlans = _findRemainingLessonPlans(
-      data.teacherEmail,
-      data.class,
-      data.subject,
-      data.chapter,
-      data.date
-    );
-    
-    return _respond({
-      success: true,
-      hasRemainingPlans: remainingPlans.length > 0,
-      remainingPlans: remainingPlans,
-      suggestion: remainingPlans.length > 0 ? 'mark_completed_early' : 'none'
-    });
-    
-  } catch (error) {
-    Logger.log(`Error checking chapter completion: ${error.message}`);
-    return _respond({ success: false, error: error.message });
-  }
-}
-
-/**
- * Apply action to remaining lesson plans after chapter completion
- */
-function _handleApplyChapterCompletionAction(data) {
-  try {
-    Logger.log('==============================================');
-    Logger.log('FUNCTION CALLED: _handleApplyChapterCompletionAction');
-    Logger.log('==============================================');
-    Logger.log('Raw data received: ' + JSON.stringify(data));
-    
-    // Parse the data (use 'userAction' to avoid conflict with API routing 'action')
-    const userAction = data.userAction || data.action; // Support both for backwards compatibility
-    const lessonPlanIds = data.lessonPlanIds || [];
-    
-    Logger.log('Parsed userAction: ' + userAction);
-    Logger.log('Parsed lessonPlanIds: ' + JSON.stringify(lessonPlanIds));
-    Logger.log('Number of IDs: ' + lessonPlanIds.length);
-    
-    if (lessonPlanIds.length === 0) {
-      Logger.log('ERROR: No lesson plan IDs provided!');
-      return _respond({ success: false, error: 'No lesson plan IDs provided' });
-    }
-    
-    // Get the sheet
-    Logger.log('Getting LessonPlans sheet...');
-    const lpSheet = _getSheet('LessonPlans');
-    const lpHeaders = _headers(lpSheet);
-    const rows = _rows(lpSheet);
-    
-    Logger.log('Sheet loaded. Total rows: ' + rows.length);
-    Logger.log('Headers: ' + JSON.stringify(lpHeaders));
-    
-    const statusColIndex = lpHeaders.indexOf('status');
-    const lpIdColIndex = lpHeaders.indexOf('lpId');
-    
-    Logger.log('Status column index: ' + statusColIndex);
-    Logger.log('LpId column index: ' + lpIdColIndex);
-    
-    if (statusColIndex === -1) {
-      Logger.log('ERROR: Status column not found!');
-      return _respond({ success: false, error: 'Status column not found' });
-    }
-    
-    let updatedCount = 0;
-    
-    // Log all lesson plan IDs in sheet for debugging
-    Logger.log('=== ALL LESSON PLAN IDs IN SHEET ===');
-    for (let i = 0; i < Math.min(rows.length, 50); i++) { // Show first 50
-      const plan = _indexByHeader(rows[i], lpHeaders);
-      Logger.log(`Row ${i + 2}: "${plan.lpId}" (status: ${plan.status})`);
-    }
-    Logger.log('=== END OF LESSON PLAN IDs ===');
-    
-    // Search through all rows
-    for (let i = 0; i < rows.length; i++) {
-      const plan = _indexByHeader(rows[i], lpHeaders);
-      const planLpId = String(plan.lpId || '').trim();
-      
-      // Check if this lpId matches any in our list
-      for (let j = 0; j < lessonPlanIds.length; j++) {
-        const searchId = String(lessonPlanIds[j] || '').trim();
-        
-        if (planLpId === searchId) {
-          Logger.log('MATCH FOUND!');
-          Logger.log('  Row: ' + (i + 2));
-          Logger.log('  lpId: ' + planLpId);
-          Logger.log('  Current status: ' + plan.status);
-          Logger.log('  User Action: ' + userAction);
-          
-          const rowIndex = i + 2;
-          
-          if (userAction === 'cancel') {
-            lpSheet.getRange(rowIndex, statusColIndex + 1).setValue('Cancelled');
-            Logger.log('  ✓ Updated to: Cancelled');
-            updatedCount++;
-          } else if (userAction === 'keep') {
-            Logger.log('  ✓ Kept unchanged');
-          }
-        }
-      }
-    }
-    
-    if (updatedCount === 0) {
-      Logger.log('❌ NO MATCHES FOUND!');
-      Logger.log('Searched for IDs: ' + JSON.stringify(lessonPlanIds));
-      Logger.log('Total rows checked: ' + rows.length);
-      Logger.log('Please verify:');
-      Logger.log('1. Lesson plan ID exists in LessonPlans sheet');
-      Logger.log('2. Exact match (no extra spaces, correct case)');
-      Logger.log('3. Check the lpId column in your sheet');
-    }
-    
-    Logger.log('==============================================');
-    Logger.log('SUMMARY: Updated ' + updatedCount + ' out of ' + lessonPlanIds.length + ' lesson plans');
-    Logger.log('==============================================');
-    
-    return _respond({
-      success: true,
-      updatedCount: updatedCount,
-      message: updatedCount + ' lesson plan(s) updated successfully'
-    });
-    
-  } catch (error) {
-    Logger.log('CRITICAL ERROR: ' + error.message);
-    Logger.log('Stack trace: ' + error.stack);
-    return _respond({ success: false, error: 'Critical error: ' + error.message });
-  }
-}
-
-/**
  * Skip remaining sessions when a chapter is completed early
  * Called when teacher checks "Chapter Fully Completed" before the final session
  */
@@ -2298,23 +2177,6 @@ function _skipRemainingSessionsForCompletedChapter(reportData) {
     Logger.log('Error skipping remaining sessions: ' + error.message);
     return { success: false, error: error.message };
   }
-}
-
-/**
- * TEST FUNCTION - Run this directly in Apps Script to test the update logic
- * DELETE AFTER TESTING
- */
-function testChapterCompletionAction() {
-  const testData = {
-    action: 'cancel',
-    lessonPlanIds: ['LP_1763628148305_723'] // Replace with actual ID from your sheet
-  };
-  
-  Logger.log('=== RUNNING TEST ===');
-  const result = _handleApplyChapterCompletionAction(testData);
-  Logger.log('Result: ' + JSON.stringify(result));
-  
-  return result;
 }
 
 /**

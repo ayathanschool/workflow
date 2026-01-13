@@ -2041,6 +2041,193 @@
   }
 
   /**
+  * Send email notification with raw HTML body (no newline-to-<br> conversion).
+  */
+  function sendEmailNotificationHtml(to, subject, htmlBody, options = {}) {
+    try {
+      if (!to || !subject || !htmlBody) {
+        console.error('Email notification missing required fields:', { to, subject, htmlBody: htmlBody ? 'present' : 'missing' });
+        return { success: false, error: 'Missing required email fields' };
+      }
+
+      const emailOptions = {
+        to: to,
+        subject: subject,
+        htmlBody: String(htmlBody || ''),
+        ...options
+      };
+
+      MailApp.sendEmail(emailOptions);
+      console.log('HTML email sent successfully to:', to);
+      return { success: true };
+    } catch (error) {
+      console.error('Error sending HTML email:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  function _htmlEscape(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function _getHMRecipientEmails() {
+    try {
+      const usersSheet = _getSheet('Users');
+      const headers = _headers(usersSheet);
+      const users = _rows(usersSheet).map(r => _indexByHeader(r, headers));
+
+      const hmSynonyms = ['hm', 'headmaster', 'headteacher', 'headmistress', 'principal'];
+      const isHMRole = (rawRoles) => {
+        const tokens = String(rawRoles || '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
+        const joined = tokens.join('');
+        const hasToken = (t) => tokens.includes(t);
+        const joinedHas = (t) => joined.indexOf(t) !== -1;
+        const hasPair = (a, b) => hasToken(a) && hasToken(b);
+        if (hmSynonyms.some(s => hasToken(s) || joinedHas(s))) return true;
+        if (hasPair('head', 'master') || hasPair('head', 'teacher') || hasPair('head', 'mistress')) return true;
+        return false;
+      };
+
+      const emails = [];
+      users.forEach(u => {
+        const email = String(u.email || '').toLowerCase().trim();
+        if (!email) return;
+        const roles = u.roles || u.role || '';
+        if (!isHMRole(roles)) return;
+        if (!emails.includes(email)) emails.push(email);
+      });
+
+      return emails;
+    } catch (err) {
+      console.error('_getHMRecipientEmails error', err);
+      return [];
+    }
+  }
+
+  function _fetchLessonPlansForChapter(teacherEmail, schemeId, chapter) {
+    const sh = _getSheet('LessonPlans');
+    const headers = _headers(sh);
+    const allPlans = _rows(sh).map(r => _indexByHeader(r, headers));
+    const te = String(teacherEmail || '').toLowerCase().trim();
+    const ch = String(chapter || '').toLowerCase().trim();
+
+    const plans = allPlans.filter(p => {
+      if (!p) return false;
+      if (String(p.schemeId || '').trim() !== String(schemeId || '').trim()) return false;
+      if (String(p.teacherEmail || '').toLowerCase().trim() !== te) return false;
+      if (String(p.chapter || '').toLowerCase().trim() !== ch) return false;
+      const st = String(p.status || '').trim();
+      return !['Cancelled', 'Rejected'].includes(st);
+    });
+
+    plans.sort((a, b) => (Number(a.session || 0) - Number(b.session || 0)) || String(a.lpId || '').localeCompare(String(b.lpId || '')));
+    return plans;
+  }
+
+  function _buildLessonPlanSubmissionEmailHtml(context, plans) {
+    const safe = _htmlEscape;
+    const rowsHtml = (plans || []).map(p => {
+      return [
+        '<tr>',
+        `<td style="padding:8px;border:1px solid #ddd;vertical-align:top;">${safe(p.session || '')}</td>`,
+        `<td style="padding:8px;border:1px solid #ddd;vertical-align:top;">${safe(p.selectedDate || '')}</td>`,
+        `<td style="padding:8px;border:1px solid #ddd;vertical-align:top;">${safe(p.selectedPeriod || '')}</td>`,
+        `<td style="padding:8px;border:1px solid #ddd;vertical-align:top;">${safe(p.status || '')}</td>`,
+        `<td style="padding:8px;border:1px solid #ddd;vertical-align:top;white-space:pre-wrap;">${safe(p.learningObjectives || '')}</td>`,
+        `<td style="padding:8px;border:1px solid #ddd;vertical-align:top;white-space:pre-wrap;">${safe(p.teachingMethods || p.activities || '')}</td>`,
+        `<td style="padding:8px;border:1px solid #ddd;vertical-align:top;white-space:pre-wrap;">${safe(p.resourcesRequired || '')}</td>`,
+        `<td style="padding:8px;border:1px solid #ddd;vertical-align:top;white-space:pre-wrap;">${safe(p.assessmentMethods || p.assessment || '')}</td>`,
+        '</tr>'
+      ].join('');
+    }).join('');
+
+    return [
+      '<div style="font-family:Arial,sans-serif;">',
+      '<h2>Lesson Plan Submitted for Review</h2>',
+      '<p>',
+      `<strong>Teacher:</strong> ${safe(context.teacherName || '')} (${safe(context.teacherEmail || '')})<br>`,
+      `<strong>Class:</strong> ${safe(context.className || '')}<br>`,
+      `<strong>Subject:</strong> ${safe(context.subject || '')}<br>`,
+      `<strong>Chapter:</strong> ${safe(context.chapter || '')}<br>`,
+      `<strong>Scheme ID:</strong> ${safe(context.schemeId || '')}`,
+      '</p>',
+      '<p style="color:#555;">Reply to this email to contact the teacher (Reply-To is set).</p>',
+      '<table style="border-collapse:collapse;width:100%;">',
+      '<thead>',
+      '<tr>',
+      '<th style="text-align:left;padding:8px;border:1px solid #ddd;">Session</th>',
+      '<th style="text-align:left;padding:8px;border:1px solid #ddd;">Date</th>',
+      '<th style="text-align:left;padding:8px;border:1px solid #ddd;">Period</th>',
+      '<th style="text-align:left;padding:8px;border:1px solid #ddd;">Status</th>',
+      '<th style="text-align:left;padding:8px;border:1px solid #ddd;">Objectives</th>',
+      '<th style="text-align:left;padding:8px;border:1px solid #ddd;">Teaching Methods / Activities</th>',
+      '<th style="text-align:left;padding:8px;border:1px solid #ddd;">Resources</th>',
+      '<th style="text-align:left;padding:8px;border:1px solid #ddd;">Assessment</th>',
+      '</tr>',
+      '</thead>',
+      '<tbody>',
+      rowsHtml || '<tr><td colspan="8" style="padding:8px;border:1px solid #ddd;">No session plans found.</td></tr>',
+      '</tbody>',
+      '</table>',
+      '</div>'
+    ].join('');
+  }
+
+  function _notifyHMOnLessonPlanSubmittedForReview(lpId) {
+    try {
+      const sh = _getSheet('LessonPlans');
+      const headers = _headers(sh);
+      const allPlans = _rows(sh).map(r => _indexByHeader(r, headers));
+      const plan = allPlans.find(p => String(p.lpId || '').trim() === String(lpId || '').trim());
+      if (!plan) return { success: false, error: 'Lesson plan not found for email' };
+
+      const hmEmails = _getHMRecipientEmails();
+      if (!hmEmails.length) {
+        console.warn('No HM recipients found; skipping submission email');
+        return { success: false, error: 'No HM recipients found' };
+      }
+
+      const teacherEmail = String(plan.teacherEmail || '').toLowerCase().trim();
+      const teacherName = String(plan.teacherName || '').trim();
+      const schemeId = String(plan.schemeId || '').trim();
+      const chapter = String(plan.chapter || '').trim();
+      const className = String(plan.class || '').trim();
+      const subject = String(plan.subject || '').trim();
+
+      const chapterPlans = _fetchLessonPlansForChapter(teacherEmail, schemeId, chapter);
+
+      const sessionNums = (chapterPlans || [])
+        .map(p => Number(p && p.session ? p.session : 0))
+        .filter(n => Number.isFinite(n) && n > 0)
+        .sort((a, b) => a - b);
+      const sessionLabel = sessionNums.length
+        ? (sessionNums[0] === sessionNums[sessionNums.length - 1]
+            ? `S${sessionNums[0]}`
+            : `S${sessionNums[0]}–S${sessionNums[sessionNums.length - 1]}`)
+        : '';
+
+      const teacherLabel = (teacherName && teacherName.trim()) ? teacherName.trim() : teacherEmail;
+      const subjectLine = `LP Review: ${teacherLabel}${sessionLabel ? ` ${sessionLabel}` : ''} | ${className} | ${subject} | ${chapter}`;
+      const html = _buildLessonPlanSubmissionEmailHtml({ teacherEmail, teacherName, schemeId, chapter, className, subject }, chapterPlans);
+
+      // NOTE: Apps Script typically cannot send truly "from" the teacher unless the executing account has that alias.
+      // We set Reply-To so HM can reply directly to the teacher.
+      return sendEmailNotificationHtml(hmEmails.join(','), subjectLine, html, {
+        replyTo: teacherEmail,
+        name: teacherName ? `${teacherName} (via Lesson Planner)` : 'Lesson Planner'
+      });
+    } catch (err) {
+      console.error('_notifyHMOnLessonPlanSubmittedForReview error', err);
+      return { success: false, error: err && err.message ? err.message : String(err) };
+    }
+  }
+
+  /**
   * Send lesson approval notification (used by academic workflow)
   */
   function sendLessonApprovalNotification(teacherEmail, teacherName, lessonPlan, status) {
@@ -2102,12 +2289,17 @@
       if (!teacherEmail) {
         return _respond({ success: false, error: 'Teacher email is required' });
       }
+
+      // Optional cache bypass for debugging stale responses.
+      const noCache = String(params.noCache || params.nocache || '').trim() === '1';
       
       // Try the original function first
       try {
         if (typeof getApprovedSchemesForLessonPlanning === 'function') {
           Logger.log('Using original getApprovedSchemesForLessonPlanning function');
-          const result = getApprovedSchemesForLessonPlanning(teacherEmail);
+          const result = noCache && (typeof _fetchApprovedSchemesForLessonPlanning === 'function')
+            ? _fetchApprovedSchemesForLessonPlanning(teacherEmail)
+            : getApprovedSchemesForLessonPlanning(teacherEmail);
           return _respond(result);
         }
       } catch (originalError) {
@@ -2535,6 +2727,15 @@
       
       // Delete the row (rowIndex + 2: 1 for header, 1 for 0-based to 1-based)
       sh.deleteRow(rowIndex + 2);
+
+      // Invalidate caches so the UI reflects changes immediately
+      try {
+        const te = String(teacherEmail || lessonPlan.teacherEmail || '').toLowerCase().trim();
+        if (te) invalidateCache('teacher_lessonplans_' + te);
+        invalidateCache('approved_schemes');
+      } catch (invErr) {
+        Logger.log(`Warning: cache invalidation failed after delete lesson plan: ${invErr.message}`);
+      }
       
       return _respond({ success: true, message: 'Lesson plan deleted successfully' });
     } catch (error) {
@@ -2696,6 +2897,28 @@
       sh.getRange(rowIndex + 2, statusColIndex).setValue(status);
       const writtenStatus = sh.getRange(rowIndex + 2, statusColIndex).getValue();
       Logger.log(`Status cell write check: prev='${previousStatus}' new='${writtenStatus}' expected='${status}'`);
+
+      // Invalidate caches so the UI reflects changes immediately
+      try {
+        const te = String(lessonPlan.teacherEmail || '').toLowerCase().trim();
+        if (te) invalidateCache('teacher_lessonplans_' + te);
+        invalidateCache('approved_schemes');
+      } catch (invErr) {
+        Logger.log(`Warning: cache invalidation failed after update lesson plan status: ${invErr.message}`);
+      }
+
+      // If the teacher resubmits an existing plan for review, notify HM(s) with full session details.
+      try {
+        const prevNorm = String(previousStatus || '').toLowerCase().trim();
+        const newNorm = String(status || '').toLowerCase().trim();
+        const req = String(requesterEmail || '').toLowerCase().trim();
+        const owner = String(lessonPlan.teacherEmail || '').toLowerCase().trim();
+        if (newNorm === 'pending review' && prevNorm !== 'pending review' && req && owner && req === owner) {
+          _notifyHMOnLessonPlanSubmittedForReview(lpId);
+        }
+      } catch (mailErr) {
+        Logger.log(`Warning: HM notification email (resubmit) failed: ${mailErr.message}`);
+      }
       
       // Update review comments if provided
       if (comments) {
@@ -2790,6 +3013,9 @@
       if (!email) {
         return _respond({ error: 'Email required' });
       }
+
+      // Optional cache bypass (useful when debugging "stale" UI).
+      const noCache = String(params.noCache || params.nocache || '').trim() === '1';
       
       // Build cache key including filters
       const filters = [
@@ -2799,10 +3025,13 @@
         params.search || ''
       ].join('_').toLowerCase();
       const cacheKey = `teacher_lessonplans_${email.toLowerCase()}_${filters}`;
-      
+
+      if (noCache) {
+        return _respond(_fetchTeacherLessonPlans(email, params));
+      }
+
       // Try to get from cache (MEDIUM TTL - 5 minutes)
       const cached = getCachedData(cacheKey, () => _fetchTeacherLessonPlans(email, params), CACHE_TTL.MEDIUM);
-      
       return _respond(cached);
     } catch (error) {
       Logger.log('Error getting teacher lesson plans: ' + error.message);
@@ -3045,6 +3274,26 @@
       }
       
       const result = createSchemeLessonPlan(data.lessonPlanData);
+
+      // Invalidate caches so the UI reflects changes immediately
+      try {
+        const teacherEmail = (data.lessonPlanData && data.lessonPlanData.teacherEmail) ? String(data.lessonPlanData.teacherEmail).toLowerCase().trim() : '';
+        if (teacherEmail) invalidateCache('teacher_lessonplans_' + teacherEmail);
+        invalidateCache('approved_schemes');
+      } catch (invErr) {
+        Logger.log(`Warning: cache invalidation failed after create scheme lesson plan: ${invErr.message}`);
+      }
+
+      // If teacher explicitly submitted for review, notify HM(s) with full session details.
+      try {
+        const statusRaw = String((data.lessonPlanData && data.lessonPlanData.status) || '').toLowerCase().trim();
+        if (result && result.success && statusRaw === 'submitted' && result.lessonPlanId) {
+          _notifyHMOnLessonPlanSubmittedForReview(result.lessonPlanId);
+        }
+      } catch (mailErr) {
+        Logger.log(`Warning: HM notification email failed: ${mailErr.message}`);
+      }
+
       return _respond(result);
     } catch (error) {
       Logger.log(`ERROR in _handleCreateSchemeLessonPlan: ${error.message}`);
@@ -3067,6 +3316,27 @@
       }
       
       const result = createBulkSchemeLessonPlans(data.bulkPlanData);
+
+      // Invalidate caches so the UI reflects changes immediately
+      try {
+        const teacherEmail = (data.bulkPlanData && data.bulkPlanData.teacherEmail) ? String(data.bulkPlanData.teacherEmail).toLowerCase().trim() : '';
+        if (teacherEmail) invalidateCache('teacher_lessonplans_' + teacherEmail);
+        invalidateCache('approved_schemes');
+      } catch (invErr) {
+        Logger.log(`Warning: cache invalidation failed after bulk create scheme lesson plans: ${invErr.message}`);
+      }
+
+      // Bulk create puts sessions into Pending Review; notify HM once (best-effort).
+      try {
+        if (result && result.success && Array.isArray(result.plans) && result.plans.length) {
+          // Prefer first LP id if available; otherwise skip.
+          const lpId = result.plans[0].lpId;
+          if (lpId) _notifyHMOnLessonPlanSubmittedForReview(lpId);
+        }
+      } catch (mailErr) {
+        Logger.log(`Warning: HM bulk notification email failed: ${mailErr.message}`);
+      }
+
       return _respond(result);
     } catch (error) {
       Logger.log(`ERROR in _handleCreateBulkSchemeLessonPlans: ${error.message}`);
@@ -3192,6 +3462,16 @@
         const rows = _rows(sh).map(r => _indexByHeader(r, headers));
         const isFetchableStatus = (s) => _isPlanReadyForTeacher(s);
 
+        // Batch load scheme session counts so we can return accurate totalSessions
+        const schemeSheet = _getSheet('Schemes');
+        const schemeHeaders = _headers(schemeSheet);
+        const allSchemes = _rows(schemeSheet).map(row => _indexByHeader(row, schemeHeaders));
+        const schemeMap = {};
+        allSchemes.forEach(s => {
+          const sid = String(s && (s.schemeId || s.id) || '').trim();
+          if (sid) schemeMap[sid] = s;
+        });
+
         const _norm = (v) => String(v || '')
           .trim()
           .toLowerCase()
@@ -3238,19 +3518,28 @@
         });
 
         // Return a compact list (top 20)
-        const compact = plans.slice(0, 20).map(p => ({
+        const compact = plans.slice(0, 20).map(p => {
+          const planSchemeId = String(p.schemeId || '').trim();
+          let totalSessions = Number(p.totalSessions || p.noOfSessions || 0);
+          if ((!totalSessions || isNaN(totalSessions)) && planSchemeId && schemeMap[planSchemeId]) {
+            totalSessions = Number(schemeMap[planSchemeId].noOfSessions || 0);
+          }
+
+          return {
           lpId: String(p.lpId || p.lessonPlanId || p.planId || p.id || '').trim(),
+          schemeId: planSchemeId,
           class: String(p.class || '').trim(),
           subject: String(p.subject || '').trim(),
           chapter: String(p.chapter || '').trim(),
           sessionNo: Number(p.session || p.sessionNo || 0),
-          totalSessions: Number(p.totalSessions || p.noOfSessions || 0),
+          totalSessions: totalSessions,
           selectedDate: toISO(p.selectedDate || p.date) || '',
           selectedPeriod: String(p.selectedPeriod || p.period || '').trim(),
           learningObjectives: String(p.learningObjectives || p.objectives || '').trim(),
           teachingMethods: String(p.teachingMethods || p.activities || '').trim(),
           status: String(p.status || '').trim()
-        })).filter(x => x.lpId);
+          };
+        }).filter(x => x.lpId);
 
         // Determine the next plan (the first one after sorting)
         const nextPlan = compact.length ? compact[0] : null;
@@ -3752,6 +4041,12 @@
             class: tt.class || '',
             subject: tt.subject || '',
             period: Number(tt.period || 0),
+            // Pass through substitution metadata from merged daily timetable
+            isSubstitution: !!tt.isSubstitution,
+            originalTeacher: tt.originalTeacher || '',
+            originalTeacherName: tt.originalTeacherName || '',
+            originalSubject: tt.originalSubject || '',
+            substitutionNote: tt.substitutionNote || '',
             chapter: report ? report.chapter : '',
             sessionNo: report ? Number(report.sessionNo || 0) : 0,
             totalSessions: report ? Number(report.totalSessions || 0) : 0,

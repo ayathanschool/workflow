@@ -12,6 +12,8 @@ import {
   LogOut, 
   Menu, 
   X, 
+  ChevronLeft,
+  ChevronRight,
   Home,
   Users,
   Book,
@@ -1240,7 +1242,13 @@ const App = () => {
                     Unable to load live period.
                   </div>
                 ) : livePeriodInfo.status === 'live' && livePeriodInfo.period ? (
-                  <div className="space-y-2">
+                  <div
+                    className={`space-y-2 rounded-lg p-3 md:p-4 ${
+                      livePeriodInfo?.period?.isSubstitution
+                        ? 'ring-2 ring-blue-400/60 dark:ring-blue-500/40 ring-offset-2 ring-offset-white dark:ring-offset-gray-800'
+                        : ''
+                    }`}
+                  >
                     <div className="text-sm text-gray-600 dark:text-gray-300">Now teaching</div>
                     <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                       Period {String(livePeriodInfo.period.period ?? '').trim() || '-'}
@@ -4108,6 +4116,10 @@ const App = () => {
     const [lessonPlansToday, setLessonPlansToday] = useState([]);
     const [loadingLessonPlansToday, setLoadingLessonPlansToday] = useState(false);
 
+    // Live schedule focused period (Prev/Next controls). Auto-follows current period until user navigates.
+    const [focusedPeriod, setFocusedPeriod] = useState(1);
+    const [focusedPeriodPinned, setFocusedPeriodPinned] = useState(false);
+
     // Modal for lesson plan details
     const [selectedLessonPlan, setSelectedLessonPlan] = useState(null);
     const [showLessonPlanModal, setShowLessonPlanModal] = useState(false);
@@ -4285,6 +4297,12 @@ const App = () => {
 
   const currentPeriod = getCurrentPeriod();
 
+  // Keep focused period synced to current period unless user has navigated.
+  useEffect(() => {
+    if (focusedPeriodPinned) return;
+    setFocusedPeriod(currentPeriod || 1);
+  }, [currentPeriod, focusedPeriodPinned]);
+
   // Lazy-load lesson plans for today so we can show chapter/session in live and selected periods.
   useEffect(() => {
     const shouldLoad = Boolean(currentPeriod || selectedPeriod);
@@ -4439,7 +4457,15 @@ const App = () => {
         
         {/* Live Period - Class-wise View Only */}
         {(() => {
-          const focusPeriod = currentPeriod || 1;
+          const focusPeriod = focusedPeriod || 1;
+          const maxPeriodFromReports = Math.max(
+            1,
+            ...(dailyReportsData?.reports || [])
+              .map(r => Number(r?.period || 0))
+              .filter(n => Number.isFinite(n) && n > 0)
+          );
+          const maxPeriod = Number.isFinite(maxPeriodFromReports) && maxPeriodFromReports > 0 ? maxPeriodFromReports : 8;
+
           const periodRows = (dailyReportsData?.reports || [])
             .filter(r => String(r?.period || '').trim() === String(focusPeriod))
             .sort((a, b) => {
@@ -4472,9 +4498,47 @@ const App = () => {
                     {new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric'})} • Last updated: {lastRefresh.toLocaleTimeString()}
                   </p>
                 </div>
-                {loadingLessonPlansToday && (
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Loading lesson plans…</div>
-                )}
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFocusedPeriodPinned(true);
+                        setFocusedPeriod(p => Math.max(1, Number(p || 1) - 1));
+                      }}
+                      disabled={focusPeriod <= 1}
+                      className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 transition-colors ${
+                        focusPeriod <= 1
+                          ? 'bg-gray-50 dark:bg-gray-900 text-gray-400 border-gray-200 dark:border-gray-700 cursor-not-allowed'
+                          : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
+                      }`}
+                      aria-label="Previous period"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Prev
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFocusedPeriodPinned(true);
+                        setFocusedPeriod(p => Math.min(maxPeriod, Number(p || 1) + 1));
+                      }}
+                      disabled={focusPeriod >= maxPeriod}
+                      className={`px-3 py-2 rounded-lg border text-sm flex items-center gap-2 transition-colors ${
+                        focusPeriod >= maxPeriod
+                          ? 'bg-gray-50 dark:bg-gray-900 text-gray-400 border-gray-200 dark:border-gray-700 cursor-not-allowed'
+                          : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
+                      }`}
+                      aria-label="Next period"
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                  {loadingLessonPlansToday && (
+                    <div className="text-xs text-gray-500 dark:text-gray-400">Loading lesson plans…</div>
+                  )}
+                </div>
               </div>
 
               {dailyReportsData.reports.length === 0 && (
@@ -4517,6 +4581,7 @@ const App = () => {
                     const subject = row?.subject || '';
                     const cls = row?.class || '';
                     const isSubmitted = row?.submitted || false;
+                    const isSubstitution = !!row?.isSubstitution;
 
                     return (
                       <div
@@ -4533,6 +4598,10 @@ const App = () => {
                           isSubmitted
                             ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-900/40'
                             : 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-900/40'
+                        } ${
+                          isSubstitution
+                            ? 'ring-2 ring-blue-400/60 dark:ring-blue-500/40 ring-offset-2 ring-offset-white dark:ring-offset-gray-800'
+                            : ''
                         }`}
                       >
                         {/* Mobile: Vertical card layout */}
@@ -4680,6 +4749,10 @@ const App = () => {
                             classData.submitted 
                               ? 'border-green-300 bg-green-50' 
                               : 'border-orange-300 bg-orange-50'
+                          } ${
+                            classData?.isSubstitution
+                              ? 'ring-2 ring-blue-400/60 dark:ring-blue-500/40 ring-offset-2 ring-offset-white dark:ring-offset-gray-800'
+                              : ''
                           }`}
                         >
                           <div className="flex justify-between items-start mb-2">
@@ -9788,11 +9861,11 @@ const App = () => {
         <LessonModal />
         <ApiErrorBanner error={apiError} onDismiss={() => setApiError(null)} />
         
-        <div className="flex h-screen">
+        <div className="flex h-screen min-w-0">
           <Sidebar />
-          <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             <Header />
-            <main className="flex-1 overflow-auto p-6 bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
+            <main className="flex-1 min-w-0 overflow-auto p-6 bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
               {renderContent()}
             </main>
           </div>

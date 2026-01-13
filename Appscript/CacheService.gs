@@ -43,6 +43,8 @@ function getCachedData(key, fetchFn, ttl = CACHE_TTL.MEDIUM) {
       // Apps Script cache has 100KB per entry limit
       if (serialized.length < 95000) { // Leave buffer
         cache.put(key, serialized, ttl);
+        // Track key so invalidateCache(pattern) can actually remove entries.
+        try { trackCacheKey(key); } catch (_trackErr) {}
       } else {
         appLog('WARN', 'Cache entry too large', { key: key, size: serialized.length });
       }
