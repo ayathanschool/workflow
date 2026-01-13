@@ -14,7 +14,7 @@ const CACHE_CONFIG = {
   // Medium term (changes occasionally)
   mediumTerm: {
     duration: 60 * 60 * 1000, // 1 hour
-    endpoints: ['getFullTimetable', 'getTeacherWeeklyTimetable', 'getHmInsights', 'getTeacherSchemes']
+    endpoints: ['getFullTimetable', 'getTeacherWeeklyTimetable', 'getHmInsights', 'getTeacherSchemes', 'getApprovedSchemesForLessonPlanning']
   },
   // Short term (changes frequently)
   shortTerm: {

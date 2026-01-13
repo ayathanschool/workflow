@@ -497,11 +497,24 @@ const App = () => {
   useEffect(() => {
     if (user) {
       // Prefetch common data in parallel to warm up cache - with error handling
-      Promise.all([
+      const promises = [
         api.getAllClasses().catch((err) => { console.warn('Failed to prefetch classes:', err); return []; }),
         api.getGradeTypes().catch((err) => { console.warn('Failed to prefetch grade types:', err); return []; })
         // Temporarily removed getSubjects() due to API issues
-      ]).catch((err) => { console.warn('Prefetch failed:', err); });
+      ];
+
+      // Teacher-specific warmup: Scheme lesson planning is one of the slowest endpoints on cold start.
+      // Prefetch it after login so opening the tab is instant.
+      try {
+        if (hasRole('teacher') && user?.email) {
+          promises.push(
+            api.getApprovedSchemesForLessonPlanning(user.email)
+              .catch((err) => { console.warn('Failed to prefetch approved schemes:', err); return null; })
+          );
+        }
+      } catch {}
+
+      Promise.all(promises).catch((err) => { console.warn('Prefetch failed:', err); });
     }
   }, [user?.email]);
 
