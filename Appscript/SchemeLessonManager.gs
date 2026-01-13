@@ -545,7 +545,7 @@ function _calculateLessonPlanningDateRange() {
 function getApprovedSchemesForLessonPlanning(teacherEmail) {
   // Cache-buster: bump this string whenever the payload/gating rules change.
   // Apps Script caches can otherwise serve stale "schemes" objects without new fields.
-  const APPROVED_SCHEMES_CACHE_VERSION = 'v2026-01-01-lessonprep-gating-2';
+  const APPROVED_SCHEMES_CACHE_VERSION = 'v2026-01-13-approved-schemes-fastindex-1';
   const cacheKey = generateCacheKey('approved_schemes', { email: teacherEmail, v: APPROVED_SCHEMES_CACHE_VERSION });
   return getCachedData(cacheKey, function() {
     return _fetchApprovedSchemesForLessonPlanning(teacherEmail);
@@ -560,20 +560,15 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
       return { success: false, error: 'Teacher email is required' };
     }
     
-    // Get approved schemes for the teacher
-    const schemesSheet = _getSheet('Schemes');
-    const schemesHeaders = _headers(schemesSheet);
-    const allSchemes = _rows(schemesSheet).map(row => _indexByHeader(row, schemesHeaders));
-    
-    const approvedSchemes = allSchemes.filter(scheme => 
+    // PERFORMANCE: Use cached sheet data (single batch read per sheet)
+    const schemesData = _getCachedSheetData('Schemes').data;
+    const approvedSchemes = schemesData.filter(scheme =>
       (scheme.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase() &&
       (scheme.status || '').toLowerCase() === 'approved'
     );
-    
+
     // Get existing lesson plans to check what's already planned
-    const lessonPlansSheet = _getSheet('LessonPlans');
-    const lessonPlansHeaders = _headers(lessonPlansSheet);
-    const existingPlans = _rows(lessonPlansSheet).map(row => _indexByHeader(row, lessonPlansHeaders));
+    const existingPlans = _getCachedSheetData('LessonPlans').data;
     
     const teacherPlans = existingPlans.filter(plan => {
       if (!plan || typeof plan !== 'object') return false;
@@ -581,49 +576,86 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
     });
     
     // Get daily reports to check which sessions have been reported
-    const drSheet = _getSheet('DailyReports');
-    const drHeaders = _headers(drSheet);
-    const allReports = _rows(drSheet).map(row => _indexByHeader(row, drHeaders));
+    const allReports = _getCachedSheetData('DailyReports').data;
     
     const teacherReports = allReports.filter(report => {
       // Safety: ensure report is object and coerce teacherEmail
       if (!report || typeof report !== 'object') return false;
       return String(report.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
     });
+
+    // PERFORMANCE: build indexes for O(1) lookups instead of repeated .find/.some
+    const normKey = function(v) { return String(v || '').toLowerCase().trim(); };
+    const csKey = function(cls, subj) { return `${normKey(cls)}|${normKey(subj)}`; };
+    const chapterKey = function(cls, subj, chapter) { return `${csKey(cls, subj)}|${normKey(chapter)}`; };
+    const reportSessionKey = function(cls, subj, chapter, sessionNo) {
+      const s = Number(sessionNo);
+      return `${csKey(cls, subj)}|${normKey(chapter)}|${isNaN(s) ? 0 : s}`;
+    };
+    const planKey = function(schemeId, chapter, sessionNo) {
+      const s = Number(sessionNo);
+      return `${String(schemeId || '').trim()}|${normKey(chapter)}|${isNaN(s) ? 0 : s}`;
+    };
+
+    const relevantClassSubjects = new Set(approvedSchemes.map(s => csKey(s.class, s.subject)));
+
+    // Plans indexed by (schemeId + chapter + session)
+    const plansByKey = new Map();
+    for (const p of teacherPlans) {
+      if (!p || typeof p !== 'object') continue;
+      const key = planKey(p.schemeId, p.chapter, p.session);
+      if (!key) continue;
+      // If duplicates exist, keep the most recently updated/created if possible
+      const existing = plansByKey.get(key);
+      if (!existing) {
+        plansByKey.set(key, p);
+      } else {
+        const existingTs = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+        const nextTs = new Date(p.updatedAt || p.createdAt || 0).getTime();
+        if (nextTs >= existingTs) plansByKey.set(key, p);
+      }
+    }
+
+    const isChapterMarkedComplete = function(report) {
+      const status = normKey(report && report.chapterStatus);
+      const chapterCompleted = report && report.chapterCompleted;
+      const chapterCompletedStr = normKey(chapterCompleted);
+      return (
+        status.indexOf('chapter complete') !== -1 ||
+        chapterCompleted === true ||
+        chapterCompletedStr === 'true' ||
+        chapterCompletedStr === 'yes' ||
+        chapterCompletedStr === 'y' ||
+        chapterCompletedStr === '1'
+      );
+    };
+
+    // Reports indexed by (class + subject + chapter [+ session])
+    const hasReportBySession = new Set();
+    const completedChapters = new Set();
+    for (const r of teacherReports) {
+      if (!r || typeof r !== 'object') continue;
+      if (!relevantClassSubjects.has(csKey(r.class, r.subject))) continue;
+
+      const chKey = chapterKey(r.class, r.subject, r.chapter);
+      if (chKey && isChapterMarkedComplete(r)) completedChapters.add(chKey);
+
+      const sessKey = reportSessionKey(r.class, r.subject, r.chapter, r.sessionNo);
+      if (sessKey) hasReportBySession.add(sessKey);
+    }
     
     // Process each scheme to show chapter/session breakdown
     const schemesWithProgress = approvedSchemes.map(scheme => {
       const schemeChapters = _parseSchemeChapters(scheme);
 
-      // Determine if each chapter is marked complete (for info) and whether preparation is allowed.
+      // Determine if each chapter is marked complete (for info) using precomputed indexes.
       // IMPORTANT: preparation gating must follow _isPreparationAllowedForSession() so it also
       // blocks starting new schemes/chapters until previously started chapters are marked complete.
-      const normKey = function(v) { return String(v || '').toLowerCase().trim(); };
-      const isChapterMarkedComplete = function(report) {
-        const status = normKey(report && report.chapterStatus);
-        const chapterCompleted = report && report.chapterCompleted;
-        const chapterCompletedStr = normKey(chapterCompleted);
-        return (
-          status.indexOf('chapter complete') !== -1 ||
-          chapterCompleted === true ||
-          chapterCompletedStr === 'true' ||
-          chapterCompletedStr === 'yes' ||
-          chapterCompletedStr === 'y' ||
-          chapterCompletedStr === '1'
-        );
-      };
-
       const completionByChapter = {};
       for (const ch of schemeChapters) {
         const key = normKey(ch && ch.name);
         if (!key) continue;
-        completionByChapter[key] = teacherReports.some(r => {
-          if (!r || typeof r !== 'object') return false;
-          const matchesClass = normKey(r.class) === normKey(scheme.class);
-          const matchesSubject = normKey(r.subject) === normKey(scheme.subject);
-          const matchesChapter = normKey(r.chapter) === key;
-          return matchesClass && matchesSubject && matchesChapter && isChapterMarkedComplete(r);
-        });
+        completionByChapter[key] = completedChapters.has(chapterKey(scheme.class, scheme.subject, key));
       }
 
       const chaptersWithSessions = [];
@@ -637,11 +669,7 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
 
         const sessions = _generateSessionsForChapter(chapter, scheme);
         const sessionsWithStatus = sessions.map(session => {
-          const existingPlan = teacherPlans.find(plan =>
-            plan.schemeId === scheme.schemeId &&
-            String(plan.chapter || '').toLowerCase() === String(chapter.name || '').toLowerCase() &&
-            parseInt(plan.session || '1') === session.sessionNumber
-          );
+          const existingPlan = plansByKey.get(planKey(scheme.schemeId, chapter.name, session.sessionNumber));
 
           let status = 'not-planned';
           let cascadeMarked = false;
@@ -652,13 +680,7 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
             const isOriginalCascade = /rescheduled\s*\(cascade\)/i.test(rawStatus); // only original missed session
 
             // Check for daily report for this session
-            const hasReport = teacherReports.some(report => {
-              const matchesClass = String(report.class || '') === String(scheme.class || '');
-              const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
-              const matchesChapter = String(report.chapter || '').toLowerCase() === String(chapter.name || '').toLowerCase();
-              const matchesSession = Number(report.sessionNo) === session.sessionNumber;
-              return matchesClass && matchesSubject && matchesChapter && matchesSession;
-            });
+            const hasReport = hasReportBySession.has(reportSessionKey(scheme.class, scheme.subject, chapter.name, session.sessionNumber));
 
             // Decide displayed status:
             // Only show 'Cascaded' for the originally missed session (explicit status + original slot recorded)
