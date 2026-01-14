@@ -225,7 +225,7 @@
       }
       if (!user) return false;
       var roles = String(user.roles || '').toLowerCase();
-      return roles.indexOf('hm') !== -1 || roles.indexOf('headmaster') !== -1 || roles.indexOf('h m') !== -1 || roles.indexOf('principal') !== -1;
+      return roles.indexOf('hm') !== -1 || roles.indexOf('headmaster') !== -1 || roles.indexOf('h m') !== -1 || roles.indexOf('principal') !== -1 || roles.indexOf('admin') !== -1;
     } catch (err) {
       try { appLog('ERROR', '_isHMOrSuperAdminSafe', String(err && err.message ? err.message : err)); } catch (ee) {}
       return false;
@@ -437,14 +437,15 @@
         const requesterEmail = (e.parameter.email || e.parameter.requesterEmail || '').toLowerCase().trim();
         const teacherEmail = (e.parameter.teacherEmail || '').toLowerCase().trim();
 
-        const isSelf = requesterEmail && teacherEmail && requesterEmail === teacherEmail;
         const isAdmin = _isHMOrSuperAdminSafe(requesterEmail);
+        // If teacherEmail is omitted, treat as self scope for teachers.
+        const isSelfOrImplicitSelf = requesterEmail && (!teacherEmail || requesterEmail === teacherEmail);
 
-        if (!isSelf && !isAdmin) {
+        if (!isAdmin && !isSelfOrImplicitSelf) {
           return _respond({ success: false, error: 'Permission denied. HM/Super Admin or self access required.' });
         }
 
-        // Teachers must scope to themselves
+        // Teachers must scope to themselves; HM/Admin can query any teacher or all.
         const effectiveTeacherEmail = isAdmin ? teacherEmail : requesterEmail;
         const startDate = (e.parameter.startDate || '').trim();
         const endDate = (e.parameter.endDate || '').trim();
@@ -882,6 +883,16 @@
       if (action === 'getMissingSubmissions') {
         return _handleGetMissingSubmissions(e.parameter);
       }
+
+      // HM/SuperAdmin: teacherwise missing daily reports view
+      if (action === 'getMissingSubmissionsTeacherwise') {
+        return _handleGetMissingSubmissionsTeacherwise(e.parameter);
+      }
+
+      // HM/SuperAdmin/Admin: teacherwise missing daily reports for a date range
+      if (action === 'getMissingSubmissionsTeacherwiseRange') {
+        return _handleGetMissingSubmissionsTeacherwiseRange(e.parameter);
+      }
       
       // Daily readiness summary for HM (GET-friendly)
       if (action === 'getDailyReadinessStatus') {
@@ -1056,10 +1067,11 @@
         const teacher = e.parameter.teacher || '';
         const cls = e.parameter.class || '';
         const subject = e.parameter.subject || '';
+        const chapter = e.parameter.chapter || '';
         const date = e.parameter.date || '';
         const fromDate = e.parameter.fromDate || '';
         const toDate = e.parameter.toDate || '';
-        return _respond(getDailyReports(teacher, fromDate || date, toDate || date, cls, subject));
+        return _respond(getDailyReports(teacher, fromDate || date, toDate || date, cls, subject, chapter));
       }
       // Chapter completion (read-only via GET)
       if (action === 'checkChapterCompletion') {
@@ -6678,58 +6690,264 @@
   /**
   * Compute missing submissions for a date by comparing timetable vs daily reports
   */
+  function _computeMissingSubmissionsForDate(date) {
+    const dayName = _dayName(date);
+
+    const ttSh = _getSheet('Timetable');
+    const ttHeaders = _headers(ttSh);
+    const allTimetable = _rows(ttSh).map(row => _indexByHeader(row, ttHeaders));
+    const todaysTT = allTimetable.filter(tt => _normalizeDayName(tt.dayOfWeek) === _normalizeDayName(dayName));
+
+    const drSh = _getSheet('DailyReports');
+    const drHeaders = _headers(drSh);
+    const queryDate = _normalizeQueryDate(date);
+    const reports = _rows(drSh)
+      .map(r => _indexByHeader(r, drHeaders))
+      .filter(r => _isoDateIST(r.date) === queryDate);
+
+    const submittedKeys = new Set();
+    reports.forEach(r => {
+      const k = `${String(r.teacherEmail||'').toLowerCase()}|${r.class}|${r.subject}|${r.period}`;
+      submittedKeys.add(k);
+    });
+
+    const missing = [];
+    todaysTT.forEach(tt => {
+      const teacherEmail = String(tt.teacherEmail || tt.teacher || '').toLowerCase().trim();
+      if (!teacherEmail) return;
+      const key = `${teacherEmail}|${tt.class}|${tt.subject}|${tt.period}`;
+      if (!submittedKeys.has(key)) {
+        missing.push({
+          teacher: tt.teacherName || tt.teacher || teacherEmail,
+          teacherEmail,
+          class: tt.class || '',
+          subject: tt.subject || '',
+          period: Number(tt.period || 0)
+        });
+      }
+    });
+
+    // Aggregate by teacher
+    const byTeacher = {};
+    missing.forEach(m => {
+      if (!byTeacher[m.teacherEmail]) byTeacher[m.teacherEmail] = { teacher: m.teacher, teacherEmail: m.teacherEmail, count: 0, periods: [] };
+      byTeacher[m.teacherEmail].count++;
+      byTeacher[m.teacherEmail].periods.push({ class: m.class, subject: m.subject, period: m.period });
+    });
+
+    // Sort teacher list by missing count desc
+    const byTeacherArr = Object.values(byTeacher).map(t => {
+      t.periods.sort((a, b) => (a.period || 0) - (b.period || 0) || String(a.class || '').localeCompare(String(b.class || '')));
+      return t;
+    }).sort((a, b) => (b.count - a.count) || String(a.teacherEmail).localeCompare(String(b.teacherEmail)));
+
+    return {
+      success: true,
+      date,
+      missing,
+      stats: {
+        totalPeriods: todaysTT.length,
+        missingCount: missing.length,
+        teachersImpacted: byTeacherArr.length
+      },
+      byTeacher: byTeacherArr
+    };
+  }
+
   function _handleGetMissingSubmissions(params) {
     try {
       const date = params.date || _todayISO();
-      const dayName = _dayName(date);
+      return _respond(_computeMissingSubmissionsForDate(date));
+    } catch (err) {
+      return _respond({ success: false, error: err && err.message ? err.message : String(err) });
+    }
+  }
 
-      const ttSh = _getSheet('Timetable');
-      const ttHeaders = _headers(ttSh);
-      const allTimetable = _rows(ttSh).map(row => _indexByHeader(row, ttHeaders));
-      const todaysTT = allTimetable.filter(tt => _normalizeDayName(tt.dayOfWeek) === _normalizeDayName(dayName));
+  function _handleGetMissingSubmissionsTeacherwise(params) {
+    try {
+      const date = (params.date || _todayISO()).trim();
+      const requesterEmail = String(params.email || params.requesterEmail || '').toLowerCase().trim();
+      if (!_isHMOrSuperAdminSafe(requesterEmail)) {
+        return _respond({ success: false, error: 'Permission denied. HM or Super Admin access required.' });
+      }
+      return _respond(_computeMissingSubmissionsForDate(date));
+    } catch (err) {
+      return _respond({ success: false, error: err && err.message ? err.message : String(err) });
+    }
+  }
 
-      const drSh = _getSheet('DailyReports');
-      const drHeaders = _headers(drSh);
-      const queryDate = _normalizeQueryDate(date);
-      const reports = _rows(drSh).map(r => _indexByHeader(r, drHeaders)).filter(r => _isoDateIST(r.date) === queryDate);
+  function _isoToLocalDate_(iso) {
+    const s = String(iso || '').trim();
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return null;
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    if (!y || !mo || !d) return null;
+    // Use script local timezone date object (no UTC offset surprise).
+    return new Date(y, mo - 1, d);
+  }
 
-      const submittedKeys = new Set();
-      reports.forEach(r => {
-        const k = `${String(r.teacherEmail||'').toLowerCase()}|${r.class}|${r.subject}|${r.period}`;
-        submittedKeys.add(k);
+  function _formatIsoIST_(dateObj) {
+    try {
+      return Utilities.formatDate(dateObj, 'Asia/Kolkata', 'yyyy-MM-dd');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function _listIsoDatesInclusive_(fromIso, toIso) {
+    const start = _isoToLocalDate_(fromIso);
+    const end = _isoToLocalDate_(toIso);
+    if (!start || !end) return [];
+    if (start > end) return [];
+
+    const days = [];
+    const cur = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    const endCopy = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    while (cur <= endCopy) {
+      days.push(_formatIsoIST_(cur));
+      cur.setDate(cur.getDate() + 1);
+      // safety against infinite loops
+      if (days.length > 400) break;
+    }
+    return days.filter(Boolean);
+  }
+
+  function _computeMissingSubmissionsForRange(fromDate, toDate, filters) {
+    const fromIso = _normalizeQueryDate(fromDate || '');
+    const toIso = _normalizeQueryDate(toDate || '');
+    if (!fromIso || !toIso) {
+      return { success: false, error: 'Missing fromDate/toDate' };
+    }
+
+    const days = _listIsoDatesInclusive_(fromIso, toIso);
+    if (!days.length) {
+      return { success: false, error: 'Invalid date range' };
+    }
+    if (days.length > 45) {
+      return { success: false, error: 'Date range too large (max 45 days). Please narrow the range.' };
+    }
+
+    const teacherNeedle = String((filters && filters.teacher) || '').toLowerCase().trim();
+    const classNeedle = String((filters && filters.cls) || '').toLowerCase().trim();
+    const subjectNeedle = String((filters && filters.subject) || '').toLowerCase().trim();
+
+    const ttSh = _getSheet('Timetable');
+    const ttHeaders = _headers(ttSh);
+    const allTimetable = _rows(ttSh).map(function(row) { return _indexByHeader(row, ttHeaders); });
+
+    const drSh = _getSheet('DailyReports');
+    const drHeaders = _headers(drSh);
+    const allReports = _rows(drSh).map(function(r) { return _indexByHeader(r, drHeaders); });
+
+    // Index submitted keys per date for the requested range.
+    const submittedByDate = {};
+    for (let i = 0; i < allReports.length; i++) {
+      const r = allReports[i];
+      const d = _isoDateIST(r.date);
+      if (!d) continue;
+      if (d < fromIso || d > toIso) continue;
+      const teacherEmail = String(r.teacherEmail || '').toLowerCase().trim();
+      if (!teacherEmail) continue;
+      const key = `${teacherEmail}|${r.class}|${r.subject}|${r.period}`;
+      if (!submittedByDate[d]) submittedByDate[d] = {};
+      submittedByDate[d][key] = true;
+    }
+
+    const missing = [];
+    let totalPeriods = 0;
+
+    for (let di = 0; di < days.length; di++) {
+      const dateIso = days[di];
+      const dayName = _dayName(dateIso);
+      const todaysTT = allTimetable.filter(function(tt) {
+        return _normalizeDayName(tt.dayOfWeek) === _normalizeDayName(dayName);
       });
+      totalPeriods += todaysTT.length;
 
-      const missing = [];
-      todaysTT.forEach(tt => {
-        const teacherEmail = String(tt.teacherEmail || tt.teacher || '').toLowerCase().trim();
-        if (!teacherEmail) return;
-        const key = `${teacherEmail}|${tt.class}|${tt.subject}|${tt.period}`;
-        if (!submittedKeys.has(key)) {
-          missing.push({
-            teacher: tt.teacherName || tt.teacher || teacherEmail,
-            teacherEmail,
-            class: tt.class || '',
-            subject: tt.subject || '',
-            period: Number(tt.period || 0)
-          });
+      const submittedKeys = submittedByDate[dateIso] || {};
+
+      todaysTT.forEach(function(tt) {
+        const tEmail = String(tt.teacherEmail || tt.teacher || '').toLowerCase().trim();
+        if (!tEmail) return;
+        const key = `${tEmail}|${tt.class}|${tt.subject}|${tt.period}`;
+        if (submittedKeys[key]) return;
+
+        const teacherName = tt.teacherName || tt.teacher || tEmail;
+        const cls = tt.class || '';
+        const sub = tt.subject || '';
+
+        // Optional server-side filters (to reduce payload)
+        if (teacherNeedle) {
+          const nm = String(teacherName || '').toLowerCase();
+          if (nm.indexOf(teacherNeedle) === -1 && tEmail.indexOf(teacherNeedle) === -1) return;
         }
-      });
+        if (classNeedle) {
+          if (String(cls || '').toLowerCase().trim() !== classNeedle) return;
+        }
+        if (subjectNeedle) {
+          if (String(sub || '').toLowerCase().indexOf(subjectNeedle) === -1) return;
+        }
 
-      // Aggregate by teacher
-      const byTeacher = {};
-      missing.forEach(m => {
-        if (!byTeacher[m.teacherEmail]) byTeacher[m.teacherEmail] = { teacher: m.teacher, teacherEmail: m.teacherEmail, count: 0, periods: [] };
-        byTeacher[m.teacherEmail].count++;
-        byTeacher[m.teacherEmail].periods.push({ class: m.class, subject: m.subject, period: m.period });
+        missing.push({
+          date: dateIso,
+          teacher: teacherName,
+          teacherEmail: tEmail,
+          class: cls,
+          subject: sub,
+          period: Number(tt.period || 0)
+        });
       });
+    }
 
-      return _respond({
-        success: true,
-        date,
-        missing,
-        stats: { totalPeriods: todaysTT.length, missingCount: missing.length, teachersImpacted: Object.keys(byTeacher).length },
-        byTeacher: Object.values(byTeacher)
+    // Aggregate by teacher
+    const byTeacher = {};
+    missing.forEach(function(m) {
+      if (!byTeacher[m.teacherEmail]) {
+        byTeacher[m.teacherEmail] = { teacher: m.teacher, teacherEmail: m.teacherEmail, count: 0, periods: [] };
+      }
+      byTeacher[m.teacherEmail].count++;
+      byTeacher[m.teacherEmail].periods.push({ date: m.date, class: m.class, subject: m.subject, period: m.period });
+    });
+
+    const byTeacherArr = Object.values(byTeacher).map(function(t) {
+      t.periods.sort(function(a, b) {
+        return String(a.date || '').localeCompare(String(b.date || '')) || (a.period || 0) - (b.period || 0) || String(a.class || '').localeCompare(String(b.class || ''));
       });
+      return t;
+    }).sort(function(a, b) {
+      return (b.count - a.count) || String(a.teacherEmail).localeCompare(String(b.teacherEmail));
+    });
+
+    return {
+      success: true,
+      fromDate: fromIso,
+      toDate: toIso,
+      days: days,
+      missing: missing,
+      stats: {
+        totalPeriods: totalPeriods,
+        missingCount: missing.length,
+        teachersImpacted: byTeacherArr.length
+      },
+      byTeacher: byTeacherArr
+    };
+  }
+
+  function _handleGetMissingSubmissionsTeacherwiseRange(params) {
+    try {
+      const fromDate = String(params.fromDate || params.date || _todayISO()).trim();
+      const toDate = String(params.toDate || params.date || fromDate).trim();
+      const requesterEmail = String(params.email || params.requesterEmail || '').toLowerCase().trim();
+      if (!_isHMOrSuperAdminSafe(requesterEmail)) {
+        return _respond({ success: false, error: 'Permission denied. HM, Admin, or Super Admin access required.' });
+      }
+      const teacher = String(params.teacher || '').trim();
+      const cls = String(params.class || '').trim();
+      const subject = String(params.subject || '').trim();
+      const out = _computeMissingSubmissionsForRange(fromDate, toDate, { teacher: teacher, cls: cls, subject: subject });
+      return _respond(out);
     } catch (err) {
       return _respond({ success: false, error: err && err.message ? err.message : String(err) });
     }
@@ -7523,26 +7741,28 @@
    * @param {string} toDate - End date filter (YYYY-MM-DD)
    * @param {string} cls - Class filter (exact match)
    * @param {string} subject - Subject filter (partial match)
+   * @param {string} chapter - Chapter filter (partial match)
    * @returns {Array} - Filtered daily reports
    */
-  function getDailyReports(teacher = '', fromDate = '', toDate = '', cls = '', subject = '') {
+  function getDailyReports(teacher = '', fromDate = '', toDate = '', cls = '', subject = '', chapter = '') {
     // Cache daily reports for 1 minute
     const cacheKey = generateCacheKey('daily_reports', {
       teacher: teacher,
       fromDate: fromDate,
       toDate: toDate,
       class: cls,
-      subject: subject
+      subject: subject,
+      chapter: chapter
     });
     
     return getCachedData(cacheKey, function() {
-      return _fetchDailyReports(teacher, fromDate, toDate, cls, subject);
+      return _fetchDailyReports(teacher, fromDate, toDate, cls, subject, chapter);
     }, CACHE_TTL.SHORT);
   }
   
-  function _fetchDailyReports(teacher = '', fromDate = '', toDate = '', cls = '', subject = '') {
+  function _fetchDailyReports(teacher = '', fromDate = '', toDate = '', cls = '', subject = '', chapter = '') {
     try {
-      Logger.log(`getDailyReports: teacher=${teacher}, fromDate=${fromDate}, toDate=${toDate}, class=${cls}, subject=${subject}`);
+      Logger.log(`getDailyReports: teacher=${teacher}, fromDate=${fromDate}, toDate=${toDate}, class=${cls}, subject=${subject}, chapter=${chapter}`);
       
       const drSh = _getSheet('DailyReports');
       const headers = _headers(drSh);
@@ -7589,6 +7809,13 @@
           const subjectLower = subject.toLowerCase().trim();
           const subjectMatch = String(report.subject || '').toLowerCase().includes(subjectLower);
           if (!subjectMatch) return false;
+        }
+
+        // Chapter filter (partial match, case-insensitive)
+        if (chapter) {
+          const chapterLower = String(chapter || '').toLowerCase().trim();
+          const chapterMatch = String(report.chapter || '').toLowerCase().includes(chapterLower);
+          if (!chapterMatch) return false;
         }
         
         return true;

@@ -83,6 +83,7 @@ const AuditLog = lazy(() => import('./components/AuditLog'));
 const AdminDataEditor = lazy(() => import('./components/AdminDataEditor'));
 const SchemeApprovalsView = lazy(() => import('./views/SchemeApprovalsView'));
 const SubstitutionAnalyticsView = lazy(() => import('./components/SubstitutionAnalyticsView'));
+const MissingDailyReportsTeacherwiseView = lazy(() => import('./components/MissingDailyReportsTeacherwiseView'));
 
 // Keep lightweight components as regular imports
 import { periodToTimeString, todayIST, formatDateForInput, formatLocalDate } from './utils/dateUtils';
@@ -541,6 +542,7 @@ const App = () => {
         { id: 'audit-log', label: 'Audit Log', icon: Shield },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
         { id: 'substitution-analytics', label: 'Substitution Analytics', icon: BarChart2 },
+        { id: 'missing-daily-reports', label: 'Missing Daily Reports', icon: AlertTriangle },
         { id: 'class-data', label: 'School Data', icon: UserCheck },
         { id: 'admin-data', label: 'Admin Data', icon: Edit2 },
         { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
@@ -597,6 +599,7 @@ const App = () => {
         { id: 'daily-oversight', label: 'Daily Oversight (Enhanced)', icon: ClipboardCheck },
         { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
         { id: 'substitution-analytics', label: 'Substitution Analytics', icon: BarChart2 },
+        { id: 'missing-daily-reports', label: 'Missing Daily Reports', icon: AlertTriangle },
         { id: 'class-data', label: 'School Data', icon: UserCheck },
         { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
         { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
@@ -606,6 +609,15 @@ const App = () => {
       // Additional management views for the headmaster
       items.push(
         { id: 'daily-reports-management', label: 'All Reports', icon: FileText }
+      );
+    }
+
+    // Admin role should also be able to access reporting dashboards.
+    // Keep this scoped (reports-only) unless explicitly expanded.
+    if (!hasRole('h m') && hasAnyRole(['admin'])) {
+      items.push(
+        { id: 'daily-reports-management', label: 'All Reports', icon: FileText },
+        { id: 'missing-daily-reports', label: 'Missing Daily Reports', icon: AlertTriangle }
       );
     }
 
@@ -1682,6 +1694,8 @@ const App = () => {
                 return <EnhancedSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
               case 'substitution-analytics':
                 return <SubstitutionAnalyticsView user={user} />;
+              case 'missing-daily-reports':
+                return <MissingDailyReportsTeacherwiseView user={user} />;
               case 'full-timetable':
                 return <FullTimetableView />;
               case 'users':
@@ -8981,6 +8995,7 @@ const App = () => {
     const [selectedTeacher, setSelectedTeacher] = useState('');
     const [selectedClass, setSelectedClass] = useState('');
     const [selectedSubject, setSelectedSubject] = useState('');
+    const [selectedChapter, setSelectedChapter] = useState('');
     const [statusFilter, setStatusFilter] = useState(''); // Empty = All
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
@@ -9053,9 +9068,14 @@ const App = () => {
       if (selectedSubject) {
         result = result.filter(r => r.subject === selectedSubject);
       }
+
+      // Filter by chapter
+      if (selectedChapter) {
+        result = result.filter(r => String(r.chapter || '').trim() === selectedChapter);
+      }
       
       return result;
-    }, [allReports, statusFilter, selectedTeacher, selectedClass, selectedSubject]);
+    }, [allReports, statusFilter, selectedTeacher, selectedClass, selectedSubject, selectedChapter]);
 
     // Get unique values for dropdowns
     const uniqueTeachers = useMemo(() => {
@@ -9068,6 +9088,10 @@ const App = () => {
 
     const uniqueSubjects = useMemo(() => {
       return [...new Set(allReports.map(r => r.subject).filter(Boolean))].sort();
+    }, [allReports]);
+
+    const uniqueChapters = useMemo(() => {
+      return [...new Set(allReports.map(r => String(r.chapter || '').trim()).filter(Boolean))].sort();
     }, [allReports]);
 
     // Reload reports with new date range
@@ -9100,6 +9124,7 @@ const App = () => {
         setSelectedTeacher('');
         setSelectedClass('');
         setSelectedSubject('');
+        setSelectedChapter('');
         setStatusFilter('');
       } catch (err) {
         console.error('Error loading reports:', err);
@@ -9206,6 +9231,21 @@ const App = () => {
               </select>
             </div>
 
+            {/* Chapter Dropdown */}
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Chapter:</label>
+              <select
+                value={selectedChapter}
+                onChange={(e) => setSelectedChapter(e.target.value)}
+                className="flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white md:min-w-[180px]"
+              >
+                <option value="">All Chapters</option>
+                {uniqueChapters.map(ch => (
+                  <option key={ch} value={ch}>{ch}</option>
+                ))}
+              </select>
+            </div>
+
             {/* Status Quick Filters */}
             <div className="flex gap-2 w-full md:w-auto md:ml-auto flex-wrap">
               <button
@@ -9252,7 +9292,7 @@ const App = () => {
           </div>
 
           {/* Active Filter Badges */}
-          {(selectedTeacher || selectedClass || selectedSubject) && (
+          {(selectedTeacher || selectedClass || selectedSubject || selectedChapter) && (
             <div className="flex flex-wrap gap-2 mt-3">
               {selectedTeacher && (
                 <span className="inline-flex items-center px-2 md:px-3 py-1 text-xs bg-blue-100 text-blue-800 rounded-full font-medium">
@@ -9270,6 +9310,12 @@ const App = () => {
                 <span className="inline-flex items-center px-2 md:px-3 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
                   Subject: {selectedSubject}
                   <button onClick={() => setSelectedSubject('')} className="ml-1 hover:text-purple-900">×</button>
+                </span>
+              )}
+              {selectedChapter && (
+                <span className="inline-flex items-center px-2 md:px-3 py-1 text-xs bg-amber-100 text-amber-800 rounded-full font-medium">
+                  Chapter: {selectedChapter}
+                  <button onClick={() => setSelectedChapter('')} className="ml-1 hover:text-amber-900">×</button>
                 </span>
               )}
             </div>
@@ -9337,6 +9383,15 @@ const App = () => {
                   <div className="text-xs text-gray-600 mb-1.5">
                     {r.class} • {r.subject} • Period {r.period}
                   </div>
+
+                  {/* Chapter */}
+                  {r.chapter && (
+                    <div className="text-xs text-gray-500 mb-2">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded bg-amber-50 text-amber-800">
+                        Chapter: {r.chapter}
+                      </span>
+                    </div>
+                  )}
                   
                   {/* Plan Type */}
                   {r.planType && (
@@ -9407,6 +9462,7 @@ const App = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Teacher</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chapter</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Period</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plan Type</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
@@ -9448,6 +9504,7 @@ const App = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.teacherName}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.class}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.subject}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.chapter || ''}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.period}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.planType}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{r.completed}</td>
@@ -9465,14 +9522,14 @@ const App = () => {
                 )})}
                 {filteredReports.length === 0 && !loadingReports && (
                   <tr>
-                    <td colSpan={10} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                    <td colSpan={11} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
                       No reports found.
                     </td>
                   </tr>
                 )}
                 {loadingReports && (
                   <tr>
-                    <td colSpan={10} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                    <td colSpan={11} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
                       Loading reports...
                     </td>
                   </tr>

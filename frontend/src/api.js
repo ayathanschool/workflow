@@ -629,6 +629,13 @@ export async function getMissingSubmissions(date) {
   return res?.data || res || { success: false };
 }
 
+// HM/SuperAdmin: Teacherwise missing daily report view
+export async function getMissingSubmissionsTeacherwise(date, requesterEmail) {
+  const q = new URLSearchParams({ action: 'getMissingSubmissionsTeacherwise', date, email: requesterEmail })
+  const res = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE)
+  return res?.data || res || { success: false };
+}
+
 export async function getAllClasses() {
   const response = await getJSON(`${BASE_URL}?action=getAllClasses`);
   // Unwrap the response: backend returns { status, data, timestamp }
@@ -1543,14 +1550,29 @@ export async function getAllSchemes(page = 1, pageSize = 10, teacher = '', cls =
 // Retrieve daily reports across the school.  Useful for headmasters to
 // browse all reports.  Optional filters: teacher, class, subject,
 // date, fromDate, toDate, status (completion status).
-export async function getDailyReports({ teacher = '', cls = '', subject = '', date = '', fromDate = '', toDate = '', status = '' } = {}) {
-  const params = new URLSearchParams({ action: 'getDailyReports', teacher, class: cls, subject, date, fromDate, toDate, status })
+export async function getDailyReports({ teacher = '', cls = '', subject = '', chapter = '', date = '', fromDate = '', toDate = '', status = '' } = {}) {
+  const params = new URLSearchParams({ action: 'getDailyReports', teacher, class: cls, subject, chapter, date, fromDate, toDate, status })
   const result = await getJSON(`${BASE_URL}?${params.toString()}`)
   // Handle multiple response formats: direct array, {data: [...]}, {reports: [...]}
   if (Array.isArray(result)) return result;
   if (result?.data) return Array.isArray(result.data) ? result.data : (result.data.reports || []);
   if (result?.reports) return result.reports;
   return [];
+}
+
+// HM/Admin: teacherwise missing daily reports for a date RANGE
+export async function getMissingSubmissionsTeacherwiseRange(fromDate, toDate, requesterEmail, { teacher = '', cls = '', subject = '' } = {}) {
+  const params = new URLSearchParams({
+    action: 'getMissingSubmissionsTeacherwiseRange',
+    fromDate: fromDate || '',
+    toDate: toDate || '',
+    email: requesterEmail || '',
+    teacher: teacher || '',
+    class: cls || '',
+    subject: subject || ''
+  });
+  const res = await getJSON(`${BASE_URL}?${params.toString()}`);
+  return res?.data || res;
 }
 
 export async function deleteDailyReport(reportId, email) {
@@ -1890,6 +1912,19 @@ export async function getAllSubstitutions() {
   const q = new URLSearchParams({ action: 'getAllSubstitutions' })
   const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE)
   return result?.data || result || { total: 0, data: [] }
+}
+
+// HM/Admin: list substitutions within a date range (used for analytics dropdowns)
+export async function getSubstitutionsRange(startDate, endDate, requesterEmail, filters = {}) {
+  const q = new URLSearchParams({
+    action: 'getSubstitutionsRange',
+    startDate,
+    endDate,
+    email: requesterEmail,
+    ...(filters || {})
+  })
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE)
+  return result?.data || result
 }
 
 export async function getSubstitutionEffectiveness(params = {}) {

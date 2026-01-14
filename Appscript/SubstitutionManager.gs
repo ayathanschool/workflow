@@ -296,6 +296,7 @@ function getSubstitutionsRange(startDate, endDate, teacherEmail = '', cls = '') 
   const rows = _getCachedSheetData('Substitutions').data;
   const filtered = rows.filter(r => {
     if (!r) return false;
+    if (_isItLabSupportRow_(r)) return false;
     const rowDate = _isoDateString(r.date);
     if (normalizedStart && rowDate < normalizedStart) return false;
     if (normalizedEnd && rowDate > normalizedEnd) return false;
@@ -343,6 +344,23 @@ function _normEmail(s) {
 
 function _normText(s) {
   return String(s || '').trim().toLowerCase();
+}
+
+function _isItLabSupportRow_(row) {
+  try {
+    const a = _normText(row && row.absentTeacher);
+    const rs = _normText(row && row.regularSubject);
+    const ss = _normText(row && row.substituteSubject);
+    const n = _normText(row && row.note);
+    return (
+      (a && a.indexOf('it lab support') !== -1) ||
+      (rs && rs.indexOf('it lab support') !== -1) ||
+      (ss && ss.indexOf('it lab support') !== -1) ||
+      (n && n.indexOf('it lab support') !== -1)
+    );
+  } catch (_e) {
+    return false;
+  }
 }
 
 function _normClass(s) {
@@ -431,6 +449,7 @@ function getSubstitutionEffectiveness(params) {
   for (let i = 0; i < subs.length; i++) {
     const s = subs[i];
     if (!s) continue;
+    if (_isItLabSupportRow_(s)) continue;
 
     const sDate = _isoDateString(s.date);
     if (sDate < startDate || sDate > endDate) continue;
