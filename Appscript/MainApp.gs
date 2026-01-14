@@ -1879,6 +1879,11 @@
             ];
             appLog('INFO', 'Clearing caches', { keys: keys });
             keys.forEach(k => cache.remove(k));
+
+            // Also invalidate broader caches that depend on DailyReports/Chapter completion.
+            // Without this, lesson planning availability (canPrepare/lockReason) can remain stale until TTL expiry.
+            try { invalidateCache('approved_schemes'); } catch (_e1) {}
+            try { if (teacherEmail) invalidateCache('teacher_lessonplans_' + teacherEmail); } catch (_e2) {}
             appLog('INFO', 'Cache cleared successfully', { count: keys.length });
           } catch (cacheErr) {
             appLog('ERROR', 'Cache invalidation failed', { error: cacheErr.message });
