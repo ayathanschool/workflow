@@ -15,6 +15,7 @@
  */
 function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
   try {
+    const _norm = (v) => String(v || '').trim().toLowerCase();
     // Ensure sessionNumber is a number
     const sessionNum = parseInt(sessionNumber);
     // Ensure noOfSessions is a number
@@ -52,9 +53,9 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           // Safety check: ensure report is an object
           if (!report || typeof report !== 'object') return false;
           
-          const matchesTeacher = String(report.teacherEmail || '').toLowerCase() === String(scheme.teacherEmail || '').toLowerCase();
-          const matchesClass = String(report.class || '') === String(scheme.class || '');
-          const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
+          const matchesTeacher = _norm(report.teacherEmail) === _norm(scheme.teacherEmail);
+          const matchesClass = _norm(report.class) === _norm(scheme.class);
+          const matchesSubject = _norm(report.subject) === _norm(scheme.subject);
           
           return matchesTeacher && matchesClass && matchesSubject;
         });
@@ -72,12 +73,13 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         // Get all unique chapters that have been started (have daily reports)
         // Collect distinct non-empty chapter names previously started
         const startedChapters = [...new Set(teacherReports
-          .map(r => String(r.chapter || '').trim())
+          .map(r => _norm(r.chapter))
           .filter(name => name))];
         Logger.log(`Started chapters for ${scheme.teacherEmail}: ${startedChapters.join(', ')}`);
         
         // Check if the current chapter being prepared already has reports
-        const currentChapterStarted = startedChapters.includes(String(chapter.name || ''));
+        const currentChapterName = _norm(chapter && (chapter.name || chapter));
+        const currentChapterStarted = startedChapters.includes(currentChapterName);
         
         if (currentChapterStarted) {
           // This chapter was already started, allow continuation
@@ -99,9 +101,7 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         
         for (const chapterName of startedChapters) {
           // Get all reports for this chapter
-          const chapterReports = teacherReports.filter(report => 
-            String(report.chapter || '') === chapterName
-          );
+          const chapterReports = teacherReports.filter(report => _norm(report && report.chapter) === chapterName);
           
           if (chapterReports.length === 0) continue;
           
@@ -120,10 +120,10 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           
           // Get the scheme's original session count for this chapter
           const chapterScheme = allSchemes.find(s => 
-            String(s.chapter || '').toLowerCase() === chapterName.toLowerCase() &&
-            String(s.teacherEmail || '').toLowerCase() === String(scheme.teacherEmail || '').toLowerCase() &&
-            String(s.class || '') === String(scheme.class || '') &&
-            String(s.subject || '') === String(scheme.subject || '')
+            _norm(s && s.chapter) === chapterName &&
+            _norm(s && s.teacherEmail) === _norm(scheme.teacherEmail) &&
+            _norm(s && s.class) === _norm(scheme.class) &&
+            _norm(s && s.subject) === _norm(scheme.subject)
           );
           
           const originalSessionCount = chapterScheme ? parseInt(chapterScheme.noOfSessions || 2) : 2;
@@ -545,7 +545,7 @@ function _calculateLessonPlanningDateRange() {
 function getApprovedSchemesForLessonPlanning(teacherEmail) {
   // Cache-buster: bump this string whenever the payload/gating rules change.
   // Apps Script caches can otherwise serve stale "schemes" objects without new fields.
-  const APPROVED_SCHEMES_CACHE_VERSION = 'v2026-01-13-approved-schemes-fastindex-1';
+  const APPROVED_SCHEMES_CACHE_VERSION = 'v2026-01-14-approved-schemes-chapter-norm-1';
   const cacheKey = generateCacheKey('approved_schemes', { email: teacherEmail, v: APPROVED_SCHEMES_CACHE_VERSION });
 
   // NOTE: The heavy schemes+progress payload is cached, but Settings-driven flags
