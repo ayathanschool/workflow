@@ -671,13 +671,15 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                                            session.isExtended === true ||
                                                            session.sessionNumber > chapter.numberOfSessions;
                                   
-                                  if (isExtendedSession) {
-                                    // Allow single session preparation for extended periods only
-                                    handleSessionClick(scheme, chapter, session);
-                                  } else {
-                                    // Block single session for normal sessions, show alert
+                                  // Bulk-only mode (lessonplan_bulk_only=true) blocks single-session prep
+                                  // for normal sessions, but still allows extended sessions.
+                                  if (isBulkOnlyMode && !isExtendedSession) {
                                     alert('Single session preparation is not allowed.\n\nPlease use "Prepare All" button above to prepare all sessions in this chapter at once.');
+                                    return;
                                   }
+
+                                  // Single-session prep allowed (or extended session exception)
+                                  handleSessionClick(scheme, chapter, session);
                                 }}
                                 className={`p-3 rounded transition-colors ${String(session.status || '').toLowerCase() === 'reported'
                                   ? 'bg-purple-50 border-2 border-purple-300 opacity-90 cursor-default'
