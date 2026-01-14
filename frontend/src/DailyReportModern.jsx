@@ -430,8 +430,11 @@ export default function DailyReportModern({ user }) {
         }
       }
       const planId = plan?.lpId || plan?.lessonPlanId || plan?.planId || plan?.id;
-      if (plan && planId) {
-        fetchCascadePreview(key, planId);
+      // For substitution in-plan mode, lessonPlans[key] may be null; fall back to selected lessonPlanId from draft.
+      const fallbackPlanId = String((currentDraft && currentDraft.lessonPlanId) || (drafts[key] && drafts[key].lessonPlanId) || '').trim();
+      const resolvedPlanId = planId || fallbackPlanId;
+      if (resolvedPlanId) {
+        fetchCascadePreview(key, resolvedPlanId);
       } else {
         setCascadePreview(prev => ({ ...prev, [key]: { success: false, sessionsToReschedule: [], error: 'No lesson plan ID found for cascade.' } }));
       }
@@ -590,18 +593,40 @@ export default function DailyReportModern({ user }) {
     if (period?.isSubstitution) {
       const lessonPlanId = String((draft.lessonPlanId || '').trim());
       const whatDone = String((draft.subNotes || draft.objectives || '').trim());
+      const inPlan = !!lessonPlanId;
+
       if (!lessonPlanId && !whatDone) {
         setMessage({ text: '❌ Please describe what you did, or select a ready lesson plan for this substitution period', type: 'error' });
         return;
+      }
+
+      // If teacher attached a Ready plan for this substitution period, allow full planned-report options
+      // (chapter completion + remaining sessions action + cascade preview/decision).
+      const chapter = String((draft.chapter || '')).trim();
+      const completionPercentage = inPlan ? Number(draft.completionPercentage || 0) : 0;
+      const deviationReason = String((draft.deviationReason || '')).trim();
+      if (inPlan) {
+        if (!chapter) {
+          setMessage({ text: '❌ Chapter/Topic is required (select a plan)', type: 'error' });
+          return;
+        }
+        if (draft.chapterCompleted && remainingSessions[key] && remainingSessions[key].length > 0 && !draft.remainingSessionsAction) {
+          setMessage({ text: 'Please choose what to do with remaining sessions', type: 'error' });
+          return;
+        }
+        if (completionPercentage === 0 && !deviationReason) {
+          setMessage({ text: '❌ For 0% completion, please select a reason', type: 'error' });
+          return;
+        }
       }
 
       setSubmitting(prev => ({ ...prev, [key]: true }));
       setMessage({ text: '', type: '' });
       try {
         const taughtSubject = period.substituteSubject || period.subject;
-        const completionPct = lessonPlanId ? Number(draft.completionPercentage || 0) : 0;
-        const sessionNo = lessonPlanId ? Number(draft.sessionNo || 0) : 0;
-        const totalSessions = lessonPlanId ? Number(draft.totalSessions || 0) : 0;
+        const completionPct = inPlan ? Number(draft.completionPercentage || 0) : 0;
+        const sessionNo = inPlan ? Number(draft.sessionNo || 0) : 0;
+        const totalSessions = inPlan ? Number(draft.totalSessions || 0) : 0;
         const payload = {
           date,
           teacherEmail: email,
@@ -610,13 +635,24 @@ export default function DailyReportModern({ user }) {
           subject: taughtSubject,
           period: Number(period.period),
           lessonPlanId: lessonPlanId || '',
-          // If a lesson plan is attached, leave objectives empty to let backend auto-fill from the plan.
+          // If a lesson plan is attached, send edited fields if present; backend can still auto-fill missing ones.
+          chapter: inPlan ? String(draft.chapter || '') : String(draft.chapter || ''),
           // Optional notes go into activities so objectives can come from plan.
-          objectives: lessonPlanId ? '' : whatDone,
-          activities: lessonPlanId ? whatDone : '',
+          objectives: inPlan ? String(draft.objectives || '') : whatDone,
+          activities: inPlan ? String(draft.activities || whatDone || '') : '',
           completionPercentage: isNaN(completionPct) ? 0 : completionPct,
           sessionNo: isNaN(sessionNo) ? 0 : sessionNo,
           totalSessions: isNaN(totalSessions) ? 0 : totalSessions,
+          chapterStatus: (inPlan && draft.chapterCompleted) ? 'Chapter Complete' : 'Session Complete',
+          deviationReason: inPlan ? String(draft.deviationReason || '') : '',
+          cascadeOption: inPlan ? (draft.cascadeOption || '') : '',
+          difficulties: inPlan ? (draft.difficulties || '') : '',
+          nextSessionPlan: inPlan ? (draft.nextSessionPlan || '') : '',
+          notes: inPlan ? (draft.notes || '') : (draft.subNotes || ''),
+          chapterCompleted: inPlan ? (draft.chapterCompleted || false) : false,
+          remainingSessionsAction: (inPlan && draft.chapterCompleted && draft.remainingSessionsAction) ? draft.remainingSessionsAction : null,
+          remainingSessions: (inPlan && draft.chapterCompleted && remainingSessions[key]) ? remainingSessions[key].map(s => s.lpId) : [],
+          completionRationale: inPlan ? (draft.completionRationale || '') : '',
           isSubstitution: true,
           absentTeacher: period.absentTeacher || '',
           regularSubject: period.regularSubject || '',
@@ -1126,6 +1162,7 @@ function PeriodCard({
   const inPlanMode = isSub && !!selectedSubPlanId;
   const effectivePlan = (isSub && selectedSubPlan) ? selectedSubPlan : plan;
   const showPlannedFields = !isSub || inPlanMode;
+  const allowPlanActions = !isSub || (inPlanMode && !!effectivePlan);
 
   // When selecting "In plan", prefill the reporting draft from the plan (still editable where allowed)
   const handleSubPlanSelect = (value) => {
@@ -1490,7 +1527,7 @@ function PeriodCard({
           )}
 
           {/* Deviation Reason (only for 0%) */}
-          {!isSub && completionPercentage === 0 && (
+          {allowPlanActions && completionPercentage === 0 && (
             <>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1508,7 +1545,7 @@ function PeriodCard({
               </div>
 
               {/* Cascade Option (only when lesson plan exists and reason is selected) */}
-              {plan && data.deviationReason && (
+              {effectivePlan && data.deviationReason && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Lesson Plan Action <span className="text-red-500">*</span>
@@ -1627,7 +1664,7 @@ function PeriodCard({
           </div>
 
           {/* Chapter Completion with Inline Dropdown */}
-          {!isSub && completionPercentage === 100 && (
+          {allowPlanActions && completionPercentage === 100 && (
             <div className="space-y-3">
               <div className="flex items-center gap-3 p-4 bg-green-50 border-2 border-green-200 rounded-lg">
                 <input
