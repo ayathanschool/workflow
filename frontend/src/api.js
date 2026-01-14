@@ -1728,7 +1728,8 @@ export async function getApprovedSchemesForLessonPlanning(teacherEmail) {
     action: 'getApprovedSchemesForLessonPlanning',
     teacherEmail
   });
-  return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  // Settings-driven response (planning windows + bulkOnly mode) should reflect sheet edits immediately.
+  return getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
 }
 
 // Get available periods for lesson plan scheduling
@@ -1742,7 +1743,8 @@ export async function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, 
     class: schemeClass,          // ✅ Add class parameter
     subject: schemeSubject        // ✅ Add subject parameter
   });
-  return getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  // Settings-driven response (bulkOnly mode, preparation rules) should reflect sheet edits immediately.
+  return getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
 }
 
 // Create scheme-based lesson plan

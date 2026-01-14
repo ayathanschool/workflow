@@ -547,9 +547,39 @@ function getApprovedSchemesForLessonPlanning(teacherEmail) {
   // Apps Script caches can otherwise serve stale "schemes" objects without new fields.
   const APPROVED_SCHEMES_CACHE_VERSION = 'v2026-01-13-approved-schemes-fastindex-1';
   const cacheKey = generateCacheKey('approved_schemes', { email: teacherEmail, v: APPROVED_SCHEMES_CACHE_VERSION });
-  return getCachedData(cacheKey, function() {
+
+  // NOTE: The heavy schemes+progress payload is cached, but Settings-driven flags
+  // (bulkOnly mode, planningDateRange) must reflect sheet edits immediately.
+  const res = getCachedData(cacheKey, function() {
     return _fetchApprovedSchemesForLessonPlanning(teacherEmail);
   }, CACHE_TTL.MEDIUM);
+
+  try {
+    if (res && typeof res === 'object' && res.success !== false) {
+      // Always refresh settings (e.g., lessonplan_bulk_only) even on cache hits.
+      res.settings = _getLessonPlanSettings();
+
+      // Always refresh planning date range because it is computed from Settings.
+      try {
+        const dateRange = _calculateLessonPlanningDateRange();
+        res.planningDateRange = {
+          startDate: dateRange.startDate,
+          endDate: dateRange.endDate,
+          deferredDays: dateRange.deferredDays,
+          daysAhead: dateRange.daysAhead,
+          preparationDay: dateRange.preparationDay,
+          isPreparationDay: dateRange.isPreparationDay,
+          canSubmit: dateRange.canSubmit
+        };
+      } catch (_drErr) {
+        // Keep cached planningDateRange (or null) if compute fails.
+      }
+    }
+  } catch (_e) {
+    // Best-effort only; never fail the call due to settings refresh.
+  }
+
+  return res;
 }
 
 function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
