@@ -1164,6 +1164,19 @@ function PeriodCard({
   const showPlannedFields = !isSub || inPlanMode;
   const allowPlanActions = !isSub || (inPlanMode && !!effectivePlan);
 
+  // Preserve cascaded context even after reporting.
+  // Sources:
+  // - cascadeMoves[periodKey]: periods moved in this UI session
+  // - plan.status: persisted lesson-plan status like 'cascaded' / 'Rescheduled (Cascade)'
+  // - report notes: sometimes includes 'Cascade:' marker
+  const planStatus = String((plan && plan.status) || '').toLowerCase();
+  const notesText = String((data && (data.notes || data.completed || '')) || '').toLowerCase();
+  const isCascaded = !!(cascadeMoves && cascadeMoves[periodKey]) ||
+    planStatus.includes('cascad') ||
+    planStatus.includes('rescheduled') ||
+    notesText.includes('cascade:') ||
+    notesText.includes('cascad');
+
   // When selecting "In plan", prefill the reporting draft from the plan (still editable where allowed)
   const handleSubPlanSelect = (value) => {
     onUpdate('lessonPlanId', value);
@@ -1183,7 +1196,7 @@ function PeriodCard({
   return (
     <div className={`bg-white rounded-xl shadow-md transition-all duration-300 ${
       isExpanded ? 'shadow-xl' : 'hover:shadow-lg'
-    }`}>
+    } ${isCascaded ? 'border-l-4 border-blue-400' : ''}`}>
       {/* Card Header */}
       <div
         className={`p-6 cursor-pointer ${isSubmitted ? 'bg-green-50' : (isSub ? 'bg-amber-50' : 'hover:bg-gray-50')} rounded-t-xl transition-colors`}
@@ -1233,6 +1246,14 @@ function PeriodCard({
                 Substitution
               </div>
             ) : null}
+
+            {/* Cascaded Badge (show even after submission) */}
+            {isCascaded && (
+              <div className="px-4 py-2 bg-blue-100 text-blue-800 rounded-full font-medium text-sm flex items-center gap-2 border border-blue-200">
+                <span>↻</span>
+                <span>Cascaded</span>
+              </div>
+            )}
 
             {/* Expand/Collapse */}
             <button

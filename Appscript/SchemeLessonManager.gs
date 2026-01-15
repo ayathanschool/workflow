@@ -545,7 +545,7 @@ function _calculateLessonPlanningDateRange() {
 function getApprovedSchemesForLessonPlanning(teacherEmail) {
   // Cache-buster: bump this string whenever the payload/gating rules change.
   // Apps Script caches can otherwise serve stale "schemes" objects without new fields.
-  const APPROVED_SCHEMES_CACHE_VERSION = 'v2026-01-14-approved-schemes-chapter-norm-1';
+  const APPROVED_SCHEMES_CACHE_VERSION = 'v2026-01-15-approved-schemes-cascade-reported-1';
   const cacheKey = generateCacheKey('approved_schemes', { email: teacherEmail, v: APPROVED_SCHEMES_CACHE_VERSION });
 
   // NOTE: The heavy schemes+progress payload is cached, but Settings-driven flags
@@ -713,10 +713,16 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
             const hasReport = hasReportBySession.has(reportSessionKey(scheme.class, scheme.subject, chapter.name, session.sessionNumber));
 
             // Decide displayed status:
-            // Only show 'Cascaded' for the originally missed session (explicit status + original slot recorded)
+            // - If a session was the ORIGINAL cascaded session, keep a cascade marker.
+            // - If that cascaded session has already been reported, display as 'Reported' (so UI shows ✓ Reported)
+            //   while still allowing the UI to show a cascade indicator via originalDate/originalPeriod/cascadeMarked.
             if (isOriginalCascade && hasOriginalSlotChange) {
-              status = 'Cascaded';
               cascadeMarked = true;
+              if (hasReport && !['cancelled','rejected'].includes(statusLower)) {
+                status = 'Reported';
+              } else {
+                status = 'Cascaded';
+              }
             } else if (hasReport && !['cancelled','rejected'].includes(statusLower)) {
               status = 'Reported';
             } else {

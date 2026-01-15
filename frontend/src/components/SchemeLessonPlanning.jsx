@@ -681,18 +681,29 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                   // Single-session prep allowed (or extended session exception)
                                   handleSessionClick(scheme, chapter, session);
                                 }}
-                                className={`p-3 rounded transition-colors ${String(session.status || '').toLowerCase() === 'reported'
-                                  ? 'bg-purple-50 border-2 border-purple-300 opacity-90 cursor-default'
-                                  : String(session.status || '').toLowerCase() === 'cascaded'
-                                    ? 'bg-orange-50 border-2 border-orange-300 hover:bg-orange-100 cursor-default'
-                                    : String(session.status || '').toLowerCase() === 'ready'
-                                      ? 'bg-blue-50 border-2 border-blue-300 hover:bg-blue-100 cursor-pointer'
-                                      : ['planned', 'pending review'].includes(String(session.status || '').toLowerCase())
-                                        ? 'bg-green-50 border-2 border-green-300 hover:bg-green-100 cursor-pointer'
-                                        : String(session.status || '').toLowerCase() === 'cancelled'
-                                          ? 'bg-gray-50 border-2 border-gray-300 opacity-60 cursor-not-allowed'
-                                          : 'bg-red-50 border-2 border-red-300 hover:bg-red-100 cursor-pointer'
-                                  }`}
+                                className={`${(() => {
+                                  const normalizedStatus = String(session.status || '').toLowerCase();
+                                  const isReported = normalizedStatus === 'reported';
+                                  const isCascaded = normalizedStatus === 'cascaded' ||
+                                    (!!session.originalDate || !!session.originalPeriod) ||
+                                    (String(session.planStatus || '').toLowerCase().includes('cascad'));
+
+                                  const base = isReported
+                                    ? 'bg-purple-50 border-2 border-purple-300 opacity-90 cursor-default'
+                                    : normalizedStatus === 'cascaded'
+                                      ? 'bg-orange-50 border-2 border-orange-300 hover:bg-orange-100 cursor-default'
+                                      : normalizedStatus === 'ready'
+                                        ? 'bg-blue-50 border-2 border-blue-300 hover:bg-blue-100 cursor-pointer'
+                                        : ['planned', 'pending review'].includes(normalizedStatus)
+                                          ? 'bg-green-50 border-2 border-green-300 hover:bg-green-100 cursor-pointer'
+                                          : normalizedStatus === 'cancelled'
+                                            ? 'bg-gray-50 border-2 border-gray-300 opacity-60 cursor-not-allowed'
+                                            : 'bg-red-50 border-2 border-red-300 hover:bg-red-100 cursor-pointer';
+
+                                  // Keep a visible cascade indicator even after reporting.
+                                  const cascadeAccent = isCascaded ? ' border-l-4 border-orange-400' : '';
+                                  return `p-3 rounded transition-colors ${base}${cascadeAccent}`;
+                                })()}`}
                               >
                                 <div className="flex items-center justify-between mb-1">
                                   <span className="text-sm font-medium">
@@ -713,7 +724,9 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                     </div>
                                   </div>
                                 )}
-                                {String(session.status || '').toLowerCase() === 'cascaded' && (
+                                {/* Cascaded indicator: show for cascaded AND reported+cascaded sessions */}
+                                {(String(session.status || '').toLowerCase() === 'cascaded' || String(session.status || '').toLowerCase() === 'reported') && (
+                                  (session.originalDate || session.originalPeriod || String(session.planStatus || '').toLowerCase().includes('cascad')) ? (
                                   <div className="space-y-1" title={`Moved from ${session.originalDate ? formatDate(session.originalDate) : 'original date unavailable'}${session.originalPeriod ? ` P${session.originalPeriod}` : ''} → ${session.plannedDate ? formatDate(session.plannedDate) : ''}${session.plannedPeriod ? ` P${session.plannedPeriod}` : ''}`}>
                                     <div className="text-xs text-orange-700 font-semibold bg-orange-100 rounded px-2 py-1 inline-block">
                                       ↻ Cascaded
@@ -731,6 +744,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                       )}
                                     </div>
                                   </div>
+                                  ) : null
                                 )}
                                 {String(session.status || '').toLowerCase() === 'ready' && (
                                   <div className="space-y-1">
