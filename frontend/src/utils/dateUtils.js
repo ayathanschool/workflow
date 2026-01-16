@@ -20,6 +20,19 @@ export function todayIST() {
 }
 
 /**
+ * Get yesterday's date in IST timezone in ISO format (YYYY-MM-DD)
+ * @returns {string} Yesterday's date in YYYY-MM-DD format in IST
+ */
+export function yesterdayIST() {
+  const t = todayIST();
+  // Interpret YYYY-MM-DD as a UTC day boundary to avoid local timezone skew.
+  const d = new Date(`${t}T00:00:00Z`);
+  if (isNaN(d.getTime())) return t;
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
  * Get today's date in ISO format (YYYY-MM-DD)
  * Adjusted for timezone to ensure the correct local date
  * @returns {string} Today's date in YYYY-MM-DD format

@@ -1,10 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, RefreshCw, Search } from 'lucide-react';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import * as api from '../api';
-
-function isoDate(d) {
-  try { return new Date(d).toISOString().slice(0, 10); } catch { return ''; }
-}
+import { yesterdayIST } from '../utils/dateUtils';
 
 function _listIsoDatesInclusive(fromIso, toIso) {
   try {
@@ -29,26 +26,30 @@ function _listIsoDatesInclusive(fromIso, toIso) {
 export default function MissingDailyReportsTeacherwiseView({ user }) {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
-  const [q, setQ] = useState('');
   const [selectedTeacher, setSelectedTeacher] = useState('');
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
+  const [optionsCache, setOptionsCache] = useState({ teachers: null, classes: null, subjects: null });
 
   useEffect(() => {
-    const today = isoDate(new Date());
-    setFromDate(today);
-    setToDate(today);
+    const yday = yesterdayIST();
+    setFromDate(yday);
+    setToDate(yday);
   }, []);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!user?.email || !fromDate || !toDate) return;
     setLoading(true);
     setError('');
     try {
-      let res = await api.getMissingSubmissionsTeacherwiseRange(fromDate, toDate, user.email);
+      let res = await api.getMissingSubmissionsTeacherwiseRange(fromDate, toDate, user.email, {
+        teacher: selectedTeacher || '',
+        cls: selectedClass || '',
+        subject: selectedSubject || ''
+      });
 
       // Apps Script sometimes returns { error: 'Unknown action: ...' } without success=false.
       if (res?.success === false || res?.error) {
@@ -114,20 +115,51 @@ export default function MissingDailyReportsTeacherwiseView({ user }) {
       }
 
       setData(res);
+
+      // Cache unfiltered options so dropdowns don't shrink when filters are applied.
+      if (!selectedTeacher && !selectedClass && !selectedSubject) {
+        const byTeacher = Array.isArray(res?.byTeacher) ? res.byTeacher : [];
+        const missing = Array.isArray(res?.missing) ? res.missing : [];
+
+        const teachers = (() => {
+          if (byTeacher.length) {
+            return byTeacher
+              .map(t => ({ label: t.teacher || t.teacherEmail, value: t.teacherEmail }))
+              .filter(t => t.value)
+              .sort((a, b) => String(a.label).localeCompare(String(b.label)));
+          }
+
+          const map = new Map();
+          for (const m of missing) {
+            const email = String(m?.teacherEmail || '').trim();
+            if (!email) continue;
+            const name = String(m?.teacher || '').trim();
+            if (!map.has(email)) map.set(email, name || email);
+          }
+          return Array.from(map.entries())
+            .map(([value, label]) => ({ value, label }))
+            .sort((a, b) => String(a.label).localeCompare(String(b.label)));
+        })();
+
+        const classes = [...new Set(missing.map(m => String(m?.class || '').trim()).filter(Boolean))].sort();
+        const subjects = [...new Set(missing.map(m => String(m?.subject || '').trim()).filter(Boolean))].sort();
+        setOptionsCache({ teachers, classes, subjects });
+      }
     } catch (e) {
       setData(null);
       setError(String(e?.message || e || 'Failed to load'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [fromDate, toDate, user?.email, selectedTeacher, selectedClass, selectedSubject]);
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.email, fromDate, toDate]);
+  }, [load]);
 
   const uniqueTeachers = useMemo(() => {
+    if (Array.isArray(optionsCache?.teachers) && optionsCache.teachers.length) return optionsCache.teachers;
+
     const byTeacher = Array.isArray(data?.byTeacher) ? data.byTeacher : [];
     if (byTeacher.length) {
       return byTeacher
@@ -148,7 +180,7 @@ export default function MissingDailyReportsTeacherwiseView({ user }) {
     return Array.from(map.entries())
       .map(([value, label]) => ({ value, label }))
       .sort((a, b) => String(a.label).localeCompare(String(b.label)));
-  }, [data]);
+  }, [data, optionsCache]);
 
   const selectedTeacherLabel = useMemo(() => {
     if (!selectedTeacher) return '';
@@ -157,31 +189,43 @@ export default function MissingDailyReportsTeacherwiseView({ user }) {
   }, [selectedTeacher, uniqueTeachers]);
 
   const uniqueClasses = useMemo(() => {
+    if (Array.isArray(optionsCache?.classes) && optionsCache.classes.length) return optionsCache.classes;
     const list = Array.isArray(data?.missing) ? data.missing : [];
-    return [...new Set(list.map(m => m.class).filter(Boolean))].sort();
-  }, [data]);
+    return [...new Set(list.map(m => String(m.class || '').trim()).filter(Boolean))].sort();
+  }, [data, optionsCache]);
 
   const uniqueSubjects = useMemo(() => {
+    if (Array.isArray(optionsCache?.subjects) && optionsCache.subjects.length) return optionsCache.subjects;
     const list = Array.isArray(data?.missing) ? data.missing : [];
-    return [...new Set(list.map(m => m.subject).filter(Boolean))].sort();
-  }, [data]);
+    return [...new Set(list.map(m => String(m.subject || '').trim()).filter(Boolean))].sort();
+  }, [data, optionsCache]);
 
   const filteredMissing = useMemo(() => {
     const list = Array.isArray(data?.missing) ? data.missing : [];
-    const needle = String(q || '').trim().toLowerCase();
     return list.filter((m) => {
       if (!m) return false;
-      if (selectedTeacher && String(m.teacherEmail || '').toLowerCase() !== String(selectedTeacher || '').toLowerCase()) return false;
-      if (selectedClass && String(m.class || '') !== String(selectedClass || '')) return false;
-      if (selectedSubject && String(m.subject || '') !== String(selectedSubject || '')) return false;
-      if (needle) {
-        const name = String(m.teacher || '').toLowerCase();
-        const email = String(m.teacherEmail || '').toLowerCase();
-        if (!name.includes(needle) && !email.includes(needle)) return false;
+
+      if (selectedTeacher) {
+        const a = String(m.teacherEmail || '').trim().toLowerCase();
+        const b = String(selectedTeacher || '').trim().toLowerCase();
+        if (!a || a !== b) return false;
       }
+
+      if (selectedClass) {
+        const a = String(m.class || '').trim();
+        const b = String(selectedClass || '').trim();
+        if (!a || a !== b) return false;
+      }
+
+      if (selectedSubject) {
+        const a = String(m.subject || '').trim();
+        const b = String(selectedSubject || '').trim();
+        if (!a || a !== b) return false;
+      }
+
       return true;
     });
-  }, [data, q, selectedTeacher, selectedClass, selectedSubject]);
+  }, [data, selectedTeacher, selectedClass, selectedSubject]);
 
   const rows = useMemo(() => {
     const by = {};
@@ -202,12 +246,14 @@ export default function MissingDailyReportsTeacherwiseView({ user }) {
 
   const serverStats = data?.stats || { totalPeriods: 0 };
   const stats = useMemo(() => {
+    const hasFilters = !!(selectedTeacher || selectedClass || selectedSubject);
     return {
+      // Backend now reports totalPeriods AFTER applying filters.
       totalPeriods: serverStats.totalPeriods || 0,
-      missingCount: filteredMissing.length,
-      teachersImpacted: rows.length
+      missingCount: hasFilters ? filteredMissing.length : (serverStats.missingCount ?? filteredMissing.length),
+      teachersImpacted: hasFilters ? rows.length : (serverStats.teachersImpacted ?? rows.length)
     };
-  }, [serverStats.totalPeriods, filteredMissing.length, rows.length]);
+  }, [serverStats.totalPeriods, serverStats.missingCount, serverStats.teachersImpacted, filteredMissing.length, rows.length, selectedTeacher, selectedClass, selectedSubject]);
 
   return (
     <div className="space-y-6">
@@ -232,7 +278,7 @@ export default function MissingDailyReportsTeacherwiseView({ user }) {
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">From</label>
             <input
@@ -251,21 +297,9 @@ export default function MissingDailyReportsTeacherwiseView({ user }) {
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900"
             />
           </div>
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Search teacher</label>
-            <div className="relative">
-              <Search className="h-4 w-4 text-gray-400 absolute left-3 top-3" />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Type name or email"
-                className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900"
-              />
-            </div>
-          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Teacher</label>
             <select
@@ -356,31 +390,36 @@ export default function MissingDailyReportsTeacherwiseView({ user }) {
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
             <thead className="bg-gray-50 dark:bg-gray-900">
               <tr>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Teacher</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Missing</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Missing periods</th>
+                <th className="px-3 py-2 sm:px-4 text-left text-xs font-medium text-gray-500 uppercase">Teacher</th>
+                <th className="hidden md:table-cell px-3 py-2 sm:px-4 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                <th className="px-3 py-2 sm:px-4 text-right text-xs font-medium text-gray-500 uppercase">Missing</th>
+                <th className="px-3 py-2 sm:px-4 text-left text-xs font-medium text-gray-500 uppercase">Missing periods</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               {rows.map((t) => (
                 <tr key={t.teacherEmail}>
-                  <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100">{t.teacher || t.teacherEmail}</td>
-                  <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">{t.teacherEmail}</td>
-                  <td className="px-4 py-2 text-sm text-amber-700 dark:text-amber-400 text-right font-medium">{t.count}</td>
-                  <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">
-                    <div className="flex flex-wrap gap-2">
-                      {(t.periods || []).map((p, idx) => (
-                        <span key={idx} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-800">
-                          {p.date ? `${p.date} • ` : ''}P{p.period} • {p.class} • {p.subject}
-                        </span>
-                      ))}
-                    </div>
+                  <td className="px-3 py-2 sm:px-4 text-sm text-gray-900 dark:text-gray-100">{t.teacher || t.teacherEmail}</td>
+                  <td className="hidden md:table-cell px-3 py-2 sm:px-4 text-sm text-gray-700 dark:text-gray-300">{t.teacherEmail}</td>
+                  <td className="px-3 py-2 sm:px-4 text-sm text-amber-700 dark:text-amber-400 text-right font-medium">{t.count}</td>
+                  <td className="px-3 py-2 sm:px-4 text-sm text-gray-700 dark:text-gray-300">
+                    <details className="max-w-[70vw]">
+                      <summary className="cursor-pointer text-xs text-gray-700 dark:text-gray-300">
+                        View periods ({(t.periods || []).length})
+                      </summary>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(t.periods || []).map((p, idx) => (
+                          <span key={idx} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-800">
+                            {p.date ? `${p.date} • ` : ''}P{p.period} • {p.class} • {p.subject}
+                          </span>
+                        ))}
+                      </div>
+                    </details>
                   </td>
                 </tr>
               ))}
               {!loading && rows.length === 0 && (
-                <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-gray-500">No missing reports</td></tr>
+                <tr><td colSpan={4} className="px-3 py-6 sm:px-4 text-center text-sm text-gray-500">No missing reports</td></tr>
               )}
             </tbody>
           </table>

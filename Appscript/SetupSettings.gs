@@ -162,3 +162,61 @@ function setupPeriodTimes() {
     return { success: false, error: error.message };
   }
 }
+
+/**
+ * Setup Missing Daily Reports settings (HM-controlled)
+ * Run once to add keys if they don't exist.
+ */
+function setupMissingDailyReportSettings() {
+  try {
+    Logger.log('=== SETTING UP MISSING DAILY REPORT SETTINGS ===');
+
+    const settingsSheet = _getSheet('Settings');
+    const expectedHeaders = ['key', 'value', 'description'];
+    _ensureHeaders(settingsSheet, expectedHeaders);
+
+    const settingsHeaders = _headers(settingsSheet);
+    const settingsData = _rows(settingsSheet).map(row => _indexByHeader(row, settingsHeaders));
+
+    const requiredSettings = [
+      {
+        key: 'MISSING_DAILY_REPORT_LOOKBACK_DAYS',
+        value: '7',
+        description: 'Teacher dashboard: default missing report range length (days), ending at yesterday'
+      },
+      {
+        key: 'MISSING_DAILY_REPORT_ESCALATION_DAYS',
+        value: '2',
+        description: 'Teacher dashboard: show "Meet the HM" when missingDays > this value (missingDays = distinct dates with any missing period)'
+      },
+      {
+        key: 'MISSING_DAILY_REPORT_MAX_RANGE_DAYS',
+        value: '31',
+        description: 'Teacher dashboard: maximum allowed custom date range length (days)'
+      },
+      {
+        key: 'MISSING_DAILY_REPORT_ALLOW_CUSTOM_RANGE',
+        value: 'true',
+        description: 'Teacher dashboard: if false, hide from/to controls and always use default lookback range'
+      }
+    ];
+
+    requiredSettings.forEach(setting => {
+      const exists = settingsData.find(row => (row.key || '').trim() === setting.key);
+      if (!exists) {
+        Logger.log(`❌ Missing: ${setting.key} - Adding it now...`);
+        settingsSheet.appendRow([setting.key, setting.value, setting.description]);
+        Logger.log(`✅ Added: ${setting.key} = ${setting.value}`);
+      } else {
+        Logger.log(`✅ Found: ${setting.key} = ${exists.value}`);
+      }
+    });
+
+    Logger.log('=== SETUP COMPLETE ===');
+    return { success: true, message: 'Missing daily report settings configured successfully' };
+  } catch (error) {
+    Logger.log(`ERROR: ${error.message}`);
+    Logger.log(`Stack: ${error.stack}`);
+    return { success: false, error: error.message };
+  }
+}

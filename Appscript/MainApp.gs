@@ -147,8 +147,26 @@
   /** Parse a client-sent date string (e.g., "2025-11-07" or ISO) to IST "YYYY-MM-DD" */
   function _normalizeQueryDate(dateStr) {
     if (!dateStr) return _todayISO();
-    // If a bare YYYY-MM-DD arrives, interpret as IST midnight that day
-    const d = new Date(dateStr);
+    const raw = String(dateStr || '').trim();
+    if (!raw) return _todayISO();
+
+    // Prefer strict YYYY-MM-DD (avoid JS Date quirks)
+    const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) {
+      return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    }
+
+    // Support common UI formats like DD-MM-YYYY or DD/MM/YYYY
+    const dmy = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+    if (dmy) {
+      const dd = String(dmy[1]).padStart(2, '0');
+      const mm = String(dmy[2]).padStart(2, '0');
+      const yyyy = String(dmy[3]);
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    // Fallback: let JS parse and then format to IST
+    const d = new Date(raw);
     if (isNaN(d.getTime())) return _todayISO();
     return Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
   }
@@ -4491,6 +4509,32 @@
     try {
       // PERFORMANCE: Use cached Settings data
       const settingsData = _getCachedSheetData('Settings').data;
+      const settingsKv = _getCachedSettings();
+
+      const _numSetting = (key, defVal) => {
+        try {
+          const raw = settingsKv && Object.prototype.hasOwnProperty.call(settingsKv, key) ? settingsKv[key] : '';
+          const s = String(raw ?? '').trim();
+          if (!s) return defVal;
+          const n = Number(s);
+          return Number.isFinite(n) ? n : defVal;
+        } catch (e) {
+          return defVal;
+        }
+      };
+
+      const _boolSetting = (key, defVal) => {
+        try {
+          const raw = settingsKv && Object.prototype.hasOwnProperty.call(settingsKv, key) ? settingsKv[key] : '';
+          const s = String(raw ?? '').trim().toLowerCase();
+          if (!s) return defVal;
+          if (s === 'true' || s === '1' || s === 'yes' || s === 'y') return true;
+          if (s === 'false' || s === '0' || s === 'no' || s === 'n') return false;
+          return defVal;
+        } catch (e) {
+          return defVal;
+        }
+      };
       
       // Extract period times for different days
       const mondayToThursdaySetting = settingsData.find(row => 
@@ -4525,7 +4569,17 @@
         success: true,
         periodTimesWeekday: periodTimesWeekday,
         periodTimesFriday: periodTimesFriday,
-        periodTimes: periodTimesWeekday  // Provide default weekday times
+        periodTimes: periodTimesWeekday,  // Provide default weekday times
+
+        // Missing Daily Reports (teacher dashboard)
+        // These are controlled via Settings sheet (HM-controlled).
+        // Range should end at yesterday EOD; frontend enforces to<=yesterday.
+        missingDailyReports: {
+          lookbackDays: Math.max(1, Math.min(60, _numSetting('MISSING_DAILY_REPORT_LOOKBACK_DAYS', 7))),
+          escalationDays: Math.max(0, Math.min(60, _numSetting('MISSING_DAILY_REPORT_ESCALATION_DAYS', 2))),
+          maxRangeDays: Math.max(1, Math.min(90, _numSetting('MISSING_DAILY_REPORT_MAX_RANGE_DAYS', 31))),
+          allowCustomRange: _boolSetting('MISSING_DAILY_REPORT_ALLOW_CUSTOM_RANGE', true)
+        }
       });
       
     } catch (error) {
@@ -6838,6 +6892,10 @@
     const classNeedle = String((filters && filters.cls) || '').toLowerCase().trim();
     const subjectNeedle = String((filters && filters.subject) || '').toLowerCase().trim();
 
+    const _normKeyPart_ = (v) => {
+      return String(v ?? '').trim().replace(/\s+/g, ' ');
+    };
+
     const ttSh = _getSheet('Timetable');
     const ttHeaders = _headers(ttSh);
     const allTimetable = _rows(ttSh).map(function(row) { return _indexByHeader(row, ttHeaders); });
@@ -6855,7 +6913,7 @@
       if (d < fromIso || d > toIso) continue;
       const teacherEmail = String(r.teacherEmail || '').toLowerCase().trim();
       if (!teacherEmail) continue;
-      const key = `${teacherEmail}|${r.class}|${r.subject}|${r.period}`;
+      const key = `${teacherEmail}|${_normKeyPart_(r.class)}|${_normKeyPart_(r.subject)}|${_normKeyPart_(r.period)}`;
       if (!submittedByDate[d]) submittedByDate[d] = {};
       submittedByDate[d][key] = true;
     }
@@ -6869,21 +6927,19 @@
       const todaysTT = allTimetable.filter(function(tt) {
         return _normalizeDayName(tt.dayOfWeek) === _normalizeDayName(dayName);
       });
-      totalPeriods += todaysTT.length;
 
       const submittedKeys = submittedByDate[dateIso] || {};
 
       todaysTT.forEach(function(tt) {
         const tEmail = String(tt.teacherEmail || tt.teacher || '').toLowerCase().trim();
         if (!tEmail) return;
-        const key = `${tEmail}|${tt.class}|${tt.subject}|${tt.period}`;
-        if (submittedKeys[key]) return;
 
         const teacherName = tt.teacherName || tt.teacher || tEmail;
-        const cls = tt.class || '';
-        const sub = tt.subject || '';
+        const cls = _normKeyPart_(tt.class || '');
+        const sub = _normKeyPart_(tt.subject || '');
+        const per = _normKeyPart_(tt.period || 0);
 
-        // Optional server-side filters (to reduce payload)
+        // Filters apply to BOTH total scheduled periods and missing payload.
         if (teacherNeedle) {
           const nm = String(teacherName || '').toLowerCase();
           if (nm.indexOf(teacherNeedle) === -1 && tEmail.indexOf(teacherNeedle) === -1) return;
@@ -6892,8 +6948,13 @@
           if (String(cls || '').toLowerCase().trim() !== classNeedle) return;
         }
         if (subjectNeedle) {
-          if (String(sub || '').toLowerCase().indexOf(subjectNeedle) === -1) return;
+          if (String(sub || '').toLowerCase().trim() !== subjectNeedle) return;
         }
+
+        totalPeriods += 1;
+
+        const key = `${tEmail}|${cls}|${sub}|${per}`;
+        if (submittedKeys[key]) return;
 
         missing.push({
           date: dateIso,
@@ -6901,7 +6962,7 @@
           teacherEmail: tEmail,
           class: cls,
           subject: sub,
-          period: Number(tt.period || 0)
+          period: Number(per || 0)
         });
       });
     }

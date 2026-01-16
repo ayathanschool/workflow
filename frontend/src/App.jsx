@@ -108,7 +108,16 @@ const App = () => {
     allowNextWeekOnly: false,    // Next-week-only restriction disabled
     periodTimes: null,           // Will store custom period times if available
     periodTimesWeekday: null,    // Monday-Thursday period times
-    periodTimesFriday: null      // Friday period times
+    periodTimesFriday: null,     // Friday period times
+
+    // Missing Daily Reports (teacher dashboard)
+    // Controlled by HM via Settings sheet (served from getAppSettings)
+    missingDailyReports: {
+      lookbackDays: 7,
+      escalationDays: 2,
+      maxRangeDays: 31,
+      allowCustomRange: true
+    }
   });
   
   // Create a memoized version of appSettings to avoid unnecessary re-renders
@@ -118,7 +127,13 @@ const App = () => {
       allowNextWeekOnly: false,
       periodTimes: null,
       periodTimesWeekday: null,
-      periodTimesFriday: null
+      periodTimesFriday: null,
+      missingDailyReports: {
+        lookbackDays: 7,
+        escalationDays: 2,
+        maxRangeDays: 31,
+        allowCustomRange: true
+      }
     };
   }, [appSettings]);
 
@@ -160,7 +175,13 @@ const App = () => {
             allowNextWeekOnly: false, // Ignore sheet value; do not restrict to next week
             periodTimes: settings.periodTimes || settings.periodTimesWeekday || null,
             periodTimesWeekday: settings.periodTimesWeekday || null,
-            periodTimesFriday: settings.periodTimesFriday || null
+            periodTimesFriday: settings.periodTimesFriday || null,
+            missingDailyReports: {
+              lookbackDays: Number(settings?.missingDailyReports?.lookbackDays ?? 7) || 7,
+              escalationDays: Number(settings?.missingDailyReports?.escalationDays ?? 2) || 2,
+              maxRangeDays: Number(settings?.missingDailyReports?.maxRangeDays ?? 31) || 31,
+              allowCustomRange: settings?.missingDailyReports?.allowCustomRange !== false
+            }
           };
           setAppSettings(newSettings);
         }
@@ -672,6 +693,22 @@ const App = () => {
     const [liveTimetableState, setLiveTimetableState] = useState({ loading: false, periods: [], error: null });
     const [nowTick, setNowTick] = useState(0);
 
+    // Pending daily reports (teacher dashboard)
+    const [pendingReportsSummary, setPendingReportsSummary] = useState({
+      loading: false,
+      date: todayIST(),
+      count: 0,
+      pending: [],
+      missingDays: 0,
+      range: { from: '', to: '' }
+    });
+
+    const [missingReportsExpanded, setMissingReportsExpanded] = useState(false);
+
+    const [missingRange, setMissingRange] = useState({ from: '', to: '' });
+    const [missingRangeDraft, setMissingRangeDraft] = useState({ from: '', to: '' });
+    const [missingRangeTouched, setMissingRangeTouched] = useState(false);
+
     // Send notification modal state - now using app-level state
     // const [showSendNotification, setShowSendNotification] = useState(true); // Removed - moved to app level
     // const [notificationData, setNotificationData] = useState({
@@ -1040,6 +1077,222 @@ const App = () => {
       return () => { cancelled = true; };
     }, [currentUser?.email, Array.isArray(currentUser?.roles) ? currentUser.roles.join('|') : String(currentUser?.roles || '')]);
 
+    // Missing daily reports: compute for recent past days up to yesterday (11:59pm IST). Excludes today.
+    useEffect(() => {
+      if (!currentUser?.email) return;
+      if (!hasAnyRole(['teacher', 'class teacher', 'daily reporting teachers'])) return;
+      if (hasAnyRole(['h m', 'super admin', 'superadmin', 'super_admin'])) return;
+
+      let cancelled = false;
+
+      const normalizeText = (v) => String(v || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/[^a-z0-9 ]+/g, '');
+
+      const normalizePeriod = (v) => {
+        const s = String(v ?? '').trim();
+        const m = s.match(/(\d+)/);
+        return m ? m[1] : s;
+      };
+
+      const normalizePeriods = (timetableRes) => {
+        if (Array.isArray(timetableRes)) return timetableRes;
+        if (Array.isArray(timetableRes?.periods)) return timetableRes.periods;
+        if (Array.isArray(timetableRes?.data)) return timetableRes.data;
+        return [];
+      };
+
+      const buildKey = (obj) => {
+        const period = normalizePeriod(obj?.period ?? obj?.Period ?? obj?.selectedPeriod ?? obj?.periodNumber ?? obj?.slot);
+        const cls = normalizeText(obj?.class ?? obj?.Class ?? obj?.className ?? obj?.standard ?? obj?.grade);
+        const subjRaw = obj?.isSubstitution
+          ? (obj?.substituteSubject ?? obj?.subject ?? obj?.Subject ?? obj?.subjectName)
+          : (obj?.subject ?? obj?.Subject ?? obj?.subjectName);
+        const subj = normalizeText(subjRaw);
+        return `${period}|${cls}|${subj}`;
+      };
+
+      const istNow = () => {
+        try {
+          return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+        } catch {
+          return new Date();
+        }
+      };
+
+      const yesterdayIST = () => {
+        const base = istNow();
+        base.setDate(base.getDate() - 1);
+        return base;
+      };
+
+      const formatIST = (d) => {
+        try {
+          return d.toLocaleString('en-CA', {
+            timeZone: 'Asia/Kolkata',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+          }).split(',')[0];
+        } catch {
+          return todayIST();
+        }
+      };
+
+      const addDaysIso = (iso, deltaDays) => {
+        const d = new Date(`${iso}T00:00:00Z`);
+        if (isNaN(d.getTime())) return iso;
+        d.setUTCDate(d.getUTCDate() + Number(deltaDays || 0));
+        return d.toISOString().slice(0, 10);
+      };
+
+      const clampToYesterday = (iso) => {
+        const y = formatIST(yesterdayIST());
+        if (!iso) return y;
+        return String(iso) > String(y) ? y : String(iso);
+      };
+
+      const getDatesInRangeDesc = (fromIso, toIso, maxDays) => {
+        const out = [];
+        const from = String(fromIso || '').trim();
+        const to = String(toIso || '').trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return out;
+        if (from > to) return out;
+        const max = Math.max(1, Number(maxDays || 1));
+        let cur = to;
+        for (let i = 0; i < max; i++) {
+          out.push(cur);
+          if (cur === from) break;
+          cur = addDaysIso(cur, -1);
+        }
+        return out;
+      };
+
+      const isWeekendIST = (iso) => {
+        try {
+          const dayName = new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Asia/Kolkata' });
+          return dayName === 'Saturday' || dayName === 'Sunday';
+        } catch {
+          return false;
+        }
+      };
+
+      // Initialize default range from HM settings (lookbackDays), ending at yesterday.
+      // Only applies if the teacher has not manually changed the range.
+      const maybeInitRange = () => {
+        if (missingRangeTouched) return;
+        const y = formatIST(yesterdayIST());
+        const lookback = Math.max(1, Number(memoizedSettings?.missingDailyReports?.lookbackDays ?? 7) || 7);
+        const from = addDaysIso(y, -(lookback - 1));
+        const nextRange = { from, to: y };
+
+        // Avoid unnecessary state churn
+        if (missingRange.from !== nextRange.from || missingRange.to !== nextRange.to) {
+          setMissingRange(nextRange);
+          setMissingRangeDraft(nextRange);
+        }
+      };
+
+      const run = async () => {
+        maybeInitRange();
+
+        const maxRangeDays = Math.max(1, Number(memoizedSettings?.missingDailyReports?.maxRangeDays ?? 31) || 31);
+        const from = String(missingRange.from || '').trim();
+        const to = clampToYesterday(String(missingRange.to || '').trim());
+        if (!from || !to) return;
+
+        const dates = getDatesInRangeDesc(from, to, maxRangeDays).filter(d => !isWeekendIST(d));
+        setPendingReportsSummary(prev => ({
+          ...prev,
+          loading: true,
+          date: to,
+          range: { from, to }
+        }));
+
+        try {
+          const results = await Promise.all(
+            dates.map(async (date) => {
+              try {
+                const daily = await api.getTeacherDailyData(currentUser.email, date);
+                const timetableRes = daily?.timetableWithReports || daily?.timetable || daily?.timetableData || daily?.timetableRes || daily;
+                const periods = normalizePeriods(timetableRes);
+                const reports = Array.isArray(daily?.reports) ? daily.reports : [];
+
+                const submitted = new Set(
+                  reports
+                    .map(r => buildKey(r))
+                    .filter(k => String(k).split('|').every(part => String(part || '').trim()))
+                );
+
+                const teachPeriods = (Array.isArray(periods) ? periods : [])
+                  .filter(p => {
+                    const k = buildKey(p);
+                    const parts = String(k).split('|');
+                    if (parts.length !== 3) return false;
+                    const [pp, cc, ss] = parts;
+                    if (!String(pp || '').trim() || !String(cc || '').trim() || !String(ss || '').trim()) return false;
+                    // ignore obvious free periods
+                    if (ss === 'free' || ss === 'no class' || ss === 'noclass') return false;
+                    return true;
+                  })
+                  .map(p => ({
+                    date,
+                    period: p?.period ?? p?.Period ?? p?.periodNumber ?? p?.slot ?? '',
+                    class: p?.class ?? p?.Class ?? p?.className ?? '',
+                    subject: p?.isSubstitution ? (p?.substituteSubject ?? p?.subject ?? p?.Subject ?? '') : (p?.subject ?? p?.Subject ?? ''),
+                    isSubstitution: !!p?.isSubstitution
+                  }));
+
+                const missing = teachPeriods.filter(p => !submitted.has(buildKey(p)));
+                return { date, missing };
+              } catch {
+                return { date, missing: [] };
+              }
+            })
+          );
+
+          const allMissing = results
+            .flatMap(r => Array.isArray(r?.missing) ? r.missing : [])
+            .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || (Number(a.period || 0) - Number(b.period || 0)));
+
+          const totalMissing = allMissing.length;
+          const missingDays = new Set(allMissing.map(m => String(m?.date || '').trim()).filter(Boolean)).size;
+
+          if (cancelled) return;
+
+          setPendingReportsSummary({
+            loading: false,
+            date: to,
+            count: totalMissing,
+            pending: allMissing,
+            missingDays,
+            range: { from, to }
+          });
+
+          setInsights(prev => ({
+            ...prev,
+            pendingReports: totalMissing
+          }));
+        } catch (_e) {
+          if (cancelled) return;
+          setPendingReportsSummary(prev => ({ ...prev, loading: false, count: 0, pending: [], missingDays: 0 }));
+          setInsights(prev => ({ ...prev, pendingReports: 0 }));
+        }
+      };
+
+      run();
+      return () => { cancelled = true; };
+    }, [
+      currentUser?.email,
+      Array.isArray(currentUser?.roles) ? currentUser.roles.join('|') : String(currentUser?.roles || ''),
+      missingRange.from,
+      missingRange.to,
+      memoizedSettings?.missingDailyReports?.lookbackDays,
+      memoizedSettings?.missingDailyReports?.maxRangeDays
+    ]);
+
     // Live period data: fetch today's timetable (lightweight) and recompute periodically.
     useEffect(() => {
       if (!currentUser?.email) return;
@@ -1216,7 +1469,7 @@ const App = () => {
                     </span>
                   )}
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+                <div className={`grid grid-cols-2 ${hasRole('class teacher') ? 'md:grid-cols-5' : 'md:grid-cols-3'} gap-3 md:gap-4`}>
                   <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
                     <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
                       <School className="w-4 h-4 text-blue-600" /> Classes
@@ -1231,6 +1484,56 @@ const App = () => {
                     </div>
                     <div className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">{insights.subjectCount}</div>
                     <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Subjects assigned</div>
+                  </div>
+
+                  <div
+                    className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60"
+                    onClick={() => setMissingReportsExpanded(v => !v)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setMissingReportsExpanded(v => !v); }}
+                    aria-expanded={missingReportsExpanded ? 'true' : 'false'}
+                    title={missingReportsExpanded ? 'Hide missing reports' : 'Show missing reports'}
+                  >
+                    <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
+                      <FileText className="w-4 h-4 text-purple-600" /> Missing Reports
+                    </div>
+                    <div className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">
+                      {pendingReportsSummary.loading ? '—' : insights.pendingReports}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      {pendingReportsSummary.loading
+                        ? 'Checking till yesterday…'
+                        : (insights.pendingReports > 0
+                          ? `Range ${pendingReportsSummary?.range?.from || '-'} → ${pendingReportsSummary?.range?.to || pendingReportsSummary.date}`
+                          : `No missing reports up to ${pendingReportsSummary.date}`)}
+                    </div>
+                    {!pendingReportsSummary.loading && pendingReportsSummary.missingDays > Number(memoizedSettings?.missingDailyReports?.escalationDays ?? 2) && (
+                      <div className="mt-1 text-xs font-semibold text-red-700 dark:text-red-300">
+                        Meet the HM
+                      </div>
+                    )}
+                    {!pendingReportsSummary.loading && insights.pendingReports > 0 && Array.isArray(pendingReportsSummary.pending) && pendingReportsSummary.pending.length > 0 && (
+                      <div className="mt-2 space-y-0.5">
+                        {pendingReportsSummary.pending.slice(0, 3).map((p, idx) => (
+                          <div key={idx} className="text-xs text-gray-600 dark:text-gray-300">
+                            {String(p.date || '').trim() || '-'} · P{String(p.period || '').trim() || '-'} · {stripStdPrefix(String(p.class || '').trim() || '—')} · {String(p.subject || '').trim() || '—'}
+                          </div>
+                        ))}
+                        {pendingReportsSummary.pending.length > 3 && (
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            +{pendingReportsSummary.pending.length - 3} more
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setActiveView('reports'); }}
+                      className="mt-2 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                      type="button"
+                    >
+                      Open Daily Reports
+                    </button>
                   </div>
 
                   {hasRole('class teacher') && (
@@ -1257,6 +1560,149 @@ const App = () => {
                     </>
                   )}
                 </div>
+
+                {missingReportsExpanded && (
+                  <div className="mt-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/10">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
+                      <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        Missing Daily Reports
+                        <span className="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400">
+                          ({pendingReportsSummary?.range?.from || '-'} → {pendingReportsSummary?.range?.to || pendingReportsSummary.date})
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            try {
+                              const rows = Array.isArray(pendingReportsSummary?.pending) ? pendingReportsSummary.pending : [];
+                              const header = ['date','period','class','subject'];
+                              const csv = [header.join(',')]
+                                .concat(rows.map(r => {
+                                  const vals = [r?.date, r?.period, r?.class, r?.subject].map(v => {
+                                    const s = String(v ?? '').replace(/\r?\n/g, ' ').trim();
+                                    const escaped = s.replace(/"/g, '""');
+                                    return `"${escaped}"`;
+                                  });
+                                  return vals.join(',');
+                                }))
+                                .join('\n');
+                              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = `missing-daily-reports_${pendingReportsSummary?.range?.from || 'from'}_${pendingReportsSummary?.range?.to || 'to'}.csv`;
+                              document.body.appendChild(a);
+                              a.click();
+                              a.remove();
+                              URL.revokeObjectURL(url);
+                            } catch (_err) {
+                              // ignore download failures
+                            }
+                          }}
+                          className="text-xs text-gray-600 dark:text-gray-300 hover:underline"
+                        >
+                          Download CSV
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMissingReportsExpanded(false)}
+                          className="text-xs text-gray-600 dark:text-gray-300 hover:underline"
+                        >
+                          Hide
+                        </button>
+                      </div>
+                    </div>
+
+                    {!pendingReportsSummary.loading && (
+                      <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                        <div className="text-xs text-gray-600 dark:text-gray-300">
+                          Missing days: <span className="font-semibold">{pendingReportsSummary.missingDays}</span>
+                          {' · '}
+                          Escalation threshold: <span className="font-semibold">{Number(memoizedSettings?.missingDailyReports?.escalationDays ?? 2)}</span>
+                        </div>
+
+                        {pendingReportsSummary.missingDays > Number(memoizedSettings?.missingDailyReports?.escalationDays ?? 2) && (
+                          <div className="text-xs font-semibold text-red-700 dark:text-red-300">
+                            Meet the HM
+                          </div>
+                        )}
+
+                        {memoizedSettings?.missingDailyReports?.allowCustomRange !== false && (
+                          <div className="flex items-center gap-2 text-xs">
+                            <label className="text-gray-600 dark:text-gray-300">
+                              From
+                              <input
+                                type="date"
+                                value={missingRangeDraft.from || ''}
+                                onChange={(e) => {
+                                  setMissingRangeTouched(true);
+                                  setMissingRangeDraft(prev => ({ ...prev, from: e.target.value }));
+                                }}
+                                className="ml-2 px-2 py-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                              />
+                            </label>
+                            <label className="text-gray-600 dark:text-gray-300">
+                              To
+                              <input
+                                type="date"
+                                value={missingRangeDraft.to || ''}
+                                onChange={(e) => {
+                                  setMissingRangeTouched(true);
+                                  setMissingRangeDraft(prev => ({ ...prev, to: e.target.value }));
+                                }}
+                                className="ml-2 px-2 py-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMissingRangeTouched(true);
+                                setMissingRange({
+                                  from: String(missingRangeDraft.from || '').trim(),
+                                  to: String(missingRangeDraft.to || '').trim()
+                                });
+                              }}
+                              className="px-2 py-1 rounded bg-gray-900 dark:bg-gray-700 text-white hover:bg-gray-800 dark:hover:bg-gray-600"
+                            >
+                              Apply
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {pendingReportsSummary.loading ? (
+                      <div className="p-3 text-sm text-gray-600 dark:text-gray-300">Loading…</div>
+                    ) : (!Array.isArray(pendingReportsSummary.pending) || pendingReportsSummary.pending.length === 0) ? (
+                      <div className="p-3 text-sm text-gray-600 dark:text-gray-300">No missing reports found.</div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full text-sm">
+                          <thead className="bg-gray-50 dark:bg-gray-800/60 text-gray-700 dark:text-gray-200">
+                            <tr>
+                              <th className="text-left font-medium px-3 py-2">Date</th>
+                              <th className="text-left font-medium px-3 py-2">Period</th>
+                              <th className="text-left font-medium px-3 py-2">Class</th>
+                              <th className="text-left font-medium px-3 py-2">Subject</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pendingReportsSummary.pending.map((p, idx) => (
+                              <tr key={idx} className="border-t border-gray-100 dark:border-gray-800">
+                                <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{String(p.date || '').trim() || '—'}</td>
+                                <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{String(p.period || '').trim() ? `P${String(p.period || '').trim()}` : '—'}</td>
+                                <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{stripStdPrefix(String(p.class || '').trim() || '—')}</td>
+                                <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{String(p.subject || '').trim() || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
