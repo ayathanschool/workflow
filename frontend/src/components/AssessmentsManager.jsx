@@ -1,8 +1,9 @@
 import { FileText, Award, ClipboardCheck } from 'lucide-react';
 import React, { useState, useMemo } from 'react';
 import ExamManagement from './ExamManagement';
-import ReportCard from './ReportCard';
+import ExamMarksMatrix from './ExamMarksMatrix';
 import Marklist from './Marklist';
+import ReportCard from './ReportCard';
 
 /**
  * Unified Assessments Manager
@@ -33,6 +34,13 @@ const AssessmentsManager = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       icon: Award,
       description: 'Create exams and enter marks',
       component: ExamManagement
+    },
+    {
+      id: 'marks-matrix',
+      label: 'Marks Matrix',
+      icon: Award,
+      description: 'One-page marks + grade table',
+      component: ExamMarksMatrix
     },
     {
       id: 'reports',

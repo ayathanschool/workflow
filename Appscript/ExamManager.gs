@@ -1747,6 +1747,17 @@ function getStudentsBatch(classes) {
 function getStudentReportCard(examType, admNo = '', cls = '') {
   try {
     Logger.log(`Getting report card for examType: ${examType}, admNo: ${admNo}, class: ${cls}`);
+
+    // Normalize class values for comparisons only.
+    // This avoids mismatches like "STD 4A" vs "4A" without altering stored data.
+    const _normClassForReportCard = function (v) {
+      return String(v || '')
+        .toLowerCase()
+        .trim()
+        .replace(/^std\s*/i, '')
+        .replace(/\s+/g, '');
+    };
+    const _clsNorm = cls ? _normClassForReportCard(cls) : '';
     
     // Get exams of this type
     const examSh = _getSheet('Exams');
@@ -1754,7 +1765,7 @@ function getStudentReportCard(examType, admNo = '', cls = '') {
     const exams = _rows(examSh).map(r => _indexByHeader(r, examHeaders))
       .filter(exam => {
         const typeMatch = !examType || String(exam.examType || '').toLowerCase() === String(examType).toLowerCase();
-        const classMatch = !cls || String(exam.class || '') === String(cls);
+        const classMatch = !_clsNorm || _normClassForReportCard(exam.class) === _clsNorm;
         return typeMatch && classMatch;
       });
     
@@ -1770,7 +1781,7 @@ function getStudentReportCard(examType, admNo = '', cls = '') {
     const studentsHeaders = _headers(studentsSh);
     const students = _rows(studentsSh).map(r => _indexByHeader(r, studentsHeaders))
       .filter(student => {
-        const classMatch = !cls || String(student.class || '') === String(cls);
+        const classMatch = !_clsNorm || _normClassForReportCard(student.class) === _clsNorm;
         const admNoMatch = !admNo || String(student.admNo || '') === String(admNo);
         return classMatch && admNoMatch;
       });

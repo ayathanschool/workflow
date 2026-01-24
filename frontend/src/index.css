@@ -203,6 +203,92 @@
   }
 }
 
+/* Generic print helpers + Marks Matrix print layout */
+.print-only {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: landscape;
+    margin: 10mm;
+  }
+
+  /* Only when printing the Marks Matrix page, hide all other app chrome */
+  body.print-matrix * {
+    visibility: hidden;
+  }
+
+  body.print-matrix .matrix-printable,
+  body.print-matrix .matrix-printable * {
+    visibility: visible;
+  }
+
+  body.print-matrix .matrix-printable {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  .matrix-printable {
+    background: #fff !important;
+  }
+
+  .matrix-print-header {
+    margin-bottom: 8px;
+  }
+
+  /* Disable sticky columns while printing (prevents overlap/cutoff). */
+  .matrix-printable .sticky {
+    position: static !important;
+    left: auto !important;
+    z-index: auto !important;
+    background: transparent !important;
+  }
+
+  .matrix-printable table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 10pt;
+  }
+
+  /* Tighter table for PDF/print */
+  .matrix-printable th,
+  .matrix-printable td {
+    padding: 3px 4px !important;
+  }
+
+  /* Repeat header row on each printed page */
+  .matrix-printable thead {
+    display: table-header-group;
+  }
+
+  .matrix-printable tfoot {
+    display: table-footer-group;
+  }
+
+  .matrix-printable th,
+  .matrix-printable td {
+    border: 1px solid #000;
+    padding: 4px 6px;
+    vertical-align: top;
+  }
+}
+
 /* Touch-friendly interactive elements */
 @media (hover: none) and (pointer: coarse) {
   button, .clickable {
