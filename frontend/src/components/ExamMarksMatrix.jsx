@@ -206,14 +206,77 @@ export default function ExamMarksMatrix({ user }) {
 
   const printMatrix = () => {
     if (!selectedClass || !selectedExamType || !reportData) return;
-    try {
-      document.body.classList.add('print-matrix');
-      // Give the browser a tick to apply print styles before opening dialog.
-      setTimeout(() => window.print(), 50);
-      // Cleanup after print dialog is closed (best-effort).
-      setTimeout(() => document.body.classList.remove('print-matrix'), 1000);
-    } catch {
-      window.print();
+    
+    // Detect mobile devices
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+    
+    if (isMobile) {
+      // Mobile: Open print-friendly view in new context
+      try {
+        const printContent = document.querySelector('.matrix-printable');
+        if (!printContent) {
+          alert('Unable to prepare print view. Please try again.');
+          return;
+        }
+        
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) {
+          alert('Please allow pop-ups to print/save as PDF.');
+          return;
+        }
+        
+        printWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Marks Matrix - ${displayClass(selectedClass)} - ${selectedExamType}</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              body { font-family: Arial, sans-serif; padding: 10px; background: #fff; }
+              .header { text-align: center; margin-bottom: 15px; }
+              .header h1 { font-size: 18px; margin-bottom: 5px; }
+              .header p { font-size: 12px; color: #666; }
+              table { width: 100%; border-collapse: collapse; font-size: 10px; }
+              th, td { border: 1px solid #000; padding: 4px 3px; text-align: left; vertical-align: top; }
+              th { background: #f0f0f0; font-weight: bold; }
+              tfoot td { background: #f9f9f9; font-weight: 500; }
+              @media print {
+                @page { size: landscape; margin: 10mm; }
+                body { padding: 0; }
+                thead { display: table-header-group; }
+                tfoot { display: table-footer-group; }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <h1>Exam Marks Matrix</h1>
+              <p>Class: ${displayClass(selectedClass)} | Exam Type: ${selectedExamType}</p>
+            </div>
+            ${printContent.querySelector('table')?.outerHTML || '<p>No data to print</p>'}
+            <script>
+              window.onload = function() {
+                setTimeout(function() { window.print(); }, 500);
+              };
+            </script>
+          </body>
+          </html>
+        `);
+        printWindow.document.close();
+      } catch (err) {
+        console.error('Mobile print error:', err);
+        alert('Unable to open print view. Please try downloading CSV instead.');
+      }
+    } else {
+      // Desktop: Use standard print with body class
+      try {
+        document.body.classList.add('print-matrix');
+        setTimeout(() => window.print(), 50);
+        setTimeout(() => document.body.classList.remove('print-matrix'), 1000);
+      } catch {
+        window.print();
+      }
     }
   };
 
