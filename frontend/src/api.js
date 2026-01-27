@@ -1723,13 +1723,24 @@ export async function callAPI(action, params = {}) {
 // ===== SCHEME-BASED LESSON PLANNING API =====
 
 // Get approved schemes for lesson planning with chapter/session breakdown
-export async function getApprovedSchemesForLessonPlanning(teacherEmail) {
+export async function getApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly = true) {
   const q = new URLSearchParams({
     action: 'getApprovedSchemesForLessonPlanning',
-    teacherEmail
+    teacherEmail,
+    summaryOnly: summaryOnly.toString()
   });
   // Settings-driven response (planning windows + bulkOnly mode) should reflect sheet edits immediately.
   return getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
+}
+
+// Get detailed chapter/session breakdown for a specific scheme (lazy loading)
+export async function getSchemeDetails(schemeId, teacherEmail) {
+  const q = new URLSearchParams({
+    action: 'getSchemeDetails',
+    schemeId,
+    teacherEmail
+  });
+  return getJSON(`${BASE_URL}?${q.toString()}`);
 }
 
 // Get available periods for lesson plan scheduling

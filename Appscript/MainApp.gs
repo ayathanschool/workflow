@@ -831,6 +831,11 @@
         return _handleGetApprovedSchemesForLessonPlanning(e.parameter);
       }
       
+      // NEW: Lazy load scheme details on demand
+      if (action === 'getSchemeDetails') {
+        return _handleGetSchemeDetails(e.parameter);
+      }
+      
       if (action === 'getAvailablePeriodsForLessonPlan') {
         return _handleGetAvailablePeriodsForLessonPlan(e.parameter);
       }
@@ -2387,6 +2392,7 @@
   function _handleGetApprovedSchemesForLessonPlanning(params) {
     try {
       const teacherEmail = params.teacherEmail;
+      const summaryOnly = String(params.summaryOnly || '').trim() === 'true' || String(params.summaryOnly || '').trim() === '1';
       
       if (!teacherEmail) {
         return _respond({ success: false, error: 'Teacher email is required' });
@@ -2398,10 +2404,10 @@
       // Try the original function first
       try {
         if (typeof getApprovedSchemesForLessonPlanning === 'function') {
-          Logger.log('Using original getApprovedSchemesForLessonPlanning function');
+          Logger.log(`Using original getApprovedSchemesForLessonPlanning function, summaryOnly: ${summaryOnly}`);
           const result = noCache && (typeof _fetchApprovedSchemesForLessonPlanning === 'function')
-            ? _fetchApprovedSchemesForLessonPlanning(teacherEmail)
-            : getApprovedSchemesForLessonPlanning(teacherEmail);
+            ? _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly)
+            : getApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly);
           return _respond(result);
         }
       } catch (originalError) {
@@ -2576,6 +2582,37 @@
     } catch (error) {
       Logger.log('Error in _handleGetApprovedSchemesForLessonPlanning:', error.message);
       Logger.log('Error stack:', error.stack);
+      return _respond({ success: false, error: error.message });
+    }
+  }
+
+  /**
+  * Handle GET scheme details (lazy load chapters/sessions on demand)
+  */
+  function _handleGetSchemeDetails(params) {
+    try {
+      const schemeId = params.schemeId;
+      const teacherEmail = params.teacherEmail;
+      
+      if (!schemeId || !teacherEmail) {
+        return _respond({ success: false, error: 'schemeId and teacherEmail are required' });
+      }
+      
+      // Try the dedicated function first
+      try {
+        if (typeof getSchemeDetails === 'function') {
+          Logger.log(`Getting scheme details for ${schemeId}`);
+          const result = getSchemeDetails(schemeId, teacherEmail);
+          return _respond(result);
+        }
+      } catch (error) {
+        Logger.log('getSchemeDetails function failed:', error.message);
+      }
+      
+      return _respond({ success: false, error: 'getSchemeDetails function not available' });
+      
+    } catch (error) {
+      Logger.log('Error in _handleGetSchemeDetails:', error.message);
       return _respond({ success: false, error: error.message });
     }
   }

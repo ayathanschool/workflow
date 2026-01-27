@@ -51,6 +51,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   const [showLessonPlanForm, setShowLessonPlanForm] = useState(false);
   const [planningDateRange, setPlanningDateRange] = useState(null);
   const [classFilter, setClassFilter] = useState('all');
+  const [subjectFilter, setSubjectFilter] = useState('all');
   const [lessonPlanData, setLessonPlanData] = useState({
     learningObjectives: '',
     teachingMethods: '',
@@ -73,6 +74,59 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   
   // Bulk-only mode setting
   const [isBulkOnlyMode, setIsBulkOnlyMode] = useState(false);
+  
+  // NEW: Track expanded schemes and loading state for lazy loading
+  const [expandedSchemes, setExpandedSchemes] = useState({});
+  const [loadingSchemeDetails, setLoadingSchemeDetails] = useState({});
+
+  // Load detailed chapter/session data for a specific scheme (lazy loading)
+  const loadSchemeDetails = useCallback(async (schemeId) => {
+    // Toggle expanded state
+    const isCurrentlyExpanded = expandedSchemes[schemeId];
+    
+    if (isCurrentlyExpanded) {
+      // Collapse - just toggle the state
+      setExpandedSchemes(prev => ({ ...prev, [schemeId]: false }));
+      return;
+    }
+    
+    // Check if we already have the chapters data
+    const scheme = schemes.find(s => s.schemeId === schemeId);
+    if (scheme && scheme.chapters && scheme.chapters.length > 0) {
+      // Already loaded, just expand
+      setExpandedSchemes(prev => ({ ...prev, [schemeId]: true }));
+      return;
+    }
+    
+    // Need to load details
+    try {
+      setLoadingSchemeDetails(prev => ({ ...prev, [schemeId]: true }));
+      
+      console.log(`Loading details for scheme: ${schemeId}`);
+      const response = await api.getSchemeDetails(schemeId, userEmail);
+      
+      console.log('Scheme details response:', response);
+      
+      if (response.data && response.data.success) {
+        // Update the scheme in the schemes array with the detailed data
+        setSchemes(prevSchemes => prevSchemes.map(s => 
+          s.schemeId === schemeId 
+            ? { ...s, ...response.data, chaptersLoaded: true }
+            : s
+        ));
+        
+        // Expand the scheme
+        setExpandedSchemes(prev => ({ ...prev, [schemeId]: true }));
+      } else {
+        alert('Failed to load scheme details: ' + (response.data?.error || 'Unknown error'));
+      }
+    } catch (err) {
+      console.error('Error loading scheme details:', err);
+      alert('Error loading scheme details: ' + err.message);
+    } finally {
+      setLoadingSchemeDetails(prev => ({ ...prev, [schemeId]: false }));
+    }
+  }, [expandedSchemes, schemes, userEmail]);
 
   const loadApprovedSchemes = useCallback(async () => {
     try {
@@ -86,13 +140,13 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
         return;
       }
 
-      const response = await apiRequest('getApprovedSchemesForLessonPlanning', {
-        teacherEmail: userEmail
-      });
+      // NEW: Load summary-only initially for faster performance
+      const response = await api.getApprovedSchemesForLessonPlanning(userEmail, true);
 
       console.log('Scheme response:', response);
       console.log('Response data:', response.data);
       console.log('Response success:', response.data?.success);
+      console.log('Response summaryOnly:', response.data?.summaryOnly);
       console.log('Response schemes:', response.data?.schemes);
       console.log('Planning date range:', response.data?.planningDateRange);
 
@@ -133,10 +187,18 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
     return [...new Set(schemes.map(s => s.class))].sort();
   }, [schemes]);
 
+  // Memoize available subjects to prevent recalculation on every render
+  const availableSubjects = useMemo(() => {
+    return [...new Set(schemes.map(s => s.subject))].sort();
+  }, [schemes]);
+
   // Memoize filtered schemes to prevent recalculation on every render
   const filteredSchemes = useMemo(() => {
-    return classFilter === 'all' ? schemes : schemes.filter(s => s.class === classFilter);
-  }, [schemes, classFilter]);
+    return schemes.filter(s => 
+      (classFilter === 'all' || s.class === classFilter) &&
+      (subjectFilter === 'all' || s.subject === subjectFilter)
+    );
+  }, [schemes, classFilter, subjectFilter]);
 
   // Memoize statistics to prevent recalculation on every render
   const statistics = useMemo(() => {
@@ -538,22 +600,40 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
             </div>
           </div>
 
-          {/* Filter - Full width on mobile */}
-          <div className="flex items-center space-x-2">
-            <label htmlFor="class-filter" className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap">
-              Class:
-            </label>
-            <select
-              id="class-filter"
-              value={classFilter}
-              onChange={(e) => setClassFilter(e.target.value)}
-              className="flex-1 border border-gray-300 rounded-md px-2 sm:px-3 py-1.5 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="all">All Classes</option>
-              {availableClasses.map(cls => (
-                <option key={cls} value={cls}>{cls}</option>
-              ))}
-            </select>
+          {/* Filters - Full width on mobile, side by side on desktop */}
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-4">
+            <div className="flex items-center space-x-2 flex-1">
+              <label htmlFor="class-filter" className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap">
+                Class:
+              </label>
+              <select
+                id="class-filter"
+                value={classFilter}
+                onChange={(e) => setClassFilter(e.target.value)}
+                className="flex-1 border border-gray-300 rounded-md px-2 sm:px-3 py-1.5 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="all">All Classes</option>
+                {availableClasses.map(cls => (
+                  <option key={cls} value={cls}>{cls}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center space-x-2 flex-1">
+              <label htmlFor="subject-filter" className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap">
+                Subject:
+              </label>
+              <select
+                id="subject-filter"
+                value={subjectFilter}
+                onChange={(e) => setSubjectFilter(e.target.value)}
+                className="flex-1 border border-gray-300 rounded-md px-2 sm:px-3 py-1.5 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="all">All Subjects</option>
+                {availableSubjects.map(subj => (
+                  <option key={subj} value={subj}>{subj}</option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -567,16 +647,45 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
             {filteredSchemes.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                <p>No schemes found for class "{classFilter}"</p>
-                <button
-                  onClick={() => setClassFilter('all')}
-                  className="mt-2 px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-                >
-                  Show All Classes
-                </button>
+                <p>
+                  No schemes found
+                  {classFilter !== 'all' && ` for class "${classFilter}"`}
+                  {subjectFilter !== 'all' && ` for subject "${subjectFilter}"`}
+                </p>
+                <div className="mt-2 space-x-2">
+                  {classFilter !== 'all' && (
+                    <button
+                      onClick={() => setClassFilter('all')}
+                      className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                      Clear Class Filter
+                    </button>
+                  )}
+                  {subjectFilter !== 'all' && (
+                    <button
+                      onClick={() => setSubjectFilter('all')}
+                      className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                      Clear Subject Filter
+                    </button>
+                  )}
+                  {(classFilter !== 'all' || subjectFilter !== 'all') && (
+                    <button
+                      onClick={() => { setClassFilter('all'); setSubjectFilter('all'); }}
+                      className="px-4 py-2 text-sm bg-gray-600 text-white rounded hover:bg-gray-700"
+                    >
+                      Clear All Filters
+                    </button>
+                  )}
+                </div>
               </div>
             ) : (
-              filteredSchemes.map((scheme) => (
+              filteredSchemes.map((scheme) => {
+                const isExpanded = expandedSchemes[scheme.schemeId];
+                const isLoadingDetails = loadingSchemeDetails[scheme.schemeId];
+                const hasChapters = scheme.chapters && scheme.chapters.length > 0;
+                
+                return (
                   <div key={scheme.schemeId} className="border border-gray-200 rounded-lg p-3 sm:p-4">
                     {/* Mobile-optimized scheme header */}
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
@@ -604,8 +713,27 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                       </div>
                     </div>
 
-                    <div className="space-y-3 sm:space-y-4">
-                      {scheme.chapters.map((chapter) => (
+                    {/* Expand/Collapse button */}
+                    <button
+                      onClick={() => loadSchemeDetails(scheme.schemeId)}
+                      disabled={isLoadingDetails}
+                      className={`w-full mb-3 px-4 py-2 text-sm rounded-lg font-medium transition-colors flex items-center justify-between ${
+                        isExpanded
+                          ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                      }`}
+                    >
+                      <span>{isExpanded ? 'Hide Sessions' : 'Show Sessions'}</span>
+                      {isLoadingDetails ? (
+                        <span className="animate-spin">⏳</span>
+                      ) : (
+                        <span>{isExpanded ? '▲' : '▼'}</span>
+                      )}
+                    </button>
+
+                    {/* Chapters and sessions (only shown when expanded) */}
+                    {isExpanded && hasChapters && (
+                      <div className="space-y-3 sm:space-y-4">{scheme.chapters.map((chapter) => (
                         <div key={`${scheme.schemeId}-${chapter.chapterNumber}`} className="border-l-4 border-blue-200 pl-2 sm:pl-4">
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
                             <div className="flex items-center gap-2 sm:gap-3">
@@ -787,9 +915,11 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                           </div>
                         </div>
                       ))}
-                    </div>
+                      </div>
+                    )}
                   </div>
-                ))
+                );
+              })
             )}
           </div>
         )}

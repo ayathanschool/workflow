@@ -542,16 +542,17 @@ function _calculateLessonPlanningDateRange() {
 /**
  * Get approved schemes for a teacher with chapter/session breakdown
  */
-function getApprovedSchemesForLessonPlanning(teacherEmail) {
+function getApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
   // Cache-buster: bump this string whenever the payload/gating rules change.
   // Apps Script caches can otherwise serve stale "schemes" objects without new fields.
-  const APPROVED_SCHEMES_CACHE_VERSION = 'v2026-01-15-approved-schemes-cascade-reported-1';
-  const cacheKey = generateCacheKey('approved_schemes', { email: teacherEmail, v: APPROVED_SCHEMES_CACHE_VERSION });
+  const APPROVED_SCHEMES_CACHE_VERSION = 'v2026-01-27-summary-lazy-load';
+  const mode = summaryOnly ? 'summary' : 'full';
+  const cacheKey = generateCacheKey('approved_schemes', { email: teacherEmail, mode: mode, v: APPROVED_SCHEMES_CACHE_VERSION });
 
   // NOTE: The heavy schemes+progress payload is cached, but Settings-driven flags
   // (bulkOnly mode, planningDateRange) must reflect sheet edits immediately.
   const res = getCachedData(cacheKey, function() {
-    return _fetchApprovedSchemesForLessonPlanning(teacherEmail);
+    return _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly);
   }, CACHE_TTL.MEDIUM);
 
   try {
@@ -582,9 +583,9 @@ function getApprovedSchemesForLessonPlanning(teacherEmail) {
   return res;
 }
 
-function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
+function _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
   try {
-    Logger.log(`Getting approved schemes for lesson planning: ${teacherEmail}`);
+    Logger.log(`Getting approved schemes for lesson planning: ${teacherEmail}, summaryOnly: ${summaryOnly}`);
     
     if (!teacherEmail) {
       return { success: false, error: 'Teacher email is required' };
@@ -596,6 +597,11 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
       (scheme.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase() &&
       (scheme.status || '').toLowerCase() === 'approved'
     );
+    
+    // OPTIMIZATION: If summary-only mode, return lightweight payload
+    if (summaryOnly) {
+      return _buildSummaryOnlyResponse(approvedSchemes, teacherEmail);
+    }
 
     // Get existing lesson plans to check what's already planned
     const existingPlans = _getCachedSheetData('LessonPlans').data;
@@ -829,6 +835,312 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail) {
     Logger.log(`Error getting approved schemes for lesson planning: ${error.message}`);
     return { success: false, error: error.message };
   }
+}
+
+/**
+ * Build lightweight summary-only response (no session details)
+ * PERFORMANCE: Reduces payload from ~500KB to ~50KB for typical teacher
+ */
+function _buildSummaryOnlyResponse(approvedSchemes, teacherEmail) {
+  const existingPlans = _getCachedSheetData('LessonPlans').data;
+  const teacherPlans = existingPlans.filter(plan => {
+    if (!plan || typeof plan !== 'object') return false;
+    return String(plan.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
+  });
+  
+  const allReports = _getCachedSheetData('DailyReports').data;
+  const teacherReports = allReports.filter(report => {
+    if (!report || typeof report !== 'object') return false;
+    return String(report.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
+  });
+  
+  const normKey = function(v) { return String(v || '').toLowerCase().trim(); };
+  const planKey = function(schemeId, chapter, sessionNo) {
+    const s = Number(sessionNo);
+    return `${String(schemeId || '').trim()}|${normKey(chapter)}|${isNaN(s) ? 0 : s}`;
+  };
+  
+  // Build plan index
+  const plansByKey = new Map();
+  for (const p of teacherPlans) {
+    if (!p || typeof p !== 'object') continue;
+    const key = planKey(p.schemeId, p.chapter, p.session);
+    if (!key) continue;
+    plansByKey.set(key, p);
+  }
+  
+  const schemes = approvedSchemes.map(scheme => {
+    const schemeChapters = _parseSchemeChapters(scheme);
+    let totalSessions = 0;
+    let plannedSessions = 0;
+    
+    for (const chapter of schemeChapters) {
+      const sessions = _generateSessionsForChapter(chapter, scheme);
+      totalSessions += sessions.length;
+      
+      for (const session of sessions) {
+        const existingPlan = plansByKey.get(planKey(scheme.schemeId, chapter.name, session.sessionNumber));
+        if (existingPlan) {
+          const statusLower = String(existingPlan.status || 'planned').trim().toLowerCase();
+          if (statusLower !== 'cancelled' && statusLower !== 'rejected') {
+            plannedSessions++;
+          }
+        }
+      }
+    }
+    
+    return {
+      schemeId: scheme.schemeId,
+      class: scheme.class,
+      subject: scheme.subject,
+      academicYear: scheme.academicYear,
+      term: scheme.term,
+      totalChapters: schemeChapters.length,
+      totalSessions: totalSessions,
+      plannedSessions: plannedSessions,
+      overallProgress: totalSessions > 0 ? Math.round((plannedSessions / totalSessions) * 100) : 0,
+      createdAt: scheme.createdAt,
+      approvedAt: scheme.approvedAt,
+      // No chapters array - lazy load on demand
+      chaptersLoaded: false
+    };
+  });
+  
+  const dateRange = _calculateLessonPlanningDateRange();
+  const settings = _getLessonPlanSettings();
+  
+  return {
+    success: true,
+    summaryOnly: true,
+    schemes: schemes,
+    planningDateRange: {
+      startDate: dateRange.startDate,
+      endDate: dateRange.endDate,
+      deferredDays: dateRange.deferredDays,
+      daysAhead: dateRange.daysAhead,
+      preparationDay: dateRange.preparationDay,
+      isPreparationDay: dateRange.isPreparationDay,
+      canSubmit: dateRange.canSubmit
+    },
+    settings: settings,
+    summary: {
+      totalSchemes: schemes.length,
+      totalSessions: schemes.reduce((sum, s) => sum + s.totalSessions, 0),
+      plannedSessions: schemes.reduce((sum, s) => sum + s.plannedSessions, 0),
+      overallProgress: schemes.length > 0 ? 
+        Math.round(schemes.reduce((sum, s) => sum + s.overallProgress, 0) / schemes.length) : 0
+    }
+  };
+}
+
+/**
+ * Get detailed chapter/session breakdown for a specific scheme (lazy loading)
+ * PERFORMANCE: Only fetches details for one scheme instead of all schemes
+ */
+function getSchemeDetails(schemeId, teacherEmail) {
+  try {
+    Logger.log(`Getting scheme details for: ${schemeId}`);
+    
+    if (!schemeId || !teacherEmail) {
+      return { success: false, error: 'schemeId and teacherEmail are required' };
+    }
+    
+    const cacheKey = generateCacheKey('scheme_details', { id: schemeId, email: teacherEmail, v: 'v2026-01-27' });
+    
+    return getCachedData(cacheKey, function() {
+      return _fetchSchemeDetails(schemeId, teacherEmail);
+    }, CACHE_TTL.MEDIUM);
+    
+  } catch (error) {
+    Logger.log(`Error getting scheme details: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
+function _fetchSchemeDetails(schemeId, teacherEmail) {
+  const schemesData = _getCachedSheetData('Schemes').data;
+  const scheme = schemesData.find(s => 
+    String(s.schemeId || '').trim() === String(schemeId || '').trim() &&
+    String(s.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase() &&
+    String(s.status || '').toLowerCase() === 'approved'
+  );
+  
+  if (!scheme) {
+    return { success: false, error: 'Scheme not found or not approved' };
+  }
+  
+  // Get existing lesson plans
+  const existingPlans = _getCachedSheetData('LessonPlans').data;
+  const teacherPlans = existingPlans.filter(plan => {
+    if (!plan || typeof plan !== 'object') return false;
+    return String(plan.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
+  });
+  
+  // Get daily reports
+  const allReports = _getCachedSheetData('DailyReports').data;
+  const teacherReports = allReports.filter(report => {
+    if (!report || typeof report !== 'object') return false;
+    return String(report.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
+  });
+  
+  // Build indexes (same as full fetch)
+  const normKey = function(v) { return String(v || '').toLowerCase().trim(); };
+  const csKey = function(cls, subj) { return `${normKey(cls)}|${normKey(subj)}`; };
+  const chapterKey = function(cls, subj, chapter) { return `${csKey(cls, subj)}|${normKey(chapter)}`; };
+  const reportSessionKey = function(cls, subj, chapter, sessionNo) {
+    const s = Number(sessionNo);
+    return `${csKey(cls, subj)}|${normKey(chapter)}|${isNaN(s) ? 0 : s}`;
+  };
+  const planKey = function(sid, chapter, sessionNo) {
+    const s = Number(sessionNo);
+    return `${String(sid || '').trim()}|${normKey(chapter)}|${isNaN(s) ? 0 : s}`;
+  };
+  
+  // Plans indexed by (schemeId + chapter + session)
+  const plansByKey = new Map();
+  for (const p of teacherPlans) {
+    if (!p || typeof p !== 'object') continue;
+    const key = planKey(p.schemeId, p.chapter, p.session);
+    if (!key) continue;
+    const existing = plansByKey.get(key);
+    if (!existing) {
+      plansByKey.set(key, p);
+    } else {
+      const existingTs = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+      const nextTs = new Date(p.updatedAt || p.createdAt || 0).getTime();
+      if (nextTs >= existingTs) plansByKey.set(key, p);
+    }
+  }
+  
+  const isChapterMarkedComplete = function(report) {
+    const status = normKey(report && report.chapterStatus);
+    const chapterCompleted = report && report.chapterCompleted;
+    const chapterCompletedStr = normKey(chapterCompleted);
+    return (
+      status.indexOf('chapter complete') !== -1 ||
+      chapterCompleted === true ||
+      chapterCompletedStr === 'true' ||
+      chapterCompletedStr === 'yes' ||
+      chapterCompletedStr === 'y' ||
+      chapterCompletedStr === '1'
+    );
+  };
+  
+  // Reports indexed by (class + subject + chapter [+ session])
+  const hasReportBySession = new Set();
+  const completedChapters = new Set();
+  const relevantClassSubjects = new Set([csKey(scheme.class, scheme.subject)]);
+  
+  for (const r of teacherReports) {
+    if (!r || typeof r !== 'object') continue;
+    if (!relevantClassSubjects.has(csKey(r.class, r.subject))) continue;
+    
+    const chKey = chapterKey(r.class, r.subject, r.chapter);
+    if (chKey && isChapterMarkedComplete(r)) completedChapters.add(chKey);
+    
+    const sessKey = reportSessionKey(r.class, r.subject, r.chapter, r.sessionNo);
+    if (sessKey) hasReportBySession.add(sessKey);
+  }
+  
+  // Build chapter details
+  const schemeChapters = _parseSchemeChapters(scheme);
+  const completionByChapter = {};
+  for (const ch of schemeChapters) {
+    const key = normKey(ch && ch.name);
+    if (!key) continue;
+    completionByChapter[key] = completedChapters.has(chapterKey(scheme.class, scheme.subject, key));
+  }
+  
+  const chaptersWithSessions = [];
+  for (let chapterIndex = 0; chapterIndex < schemeChapters.length; chapterIndex++) {
+    const chapter = schemeChapters[chapterIndex];
+    
+    const gate = _isPreparationAllowedForSession(chapter, 1, scheme);
+    const canPrepare = !!(gate && gate.allowed);
+    
+    const sessions = _generateSessionsForChapter(chapter, scheme);
+    const sessionsWithStatus = sessions.map(session => {
+      const existingPlan = plansByKey.get(planKey(scheme.schemeId, chapter.name, session.sessionNumber));
+      
+      let status = 'not-planned';
+      let cascadeMarked = false;
+      if (existingPlan) {
+        const rawStatus = String(existingPlan.status || 'planned').trim();
+        const statusLower = rawStatus.toLowerCase();
+        const hasOriginalSlotChange = existingPlan.originalDate && existingPlan.originalDate !== existingPlan.selectedDate;
+        const isOriginalCascade = /rescheduled\\s*\\(cascade\\)/i.test(rawStatus);
+        
+        const hasReport = hasReportBySession.has(reportSessionKey(scheme.class, scheme.subject, chapter.name, session.sessionNumber));
+        
+        if (isOriginalCascade && hasOriginalSlotChange) {
+          cascadeMarked = true;
+          if (hasReport && !['cancelled','rejected'].includes(statusLower)) {
+            status = 'Reported';
+          } else {
+            status = 'Cascaded';
+          }
+        } else if (hasReport && !['cancelled','rejected'].includes(statusLower)) {
+          status = 'Reported';
+        } else {
+          status = rawStatus;
+        }
+      }
+      
+      return {
+        sessionNumber: session.sessionNumber,
+        sessionName: session.sessionName,
+        estimatedDuration: session.estimatedDuration,
+        status: status,
+        plannedDate: existingPlan ? existingPlan.selectedDate : null,
+        plannedPeriod: existingPlan ? existingPlan.selectedPeriod : null,
+        originalDate: existingPlan ? (existingPlan.originalDate || null) : null,
+        originalPeriod: existingPlan ? (existingPlan.originalPeriod || null) : null,
+        lessonPlanId: existingPlan ? existingPlan.lpId : null,
+        cascadeMarked: cascadeMarked
+      };
+    });
+    
+    const totalSessions = sessions.length;
+    const plannedSessions = sessionsWithStatus.filter(s => {
+      const status = String(s.status || '').toLowerCase();
+      return status !== 'not-planned' && status !== 'cancelled' && status !== 'rejected';
+    }).length;
+    
+    const currentChapterKey = normKey(chapter && chapter.name);
+    const currentChapterCompleted = !!completionByChapter[currentChapterKey];
+    
+    chaptersWithSessions.push({
+      chapterNumber: chapter.number,
+      chapterName: chapter.name,
+      chapterDescription: chapter.description,
+      totalSessions: totalSessions,
+      plannedSessions: plannedSessions,
+      completionPercentage: totalSessions > 0 ? Math.round((plannedSessions / totalSessions) * 100) : 0,
+      sessions: sessionsWithStatus,
+      chapterCompleted: currentChapterCompleted,
+      canPrepare: canPrepare,
+      lockReason: canPrepare ? '' : (gate && gate.message ? gate.message : 'Previous chapter should be completed')
+    });
+  }
+  
+  const totalSessions = chaptersWithSessions.reduce((sum, ch) => sum + ch.totalSessions, 0);
+  const totalPlanned = chaptersWithSessions.reduce((sum, ch) => sum + ch.plannedSessions, 0);
+  
+  return {
+    success: true,
+    schemeId: scheme.schemeId,
+    class: scheme.class,
+    subject: scheme.subject,
+    academicYear: scheme.academicYear,
+    term: scheme.term,
+    totalChapters: chaptersWithSessions.length,
+    totalSessions: totalSessions,
+    plannedSessions: totalPlanned,
+    overallProgress: totalSessions > 0 ? Math.round((totalPlanned / totalSessions) * 100) : 0,
+    chapters: chaptersWithSessions,
+    createdAt: scheme.createdAt,
+    approvedAt: scheme.approvedAt
+  };
 }
 
 /**
