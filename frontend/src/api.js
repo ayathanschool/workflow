@@ -585,6 +585,18 @@ export async function submitDailyReport(data) {
   return postJSON(`${BASE_URL}?action=submitDailyReport`, data)
 }
 
+// Get unreported sessions for backfill reporting (HM-controlled feature)
+export async function getUnreportedSessions(teacherEmail, cls, subject, chapter) {
+  const q = new URLSearchParams({
+    action: 'getUnreportedSessions',
+    teacherEmail,
+    class: cls,
+    subject,
+    chapter
+  });
+  return getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
+}
+
 export async function checkChapterCompletion(data) {
   return postJSON(`${BASE_URL}?action=checkChapterCompletion`, data)
 }
