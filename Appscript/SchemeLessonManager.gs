@@ -945,7 +945,7 @@ function getSchemeDetails(schemeId, teacherEmail) {
       return { success: false, error: 'schemeId and teacherEmail are required' };
     }
     
-    const cacheKey = generateCacheKey('scheme_details', { id: schemeId, email: teacherEmail, v: 'v2026-01-27' });
+    const cacheKey = generateCacheKey('scheme_details', { id: schemeId, email: teacherEmail, v: 'v2026-02-02-filtered' });
     
     return getCachedData(cacheKey, function() {
       return _fetchSchemeDetails(schemeId, teacherEmail);
@@ -969,22 +969,37 @@ function _fetchSchemeDetails(schemeId, teacherEmail) {
     return { success: false, error: 'Scheme not found or not approved' };
   }
   
-  // Get existing lesson plans
-  const existingPlans = _getCachedSheetData('LessonPlans').data;
-  const teacherPlans = existingPlans.filter(plan => {
-    if (!plan || typeof plan !== 'object') return false;
-    return String(plan.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
-  });
-  
-  // Get daily reports
-  const allReports = _getCachedSheetData('DailyReports').data;
-  const teacherReports = allReports.filter(report => {
-    if (!report || typeof report !== 'object') return false;
-    return String(report.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
-  });
-  
-  // Build indexes (same as full fetch)
+  // OPTIMIZATION: Filter plans and reports EARLY to only this scheme's class/subject
   const normKey = function(v) { return String(v || '').toLowerCase().trim(); };
+  const schemeClass = normKey(scheme.class);
+  const schemeSubject = normKey(scheme.subject);
+  
+  // Get existing lesson plans - FILTER EARLY by schemeId first, then class/subject
+  const existingPlans = _getCachedSheetData('LessonPlans').data;
+  const schemePlans = existingPlans.filter(plan => {
+    if (!plan || typeof plan !== 'object') return false;
+    // First filter: only this schemeId OR matching class+subject for this teacher
+    const matchesSchemeId = String(plan.schemeId || '').trim() === String(schemeId || '').trim();
+    const matchesClassSubject = (
+      normKey(plan.class) === schemeClass && 
+      normKey(plan.subject) === schemeSubject &&
+      String(plan.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase()
+    );
+    return matchesSchemeId || matchesClassSubject;
+  });
+  
+  // Get daily reports - FILTER EARLY by class/subject only
+  const allReports = _getCachedSheetData('DailyReports').data;
+  const schemeReports = allReports.filter(report => {
+    if (!report || typeof report !== 'object') return false;
+    return (
+      normKey(report.class) === schemeClass &&
+      normKey(report.subject) === schemeSubject &&
+      String(report.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase()
+    );
+  });
+  
+  // Build indexes (only for filtered data)
   const csKey = function(cls, subj) { return `${normKey(cls)}|${normKey(subj)}`; };
   const chapterKey = function(cls, subj, chapter) { return `${csKey(cls, subj)}|${normKey(chapter)}`; };
   const reportSessionKey = function(cls, subj, chapter, sessionNo) {
@@ -996,9 +1011,9 @@ function _fetchSchemeDetails(schemeId, teacherEmail) {
     return `${String(sid || '').trim()}|${normKey(chapter)}|${isNaN(s) ? 0 : s}`;
   };
   
-  // Plans indexed by (schemeId + chapter + session)
+  // Plans indexed by (schemeId + chapter + session) - much smaller now!
   const plansByKey = new Map();
-  for (const p of teacherPlans) {
+  for (const p of schemePlans) {
     if (!p || typeof p !== 'object') continue;
     const key = planKey(p.schemeId, p.chapter, p.session);
     if (!key) continue;
@@ -1026,14 +1041,12 @@ function _fetchSchemeDetails(schemeId, teacherEmail) {
     );
   };
   
-  // Reports indexed by (class + subject + chapter [+ session])
+  // Reports indexed by (class + subject + chapter [+ session]) - much smaller now!
   const hasReportBySession = new Set();
   const completedChapters = new Set();
-  const relevantClassSubjects = new Set([csKey(scheme.class, scheme.subject)]);
   
-  for (const r of teacherReports) {
+  for (const r of schemeReports) {
     if (!r || typeof r !== 'object') continue;
-    if (!relevantClassSubjects.has(csKey(r.class, r.subject))) continue;
     
     const chKey = chapterKey(r.class, r.subject, r.chapter);
     if (chKey && isChapterMarkedComplete(r)) completedChapters.add(chKey);
