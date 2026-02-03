@@ -5733,6 +5733,10 @@ const App = () => {
     const [showTeacherStats, setShowTeacherStats] = useState(true);
     // Removed: timetable date view UI
     const [rowSubmitting, setRowSubmitting] = useState({});
+    const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+    const [rescheduleLesson, setRescheduleLesson] = useState(null);
+    const [newDate, setNewDate] = useState('');
+    const [newPeriod, setNewPeriod] = useState('');
     const [refreshing, setRefreshing] = useState(false);
     const [showChapterModal, setShowChapterModal] = useState(false);
     const [selectedChapter, setSelectedChapter] = useState(null);
@@ -6882,6 +6886,19 @@ const App = () => {
                             </button>
                           </>
                         )}
+                        <button 
+                          onClick={() => {
+                            setRescheduleLesson(lesson);
+                            setNewDate(lesson.date || '');
+                            setNewPeriod(lesson.period || '');
+                            setShowRescheduleModal(true);
+                          }}
+                          disabled={!!rowSubmitting[lesson.lpId]}
+                          className={`text-blue-600 px-1.5 py-0.5 bg-blue-100 rounded text-xs ${rowSubmitting[lesson.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-blue-900'}`}
+                          title="Reschedule"
+                        >
+                          📅
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -7163,18 +7180,9 @@ const App = () => {
           </div>
         )}
 
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">Lesson Plan Details</h2>
-          {filteredLessons.length === 0 ? (
-            <p className="text-gray-700">No pending lesson plans.</p>
-          ) : (
-            <p className="text-gray-700">Click the eye icon to view individual lesson, or book icon to view all chapter sessions together.</p>
-          )}
-        </div>
-
-          {/* Chapter Sessions Modal (view-only) */}
-          {showChapterModal && selectedChapter && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={closeChapterModal}>
+        {/* Chapter Sessions Modal (view-only) */}
+        {showChapterModal && selectedChapter && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={closeChapterModal}>
               <div className="bg-white w-full max-w-5xl rounded-xl shadow-2xl p-4 md:p-6 mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 <div className="flex justify-between items-start gap-4 mb-6">
                   <div className="flex-1 min-w-0">
@@ -7323,7 +7331,99 @@ const App = () => {
               </div>
             </div>
           )}
-      </div>
+
+      {/* Reschedule Modal */}
+      {showRescheduleModal && rescheduleLesson && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Reschedule Lesson Plan</h3>
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm text-gray-600 mb-2">
+                  <strong>Teacher:</strong> {rescheduleLesson.teacherName}<br/>
+                  <strong>Class:</strong> {rescheduleLesson.class}<br/>
+                  <strong>Subject:</strong> {rescheduleLesson.subject}<br/>
+                  <strong>Chapter:</strong> {rescheduleLesson.chapter} (Session {rescheduleLesson.session})
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">New Date</label>
+                <input
+                  type="date"
+                  value={newDate}
+                  onChange={(e) => setNewDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">New Period</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={newPeriod}
+                  onChange={(e) => setNewPeriod(e.target.value)}
+                  placeholder="Period number (1-10)"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={async () => {
+                    if (!newDate) {
+                      alert('Please select a date');
+                      return;
+                    }
+                    if (!newPeriod) {
+                      alert('Please enter a period number');
+                      return;
+                    }
+                    
+                    try {
+                      setRowSubmitting(prev => ({ ...prev, [rescheduleLesson.lpId]: true }));
+                      const response = await api.rescheduleLessonPlan(
+                        rescheduleLesson.lpId,
+                        newDate,
+                        newPeriod,
+                        currentUser.email
+                      );
+                      
+                      if (response.data?.success || response.success) {
+                        alert('Lesson plan rescheduled successfully!');
+                        setShowRescheduleModal(false);
+                        setRescheduleLesson(null);
+                        refreshApprovals();
+                      } else {
+                        alert('Failed to reschedule: ' + (response.data?.error || response.error || 'Unknown error'));
+                      }
+                    } catch (err) {
+                      console.error('Error rescheduling:', err);
+                      alert('Error rescheduling lesson plan: ' + err.message);
+                    } finally {
+                      setRowSubmitting(prev => ({ ...prev, [rescheduleLesson.lpId]: false }));
+                    }
+                  }}
+                  disabled={rowSubmitting[rescheduleLesson.lpId]}
+                  className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {rowSubmitting[rescheduleLesson.lpId] ? 'Rescheduling...' : 'Reschedule'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowRescheduleModal(false);
+                    setRescheduleLesson(null);
+                  }}
+                  disabled={rowSubmitting[rescheduleLesson.lpId]}
+                  className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
     );
   };
 

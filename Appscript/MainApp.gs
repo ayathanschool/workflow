@@ -2037,6 +2037,11 @@
         return _handleChapterBulkUpdateLessonPlanStatus(data);
       }
 
+      // Reschedule lesson plan (change date and period) - HM/Admin only
+      if (action === 'rescheduleLessonPlan') {
+        return _handleRescheduleLessonPlan(data);
+      }
+
       // Simple diagnostic: reveals LessonPlans sheet headers and detects status column
       if (action === 'diagnoseLessonPlanHeaders') {
         const email = (data.email || e.parameter.email || '').toLowerCase().trim();
@@ -3104,6 +3109,84 @@
     } catch (error) {
       Logger.log(`Error in batch update: ${error.message}`);
       return _respond({ error: error.message });
+    }
+  }
+
+  /**
+   * Handle reschedule lesson plan (change date and period)
+   * HM/Admin only feature
+   */
+  function _handleRescheduleLessonPlan(data) {
+    try {
+      const lpId = data.lpId;
+      const newDate = data.newDate;
+      const newPeriod = data.newPeriod;
+      const requesterEmail = (data.requesterEmail || '').toLowerCase().trim();
+
+      if (!lpId) {
+        return _respond({ success: false, error: 'Lesson plan ID required' });
+      }
+      if (!newDate) {
+        return _respond({ success: false, error: 'New date required' });
+      }
+      if (!newPeriod) {
+        return _respond({ success: false, error: 'New period required' });
+      }
+
+      // Permission check: only HM or Admin can reschedule
+      if (requesterEmail && !_isHM(requesterEmail) && !_isSuperAdmin(requesterEmail)) {
+        return _respond({ success: false, error: 'Permission denied. Only HM or Admin can reschedule lesson plans.' });
+      }
+
+      const sh = _getSheet('LessonPlans');
+      const headers = _headers(sh);
+      const data_rows = sh.getRange(2, 1, sh.getLastRow() - 1, headers.length).getValues();
+
+      const lpIdColIndex = headers.indexOf('lpId');
+      const dateColIndex = headers.indexOf('date');
+      const periodColIndex = headers.indexOf('period');
+
+      if (lpIdColIndex === -1 || dateColIndex === -1 || periodColIndex === -1) {
+        return _respond({ success: false, error: 'Required columns not found in LessonPlans sheet' });
+      }
+
+      // Find the lesson plan row
+      let rowIndex = -1;
+      for (let i = 0; i < data_rows.length; i++) {
+        if (String(data_rows[i][lpIdColIndex]) === String(lpId)) {
+          rowIndex = i + 2; // +2 because arrays are 0-indexed and row 1 is headers
+          break;
+        }
+      }
+
+      if (rowIndex === -1) {
+        return _respond({ success: false, error: 'Lesson plan not found' });
+      }
+
+      // Update date and period
+      sh.getRange(rowIndex, dateColIndex + 1).setValue(newDate);
+      sh.getRange(rowIndex, periodColIndex + 1).setValue(newPeriod);
+
+      Logger.log(`Rescheduled lesson plan ${lpId} to ${newDate} period ${newPeriod} by ${requesterEmail}`);
+      
+      // Clear cache
+      try {
+        invalidateCache('teacher_lessonplans');
+        invalidateCache('hm_lessonplans');
+      } catch (e) {
+        // Ignore cache clear errors
+      }
+
+      return _respond({ 
+        success: true, 
+        message: 'Lesson plan rescheduled successfully',
+        lpId: lpId,
+        newDate: newDate,
+        newPeriod: newPeriod
+      });
+    } catch (error) {
+      Logger.log(`Error rescheduling lesson plan: ${error.message}`);
+      return _respond({ success: false, error: error.message });
     }
   }
 

@@ -488,6 +488,16 @@ export async function chapterBulkUpdateLessonPlanStatus(schemeId, chapter, statu
   })
 }
 
+// Reschedule lesson plan (change date and period) - HM/Admin only
+export async function rescheduleLessonPlan(lpId, newDate, newPeriod, requesterEmail = '') {
+  return postJSON(`${BASE_URL}?action=rescheduleLessonPlan`, {
+    lpId,
+    newDate,
+    newPeriod,
+    requesterEmail
+  })
+}
+
 // Grouped lesson plans by chapter
 export async function getLessonPlansByChapter({ teacher = '', class: cls = '', subject = '', status = 'Pending Review', dateFrom = '', dateTo = '', noCache = false } = {}) {
   const q = new URLSearchParams({ action: 'getLessonPlansByChapter' });
