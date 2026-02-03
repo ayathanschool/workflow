@@ -5730,13 +5730,23 @@ const App = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [newLessonsCount, setNewLessonsCount] = useState(0);
     const [showNewLessonsNotif, setShowNewLessonsNotif] = useState(false);
-    const [showTeacherStats, setShowTeacherStats] = useState(true);
+    const [showTeacherStats, setShowTeacherStats] = useState(false);
     // Removed: timetable date view UI
     const [rowSubmitting, setRowSubmitting] = useState({});
     const [showRescheduleModal, setShowRescheduleModal] = useState(false);
     const [rescheduleLesson, setRescheduleLesson] = useState(null);
     const [newDate, setNewDate] = useState('');
     const [newPeriod, setNewPeriod] = useState('');
+    const [rescheduleAvailablePeriods, setRescheduleAvailablePeriods] = useState([]);
+    const [loadingPeriods, setLoadingPeriods] = useState(false);
+    const [reschedulePlannedPeriods, setReschedulePlannedPeriods] = useState([]);
+    const [showOtherClassPeriods, setShowOtherClassPeriods] = useState(false);
+    const [showBulkRescheduleModal, setShowBulkRescheduleModal] = useState(false);
+    const [bulkRescheduleChapter, setBulkRescheduleChapter] = useState(null);
+    const [bulkRescheduleDates, setBulkRescheduleDates] = useState([]);
+    const [bulkTimetables, setBulkTimetables] = useState({});
+    const [bulkPlannedPeriods, setBulkPlannedPeriods] = useState({});
+    const [showOtherClassPeriodsBulk, setShowOtherClassPeriodsBulk] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [showChapterModal, setShowChapterModal] = useState(false);
     const [selectedChapter, setSelectedChapter] = useState(null);
@@ -6889,8 +6899,11 @@ const App = () => {
                         <button 
                           onClick={() => {
                             setRescheduleLesson(lesson);
-                            setNewDate(lesson.date || '');
-                            setNewPeriod(lesson.period || '');
+                            setNewDate(lesson.selectedDate || lesson.date || '');
+                            setNewPeriod(String(lesson.selectedPeriod || lesson.period || ''));
+                            setShowOtherClassPeriods(false);
+                            setRescheduleAvailablePeriods([]);
+                            setReschedulePlannedPeriods([]);
                             setShowRescheduleModal(true);
                           }}
                           disabled={!!rowSubmitting[lesson.lpId]}
@@ -7219,6 +7232,27 @@ const App = () => {
                         <span className="text-xs text-gray-600 w-full sm:w-auto">Pending: {pc}</span>
                       ); })()}
                       <button
+                        onClick={() => {
+                          setBulkRescheduleChapter(selectedChapter);
+                          const sortedLessons = selectedChapter.lessons.sort((a,b) => parseInt(a.session||0) - parseInt(b.session||0));
+                          setBulkRescheduleDates(sortedLessons.map(l => ({ 
+                            lpId: l.lpId, 
+                            session: l.session, 
+                            teacherEmail: l.teacherEmail || '',
+                            date: l.selectedDate || '', 
+                            period: l.selectedPeriod || '',
+                            newDate: '',
+                            newPeriod: ''
+                          })));
+                          setBulkTimetables({});
+                          setBulkPlannedPeriods({});
+                          setShowOtherClassPeriodsBulk(false);
+                          setShowBulkRescheduleModal(true);
+                        }}
+                        className="px-2 sm:px-3 py-2 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 flex-1 sm:flex-initial whitespace-nowrap"
+                        title="Reschedule all sessions in this chapter"
+                      >📅 Reschedule Chapter</button>
+                      <button
                         disabled={bulkSubmitting || selectedChapter.lessons.filter(l => l.status === 'Pending Review').length === 0}
                         onClick={() => bulkUpdateChapter('Ready')}
                         className={`px-2 sm:px-3 py-2 rounded-lg text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 flex-1 sm:flex-initial whitespace-nowrap`}
@@ -7335,7 +7369,7 @@ const App = () => {
       {/* Reschedule Modal */}
       {showRescheduleModal && rescheduleLesson && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Reschedule Lesson Plan</h3>
             <div className="space-y-4">
               <div>
@@ -7351,22 +7385,142 @@ const App = () => {
                 <input
                   type="date"
                   value={newDate}
-                  onChange={(e) => setNewDate(e.target.value)}
+                  onChange={async (e) => {
+                    const selectedDate = e.target.value;
+                    setNewDate(selectedDate);
+                    setNewPeriod('');
+                    
+                    // Fetch teacher's timetable and lesson plans for selected date
+                    if (selectedDate && rescheduleLesson.teacherEmail) {
+                      setLoadingPeriods(true);
+                      try {
+                        // Fetch timetable
+                        const timetableData = await api.getTeacherDailyTimetable(rescheduleLesson.teacherEmail, selectedDate);
+                        const periods = timetableData?.periods || [];
+                        setRescheduleAvailablePeriods(periods);
+                        
+                        // Fetch lesson plans for this date to check which periods are already scheduled
+                        const lessonPlansData = await api.getLessonPlansForDate(selectedDate);
+                        const teacherPlans = (lessonPlansData?.lessonPlans || []).filter(
+                          lp => (lp.teacherEmail || '').toLowerCase() === rescheduleLesson.teacherEmail.toLowerCase()
+                        );
+                        const plannedPeriods = teacherPlans.map(lp => String(lp.period || lp.selectedPeriod || ''));
+                        setReschedulePlannedPeriods(plannedPeriods);
+                      } catch (err) {
+                        console.error('Error loading timetable:', err);
+                        setRescheduleAvailablePeriods([]);
+                        setReschedulePlannedPeriods([]);
+                      } finally {
+                        setLoadingPeriods(false);
+                      }
+                    } else {
+                      setRescheduleAvailablePeriods([]);
+                      setReschedulePlannedPeriods([]);
+                    }
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">New Period</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="10"
-                  value={newPeriod}
-                  onChange={(e) => setNewPeriod(e.target.value)}
-                  placeholder="Period number (1-10)"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
+              
+              {loadingPeriods && (
+                <div className="text-center py-2">
+                  <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                  <p className="text-sm text-gray-600 mt-2">Loading periods...</p>
+                </div>
+              )}
+              
+              {!loadingPeriods && newDate && rescheduleAvailablePeriods.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Select Period</label>
+                  <label className="flex items-center gap-2 text-xs text-gray-600 mb-2">
+                    <input
+                      type="checkbox"
+                      checked={showOtherClassPeriods}
+                      onChange={(e) => setShowOtherClassPeriods(e.target.checked)}
+                    />
+                    Show other class periods (from timetable)
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto">
+                    {rescheduleAvailablePeriods.map((period) => {
+                      const norm = (v) => String(v || '').toLowerCase().trim();
+                      const targetClass = norm(rescheduleLesson?.class);
+                      const targetSubject = norm(rescheduleLesson?.subject);
+
+                      const periodNum = period.period || period.Period || period.periodNumber;
+                      const isFree = !period.class || period.class === 'Free' || period.subject === 'Free';
+                      const hasLessonPlan = reschedulePlannedPeriods.includes(String(periodNum));
+                      const isTarget = !isFree && norm(period.class) === targetClass && (!targetSubject || norm(period.subject) === targetSubject);
+                      const isSelected = String(newPeriod) === String(periodNum);
+
+                      if (!showOtherClassPeriods && !isFree && !isTarget) {
+                        return null;
+                      }
+                      
+                      return (
+                        <button
+                          key={periodNum}
+                          type="button"
+                          onClick={() => setNewPeriod(String(periodNum))}
+                          className={`p-3 rounded-lg border-2 text-left transition-all ${
+                            isSelected
+                              ? 'border-blue-500 bg-blue-50'
+                              : hasLessonPlan
+                              ? 'border-orange-200 bg-orange-50 hover:border-orange-400'
+                              : isTarget
+                              ? 'border-green-200 bg-green-50 hover:border-green-400'
+                              : isFree
+                              ? 'border-gray-200 bg-gray-50 hover:border-gray-400'
+                              : 'border-slate-200 bg-slate-50 hover:border-slate-400'
+                          }`}
+                        >
+                          <div className="font-semibold text-sm">
+                            Period {periodNum}
+                            {isSelected && <span className="ml-2 text-blue-600">✓</span>}
+                          </div>
+                          <div className="text-xs mt-1">
+                            {hasLessonPlan ? (
+                              <span className="text-orange-700">📅 Lesson Scheduled</span>
+                            ) : isTarget ? (
+                              <span className="text-green-700">✅ {rescheduleLesson.class} ({rescheduleLesson.subject})</span>
+                            ) : isFree ? (
+                              <span className="text-gray-700">Free</span>
+                            ) : (
+                              <>
+                                <div className="text-gray-700">{period.class}</div>
+                                <div className="text-gray-600">{period.subject}</div>
+                              </>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    <span className="text-green-600">● Green</span> = {rescheduleLesson.class} ({rescheduleLesson.subject}),
+                    <span className="text-gray-600 ml-2">● Gray</span> = Free period,
+                    <span className="text-orange-600 ml-2">● Orange</span> = Lesson already scheduled
+                  </p>
+                </div>
+              )}
+              
+              {!loadingPeriods && newDate && rescheduleAvailablePeriods.length === 0 && (
+                <div className="text-sm text-gray-600 p-3 bg-gray-50 rounded">
+                  No timetable found for this date. You can still enter a period number manually.
+                  <div className="mt-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Period Number</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={newPeriod}
+                      onChange={(e) => setNewPeriod(e.target.value)}
+                      placeholder="Enter period (1-10)"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
+              )}
+              
               <div className="flex gap-3 mt-6">
                 <button
                   onClick={async () => {
@@ -7385,7 +7539,7 @@ const App = () => {
                         rescheduleLesson.lpId,
                         newDate,
                         newPeriod,
-                        currentUser.email
+                        memoizedUser?.email || ''
                       );
                       
                       if (response.data?.success || response.success) {
@@ -7414,6 +7568,264 @@ const App = () => {
                     setRescheduleLesson(null);
                   }}
                   disabled={rowSubmitting[rescheduleLesson.lpId]}
+                  className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    
+      {/* Bulk Reschedule Chapter Modal */}
+      {showBulkRescheduleModal && bulkRescheduleChapter && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Reschedule Chapter: {bulkRescheduleChapter.chapter}</h3>
+            <div className="space-y-4">
+              <div className="bg-blue-50 p-3 rounded-lg">
+                <p className="text-sm text-gray-700">
+                  <strong>Class:</strong> {bulkRescheduleChapter.class}<br/>
+                  <strong>Subject:</strong> {bulkRescheduleChapter.subject}<br/>
+                  <strong>Total Sessions:</strong> {bulkRescheduleDates.length}
+                </p>
+              </div>
+              
+              <div className="text-sm text-gray-600 bg-amber-50 p-3 rounded-lg">
+                <div>
+                  ℹ️ Select a date to see suggested periods. <span className="text-green-600">● Green</span> = {bulkRescheduleChapter.class} ({bulkRescheduleChapter.subject}), <span className="text-gray-600">● Gray</span> = Free, <span className="text-orange-600">● Orange</span> = Lesson already scheduled.
+                </div>
+                <label className="mt-2 flex items-center gap-2 text-xs text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={showOtherClassPeriodsBulk}
+                    onChange={(e) => setShowOtherClassPeriodsBulk(e.target.checked)}
+                  />
+                  Show other class periods (from timetable)
+                </label>
+              </div>
+              
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Session</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Current Date</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Current Period</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">New Date</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">New Period</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {bulkRescheduleDates.map((item, idx) => (
+                      <tr key={item.lpId} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 text-sm font-medium text-gray-900">{item.session}</td>
+                        <td className="px-3 py-2 text-sm text-gray-600">{item.date || '-'}</td>
+                        <td className="px-3 py-2 text-sm text-gray-600">{item.period || '-'}</td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="date"
+                            value={bulkRescheduleDates[idx]?.newDate || ''}
+                            onChange={async (e) => {
+                              const selectedDate = e.target.value;
+                              const updated = [...bulkRescheduleDates];
+                              updated[idx] = { ...updated[idx], newDate: selectedDate, newPeriod: '' };
+                              setBulkRescheduleDates(updated);
+                              
+                              // Fetch teacher timetable and lesson plans for this date
+                              if (selectedDate && item.teacherEmail) {
+                                const key = `${idx}-${selectedDate}`;
+                                setBulkTimetables(prev => ({ ...prev, [key]: { loading: true, periods: [] } }));
+                                try {
+                                  // Fetch timetable
+                                  const timetableData = await api.getTeacherDailyTimetable(item.teacherEmail, selectedDate);
+                                  const periods = timetableData?.periods || [];
+                                  setBulkTimetables(prev => ({ ...prev, [key]: { loading: false, periods } }));
+                                  
+                                  // Fetch lesson plans for this date
+                                  const lessonPlansData = await api.getLessonPlansForDate(selectedDate);
+                                  const teacherPlans = (lessonPlansData?.lessonPlans || []).filter(
+                                    lp => (lp.teacherEmail || '').toLowerCase() === item.teacherEmail.toLowerCase()
+                                  );
+                                  const plannedPeriods = teacherPlans.map(lp => String(lp.period || lp.selectedPeriod || ''));
+                                  setBulkPlannedPeriods(prev => ({ ...prev, [key]: plannedPeriods }));
+                                } catch (err) {
+                                  console.error('Error loading timetable:', err);
+                                  setBulkTimetables(prev => ({ ...prev, [key]: { loading: false, periods: [] } }));
+                                  setBulkPlannedPeriods(prev => ({ ...prev, [key]: [] }));
+                                }
+                              }
+                            }}
+                            className="px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex flex-col gap-1">
+                            {(() => {
+                              const key = `${idx}-${bulkRescheduleDates[idx]?.newDate || ''}`;
+                              const timetableData = bulkTimetables[key];
+                              const periods = timetableData?.periods || [];
+                              const loading = timetableData?.loading;
+                              
+                              if (loading) {
+                                return <span className="text-xs text-gray-500">Loading...</span>;
+                              }
+                              
+                              if (bulkRescheduleDates[idx]?.newDate && periods.length > 0) {
+                                const norm = (v) => String(v || '').toLowerCase().trim();
+                                const targetClass = norm(bulkRescheduleChapter?.class);
+                                const targetSubject = norm(bulkRescheduleChapter?.subject);
+                                const plannedPeriods = bulkPlannedPeriods[key] || [];
+                                return (
+                                  <div className="flex flex-wrap gap-1">
+                                    {periods.map((p) => {
+                                      const periodNum = p.period || p.Period || p.periodNumber;
+                                      const isFree = !p.class || p.class === 'Free' || p.subject === 'Free';
+                                      const hasLessonPlan = plannedPeriods.includes(String(periodNum));
+                                      const isTarget = !isFree && norm(p.class) === targetClass && (!targetSubject || norm(p.subject) === targetSubject);
+                                      const isSelected = String(bulkRescheduleDates[idx]?.newPeriod) === String(periodNum);
+
+                                      if (!showOtherClassPeriodsBulk && !isFree && !isTarget) {
+                                        return null;
+                                      }
+                                      return (
+                                        <button
+                                          key={periodNum}
+                                          type="button"
+                                          onClick={() => {
+                                            const updated = [...bulkRescheduleDates];
+                                            updated[idx] = { ...updated[idx], newPeriod: String(periodNum) };
+                                            setBulkRescheduleDates(updated);
+                                          }}
+                                          className={`px-2 py-1 text-xs rounded border ${
+                                            isSelected
+                                              ? 'bg-blue-600 text-white border-blue-600'
+                                              : hasLessonPlan
+                                              ? 'bg-orange-50 text-orange-700 border-orange-300 hover:bg-orange-100'
+                                              : isTarget
+                                              ? 'bg-green-50 text-green-700 border-green-300 hover:bg-green-100'
+                                              : isFree
+                                              ? 'bg-gray-50 text-gray-700 border-gray-300 hover:bg-gray-100'
+                                              : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                                          }`}
+                                          title={hasLessonPlan ? `Period ${periodNum} - Lesson scheduled` : isTarget ? `Period ${periodNum} - ${bulkRescheduleChapter.class} ${bulkRescheduleChapter.subject}` : isFree ? `Period ${periodNum} - Free` : `Period ${periodNum} - ${p.class} ${p.subject}`}
+                                        >
+                                          {periodNum}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              }
+                              
+                              return (
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="10"
+                                  value={bulkRescheduleDates[idx]?.newPeriod || ''}
+                                  onChange={(e) => {
+                                    const updated = [...bulkRescheduleDates];
+                                    updated[idx] = { ...updated[idx], newPeriod: e.target.value };
+                                    setBulkRescheduleDates(updated);
+                                  }}
+                                  placeholder="1-10"
+                                  className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                                />
+                              );
+                            })()}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={() => {
+                              if (bulkRescheduleDates[idx]?.newDate) {
+                                const dateToApply = bulkRescheduleDates[idx].newDate;
+                                const updated = bulkRescheduleDates.map((item, i) => 
+                                  i >= idx ? { ...item, newDate: dateToApply } : item
+                                );
+                                setBulkRescheduleDates(updated);
+                              }
+                            }}
+                            className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                            title="Apply this date to all sessions below"
+                          >
+                            Apply ↓
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={async () => {
+                    // Validate all entries
+                    const incomplete = bulkRescheduleDates.filter(item => !item.newDate || !item.newPeriod);
+                    if (incomplete.length > 0) {
+                      alert(`Please set date and period for all ${incomplete.length} session(s)`);
+                      return;
+                    }
+                    
+                    try {
+                      setBulkSubmitting(true);
+                      let successCount = 0;
+                      let failCount = 0;
+                      
+                      for (const item of bulkRescheduleDates) {
+                        try {
+                          const response = await api.rescheduleLessonPlan(
+                            item.lpId,
+                            item.newDate,
+                            item.newPeriod,
+                            memoizedUser?.email || ''
+                          );
+                          
+                          const result = response.data || response;
+                          if (result.success) {
+                            successCount++;
+                          } else {
+                            failCount++;
+                            console.error('Failed to reschedule session', item.session, result.error || 'Unknown error', response);
+                          }
+                        } catch (err) {
+                          failCount++;
+                          console.error('Error rescheduling session', item.session, err);
+                        }
+                      }
+                      
+                      alert(`Bulk reschedule complete!\nSuccess: ${successCount}\nFailed: ${failCount}`);
+                      setShowBulkRescheduleModal(false);
+                      setBulkRescheduleChapter(null);
+                      setBulkRescheduleDates([]);
+                      setBulkTimetables({});
+                      setBulkPlannedPeriods({});
+                      refreshApprovals();
+                    } catch (err) {
+                      console.error('Error in bulk reschedule:', err);
+                      alert('Error during bulk reschedule: ' + err.message);
+                    } finally {
+                      setBulkSubmitting(false);
+                    }
+                  }}
+                  disabled={bulkSubmitting}
+                  className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {bulkSubmitting ? 'Rescheduling All Sessions...' : 'Reschedule All Sessions'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowBulkRescheduleModal(false);
+                    setBulkRescheduleChapter(null);
+                    setBulkRescheduleDates([]);
+                    setBulkTimetables({});
+                    setBulkPlannedPeriods({});
+                  }}
+                  disabled={bulkSubmitting}
                   className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Cancel

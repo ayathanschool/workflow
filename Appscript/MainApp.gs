@@ -3118,10 +3118,11 @@
    */
   function _handleRescheduleLessonPlan(data) {
     try {
-      const lpId = data.lpId;
-      const newDate = data.newDate;
-      const newPeriod = data.newPeriod;
-      const requesterEmail = (data.requesterEmail || '').toLowerCase().trim();
+      // Accept multiple payload shapes for backwards/forwards compatibility
+      const lpId = data.lpId || data.lessonPlanId || data.id;
+      const newDate = data.newDate || data.selectedDate || data.date;
+      const newPeriod = data.newPeriod || data.selectedPeriod || data.period;
+      const requesterEmail = (data.requesterEmail || data.email || '').toLowerCase().trim();
 
       if (!lpId) {
         return _respond({ success: false, error: 'Lesson plan ID required' });
@@ -3134,8 +3135,8 @@
       }
 
       // Permission check: only HM or Admin can reschedule
-      if (requesterEmail && !_isHM(requesterEmail) && !_isSuperAdmin(requesterEmail)) {
-        return _respond({ success: false, error: 'Permission denied. Only HM or Admin can reschedule lesson plans.' });
+      if (requesterEmail && !_isHMOrSuperAdminSafe(requesterEmail)) {
+        return _respond({ success: false, error: 'Permission denied. Only HM/Admin can reschedule lesson plans.' });
       }
 
       const sh = _getSheet('LessonPlans');
@@ -3143,11 +3144,27 @@
       const data_rows = sh.getRange(2, 1, sh.getLastRow() - 1, headers.length).getValues();
 
       const lpIdColIndex = headers.indexOf('lpId');
-      const dateColIndex = headers.indexOf('date');
-      const periodColIndex = headers.indexOf('period');
+      const teacherEmailColIndex = headers.indexOf('teacherEmail');
+      // Different deployments use different column names.
+      // Prefer selectedDate/selectedPeriod (current schema), fall back to date/period (legacy schema).
+      const dateColIndex = headers.indexOf('selectedDate') !== -1 ? headers.indexOf('selectedDate') : headers.indexOf('date');
+      const periodColIndex = headers.indexOf('selectedPeriod') !== -1 ? headers.indexOf('selectedPeriod') : headers.indexOf('period');
+      const originalDateColIndex = headers.indexOf('originalDate');
+      const originalPeriodColIndex = headers.indexOf('originalPeriod');
 
       if (lpIdColIndex === -1 || dateColIndex === -1 || periodColIndex === -1) {
-        return _respond({ success: false, error: 'Required columns not found in LessonPlans sheet' });
+        return _respond({
+          success: false,
+          error: 'Required columns not found in LessonPlans sheet',
+          details: {
+            missing: {
+              lpId: lpIdColIndex === -1,
+              date: dateColIndex === -1,
+              period: periodColIndex === -1
+            },
+            headers: headers
+          }
+        });
       }
 
       // Find the lesson plan row
@@ -3163,7 +3180,34 @@
         return _respond({ success: false, error: 'Lesson plan not found' });
       }
 
-      // Update date and period
+      // Capture teacherEmail for targeted cache invalidation (best effort)
+      let teacherEmail = '';
+      try {
+        if (teacherEmailColIndex !== -1) {
+          teacherEmail = String(sh.getRange(rowIndex, teacherEmailColIndex + 1).getValue() || '').toLowerCase().trim();
+        }
+      } catch (e) {
+        teacherEmail = '';
+      }
+
+      // Preserve the previous schedule in originalDate/originalPeriod (if present and empty)
+      // so HM/Admin can track what was changed.
+      try {
+        const prevDate = sh.getRange(rowIndex, dateColIndex + 1).getValue();
+        const prevPeriod = sh.getRange(rowIndex, periodColIndex + 1).getValue();
+        if (originalDateColIndex !== -1) {
+          const curOrigDate = sh.getRange(rowIndex, originalDateColIndex + 1).getValue();
+          if (!curOrigDate && prevDate) sh.getRange(rowIndex, originalDateColIndex + 1).setValue(prevDate);
+        }
+        if (originalPeriodColIndex !== -1) {
+          const curOrigPeriod = sh.getRange(rowIndex, originalPeriodColIndex + 1).getValue();
+          if (!curOrigPeriod && prevPeriod) sh.getRange(rowIndex, originalPeriodColIndex + 1).setValue(prevPeriod);
+        }
+      } catch (e) {
+        // Ignore preserve errors
+      }
+
+      // Update date and period (selectedDate/selectedPeriod in current schema)
       sh.getRange(rowIndex, dateColIndex + 1).setValue(newDate);
       sh.getRange(rowIndex, periodColIndex + 1).setValue(newPeriod);
 
@@ -3173,6 +3217,9 @@
       try {
         invalidateCache('teacher_lessonplans');
         invalidateCache('hm_lessonplans');
+        if (teacherEmail) {
+          try { invalidateCache('teacher_lessonplans_' + teacherEmail); } catch (e) {}
+        }
       } catch (e) {
         // Ignore cache clear errors
       }

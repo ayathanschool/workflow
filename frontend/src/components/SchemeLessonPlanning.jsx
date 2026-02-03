@@ -78,6 +78,9 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   // NEW: Track expanded schemes and loading state for lazy loading
   const [expandedSchemes, setExpandedSchemes] = useState({});
   const [loadingSchemeDetails, setLoadingSchemeDetails] = useState({});
+
+  // NEW: Per-chapter expansion (prevents heavy session-grid render on initial expand)
+  const [expandedChapters, setExpandedChapters] = useState({});
   
   // Prevent duplicate API calls (React StrictMode protection)
   const loadingRef = useRef(false);
@@ -174,7 +177,21 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
       console.log('Planning date range:', response.data?.planningDateRange);
 
       if (response.data && response.data.success) {
-        setSchemes(response.data.schemes || []);
+        // Normalize numeric fields so progress bar width/classes always compute correctly
+        const normalizedSchemes = (response.data.schemes || []).map(s => {
+          const toNum = (v) => {
+            const n = Number(String(v ?? '').trim());
+            return Number.isFinite(n) ? n : 0;
+          };
+          const overallProgress = Math.max(0, Math.min(100, toNum(s.overallProgress)));
+          return {
+            ...s,
+            totalSessions: toNum(s.totalSessions),
+            plannedSessions: toNum(s.plannedSessions),
+            overallProgress
+          };
+        });
+        setSchemes(normalizedSchemes);
         setPlanningDateRange(response.data.planningDateRange || null);
         
         // Check if bulk-only mode is enabled
@@ -542,8 +559,10 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   };
 
   const getProgressColor = (percentage) => {
-    if (percentage >= 80) return 'bg-green-500';
-    if (percentage >= 50) return 'bg-yellow-500';
+    const p = Number(percentage);
+    const pct = Number.isFinite(p) ? p : 0;
+    if (pct >= 80) return 'bg-green-500';
+    if (pct >= 50) return 'bg-yellow-500';
     return 'bg-red-500';
   };
 
@@ -723,6 +742,13 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                 const isExpanded = expandedSchemes[scheme.schemeId];
                 const isLoadingDetails = loadingSchemeDetails[scheme.schemeId];
                 const hasChapters = scheme.chapters && scheme.chapters.length > 0;
+
+                const headerChapterText = (() => {
+                  const n = String(scheme.firstChapterName || '').trim();
+                  if (!n) return '';
+                  const num = String(scheme.firstChapterNumber || '').trim();
+                  return num ? ` | Ch ${num}: ${n}` : ` | ${n}`;
+                })();
                 
                 return (
                   <div key={scheme.schemeId} className="border border-gray-200 rounded-lg p-3 sm:p-4">
@@ -733,7 +759,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                           {stripStdPrefix(scheme.class)} - {scheme.subject}
                         </h3>
                         <p className="text-xs sm:text-sm text-gray-500">
-                          {scheme.academicYear} | Term: {scheme.term}
+                          {scheme.academicYear} | Term: {scheme.term}{headerChapterText}
                         </p>
                       </div>
                       <div className="sm:text-right">
@@ -743,7 +769,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                         <div className="w-full sm:w-32 bg-gray-200 rounded-full h-2">
                           <div
                             className={`h-2 rounded-full ${getProgressColor(scheme.overallProgress)}`}
-                            style={{ width: `${scheme.overallProgress}%` }}
+                            style={{ width: `${Math.max(0, Math.min(100, Number(scheme.overallProgress) || 0))}%` }}
                           ></div>
                         </div>
                         <div className="text-xs text-gray-500 mt-1">
@@ -772,13 +798,23 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
                     {/* Chapters and sessions (only shown when expanded) */}
                     {isExpanded && hasChapters && (
-                      <div className="space-y-3 sm:space-y-4">{scheme.chapters.map((chapter) => (
+                      <div className="space-y-3 sm:space-y-4">{scheme.chapters.map((chapter) => {
+                        const chapterKey = `${scheme.schemeId}::${chapter.chapterNumber}`;
+                        const chapterExpanded = !!expandedChapters[chapterKey];
+                        return (
                         <div key={`${scheme.schemeId}-${chapter.chapterNumber}`} className="border-l-4 border-blue-200 pl-2 sm:pl-4">
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
                             <div className="flex items-center gap-2 sm:gap-3">
-                              <h4 className="text-sm sm:text-base font-medium text-gray-800">
-                                Ch {chapter.chapterNumber}: {chapter.chapterName}
-                              </h4>
+                              <button
+                                type="button"
+                                onClick={() => setExpandedChapters(prev => ({ ...prev, [chapterKey]: !prev[chapterKey] }))}
+                                className="text-left"
+                                title={chapterExpanded ? 'Hide chapter sessions' : 'Show chapter sessions'}
+                              >
+                                <h4 className="text-sm sm:text-base font-medium text-gray-800">
+                                  Ch {chapter.chapterNumber}: {chapter.chapterName} {chapterExpanded ? '▲' : '▼'}
+                                </h4>
+                              </button>
                               {chapter.canPrepare === false && (
                                 <span className="text-xs text-red-600 font-semibold">
                                   Previous chapter should be completed
@@ -808,6 +844,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                             </span>
                           </div>
 
+                          {chapterExpanded && (
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                             {chapter.sessions.map((session) => (
                               <div
@@ -952,9 +989,10 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                               </div>
                             ))}
                           </div>
+                          )}
                         </div>
-                      ))}
-                      </div>
+                      );
+                    })}</div>
                     )}
                   </div>
                 );
