@@ -8,8 +8,8 @@ import {
   checkChapterCompletion,
   getPlannedLessonsForDate,
   getTeacherWeeklyTimetable,
-  getSuggestedPlansForSubstitution,
-  getUnreportedSessions
+  getSuggestedPlansForSubstitution
+  // getUnreportedSessions // TODO: Implement backfill feature API
 } from "./api";
 import { todayIST } from "./utils/dateUtils";
 import { confirmDestructive } from "./utils/confirm";
@@ -510,8 +510,14 @@ export default function DailyReportModern({ user }) {
     console.log('[Backfill] Fetching unreported sessions:', { key, class: period.class, subject: period.subject, chapter });
     setUnreportedSessionsLoading(prev => ({ ...prev, [key]: true }));
     try {
-      const result = await getUnreportedSessions(email, period.class, period.subject, chapter);
-      const data = result.data || result;
+      // TODO: Implement getUnreportedSessions API endpoint
+      console.warn('[Backfill] getUnreportedSessions not implemented yet');
+      setUnreportedSessions(prev => ({ ...prev, [key]: [] }));
+      setBackfillEnabled(false);
+      return;
+      
+      // const result = await getUnreportedSessions(email, period.class, period.subject, chapter);
+      // const data = result.data || result;
       
       console.log('[Backfill] API response:', data);
       
