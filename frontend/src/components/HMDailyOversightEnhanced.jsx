@@ -10,6 +10,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
   const [lessonPlans, setLessonPlans] = useState([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('reports');
+  const [simpleMode, setSimpleMode] = useState(true);
   const [merged, setMerged] = useState({ periods: [], summary: { total: 0, plannedReady: 0, reported: 0, unplannedCount: 0, avgCompletion: 0 } });
   const [stats, setStats] = useState({
     totalPeriods: 0,
@@ -159,9 +160,16 @@ const HMDailyOversightEnhanced = ({ user }) => {
     return () => clearInterval(intervalId);
   }, [autoRefresh, refreshInterval, date]);
 
+  // Keep advanced tabs out of view in simple mode
+  useEffect(() => {
+    if (simpleMode && ['analytics', 'pace-tracking', 'insights'].includes(activeTab)) {
+      setActiveTab('reports');
+    }
+  }, [simpleMode, activeTab]);
+
   const handleAutoRefresh = async () => {
     setIsRefreshing(true);
-    await Promise.all([loadDailyReports(true), loadLessonPlans(true), loadReadinessStatus(), loadExamPending()]);
+    await Promise.all([loadDailyReports(true), loadLessonPlans(true), loadReadinessStatus()]);
     setIsRefreshing(false);
   };
 
@@ -560,8 +568,10 @@ const HMDailyOversightEnhanced = ({ user }) => {
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">Enhanced Daily Oversight</h2>
-        <p className="text-gray-600">Monitor daily session progress and teacher performance with detailed analytics</p>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">{simpleMode ? 'Daily Oversight' : 'Enhanced Daily Oversight'}</h2>
+        <p className="text-gray-600">
+          {simpleMode ? 'Today\'s lesson plans and reports at a glance.' : 'Monitor daily session progress and teacher performance with detailed analytics'}
+        </p>
       </div>
 
       {/* Urgent Alerts Banner */}
@@ -610,6 +620,15 @@ const HMDailyOversightEnhanced = ({ user }) => {
           </div>
           
           <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={simpleMode}
+                onChange={(e) => setSimpleMode(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              <span className="text-gray-700">Simple view</span>
+            </label>
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -864,6 +883,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
       )}
 
       {/* Enhanced Statistics Cards */}
+      {!simpleMode && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-white p-4 border border-gray-200 rounded-lg">
           <div className="flex items-center justify-between">
@@ -927,7 +947,10 @@ const HMDailyOversightEnhanced = ({ user }) => {
           <p className="text-xs text-gray-500 mt-1">High cascading risk</p>
         </div>
       </div>
+      )}
 
+      {!simpleMode && (
+      <>
       {/* Subject-wise Performance (Collapsible) */}
       <div className="bg-white p-6 border border-gray-200 rounded-lg mb-6">
         <div
@@ -1192,6 +1215,8 @@ const HMDailyOversightEnhanced = ({ user }) => {
           </div>
         )}
       </div>
+      </>
+      )}
 
       {/* Filters - Gradient Bar with Mobile Responsive Layout */}
       <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 p-3 sm:p-4 border border-gray-200 rounded-lg mb-6 shadow-sm">
@@ -1241,16 +1266,18 @@ const HMDailyOversightEnhanced = ({ user }) => {
               <option value="pending">Pending</option>
             </select>
 
-            <select
-              value={filters.completionRange}
-              onChange={(e) => setFilters(prev => ({ ...prev, completionRange: e.target.value }))}
-              className="text-xs sm:text-sm border border-gray-300 rounded-md px-2 py-1.5 bg-white focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">All Levels</option>
-              <option value="excellent">Excellent (80%+)</option>
-              <option value="good">Good (60-79%)</option>
-              <option value="concern">Concern (&lt;60%)</option>
-            </select>
+            {!simpleMode && (
+              <select
+                value={filters.completionRange}
+                onChange={(e) => setFilters(prev => ({ ...prev, completionRange: e.target.value }))}
+                className="text-xs sm:text-sm border border-gray-300 rounded-md px-2 py-1.5 bg-white focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">All Levels</option>
+                <option value="excellent">Excellent (80%+)</option>
+                <option value="good">Good (60-79%)</option>
+                <option value="concern">Concern (&lt;60%)</option>
+              </select>
+            )}
           </div>
         </div>
       </div>
@@ -1266,7 +1293,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
           >
-            Session Reports ({filteredReports.length})
+            Reports ({filteredReports.length})
           </button>
           <button
             onClick={() => setActiveTab('plan-actual')}
@@ -1278,26 +1305,30 @@ const HMDailyOversightEnhanced = ({ user }) => {
           >
             Plan vs Actual ({merged.summary?.total || 0})
           </button>
-          <button
-            onClick={() => setActiveTab('analytics')}
-            className={`py-2 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'analytics'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            Chapter Analytics ({filteredAnalytics.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('pace-tracking')}
-            className={`py-2 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'pace-tracking'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            Syllabus Pace Tracking ({filteredPaceTrackingSubjects.length})
-          </button>
+          {!simpleMode && (
+            <>
+              <button
+                onClick={() => setActiveTab('analytics')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'analytics'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Chapter Analytics ({filteredAnalytics.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('pace-tracking')}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'pace-tracking'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Syllabus Pace Tracking ({filteredPaceTrackingSubjects.length})
+              </button>
+            </>
+          )}
           <button
             onClick={() => setActiveTab('missing')}
             className={`py-2 px-1 border-b-2 font-medium text-sm ${
@@ -1308,16 +1339,18 @@ const HMDailyOversightEnhanced = ({ user }) => {
           >
             Missing Submissions ({missing.stats.missingCount || 0})
           </button>
-          <button
-            onClick={() => setActiveTab('insights')}
-            className={`py-2 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'insights'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            Performance Insights
-          </button>
+          {!simpleMode && (
+            <button
+              onClick={() => setActiveTab('insights')}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'insights'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Performance Insights
+            </button>
+          )}
         </nav>
       </div>
 
@@ -1928,7 +1961,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
         </div>
       )}
 
-      {activeTab === 'analytics' && (
+      {!simpleMode && activeTab === 'analytics' && (
         <div className="space-y-4">
           {filteredAnalytics.map((chapter, index) => (
             <div key={index} className="bg-white border border-gray-200 rounded-lg p-4">
@@ -1991,7 +2024,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
         </div>
       )}
 
-      {activeTab === 'insights' && (
+      {!simpleMode && activeTab === 'insights' && (
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -2045,7 +2078,7 @@ const HMDailyOversightEnhanced = ({ user }) => {
         </div>
       )}
 
-      {activeTab === 'pace-tracking' && (
+      {!simpleMode && activeTab === 'pace-tracking' && (
         <div className="space-y-6">
           {/* Term Selector */}
           <div className="flex items-center gap-4 mb-4">

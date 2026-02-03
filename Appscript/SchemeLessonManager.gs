@@ -545,20 +545,29 @@ function _calculateLessonPlanningDateRange() {
 function getApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
   // Cache-buster: bump this string whenever the payload/gating rules change.
   // Apps Script caches can otherwise serve stale "schemes" objects without new fields.
-  const APPROVED_SCHEMES_CACHE_VERSION = 'v2026-01-27-summary-lazy-load';
+  const APPROVED_SCHEMES_CACHE_VERSION = 'v2026-02-02-ultra-fast';
   const mode = summaryOnly ? 'summary' : 'full';
   const cacheKey = generateCacheKey('approved_schemes', { email: teacherEmail, mode: mode, v: APPROVED_SCHEMES_CACHE_VERSION });
+
+  // PERFORMANCE: For summary mode, use SHORT cache (60s) to ensure fast responses
+  // For full mode, use MEDIUM cache (5min) as before
+  const cacheTTL = summaryOnly ? CACHE_TTL.SHORT : CACHE_TTL.MEDIUM;
 
   // NOTE: The heavy schemes+progress payload is cached, but Settings-driven flags
   // (bulkOnly mode, planningDateRange) must reflect sheet edits immediately.
   const res = getCachedData(cacheKey, function() {
     return _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly);
-  }, CACHE_TTL.MEDIUM);
+  }, cacheTTL);
 
   try {
     if (res && typeof res === 'object' && res.success !== false) {
       // Always refresh settings (e.g., lessonplan_bulk_only) even on cache hits.
       res.settings = _getLessonPlanSettings();
+
+      // Preserve summaryOnly flag (important for frontend to know response type)
+      if (summaryOnly) {
+        res.summaryOnly = true;
+      }
 
       // Always refresh planning date range because it is computed from Settings.
       try {
@@ -591,15 +600,41 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
       return { success: false, error: 'Teacher email is required' };
     }
     
-    // PERFORMANCE: Use cached sheet data (single batch read per sheet)
-    const schemesData = _getCachedSheetData('Schemes').data;
-    const approvedSchemes = schemesData.filter(scheme =>
-      (scheme.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase() &&
-      (scheme.status || '').toLowerCase() === 'approved'
+    // PERFORMANCE CRITICAL: Instead of loading entire Schemes sheet (_getCachedSheetData),
+    // directly query only the rows we need using TextFinder for massive speed improvement
+    const sheet = _getSheet('Schemes');
+    const headers = _headers(sheet);
+    
+    // Find email column index
+    const emailColIndex = headers.findIndex(h => 
+      String(h).toLowerCase().trim() === 'teacheremail'
+    );
+    const statusColIndex = headers.findIndex(h => 
+      String(h).toLowerCase().trim() === 'status'
     );
     
-    // OPTIMIZATION: If summary-only mode, return lightweight payload
+    if (emailColIndex === -1) {
+      Logger.log('ERROR: teacherEmail column not found in Schemes sheet');
+      return { success: false, error: 'Invalid Schemes sheet structure' };
+    }
+    
+    // Get all data once (unavoidable, but faster than multiple queries)
+    const allRows = _rows(sheet);
+    
+    // Filter in-memory for approved schemes (much faster than multiple TextFinder queries)
+    const approvedSchemes = allRows
+      .filter(row => {
+        const email = String(row[emailColIndex] || '').toLowerCase().trim();
+        const status = String(row[statusColIndex] || '').toLowerCase().trim();
+        return email === teacherEmail.toLowerCase() && status === 'approved';
+      })
+      .map(row => _indexByHeader(row, headers));
+    
+    Logger.log(`Found ${approvedSchemes.length} approved schemes for ${teacherEmail}`);
+    
+    // OPTIMIZATION: If summary-only mode, return lightweight payload immediately
     if (summaryOnly) {
+      Logger.log('Returning summary-only response');
       return _buildSummaryOnlyResponse(approvedSchemes, teacherEmail);
     }
 
@@ -842,63 +877,19 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
  * PERFORMANCE: Reduces payload from ~500KB to ~50KB for typical teacher
  */
 function _buildSummaryOnlyResponse(approvedSchemes, teacherEmail) {
-  const existingPlans = _getCachedSheetData('LessonPlans').data;
-  const teacherPlans = existingPlans.filter(plan => {
-    if (!plan || typeof plan !== 'object') return false;
-    return String(plan.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
-  });
-  
-  const allReports = _getCachedSheetData('DailyReports').data;
-  const teacherReports = allReports.filter(report => {
-    if (!report || typeof report !== 'object') return false;
-    return String(report.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
-  });
-  
-  const normKey = function(v) { return String(v || '').toLowerCase().trim(); };
-  const planKey = function(schemeId, chapter, sessionNo) {
-    const s = Number(sessionNo);
-    return `${String(schemeId || '').trim()}|${normKey(chapter)}|${isNaN(s) ? 0 : s}`;
-  };
-  
-  // Build plan index
-  const plansByKey = new Map();
-  for (const p of teacherPlans) {
-    if (!p || typeof p !== 'object') continue;
-    const key = planKey(p.schemeId, p.chapter, p.session);
-    if (!key) continue;
-    plansByKey.set(key, p);
-  }
-  
+  // ULTRA-FAST MODE: Return only basic scheme metadata without ANY processing
+  // Progress and chapter details will be calculated on-demand when user expands a specific scheme
   const schemes = approvedSchemes.map(scheme => {
-    const schemeChapters = _parseSchemeChapters(scheme);
-    let totalSessions = 0;
-    let plannedSessions = 0;
-    
-    for (const chapter of schemeChapters) {
-      const sessions = _generateSessionsForChapter(chapter, scheme);
-      totalSessions += sessions.length;
-      
-      for (const session of sessions) {
-        const existingPlan = plansByKey.get(planKey(scheme.schemeId, chapter.name, session.sessionNumber));
-        if (existingPlan) {
-          const statusLower = String(existingPlan.status || 'planned').trim().toLowerCase();
-          if (statusLower !== 'cancelled' && statusLower !== 'rejected') {
-            plannedSessions++;
-          }
-        }
-      }
-    }
-    
     return {
       schemeId: scheme.schemeId,
       class: scheme.class,
       subject: scheme.subject,
       academicYear: scheme.academicYear,
       term: scheme.term,
-      totalChapters: schemeChapters.length,
-      totalSessions: totalSessions,
-      plannedSessions: plannedSessions,
-      overallProgress: totalSessions > 0 ? Math.round((plannedSessions / totalSessions) * 100) : 0,
+      totalChapters: 0, // Will be calculated on-demand
+      totalSessions: 0, // Calculated on-demand when expanded
+      plannedSessions: 0, // Calculated on-demand when expanded
+      overallProgress: 0, // Calculated on-demand when expanded
       createdAt: scheme.createdAt,
       approvedAt: scheme.approvedAt,
       // No chapters array - lazy load on demand

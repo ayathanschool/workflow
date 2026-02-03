@@ -1,5 +1,5 @@
 import { Clock, CheckCircle, AlertCircle, BookOpen, Users, Plus, Search, Sparkles } from 'lucide-react';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import * as ai from '../api-ai.js';
 import * as api from '../api.js';
 
@@ -78,6 +78,9 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   // NEW: Track expanded schemes and loading state for lazy loading
   const [expandedSchemes, setExpandedSchemes] = useState({});
   const [loadingSchemeDetails, setLoadingSchemeDetails] = useState({});
+  
+  // Prevent duplicate API calls (React StrictMode protection)
+  const loadingRef = useRef(false);
 
   // Load detailed chapter/session data for a specific scheme (lazy loading)
   const loadSchemeDetails = useCallback(async (schemeId) => {
@@ -129,16 +132,36 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   }, [expandedSchemes, schemes, userEmail]);
 
   const loadApprovedSchemes = useCallback(async () => {
+    // Prevent duplicate calls (React StrictMode can trigger twice)
+    if (loadingRef.current) {
+      console.log('Already loading schemes (ref check), skipping duplicate call');
+      return;
+    }
+    
+    let timeoutId = null;
+    
     try {
+      loadingRef.current = true;
       setLoading(true);
+      setError(null);
 
       // Debug logging
       console.log('Loading schemes for user:', userEmail);
 
       if (!userEmail) {
         setError('No user email provided');
+        setLoading(false);
+        loadingRef.current = false;
         return;
       }
+
+      // Timeout fallback to prevent infinite loading (increased to 30s for slow Apps Script responses)
+      timeoutId = setTimeout(() => {
+        console.warn('⚠️ Scheme loading timeout - forcing loading=false');
+        setLoading(false);
+        loadingRef.current = false;
+        setError('Loading timed out. The server may be slow. Please try refreshing.');
+      }, 30000); // 30 second timeout (Apps Script can be very slow on cold starts)
 
       // NEW: Load summary-only initially for faster performance
       const response = await api.getApprovedSchemesForLessonPlanning(userEmail, true);
@@ -172,7 +195,12 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
       console.error('Error loading schemes:', err);
       setError('Error loading schemes: ' + err.message);
     } finally {
+      // CRITICAL: Always clear timeout and reset loading state
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       setLoading(false);
+      loadingRef.current = false;
     }
   }, [userEmail]);
 
@@ -536,9 +564,15 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center p-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        <span className="ml-2">Loading approved schemes...</span>
+      <div className="flex flex-col items-center justify-center p-8 space-y-4">
+        <div className="relative">
+          <div className="animate-spin rounded-full h-16 w-16 border-4 border-gray-200"></div>
+          <div className="animate-spin rounded-full h-16 w-16 border-4 border-t-blue-600 border-r-blue-600 absolute top-0 left-0"></div>
+        </div>
+        <div className="text-center">
+          <p className="text-gray-700 font-medium">Loading your schemes...</p>
+          <p className="text-sm text-gray-500 mt-1">This may take a moment</p>
+        </div>
       </div>
     );
   }
@@ -573,11 +607,16 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               <span className="sm:hidden">Lesson Plans</span>
             </h2>
             <button
-              onClick={loadApprovedSchemes}
+              onClick={() => {
+                // Clear cache before refresh for fresh data
+                api.clearCache('getApprovedSchemesForLessonPlanning');
+                loadApprovedSchemes();
+              }}
               disabled={loading}
               className="px-3 py-1.5 text-xs sm:text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1"
+              title="Refresh schemes (clears cache)"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
               <span className="hidden sm:inline">{loading ? 'Refreshing...' : 'Refresh'}</span>

@@ -67,7 +67,6 @@ import ApiErrorBanner from './components/shared/ApiErrorBanner';
 const SubstitutionModule = lazy(() => import('./components/SubstitutionModule'));
 const EnhancedSubstitutionView = lazy(() => import('./components/EnhancedSubstitutionView'));
 const DailyReportModern = lazy(() => import('./DailyReportModern'));
-const HMMissingLessonPlansOverview = lazy(() => import('./components/HMMissingLessonPlansOverview'));
 const ClassPeriodSubstitutionView = lazy(() => import('./components/ClassPeriodSubstitutionView'));
 const AssessmentsManager = lazy(() => import('./components/AssessmentsManager'));
 const LessonPlansManager = lazy(() => import('./components/LessonPlansManager'));
@@ -891,19 +890,23 @@ const App = () => {
                     const examsArray = [];
                     const allMarksArrays = [];
 
-                    const perClassData = await Promise.all(
-                      uniqueTeachingClasses.map(async (cls) => {
-                        const [exams, status] = await Promise.all([
-                          api.getExams({ class: cls }).catch(() => []),
-                          api.getExamMarksEntryStatusAll({ class: cls, limit: 200 }).catch(() => ({ success: false, exams: [] }))
-                        ]);
-                        return {
-                          cls,
-                          exams: Array.isArray(exams) ? exams : [],
-                          statusRows: status && Array.isArray(status.exams) ? status.exams : []
-                        };
-                      })
-                    );
+                    // PERFORMANCE: Fetch exams and status ONCE for all classes, then filter client-side
+                    // This prevents N API calls (one per class) which was causing 7+ redundant getExams() calls
+                    const [allExamsRaw, allStatusRaw] = await Promise.all([
+                      api.getExams({}).catch(() => []),
+                      api.getExamMarksEntryStatusAll({ limit: 500 }).catch(() => ({ success: false, exams: [] }))
+                    ]);
+
+                    const allExams = Array.isArray(allExamsRaw) ? allExamsRaw : [];
+                    const allStatusRows = allStatusRaw && Array.isArray(allStatusRaw.exams) ? allStatusRaw.exams : [];
+
+                    // Filter exams and status by each teaching class
+                    const perClassData = uniqueTeachingClasses.map((cls) => {
+                      const normCls = normClassKey(cls);
+                      const exams = allExams.filter(ex => normClassKey(ex?.class || '') === normCls);
+                      const statusRows = allStatusRows.filter(s => normClassKey(s?.class || '') === normCls);
+                      return { cls, exams, statusRows };
+                    });
 
                     for (const item of perClassData) {
                       const normCls = normClassKey(item.cls);
@@ -2959,6 +2962,7 @@ const App = () => {
     // Grouping toggles (mutually exclusive)
     const [groupByClass, setGroupByClass] = useState(false);
     const [groupByChapter, setGroupByChapter] = useState(false);
+    const [groupByClassChapter, setGroupByClassChapter] = useState(false);
     
     // Filter states for lesson plans
     const [lessonPlanFilters, setLessonPlanFilters] = useState({
@@ -5722,6 +5726,11 @@ const App = () => {
     const [selectedTeacher, setSelectedTeacher] = useState('');
     const [groupByClass, setGroupByClass] = useState(false);
     const [groupByChapter, setGroupByChapter] = useState(false);
+    const [groupByClassChapter, setGroupByClassChapter] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [newLessonsCount, setNewLessonsCount] = useState(0);
+    const [showNewLessonsNotif, setShowNewLessonsNotif] = useState(false);
+    const [showTeacherStats, setShowTeacherStats] = useState(true);
     // Removed: timetable date view UI
     const [rowSubmitting, setRowSubmitting] = useState({});
     const [refreshing, setRefreshing] = useState(false);
@@ -5841,11 +5850,48 @@ const App = () => {
       fetchAllLessons();
     }, []); // Empty dependency - load only once
 
+    // Auto-refresh every 2 minutes to check for new lessons
+    useEffect(() => {
+      const interval = setInterval(async () => {
+        try {
+          const data = await api.getPendingLessonReviews('', '', '', '', { noCache: true });
+          let lessons = Array.isArray(data) ? data : [];
+          lessons.sort((a, b) => new Date(b.selectedDate || 0) - new Date(a.selectedDate || 0));
+          
+          // Check if there are new lessons
+          const currentCount = allLessons.length;
+          const newCount = lessons.length;
+          if (newCount > currentCount) {
+            const diff = newCount - currentCount;
+            setNewLessonsCount(diff);
+            setShowNewLessonsNotif(true);
+            // Auto-hide notification after 10 seconds
+            setTimeout(() => setShowNewLessonsNotif(false), 10000);
+          }
+          
+          setAllLessons(lessons);
+        } catch (err) {
+          console.error('Auto-refresh error:', err);
+        }
+      }, 120000); // 2 minutes
+      
+      return () => clearInterval(interval);
+    }, [allLessons.length]);
+
     // CLIENT-SIDE FILTERING - no API calls
     const filteredLessons = useMemo(() => {
       return allLessons.filter(lesson => {
         // Filter by teacher (from simple dropdown)
         if (selectedTeacher && lesson.teacherName !== selectedTeacher) return false;
+        
+        // Filter by search query (chapter or teacher name)
+        if (searchQuery) {
+          const q = searchQuery.toLowerCase();
+          const matchesChapter = String(lesson.chapter || '').toLowerCase().includes(q);
+          const matchesTeacher = String(lesson.teacherName || '').toLowerCase().includes(q);
+          const matchesSubject = String(lesson.subject || '').toLowerCase().includes(q);
+          if (!matchesChapter && !matchesTeacher && !matchesSubject) return false;
+        }
         
         // Filter by advanced filters (when showFilters is true)
         if (filters.teacher && lesson.teacherName !== filters.teacher) return false;
@@ -5859,7 +5905,7 @@ const App = () => {
         
         return true;
       });
-    }, [allLessons, selectedTeacher, filters]);
+    }, [allLessons, selectedTeacher, searchQuery, filters]);
 
     // CLIENT-SIDE GROUPING - Compute groups from filteredLessons
     const computedChapterGroups = useMemo(() => {
@@ -5939,6 +5985,62 @@ const App = () => {
       });
     }, [filteredLessons]);
 
+    const computedClassChapterGroups = useMemo(() => {
+      const groupMap = {};
+      filteredLessons.forEach(lesson => {
+        const cls = lesson.class || 'Unknown Class';
+        const chapter = lesson.chapter || 'Unknown Chapter';
+        const subject = lesson.subject || 'Unknown Subject';
+        const key = `${cls}|${subject}|${chapter}`;
+        if (!groupMap[key]) {
+          groupMap[key] = {
+            key,
+            class: cls,
+            subject,
+            chapter,
+            teacherNames: new Set(),
+            schemeId: lesson.schemeId,
+            lessons: [],
+            counts: { pending: 0, ready: 0, needsRework: 0, rejected: 0 }
+          };
+        }
+        groupMap[key].teacherNames.add(lesson.teacherName || '');
+        groupMap[key].lessons.push(lesson);
+        if (lesson.status === 'Pending Review') groupMap[key].counts.pending++;
+        if (lesson.status === 'Ready') groupMap[key].counts.ready++;
+        if (lesson.status === 'Needs Rework') groupMap[key].counts.needsRework++;
+        if (lesson.status === 'Rejected') groupMap[key].counts.rejected++;
+      });
+      return Object.values(groupMap)
+        .map(g => ({ ...g, teacherNames: Array.from(g.teacherNames).filter(Boolean) }))
+        .sort((a, b) => String(a.class || '').localeCompare(String(b.class || '')) || String(a.chapter || '').localeCompare(String(b.chapter || '')));
+    }, [filteredLessons]);
+
+    // Teacher Statistics - computed from allLessons (not filtered)
+    const teacherStats = useMemo(() => {
+      const statsMap = {};
+      allLessons.forEach(lesson => {
+        const teacher = lesson.teacherName || 'Unknown';
+        if (!statsMap[teacher]) {
+          statsMap[teacher] = {
+            teacher,
+            pending: 0,
+            approved: 0,
+            needsRework: 0,
+            rejected: 0,
+            total: 0
+          };
+        }
+        statsMap[teacher].total++;
+        if (lesson.status === 'Pending Review') statsMap[teacher].pending++;
+        if (lesson.status === 'Ready') statsMap[teacher].approved++;
+        if (lesson.status === 'Needs Rework') statsMap[teacher].needsRework++;
+        if (lesson.status === 'Rejected') statsMap[teacher].rejected++;
+      });
+      return Object.values(statsMap)
+        .sort((a, b) => b.pending - a.pending); // Sort by pending count (most pending first)
+    }, [allLessons]);
+
     const handleApproveLesson = async (lpId, status) => {
       try {
         console.debug('🔵 Single approval - lpId:', lpId, 'status:', status);
@@ -6017,7 +6119,7 @@ const App = () => {
         }
         setAllLessons(lessons);
         // If grouped view is active, refresh groups to reflect changes
-        if (groupByChapter || groupByClass) {
+        if (groupByChapter || groupByClass || groupByClassChapter) {
           await refreshApprovals();
         }
       } catch (err) {
@@ -6036,11 +6138,51 @@ const App = () => {
         let lessons = Array.isArray(data) ? data : [];
         lessons.sort((a, b) => new Date(b.selectedDate || 0) - new Date(a.selectedDate || 0));
         setAllLessons(lessons);
+        setShowNewLessonsNotif(false);
+        setNewLessonsCount(0);
       } catch (e) {
         console.warn('Manual refresh failed:', e);
       } finally {
         setRefreshing(false);
       }
+    };
+
+    // Export to Excel
+    const exportToExcel = () => {
+      if (filteredLessons.length === 0) {
+        alert('No data to export');
+        return;
+      }
+      
+      // Prepare CSV data
+      const headers = ['Teacher', 'Class', 'Subject', 'Chapter', 'Session', 'Date', 'Period', 'Status', 'Learning Objectives'];
+      const rows = filteredLessons.map(l => [
+        l.teacherName || '',
+        l.class || '',
+        l.subject || '',
+        l.chapter || '',
+        l.session || '',
+        l.selectedDate ? new Date(l.selectedDate).toLocaleDateString('en-IN') : '',
+        l.selectedPeriod || '',
+        l.status || '',
+        (l.learningObjectives || '').replace(/,/g, ';') // Replace commas to avoid CSV issues
+      ]);
+      
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+      ].join('\n');
+      
+      // Download CSV
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `lesson_approvals_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     };
 
     // Batch selection, chapter grouping, and modal approval removed per request
@@ -6059,6 +6201,24 @@ const App = () => {
 
     return (
       <div className="space-y-6 max-w-full">
+        {/* New Lessons Notification */}
+        {showNewLessonsNotif && newLessonsCount > 0 && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse"></div>
+              <span className="text-sm font-medium text-green-800">
+                {newLessonsCount} new lesson plan{newLessonsCount > 1 ? 's' : ''} submitted!
+              </span>
+            </div>
+            <button
+              onClick={() => setShowNewLessonsNotif(false)}
+              className="text-green-600 hover:text-green-800"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
           <h1 className="text-xl md:text-2xl font-bold text-gray-900">Lesson Plan Approvals</h1>
           <div className="flex flex-wrap gap-2 md:gap-3 w-full sm:w-auto">
@@ -6071,6 +6231,15 @@ const App = () => {
               <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">{refreshing ? 'Refreshing…' : 'Refresh'}</span>
               <span className="sm:hidden">{refreshing ? '...' : 'Refresh'}</span>
+            </button>
+            <button
+              onClick={exportToExcel}
+              className="flex-1 sm:flex-initial bg-green-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center justify-center hover:bg-green-700 text-sm"
+              title="Export to Excel (CSV)"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              <span className="hidden sm:inline">Export</span>
+              <span className="sm:hidden">CSV</span>
             </button>
             <button 
               onClick={() => {
@@ -6085,9 +6254,119 @@ const App = () => {
           </div>
         </div>
 
+        {/* Teacher Statistics Dashboard */}
+        {showTeacherStats && teacherStats.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-indigo-50">
+              <div className="flex items-center gap-2">
+                <BarChart2 className="h-5 w-5 text-purple-600" />
+                <h3 className="text-base md:text-lg font-semibold text-gray-900">Teacher Statistics</h3>
+                <span className="text-xs text-gray-500">({teacherStats.length} teachers)</span>
+              </div>
+              <button
+                onClick={() => setShowTeacherStats(false)}
+                className="text-gray-400 hover:text-gray-600"
+                title="Hide statistics"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-600 uppercase">Teacher</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-600 uppercase">Pending</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-600 uppercase">Approved</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-600 uppercase">Rework</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-600 uppercase">Total</th>
+                    <th className="px-3 py-2 text-center text-xs font-medium text-gray-600 uppercase">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {teacherStats.map((stat, idx) => (
+                    <tr key={idx} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 text-gray-900 font-medium">{stat.teacher}</td>
+                      <td className="px-3 py-2 text-center">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                          stat.pending > 0 ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {stat.pending}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          {stat.approved}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                          stat.needsRework > 0 ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {stat.needsRework}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-center text-gray-600 font-medium">{stat.total}</td>
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          onClick={() => {
+                            setSelectedTeacher(stat.teacher);
+                            setFilters(prev => ({ ...prev, teacher: stat.teacher }));
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className="text-blue-600 hover:text-blue-800 text-xs font-medium underline"
+                        >
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-4 py-2 bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
+              <div className="flex items-center justify-between">
+                <span>Sorted by pending count (highest first)</span>
+                <span>Click "View" to filter by teacher</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!showTeacherStats && (
+          <button
+            onClick={() => setShowTeacherStats(true)}
+            className="w-full bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 flex items-center justify-center gap-2"
+          >
+            <BarChart2 className="h-4 w-4" />
+            Show Teacher Statistics
+          </button>
+        )}
+
         {/* Simple Filter Bar - Always Visible */}
         <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow-sm p-3 md:p-4 border border-blue-100">
           <div className="flex flex-col md:flex-row md:flex-wrap md:items-center gap-2 md:gap-3">
+            {/* Quick Search */}
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              <Search className="h-4 w-4 text-gray-500" />
+              <input
+                type="text"
+                placeholder="Search chapter, teacher, subject..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white md:min-w-[200px]"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="text-gray-400 hover:text-gray-600"
+                  title="Clear search"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
             {/* Teacher Dropdown */}
             <div className="flex items-center gap-2 w-full md:w-auto">
               <label className="text-xs md:text-sm font-medium text-gray-700 whitespace-nowrap">Teacher:</label>
@@ -6109,7 +6388,7 @@ const App = () => {
                 onClick={() => {
                   const newValue = !groupByClass;
                   setGroupByClass(newValue);
-                  if (newValue) setGroupByChapter(false);
+                  if (newValue) { setGroupByChapter(false); setGroupByClassChapter(false); }
                 }}
                 className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-lg transition-all ${
                   groupByClass
@@ -6125,7 +6404,7 @@ const App = () => {
                 onClick={() => {
                   const newValue = !groupByChapter;
                   setGroupByChapter(newValue);
-                  if (newValue) setGroupByClass(false);
+                  if (newValue) { setGroupByClass(false); setGroupByClassChapter(false); }
                 }}
                 className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-lg transition-all ${
                   groupByChapter
@@ -6136,6 +6415,21 @@ const App = () => {
                 <BookOpen className="h-3 w-3 md:h-4 md:w-4 inline mr-1" />
                 <span className="hidden sm:inline">Chapter-wise</span>
                 <span className="sm:hidden">Chapter</span>
+              </button>
+              <button
+                onClick={() => {
+                  const newValue = !groupByClassChapter;
+                  setGroupByClassChapter(newValue);
+                  if (newValue) { setGroupByClass(false); setGroupByChapter(false); }
+                }}
+                className={`flex-1 md:flex-initial px-2 md:px-3 py-1 md:py-1.5 text-xs md:text-sm rounded-lg transition-all ${
+                  groupByClassChapter
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                <span className="hidden sm:inline">Class + Chapter</span>
+                <span className="sm:hidden">C+Ch</span>
               </button>
             </div>
 
@@ -6153,6 +6447,11 @@ const App = () => {
             {groupByChapter && (
               <span className="px-2 md:px-3 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
                 Grouped by Chapter
+              </span>
+            )}
+            {groupByClassChapter && (
+              <span className="px-2 md:px-3 py-1 text-xs bg-indigo-100 text-indigo-800 rounded-full font-medium">
+                Grouped by Class + Chapter
               </span>
             )}
           </div>
@@ -6211,9 +6510,13 @@ const App = () => {
                     const today = new Date().toISOString().split('T')[0];
                     setFilters({ teacher: '', class: '', subject: '', status: 'Pending Review', dateFrom: today, dateTo: today });
                   }}
-                  className="px-3 py-1 text-sm rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all"
+                  className={`px-3 py-1 text-sm rounded-full transition-all ${
+                    filters.status === 'Pending Review' && filters.dateFrom && filters.dateTo && filters.dateFrom === filters.dateTo && filters.dateFrom === new Date().toISOString().split('T')[0]
+                      ? 'bg-orange-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  📅 Today
+                  📅 Today's Pending
                 </button>
                 <button
                   onClick={() => {
@@ -6312,7 +6615,7 @@ const App = () => {
           </div>
         )}
 
-        {!groupByChapter && !groupByClass && (
+        {!groupByChapter && !groupByClass && !groupByClassChapter && (
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-200">
             <div className="flex flex-col gap-2">
@@ -6634,6 +6937,93 @@ const App = () => {
                                 <div className="text-xs text-gray-700 line-clamp-2 md:line-clamp-1 md:truncate md:max-w-[28rem] break-words">{l.learningObjectives || '-'}</div>
                               </div>
                               {/* Status and Actions */}
+                              <div className="flex items-center gap-2 self-start md:self-center">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs whitespace-nowrap ${l.status==='Ready'?'bg-green-100 text-green-800': l.status==='Pending Review'?'bg-yellow-100 text-yellow-800': l.status==='Needs Rework'?'bg-orange-100 text-orange-800':'bg-gray-100 text-gray-800'}`}>{l.status}</span>
+                                {(l.status === 'Pending Review' || l.status === 'Needs Rework') && (
+                                  <>
+                                    <button 
+                                      onClick={() => handleApproveLesson(l.lpId, 'Ready')}
+                                      disabled={!!rowSubmitting[l.lpId]}
+                                      className={`text-green-600 px-1.5 py-0.5 bg-green-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-green-900'}`}
+                                      title="Approve"
+                                    >✓</button>
+                                    {l.status === 'Pending Review' && (
+                                      <button 
+                                        onClick={() => handleApproveLesson(l.lpId, 'Needs Rework')}
+                                        disabled={!!rowSubmitting[l.lpId]}
+                                        className={`text-yellow-600 px-1.5 py-0.5 bg-yellow-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-yellow-900'}`}
+                                        title="Needs Rework"
+                                      >⚠</button>
+                                    )}
+                                    <button 
+                                      onClick={() => handleApproveLesson(l.lpId, 'Rejected')}
+                                      disabled={!!rowSubmitting[l.lpId]}
+                                      className={`text-red-600 px-1.5 py-0.5 bg-red-100 rounded text-xs ${rowSubmitting[l.lpId] ? 'opacity-50 cursor-not-allowed' : 'hover:text-red-900'}`}
+                                      title="Reject"
+                                    >✗</button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {groupByClassChapter && (
+          <div className="bg-white rounded-xl shadow-sm p-4">
+            <h2 className="text-lg font-medium text-gray-900 mb-3">Lesson Plans (Class + Chapter)</h2>
+            {computedClassChapterGroups.length === 0 ? (
+              <p className="text-gray-700">No lesson plans match the current filters.</p>
+            ) : (
+              <div className="space-y-4">
+                {computedClassChapterGroups.map(g => {
+                  const pending = g.counts?.pending || 0;
+                  const approved = g.counts?.ready || 0;
+                  const teachersLabel = (g.teacherNames || []).length > 0 ? g.teacherNames.join(', ') : '';
+                  return (
+                    <div key={g.key} className="border rounded-lg">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between px-3 py-2 sm:px-4 sm:py-3 bg-gray-50 border-b gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs sm:text-sm text-gray-600 truncate">{stripStdPrefix(g.class)} • {g.subject}</div>
+                          <div className="text-sm sm:text-base font-semibold text-gray-900 break-words line-clamp-2">{g.chapter}</div>
+                          {teachersLabel && (
+                            <div className="text-xs text-gray-500 mt-1 line-clamp-2 break-words">Teachers: {teachersLabel}</div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+                          <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800 font-medium">P: {pending}</span>
+                          <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-medium">A: {approved}</span>
+                          <button
+                            onClick={() => {
+                              const lessons = (g.lessons || []).slice().sort((a,b) => Number(a.session||0) - Number(b.session||0));
+                              setSelectedChapter({ schemeId: g.schemeId || '', chapter: g.chapter, class: g.class, subject: g.subject, teacherName: teachersLabel || 'Multiple Teachers', lessons });
+                              setShowChapterModal(true);
+                            }}
+                            className="p-1.5 text-purple-600 hover:text-purple-700 bg-purple-100 rounded-lg hover:bg-purple-200"
+                            title="Open Chapter"
+                          ><BookOpen className="h-4 w-4" /></button>
+                        </div>
+                      </div>
+                      <div className="divide-y">
+                        {(g.lessons || []).slice().sort((a,b) => Number(a.session||0) - Number(b.session||0)).map(l => (
+                          <div key={l.lpId} className="px-3 py-2 md:px-4 md:py-3">
+                            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                              <div className="flex flex-col gap-1 md:flex-row md:items-center md:gap-4 flex-1">
+                                <div className="flex items-center gap-3 text-xs text-gray-600">
+                                  <span className="font-medium">Session {l.session}</span>
+                                  <span>{l.selectedDate ? new Date(l.selectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '-'}</span>
+                                  <span>P{l.selectedPeriod || '-'}</span>
+                                  {l.teacherName && <span className="text-gray-500">• {l.teacherName}</span>}
+                                </div>
+                                <div className="text-xs text-gray-700 line-clamp-2 md:line-clamp-1 md:truncate md:max-w-[28rem] break-words">{l.learningObjectives || '-'}</div>
+                              </div>
                               <div className="flex items-center gap-2 self-start md:self-center">
                                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs whitespace-nowrap ${l.status==='Ready'?'bg-green-100 text-green-800': l.status==='Pending Review'?'bg-yellow-100 text-yellow-800': l.status==='Needs Rework'?'bg-orange-100 text-orange-800':'bg-gray-100 text-gray-800'}`}>{l.status}</span>
                                 {(l.status === 'Pending Review' || l.status === 'Needs Rework') && (

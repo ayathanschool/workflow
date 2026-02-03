@@ -1448,10 +1448,6 @@
       }
       
       // === DAILY REPORT ROUTES ===
-      if (action === 'getUnreportedSessions') {
-        return _handleGetUnreportedSessions(e.parameter);
-      }
-      
       if (action === 'submitDailyReport') {
         const lock = LockService.getScriptLock();
         try {
@@ -1469,10 +1465,6 @@
           const reportClass = String(data.class || '').trim();
           const reportSubject = String(data.subject || '').trim();
           const reportPeriod = Number(data.period || 0);
-          
-          // NEW: Support backfill reporting - teacher can select which session to report
-          const backfillSessionNo = data.backfillSessionNo ? Number(data.backfillSessionNo) : null;
-          const isBackfillReport = backfillSessionNo !== null && backfillSessionNo > 0;
           appLog('DEBUG', 'duplicateCheck params', { date: reportDate, email: teacherEmail, class: reportClass, subject: reportSubject, period: reportPeriod });
 
           SpreadsheetApp.flush();
@@ -2393,87 +2385,6 @@
   /**
   * Handle GET approved schemes for lesson planning
   */
-  /**
-  * Handle GET unreported sessions for a chapter
-  * Returns sessions that have lesson plans but no daily reports
-  */
-  function _handleGetUnreportedSessions(params) {
-    try {
-      const teacherEmail = String(params.teacherEmail || '').toLowerCase().trim();
-      const reportClass = String(params.class || '').trim();
-      const reportSubject = String(params.subject || '').trim();
-      const chapter = String(params.chapter || '').trim();
-      
-      if (!teacherEmail || !reportClass || !reportSubject || !chapter) {
-        return _respond({ success: false, error: 'teacherEmail, class, subject, and chapter are required' });
-      }
-      
-      // Check if backfill reporting is enabled
-      const settings = _getCachedSettings();
-      const backfillEnabled = String(settings['allow_backfill_reporting'] || 'false').toLowerCase() === 'true';
-      
-      if (!backfillEnabled) {
-        return _respond({ success: false, error: 'Backfill reporting is not enabled', backfillEnabled: false });
-      }
-      
-      // Get lesson plans for this teacher/class/subject/chapter
-      const lessonPlans = _getCachedSheetData('LessonPlans').data;
-      const chapterPlans = lessonPlans.filter(p => {
-        return String(p.teacherEmail || '').toLowerCase().trim() === teacherEmail &&
-          String(p.class || '').trim() === reportClass &&
-          String(p.subject || '').trim() === reportSubject &&
-          String(p.chapter || '').trim() === chapter &&
-          _isPlanReadyForTeacher(p.status);
-      });
-      
-      // Get existing reports
-      const dailyReports = _getCachedSheetData('DailyReports').data;
-      const chapterReports = dailyReports.filter(r => {
-        return String(r.teacherEmail || '').toLowerCase().trim() === teacherEmail &&
-          String(r.class || '').trim() === reportClass &&
-          String(r.subject || '').trim() === reportSubject &&
-          String(r.chapter || '').trim() === chapter;
-      });
-      
-      // Build set of reported sessions
-      const reportedSessions = new Set();
-      chapterReports.forEach(r => {
-        const sessNo = Number(r.sessionNo || 0);
-        if (sessNo > 0) reportedSessions.add(sessNo);
-      });
-      
-      // Find unreported sessions
-      const unreportedSessions = [];
-      chapterPlans.forEach(p => {
-        const sessNo = Number(p.session || 0);
-        if (sessNo > 0 && !reportedSessions.has(sessNo)) {
-          unreportedSessions.push({
-            sessionNo: sessNo,
-            lessonPlanId: p.lpId,
-            plannedDate: p.selectedDate,
-            plannedPeriod: p.selectedPeriod,
-            status: p.status
-          });
-        }
-      });
-      
-      // Sort by session number
-      unreportedSessions.sort((a, b) => a.sessionNo - b.sessionNo);
-      
-      return _respond({
-        success: true,
-        backfillEnabled: true,
-        unreportedSessions: unreportedSessions,
-        totalPlans: chapterPlans.length,
-        totalReports: chapterReports.length
-      });
-      
-    } catch (error) {
-      Logger.log('Error in _handleGetUnreportedSessions:', error.message);
-      return _respond({ success: false, error: error.message });
-    }
-  }
-
   /**
   * Handle GET approved schemes for lesson planning
   * WITH ENHANCED BACKUP IMPLEMENTATION

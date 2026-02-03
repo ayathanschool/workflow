@@ -585,18 +585,6 @@ export async function submitDailyReport(data) {
   return postJSON(`${BASE_URL}?action=submitDailyReport`, data)
 }
 
-// Get unreported sessions for backfill reporting (HM-controlled feature)
-export async function getUnreportedSessions(teacherEmail, cls, subject, chapter) {
-  const q = new URLSearchParams({
-    action: 'getUnreportedSessions',
-    teacherEmail,
-    class: cls,
-    subject,
-    chapter
-  });
-  return getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
-}
-
 export async function checkChapterCompletion(data) {
   return postJSON(`${BASE_URL}?action=checkChapterCompletion`, data)
 }
@@ -903,7 +891,8 @@ export async function getFullTimetableFiltered(cls = '', subject = '', teacher =
 // App settings (used to control lesson planning rules and period times)
 export async function getAppSettings() {
   // Expect either an object with settings or { settings: { ... } }
-  const res = await getJSON(`${BASE_URL}?action=getAppSettings`);
+  // Cache for 5 minutes since settings rarely change
+  const res = await getJSON(`${BASE_URL}?action=getAppSettings`, 300000);
 
   // Check if response has the period times directly
   if (res && (res.periodTimesWeekday || res.periodTimesFriday)) {
@@ -983,7 +972,8 @@ export async function getExams(options = {}) {
   });
 
   // CRITICAL: Unwrap response from {status, data, timestamp} wrapper
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`);
+  // Cache for 2 minutes to speed up repeated loads
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, 120000);
   return result?.data || result || [];
 }
 
@@ -1044,7 +1034,8 @@ export async function getExamMarksEntryStatusAll(options = {}) {
   if (teacherEmail) q.append('teacherEmail', String(teacherEmail));
   if (role) q.append('role', String(role));
   if (limit) q.append('limit', String(limit));
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`);
+  // Cache for 1 minute - marks entry status changes infrequently
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, 60000);
   return result?.data || result || { success: false, exams: [] };
 }
 
@@ -1438,7 +1429,8 @@ export async function submitExamMarks(data) {
 // Retrieve all marks for a given examId.  Returns an array of mark records.
 export async function getExamMarks(examId) {
   const q = new URLSearchParams({ action: 'getExamMarks', examId })
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`)
+  // Cache for 2 minutes - marks don't change frequently
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, 120000)
   return result?.data || result || []
 }
 
@@ -1741,8 +1733,8 @@ export async function getApprovedSchemesForLessonPlanning(teacherEmail, summaryO
     teacherEmail,
     summaryOnly: summaryOnly.toString()
   });
-  // Settings-driven response (planning windows + bulkOnly mode) should reflect sheet edits immediately.
-  return getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
+  // Use 30-second cache for faster subsequent loads, manual refresh available in UI
+  return getJSON(`${BASE_URL}?${q.toString()}`, 30000);
 }
 
 // Get detailed chapter/session breakdown for a specific scheme (lazy loading)

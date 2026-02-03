@@ -8,7 +8,8 @@ import {
   checkChapterCompletion,
   getPlannedLessonsForDate,
   getTeacherWeeklyTimetable,
-  getSuggestedPlansForSubstitution
+  getSuggestedPlansForSubstitution,
+  getUnreportedSessions
 } from "./api";
 import { todayIST } from "./utils/dateUtils";
 import { confirmDestructive } from "./utils/confirm";
@@ -61,6 +62,11 @@ export default function DailyReportModern({ user }) {
   // Debounce + cooldown to prevent frequent refresh on global re-renders (e.g., theme toggle)
   const lastRemainingFetchAtRef = useRef(0);
   const pendingRemainingFetchRef = useRef(null);
+  
+  // Backfill reporting - unreported sessions (HM-controlled feature)
+  const [unreportedSessions, setUnreportedSessions] = useState({});
+  const [unreportedSessionsLoading, setUnreportedSessionsLoading] = useState({});
+  const [backfillEnabled, setBackfillEnabled] = useState(false);
   
   // Prevent infinite reload loops
   const loadingRef = useRef(false);
@@ -414,6 +420,14 @@ export default function DailyReportModern({ user }) {
       setRemainingSessions(prev => ({ ...prev, [key]: null }));
     }
     
+    // When chapter is entered, fetch unreported sessions (for backfill)
+    if (field === 'chapter' && value) {
+      const period = periods.find(p => periodKey(p) === key);
+      if (period) {
+        fetchUnreportedSessions(key, period, value);
+      }
+    }
+    
     // When cascade option is selected, fetch preview
     if (field === 'cascadeOption' && value === 'cascade') {
       // Robust plan lookup: direct key, fuzzy by period+class, fallback id fields
@@ -484,6 +498,56 @@ export default function DailyReportModern({ user }) {
       setCascadeLoading(prev => ({ ...prev, [key]: false }));
     }
   };
+
+  // Fetch unreported sessions for backfill reporting (HM-controlled)
+  const fetchUnreportedSessions = useCallback(async (key, period, chapter) => {
+    if (!chapter) {
+      console.log('[Backfill] No chapter provided, skipping fetch');
+      setUnreportedSessions(prev => ({ ...prev, [key]: [] }));
+      return;
+    }
+    
+    console.log('[Backfill] Fetching unreported sessions:', { key, class: period.class, subject: period.subject, chapter });
+    setUnreportedSessionsLoading(prev => ({ ...prev, [key]: true }));
+    try {
+      const result = await getUnreportedSessions(email, period.class, period.subject, chapter);
+      const data = result.data || result;
+      
+      console.log('[Backfill] API response:', data);
+      
+      if (data.success && data.backfillEnabled) {
+        setBackfillEnabled(true);
+        setUnreportedSessions(prev => ({ ...prev, [key]: data.unreportedSessions || [] }));
+        console.log('[Backfill] Found', data.unreportedSessions?.length || 0, 'unreported sessions');
+      } else {
+        setBackfillEnabled(data.backfillEnabled || false);
+        setUnreportedSessions(prev => ({ ...prev, [key]: [] }));
+        console.log('[Backfill] Feature enabled:', data.backfillEnabled, '| Error:', data.error);
+      }
+    } catch (error) {
+      console.error('[Backfill] Error fetching unreported sessions:', error);
+      setUnreportedSessions(prev => ({ ...prev, [key]: [] }));
+    } finally {
+      setUnreportedSessionsLoading(prev => ({ ...prev, [key]: false }));
+    }
+  }, [email]);
+
+  // Fetch unreported sessions when period is expanded and has a chapter
+  useEffect(() => {
+    if (expandedPeriod && periods.length > 0) {
+      const period = periods.find(p => periodKey(p) === expandedPeriod);
+      if (period && !reports[expandedPeriod]) {
+        const draft = drafts[expandedPeriod] || {};
+        const plan = lessonPlans[expandedPeriod];
+        const chapter = draft.chapter || plan?.chapter;
+        
+        if (chapter) {
+          console.log('[Backfill] Fetching unreported sessions on expand:', { period, chapter });
+          fetchUnreportedSessions(expandedPeriod, period, chapter);
+        }
+      }
+    }
+  }, [expandedPeriod, periods, reports, drafts, lessonPlans, fetchUnreportedSessions]);
   
   const fetchRemainingSessions = useCallback(async (key, period, currentDraft = null) => {
     // Use passed draft if provided (for immediate state), else get from state
@@ -1109,6 +1173,9 @@ export default function DailyReportModern({ user }) {
                   periodKey={key}
                   remainingSessions={remainingSessions}
                   remainingSessionsLoading={remainingSessionsLoading}
+                  backfillEnabled={backfillEnabled}
+                  unreportedSessions={unreportedSessions}
+                  unreportedSessionsLoading={unreportedSessionsLoading}
                   onToggle={() => setExpandedPeriod(isExpanded ? null : key)}
                   onUpdate={(field, value) => updateDraft(key, field, value)}
                   onSubmit={() => handleSubmit(period)}
@@ -1142,6 +1209,9 @@ function PeriodCard({
   periodKey = '',
   remainingSessions = {},
   remainingSessionsLoading = {},
+  backfillEnabled = false,
+  unreportedSessions = {},
+  unreportedSessionsLoading = {},
   onToggle, 
   onUpdate, 
   onSubmit 
@@ -1399,6 +1469,30 @@ function PeriodCard({
                   )}
                 </div>
               </div>
+              
+              {/* Unreported Sessions Dropdown (Backfill Feature - HM Controlled) */}
+              {backfillEnabled && unreportedSessions[key] && unreportedSessions[key].length > 0 && (
+                <div className="mt-4 bg-amber-50 border border-amber-300 rounded-lg p-3">
+                  <label className="block text-sm font-medium text-amber-900 mb-2">
+                    📋 Report Missed Session (Optional)
+                  </label>
+                  <select
+                    value={data.backfillSessionNo || ''}
+                    onChange={(e) => onUpdate('backfillSessionNo', e.target.value)}
+                    className="w-full px-3 py-2 border border-amber-400 bg-white rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                  >
+                    <option value="">Current session (reporting for today)</option>
+                    {unreportedSessions[key].map((session) => (
+                      <option key={session.sessionNo} value={session.sessionNo}>
+                        Session {session.sessionNo} - Originally planned for {new Date(session.plannedDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} P{session.plannedPeriod}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-amber-700 mt-2">
+                    💡 Select an unreported session to backfill missed reports. Feature enabled by HM.
+                  </p>
+                </div>
+              )}
             </div>
           ) : (!isSub && (
             <div className={`rounded-lg p-4 border ${cascadeMoves[periodKey] ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200'}`}>
