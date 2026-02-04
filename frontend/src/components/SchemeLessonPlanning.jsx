@@ -85,6 +85,14 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   // Prevent duplicate API calls (React StrictMode protection)
   const loadingRef = useRef(false);
 
+  const _normStatus = (v) => String(v || '').trim().toLowerCase();
+  const _isSessionReported = (session) => _normStatus(session && session.status) === 'reported';
+  const _isChapterFullyReported = (chapter) => {
+    const sessions = (chapter && Array.isArray(chapter.sessions)) ? chapter.sessions : [];
+    if (sessions.length === 0) return false;
+    return sessions.every(_isSessionReported);
+  };
+
   // Load detailed chapter/session data for a specific scheme (lazy loading)
   const loadSchemeDetails = useCallback(async (schemeId) => {
     // Just toggle expanded state - data is already loaded
@@ -100,6 +108,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
     }
     
     let timeoutId = null;
+    let didSoftTimeout = false;
     
     try {
       loadingRef.current = true;
@@ -116,16 +125,17 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
         return;
       }
 
-      // Timeout fallback to prevent infinite loading (increased to 30s for slow Apps Script responses)
+      // Soft timeout: Apps Script cold-starts can exceed 30s, especially for full-payload fetch.
+      // We warn the user, but we don't permanently fail the request.
       timeoutId = setTimeout(() => {
         console.warn('⚠️ Scheme loading timeout - forcing loading=false');
-        setLoading(false);
-        loadingRef.current = false;
-        setError('Loading timed out. The server may be slow. Please try refreshing.');
-      }, 30000); // 30 second timeout (Apps Script can be very slow on cold starts)
+        didSoftTimeout = true;
+        setError('Still loading… server is slow (cold start). Please wait a bit longer.');
+      }, 60000); // 60s soft-timeout
 
       // Load summary-only first for quick initial render
-      const response = await api.getApprovedSchemesForLessonPlanning(userEmail, true);
+      // Load FULL details in one call (schemes + chapters + sessions)
+      const response = await api.getApprovedSchemesForLessonPlanning(userEmail, false);
 
       console.log('Scheme response:', response);
       console.log('Response data:', response.data);
@@ -146,27 +156,11 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
             ...s,
             totalSessions: toNum(s.totalSessions),
             plannedSessions: toNum(s.plannedSessions),
-            overallProgress
+            overallProgress,
+            chaptersLoaded: true
           };
         });
         setSchemes(normalizedSchemes);
-        
-        // Load all scheme details immediately in background
-        console.log('Loading detailed chapter data for all schemes...');
-        normalizedSchemes.forEach(async (scheme) => {
-          try {
-            const detailResponse = await api.getSchemeDetails(scheme.schemeId, userEmail);
-            if (detailResponse.data && detailResponse.data.success) {
-              setSchemes(prevSchemes => prevSchemes.map(s => 
-                s.schemeId === scheme.schemeId 
-                  ? { ...s, ...detailResponse.data, chaptersLoaded: true }
-                  : s
-              ));
-            }
-          } catch (err) {
-            console.error(`Failed to load details for scheme ${scheme.schemeId}:`, err);
-          }
-        });
         setPlanningDateRange(response.data.planningDateRange || null);
         
         // Check if bulk-only mode is enabled
@@ -193,6 +187,15 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
       }
       setLoading(false);
       loadingRef.current = false;
+
+      // If we only hit the soft-timeout, clear the warning once loading completes successfully.
+      // (If an actual error happened, error state is already set in catch.)
+      if (didSoftTimeout) {
+        setError(prev => {
+          const p = String(prev || '');
+          return p.includes('Still loading') ? null : prev;
+        });
+      }
     }
   }, [userEmail]);
 
@@ -718,7 +721,53 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                 const isLoadingDetails = loadingSchemeDetails[scheme.schemeId];
                 const hasChapters = scheme.chapters && scheme.chapters.length > 0;
 
+                const schemeTotals = (() => {
+                  if (!hasChapters) {
+                    return {
+                      total: Number(scheme.totalSessions) || 0,
+                      lpPlanned: Number(scheme.plannedSessions) || 0,
+                      reported: null
+                    };
+                  }
+                  const chapters = Array.isArray(scheme.chapters) ? scheme.chapters : [];
+                  let total = 0;
+                  let lpPlanned = 0;
+                  let reported = 0;
+                  for (const ch of chapters) {
+                    const sessions = (ch && Array.isArray(ch.sessions)) ? ch.sessions : [];
+                    for (const s of sessions) {
+                      total += 1;
+                      const st = _normStatus(s && s.status);
+                      if (st && st !== 'not-planned' && st !== 'cancelled' && st !== 'rejected') lpPlanned += 1;
+                      if (st === 'reported') reported += 1;
+                    }
+                  }
+                  return { total, lpPlanned, reported };
+                })();
+
                 const headerChapterText = (() => {
+                  // Prefer dynamic chapter name from loaded sessions (full payload)
+                  const chapters = Array.isArray(scheme.chapters) ? scheme.chapters : [];
+                  if (chapters.length > 0) {
+                    const current = chapters.find(ch => ch && ch.canPrepare !== false && !_isChapterFullyReported(ch));
+                    if (current) {
+                      return ` | Current: Ch ${current.chapterNumber}: ${current.chapterName}`;
+                    }
+                    const allReported = chapters.every(_isChapterFullyReported);
+                    if (allReported) {
+                      const last = chapters[chapters.length - 1];
+                      const lastLabel = last && last.chapterName ? `Ch ${last.chapterNumber}: ${last.chapterName}` : 'Last chapter';
+                      const isComplete = !!(last && last.chapterCompleted);
+                      return isComplete
+                        ? ` | Chapter Complete: ${lastLabel}`
+                        : ` | All sessions reported: ${lastLabel}`;
+                    }
+                    // Fallback: show first chapter name
+                    const first = chapters[0];
+                    if (first && first.chapterName) return ` | Ch ${first.chapterNumber}: ${first.chapterName}`;
+                  }
+
+                  // Fallback for summary payloads (older behavior)
                   const n = String(scheme.firstChapterName || '').trim();
                   if (!n) return '';
                   const num = String(scheme.firstChapterNumber || '').trim();
@@ -739,7 +788,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                       </div>
                       <div className="sm:text-right">
                         <div className="text-xs sm:text-sm text-gray-600 mb-1">
-                          Progress: {scheme.plannedSessions}/{scheme.totalSessions} sessions
+                          Progress: LP {schemeTotals.lpPlanned}/{schemeTotals.total}{schemeTotals.reported != null ? `, Reported ${schemeTotals.reported}/${schemeTotals.total}` : ''}
                         </div>
                         <div className="w-full sm:w-32 bg-gray-200 rounded-full h-2">
                           <div
@@ -772,17 +821,33 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                     </button>
 
                     {/* Chapters and sessions (only shown when expanded) */}
+                    {isExpanded && !hasChapters && (
+                      <div className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded p-3">
+                        Loading sessions…
+                      </div>
+                    )}
+
                     {isExpanded && hasChapters && (
-                      <div className="space-y-3 sm:space-y-4">{scheme.chapters.map((chapter) => {
+                      <div className="space-y-3 sm:space-y-4">{scheme.chapters.map((chapter, chapterIdx) => {
                         const chapterKey = `${scheme.schemeId}::${chapter.chapterNumber}`;
-                        const chapterExpanded = !!expandedChapters[chapterKey];
+                        // Default to expanded (so no chapter-wise clicking is required).
+                        const chapterExpanded = expandedChapters[chapterKey] !== false;
+
+                        const chapterFullyReported = _isChapterFullyReported(chapter);
+                        const chapterMarkedComplete = !!(chapter && chapter.chapterCompleted);
+                        const nextChapter = (Array.isArray(scheme.chapters) ? scheme.chapters[chapterIdx + 1] : null);
+                        const nextChapterUnlocked = !!(nextChapter && nextChapter.canPrepare !== false);
+                        const showCompletedBadge = chapterFullyReported && nextChapterUnlocked;
+                        const showChapterCompleteBadge = chapterMarkedComplete;
+                        const showAllReportedBadge = chapterFullyReported && !chapterMarkedComplete;
+
                         return (
                         <div key={`${scheme.schemeId}-${chapter.chapterNumber}`} className="border-l-4 border-blue-200 pl-2 sm:pl-4">
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
                             <div className="flex items-center gap-2 sm:gap-3">
                               <button
                                 type="button"
-                                onClick={() => setExpandedChapters(prev => ({ ...prev, [chapterKey]: !prev[chapterKey] }))}
+                                onClick={() => setExpandedChapters(prev => ({ ...prev, [chapterKey]: chapterExpanded ? false : true }))}
                                 className="text-left"
                                 title={chapterExpanded ? 'Hide chapter sessions' : 'Show chapter sessions'}
                               >
@@ -793,6 +858,29 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                               {chapter.canPrepare === false && (
                                 <span className="text-xs text-red-600 font-semibold">
                                   Previous chapter should be completed
+                                </span>
+                              )}
+
+                              {showChapterCompleteBadge && (
+                                <span className="text-xs bg-green-100 text-green-700 border border-green-200 px-2 py-1 rounded-full font-semibold">
+                                  Chapter Complete
+                                </span>
+                              )}
+
+                              {!showChapterCompleteBadge && showCompletedBadge && (
+                                <span className="text-xs bg-green-100 text-green-700 border border-green-200 px-2 py-1 rounded-full font-semibold">
+                                  Chapter Completed
+                                </span>
+                              )}
+
+                              {!showChapterCompleteBadge && !showCompletedBadge && showAllReportedBadge && (
+                                <span className="inline-flex items-center gap-2">
+                                  <span className="text-xs bg-amber-100 text-amber-800 border border-amber-200 px-2 py-1 rounded-full font-semibold">
+                                    All sessions reported
+                                  </span>
+                                  <span className="text-xs text-amber-800/80">
+                                    Mark “Chapter Complete” in the last session’s Daily Report.
+                                  </span>
                                 </span>
                               )}
                               {chapter.plannedSessions === 0 && (
