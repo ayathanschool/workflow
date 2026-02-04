@@ -4,6 +4,23 @@
  * Implements reverse flow: Schemes → Chapters → Sessions → Select Period
  */
 
+// ===== SchemeLessonManager shared helpers =====
+function _slmSafeDateMs_(v) {
+  try {
+    if (v == null || v === '') return 0;
+    const t = new Date(v).getTime();
+    return Number.isFinite(t) ? t : 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+function _slmSchemeStartMs_(scheme) {
+  // Use approvedAt first (when present), else createdAt. If missing/invalid, return 0 (no filtering).
+  const a = scheme && (scheme.approvedAt || scheme.createdAt);
+  return _slmSafeDateMs_(a);
+}
+
 /**
  * Check if lesson plan preparation is allowed for this session
  * SIMPLIFIED LOGIC: Allow preparation any day if:
@@ -82,8 +99,14 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
       }
 
       // Filter by class/subject once
+      const schemeStartMs = _slmSchemeStartMs_(scheme);
       const filtered = (teacherReportsAll || []).filter(r => {
         if (!r || typeof r !== 'object') return false;
+        // Avoid older-term/older-scheme reports affecting current scheme gating
+        if (schemeStartMs) {
+          const reportMs = _slmSafeDateMs_(r.date || r.createdAt);
+          if (reportMs && reportMs < schemeStartMs) return false;
+        }
         return _norm(r.teacherEmail) === teacherKey && _norm(r.class) === classKey && _norm(r.subject) === subjectKey;
       });
 
@@ -800,23 +823,39 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
       );
     };
 
-    // Reports indexed by (class + subject + chapter [+ session])
-    const hasReportBySession = new Set();
-    const completedChapters = new Set();
+    // Pre-group teacher reports by class|subject with parsed dateMs for per-scheme filtering.
+    const reportsByCs = new Map();
     for (const r of teacherReports) {
       if (!r || typeof r !== 'object') continue;
-      if (!relevantClassSubjects.has(csKey(r.class, r.subject))) continue;
-
-      const chKey = chapterKey(r.class, r.subject, r.chapter);
-      if (chKey && isChapterMarkedComplete(r)) completedChapters.add(chKey);
-
-      const sessKey = reportSessionKey(r.class, r.subject, r.chapter, r.sessionNo);
-      if (sessKey) hasReportBySession.add(sessKey);
+      const cs = csKey(r.class, r.subject);
+      if (!relevantClassSubjects.has(cs)) continue;
+      const dateMs = _slmSafeDateMs_(r.date || r.createdAt);
+      if (!reportsByCs.has(cs)) reportsByCs.set(cs, []);
+      reportsByCs.get(cs).push({ r, dateMs });
     }
     
     // Process each scheme to show chapter/session breakdown
     const schemesWithProgress = approvedSchemes.map(scheme => {
       const schemeChapters = _parseSchemeChapters(scheme);
+
+      // Filter reports to this scheme window (avoid old reports impacting a new term/scheme)
+      const schemeStartMs = _slmSchemeStartMs_(scheme);
+      const cs = csKey(scheme.class, scheme.subject);
+      const raw = reportsByCs.get(cs) || [];
+      const schemeReports = schemeStartMs
+        ? raw.filter(x => x && x.dateMs && x.dateMs >= schemeStartMs).map(x => x.r)
+        : raw.map(x => x.r);
+
+      // Build report indexes for this scheme only
+      const hasReportBySession = new Set();
+      const completedChapters = new Set();
+      for (const rr of schemeReports) {
+        if (!rr || typeof rr !== 'object') continue;
+        const chKey = chapterKey(rr.class, rr.subject, rr.chapter);
+        if (chKey && isChapterMarkedComplete(rr)) completedChapters.add(chKey);
+        const sessKey = reportSessionKey(rr.class, rr.subject, rr.chapter, rr.sessionNo);
+        if (sessKey) hasReportBySession.add(sessKey);
+      }
 
       // Determine if each chapter is marked complete (for info) using precomputed indexes.
       // IMPORTANT: preparation gating must follow _isPreparationAllowedForSession() so it also
@@ -825,11 +864,8 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
       // This prevents "extended session" options from making already-moved-on chapters look incomplete.
       const startedChaptersForCs = (() => {
         const set = new Set();
-        const cs = csKey(scheme.class, scheme.subject);
-        for (const r of teacherReports) {
+        for (const r of schemeReports) {
           if (!r || typeof r !== 'object') continue;
-          if (!relevantClassSubjects.has(csKey(r.class, r.subject))) continue;
-          if (csKey(r.class, r.subject) !== cs) continue;
           const chName = normKey(r.chapter);
           if (chName) set.add(chName);
         }
@@ -1526,6 +1562,16 @@ function _fetchSchemeDetails(schemeId, teacherEmail) {
         normKey(report.subject) === schemeSubject &&
         String(report.teacherEmail || '').toLowerCase().trim() === teacherEmailNorm
       );
+    });
+  }
+
+  // Filter reports to this scheme window (avoid old reports affecting new scheme)
+  const schemeStartMs = _slmSchemeStartMs_(scheme);
+  if (schemeStartMs) {
+    schemeReports = (schemeReports || []).filter(r => {
+      if (!r || typeof r !== 'object') return false;
+      const ms = _slmSafeDateMs_(r.date || r.createdAt);
+      return !ms || ms >= schemeStartMs;
     });
   }
   

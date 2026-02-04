@@ -745,33 +745,46 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   return { total, lpPlanned, reported };
                 })();
 
-                const headerChapterText = (() => {
-                  // Prefer dynamic chapter name from loaded sessions (full payload)
+                const headerChapterNode = (() => {
                   const chapters = Array.isArray(scheme.chapters) ? scheme.chapters : [];
                   if (chapters.length > 0) {
                     const current = chapters.find(ch => ch && ch.canPrepare !== false && !_isChapterFullyReported(ch));
                     if (current) {
-                      return ` | Current: Ch ${current.chapterNumber}: ${current.chapterName}`;
+                      return (
+                        <span className="ml-1 text-indigo-600 font-semibold">
+                          Current: Ch {current.chapterNumber}: {current.chapterName}
+                        </span>
+                      );
                     }
                     const allReported = chapters.every(_isChapterFullyReported);
                     if (allReported) {
                       const last = chapters[chapters.length - 1];
                       const lastLabel = last && last.chapterName ? `Ch ${last.chapterNumber}: ${last.chapterName}` : 'Last chapter';
                       const isComplete = !!(last && last.chapterCompleted);
-                      return isComplete
-                        ? ` | Chapter Complete: ${lastLabel}`
-                        : ` | All sessions reported: ${lastLabel}`;
+                      return (
+                        <span className={"ml-1 " + (isComplete ? 'text-green-700 font-semibold' : 'text-amber-800 font-semibold')}>
+                          {isComplete ? 'Chapter Complete: ' : 'All sessions reported: '}{lastLabel}
+                        </span>
+                      );
                     }
-                    // Fallback: show first chapter name
                     const first = chapters[0];
-                    if (first && first.chapterName) return ` | Ch ${first.chapterNumber}: ${first.chapterName}`;
+                    if (first && first.chapterName) {
+                      return (
+                        <span className="ml-1 text-gray-600">
+                          Ch {first.chapterNumber}: {first.chapterName}
+                        </span>
+                      );
+                    }
                   }
 
-                  // Fallback for summary payloads (older behavior)
                   const n = String(scheme.firstChapterName || '').trim();
-                  if (!n) return '';
+                  if (!n) return null;
                   const num = String(scheme.firstChapterNumber || '').trim();
-                  return num ? ` | Ch ${num}: ${n}` : ` | ${n}`;
+                  return (
+                    <span className="ml-1 text-gray-600">
+                      {num ? `Ch ${num}: ${n}` : n}
+                    </span>
+                  );
                 })();
                 
                 return (
@@ -783,7 +796,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                           {stripStdPrefix(scheme.class)} - {scheme.subject}
                         </h3>
                         <p className="text-xs sm:text-sm text-gray-500">
-                          {scheme.academicYear} | Term: {scheme.term}{headerChapterText}
+                          {scheme.academicYear} | Term: {scheme.term}{headerChapterNode}
                         </p>
                       </div>
                       <div className="sm:text-right">
