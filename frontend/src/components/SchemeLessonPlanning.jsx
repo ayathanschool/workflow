@@ -87,52 +87,10 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
   // Load detailed chapter/session data for a specific scheme (lazy loading)
   const loadSchemeDetails = useCallback(async (schemeId) => {
-    // Toggle expanded state
+    // Just toggle expanded state - data is already loaded
     const isCurrentlyExpanded = expandedSchemes[schemeId];
-    
-    if (isCurrentlyExpanded) {
-      // Collapse - just toggle the state
-      setExpandedSchemes(prev => ({ ...prev, [schemeId]: false }));
-      return;
-    }
-    
-    // Check if we already have the chapters data
-    const scheme = schemes.find(s => s.schemeId === schemeId);
-    if (scheme && scheme.chapters && scheme.chapters.length > 0) {
-      // Already loaded, just expand
-      setExpandedSchemes(prev => ({ ...prev, [schemeId]: true }));
-      return;
-    }
-    
-    // Need to load details
-    try {
-      setLoadingSchemeDetails(prev => ({ ...prev, [schemeId]: true }));
-      
-      console.log(`Loading details for scheme: ${schemeId}`);
-      const response = await api.getSchemeDetails(schemeId, userEmail);
-      
-      console.log('Scheme details response:', response);
-      
-      if (response.data && response.data.success) {
-        // Update the scheme in the schemes array with the detailed data
-        setSchemes(prevSchemes => prevSchemes.map(s => 
-          s.schemeId === schemeId 
-            ? { ...s, ...response.data, chaptersLoaded: true }
-            : s
-        ));
-        
-        // Expand the scheme
-        setExpandedSchemes(prev => ({ ...prev, [schemeId]: true }));
-      } else {
-        alert('Failed to load scheme details: ' + (response.data?.error || 'Unknown error'));
-      }
-    } catch (err) {
-      console.error('Error loading scheme details:', err);
-      alert('Error loading scheme details: ' + err.message);
-    } finally {
-      setLoadingSchemeDetails(prev => ({ ...prev, [schemeId]: false }));
-    }
-  }, [expandedSchemes, schemes, userEmail]);
+    setExpandedSchemes(prev => ({ ...prev, [schemeId]: !isCurrentlyExpanded }));
+  }, [expandedSchemes]);
 
   const loadApprovedSchemes = useCallback(async () => {
     // Prevent duplicate calls (React StrictMode can trigger twice)
@@ -166,7 +124,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
         setError('Loading timed out. The server may be slow. Please try refreshing.');
       }, 30000); // 30 second timeout (Apps Script can be very slow on cold starts)
 
-      // NEW: Load summary-only initially for faster performance
+      // Load summary-only first for quick initial render
       const response = await api.getApprovedSchemesForLessonPlanning(userEmail, true);
 
       console.log('Scheme response:', response);
@@ -192,6 +150,23 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
           };
         });
         setSchemes(normalizedSchemes);
+        
+        // Load all scheme details immediately in background
+        console.log('Loading detailed chapter data for all schemes...');
+        normalizedSchemes.forEach(async (scheme) => {
+          try {
+            const detailResponse = await api.getSchemeDetails(scheme.schemeId, userEmail);
+            if (detailResponse.data && detailResponse.data.success) {
+              setSchemes(prevSchemes => prevSchemes.map(s => 
+                s.schemeId === scheme.schemeId 
+                  ? { ...s, ...detailResponse.data, chaptersLoaded: true }
+                  : s
+              ));
+            }
+          } catch (err) {
+            console.error(`Failed to load details for scheme ${scheme.schemeId}:`, err);
+          }
+        });
         setPlanningDateRange(response.data.planningDateRange || null);
         
         // Check if bulk-only mode is enabled

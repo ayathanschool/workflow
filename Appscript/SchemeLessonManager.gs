@@ -1309,9 +1309,20 @@ function _slmRowNumbersByExactValue_(sh, colIndex0, value) {
   return Array.from(new Set(rows)).sort((a, b) => a - b);
 }
 
-function _slmReadRowsBatched_(sh, headers, rowNumbers) {
+function _slmReadRowsBatched_(sh, headers, rowNumbers, colNamesFilter) {
   const lastCol = Math.max(sh.getLastColumn(), 1);
   if (!rowNumbers || rowNumbers.length === 0) return [];
+
+  // If colNamesFilter provided, compute column indexes to extract
+  let colIndexes = null;
+  if (Array.isArray(colNamesFilter) && colNamesFilter.length > 0) {
+    colIndexes = [];
+    for (const name of colNamesFilter) {
+      const idx = _slmFindColumnIndex_(headers, name);
+      if (idx !== -1) colIndexes.push(idx);
+    }
+    if (colIndexes.length === 0) colIndexes = null;
+  }
 
   // Batch contiguous row segments to minimize calls.
   const segments = [];
@@ -1332,13 +1343,27 @@ function _slmReadRowsBatched_(sh, headers, rowNumbers) {
   const out = [];
   for (const [start, end] of segments) {
     const numRows = end - start + 1;
+    // Always batch-read ALL columns first (one fast API call)
     const values = sh.getRange(start, 1, numRows, lastCol).getValues();
-    for (const row of values) out.push(_indexByHeader(row, headers));
+    
+    if (colIndexes && colIndexes.length > 0) {
+      // Filter to needed columns in memory (fast)
+      for (const row of values) {
+        const obj = {};
+        for (const colIdx of colIndexes) {
+          obj[headers[colIdx]] = row[colIdx];
+        }
+        out.push(obj);
+      }
+    } else {
+      // Return full rows
+      for (const row of values) out.push(_indexByHeader(row, headers));
+    }
   }
   return out;
 }
 
-function _slmFetchRowsByColumnExact_(sheetName, headerName, value) {
+function _slmFetchRowsByColumnExact_(sheetName, headerName, value, colNamesFilter) {
   const sh = _getSheet(sheetName);
   const headers = _headers(sh);
   const colIndex = _slmFindColumnIndex_(headers, headerName);
@@ -1346,7 +1371,7 @@ function _slmFetchRowsByColumnExact_(sheetName, headerName, value) {
     return { headers, rows: null, error: `Column not found: ${headerName}` };
   }
   const rowNumbers = _slmRowNumbersByExactValue_(sh, colIndex, value);
-  const rows = _slmReadRowsBatched_(sh, headers, rowNumbers);
+  const rows = _slmReadRowsBatched_(sh, headers, rowNumbers, colNamesFilter);
   return { headers, rows, rowNumbers };
 }
 
