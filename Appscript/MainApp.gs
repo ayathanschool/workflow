@@ -3769,10 +3769,47 @@
           return d || '';
         };
 
+        // Compare two timetable slots (date+period). Returns:
+        // -1 if A is before B, 1 if A is after B, 0 if equal/unknown.
+        const compareSlot = (dateA, periodA, dateB, periodB) => {
+          const a = String(dateA || '').trim();
+          const b = String(dateB || '').trim();
+          if (!a || !b) return 0;
+          if (a < b) return -1;
+          if (a > b) return 1;
+          const pa = Number(periodA || 0);
+          const pb = Number(periodB || 0);
+          if (pa < pb) return -1;
+          if (pa > pb) return 1;
+          return 0;
+        };
+
+        const hasReportSlot = Boolean(date && reportPeriod);
+        const isAfterReportSlot = (planDate, planPeriod) => {
+          if (!hasReportSlot) return true;
+          const pd = String(planDate || '').trim();
+          const pp = String(planPeriod || '').trim();
+          if (!pd || !pp) return false;
+          return compareSlot(date, reportPeriod, pd, pp) < 0;
+        };
+
         plans.sort((a, b) => {
           // Prefer plans on/after the requested date, then by date, then by period, then by session
           const ad = toISO(a.selectedDate || a.date);
           const bd = toISO(b.selectedDate || b.date);
+
+          // Key fix: when reporting a substitution slot (date+period), avoid picking a plan
+          // scheduled BEFORE the reporting slot as the default suggestion.
+          // Example: teacher already taught session 1 in P1 today, then reports substitution in P4.
+          // We should suggest the next session (often scheduled tomorrow) not the earlier P1 plan.
+          if (hasReportSlot) {
+            const ap = String(a.selectedPeriod || a.period || '').trim();
+            const bp = String(b.selectedPeriod || b.period || '').trim();
+            const aAfterSlot = isAfterReportSlot(ad, ap);
+            const bAfterSlot = isAfterReportSlot(bd, bp);
+            if (aAfterSlot !== bAfterSlot) return aAfterSlot ? -1 : 1;
+          }
+
           const aAfter = date ? (ad >= date) : true;
           const bAfter = date ? (bd >= date) : true;
           if (aAfter !== bAfter) return aAfter ? -1 : 1;
@@ -3810,21 +3847,14 @@
           };
         }).filter(x => x.lpId);
 
-        // Determine the next plan (the first one after sorting)
-        const nextPlan = compact.length ? compact[0] : null;
-
-        const compareSlot = (dateA, periodA, dateB, periodB) => {
-          const a = String(dateA || '').trim();
-          const b = String(dateB || '').trim();
-          if (!a || !b) return 0;
-          if (a < b) return -1;
-          if (a > b) return 1;
-          const pa = Number(periodA || 0);
-          const pb = Number(periodB || 0);
-          if (pa < pb) return -1;
-          if (pa > pb) return 1;
-          return 0;
-        };
+        // Determine the next plan:
+        // Prefer the first plan scheduled AFTER the reporting slot (if provided).
+        // Fallback to the first item after sorting.
+        let nextPlan = null;
+        if (hasReportSlot) {
+          nextPlan = compact.find(p => isAfterReportSlot(p.selectedDate, p.selectedPeriod)) || null;
+        }
+        if (!nextPlan) nextPlan = compact.length ? compact[0] : null;
 
         let pullbackPreview = [];
         if (nextPlan && nextPlan.chapter) {

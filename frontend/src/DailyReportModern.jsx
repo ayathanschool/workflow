@@ -31,9 +31,10 @@ const DEVIATION_REASONS = [
 ];
 
 const CASCADE_OPTIONS = [
-  { value: "", label: "Select cascade option" },
-  { value: "continue", label: "📌 Continue with existing plan" },
-  { value: "cascade", label: "🔄 Reschedule remaining sessions" }
+  { value: "", label: "Select lesson plan action" },
+  { value: "continue_same", label: "↩ Continue SAME session next day" },
+  { value: "continue", label: "📌 Continue with existing plan (next session)" },
+  { value: "cascade", label: "🔄 Reschedule remaining sessions (0% only)" }
 ];
 
 export default function DailyReportModern({ user }) {
@@ -780,11 +781,15 @@ export default function DailyReportModern({ user }) {
       return;
     }
     
-    // Validate cascade option if lesson plan exists and 0% completion
-    // Only require explicit cascade option if auto-cascade is disabled (backend flag) – optimistic assumption via window flag
-    const autoCascadeDisabled = window.__AUTO_CASCADE_DISABLED__ === true; // can be set after fetching settings
-    if (autoCascadeDisabled && completionPercentage === 0 && plan && !cascadeOption) {
-      setMessage({ text: "❌ Select cascade option (Continue or Reschedule)", type: "error" });
+    // For <=50% completion, require selecting a lesson plan action
+    if (plan && completionPercentage <= 50 && !cascadeOption) {
+      setMessage({ text: "❌ Select lesson plan action (Continue same session / Continue next session / Reschedule)", type: "error" });
+      return;
+    }
+
+    // Cascade is only for 0% completion
+    if (cascadeOption === 'cascade' && completionPercentage !== 0) {
+      setMessage({ text: "❌ Reschedule (cascade) can only be used for 0% completion", type: "error" });
       return;
     }
 
@@ -846,8 +851,16 @@ export default function DailyReportModern({ user }) {
           }
         }
         
-        // Execute cascade if option was selected
-        if (cascadeOption === 'cascade' && cascadePreview[key]) {
+        // Friendly reminder for partial completion workflow
+        if (completionPercentage > 0 && completionPercentage <= 50 && cascadeOption === 'continue_same') {
+          setMessage({
+            text: `✅ Report submitted. Reminder: continue the SAME session next day (set Session Number to ${Number(draft.sessionNo || plan?.session || 1)} again).`,
+            type: 'success'
+          });
+        }
+
+        // Execute cascade if option was selected (0% only)
+        if (completionPercentage === 0 && cascadeOption === 'cascade' && cascadePreview[key]) {
           console.log('🔄 Executing cascade...');
           try {
             const sessionsToUpdate = cascadePreview[key].sessionsToReschedule || [];
@@ -1649,52 +1662,53 @@ function PeriodCard({
 
           {/* Deviation Reason (only for 0%) */}
           {allowPlanActions && completionPercentage === 0 && (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Reason for 0% Completion <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={data.deviationReason || ""}
-                  onChange={(e) => onUpdate('deviationReason', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  {DEVIATION_REASONS.map(reason => (
-                    <option key={reason.value} value={reason.value}>{reason.label}</option>
-                  ))}
-                </select>
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Reason for 0% Completion <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={data.deviationReason || ""}
+                onChange={(e) => onUpdate('deviationReason', e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                {DEVIATION_REASONS.map(reason => (
+                  <option key={reason.value} value={reason.value}>{reason.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
-              {/* Cascade Option (only when lesson plan exists and reason is selected) */}
-              {effectivePlan && data.deviationReason && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Lesson Plan Action <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={data.cascadeOption || ""}
-                    onChange={(e) => onUpdate('cascadeOption', e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    {CASCADE_OPTIONS.map(option => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                  <p className="mt-2 text-sm text-gray-600">
-                    {data.cascadeOption === 'continue' && '📌 Remaining sessions will keep their original dates'}
-                    {data.cascadeOption === 'cascade' && '🔄 All remaining sessions will be rescheduled to next available periods'}
-                  </p>
-                  {data.cascadeOption === 'cascade' && cascadeLoading && (
-                    <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
-                      <span className="animate-spin inline-block w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full"></span>
-                      Generating cascade preview...
-                    </div>
-                  )}
+          {/* Lesson Plan Action (for <=50% completion; for 0% show only after reason selected) */}
+          {allowPlanActions && effectivePlan && completionPercentage <= 50 && (completionPercentage > 0 || !!data.deviationReason) && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Lesson Plan Action <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={data.cascadeOption || ""}
+                onChange={(e) => onUpdate('cascadeOption', e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                {CASCADE_OPTIONS.filter(opt => opt.value !== 'cascade' || completionPercentage === 0).map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <p className="mt-2 text-sm text-gray-600">
+                {data.cascadeOption === 'continue_same' && '↩ You will continue the SAME session next day. Keep the Session Number unchanged while reporting until the session is completed.'}
+                {data.cascadeOption === 'continue' && '📌 Continue with the planned schedule (next session as per lesson plans).'}
+                {data.cascadeOption === 'cascade' && '🔄 Reschedule remaining sessions to next available periods (use only when 0% was delivered).'}
+              </p>
+              {completionPercentage === 0 && data.cascadeOption === 'cascade' && cascadeLoading && (
+                <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
+                  <span className="animate-spin inline-block w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full"></span>
+                  Generating cascade preview...
                 </div>
               )}
+            </div>
+          )}
 
-              {/* Cascade Preview */}
-              {data.cascadeOption === 'cascade' && cascadePreview && !cascadeLoading && (
+              {/* Cascade Preview (0% only) */}
+              {completionPercentage === 0 && data.cascadeOption === 'cascade' && cascadePreview && !cascadeLoading && (
                 <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
                   <h4 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
                     <span className="text-xl">🔄</span>
@@ -1730,8 +1744,6 @@ function PeriodCard({
                   )}
                 </div>
               )}
-            </>
-          )}
 
           {/* Learning Objectives - show for all cases when completion > 0 */}
           {showPlannedFields && completionPercentage > 0 && !effectivePlan && (
