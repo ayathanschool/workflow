@@ -878,6 +878,19 @@ export async function getSuggestedPlansForSubstitution(teacherEmail, cls, subjec
   return response?.data || response;
 }
 
+export async function getFirstUnreportedSession(teacherEmail, cls, subject, chapter, totalSessions) {
+  const params = new URLSearchParams({
+    action: 'getFirstUnreportedSession',
+    teacherEmail,
+    class: cls,
+    subject,
+    chapter,
+    totalSessions: String(totalSessions)
+  });
+  const response = await getJSON(`${BASE_URL}?${params.toString()}`, NO_CACHE);
+  return response;
+}
+
 // HM Insights (basic)
 export async function getHmInsights() {
   const response = await getJSON(`${BASE_URL}?action=getHmInsights`);

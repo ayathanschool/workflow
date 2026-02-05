@@ -8,19 +8,15 @@ import {
   checkChapterCompletion,
   getPlannedLessonsForDate,
   getTeacherWeeklyTimetable,
-  getSuggestedPlansForSubstitution
+  getSuggestedPlansForSubstitution,
+  getFirstUnreportedSession
   // getUnreportedSessions // TODO: Implement backfill feature API
 } from "./api";
 import { todayIST } from "./utils/dateUtils";
 import { confirmDestructive } from "./utils/confirm";
 
-const COMPLETION_LEVELS = [
-  { value: 0, label: '0% - Not Started', icon: '⭕', color: 'bg-gray-50 border-gray-200' },
-  { value: 25, label: '25% - Started', icon: '🔵', color: 'bg-orange-50 border-orange-200' },
-  { value: 50, label: '50% - Half Done', icon: '🟡', color: 'bg-yellow-50 border-yellow-200' },
-  { value: 75, label: '75% - Almost Done', icon: '🟢', color: 'bg-blue-50 border-blue-200' },
-  { value: 100, label: '100% - Complete', icon: '✅', color: 'bg-green-50 border-green-200' }
-];
+// Session completion is now binary: Yes (complete) or No (incomplete)
+// Backend maps: true → 100%, false → 0%
 
 const DEVIATION_REASONS = [
   { value: "", label: "Select reason for 0% completion" },
@@ -30,12 +26,7 @@ const DEVIATION_REASONS = [
   { value: "Other", label: "📋 Other (specify in notes)" }
 ];
 
-const CASCADE_OPTIONS = [
-  { value: "", label: "Select lesson plan action" },
-  { value: "continue_same", label: "↩ Continue SAME session next day" },
-  { value: "continue", label: "📌 Continue with existing plan (next session)" },
-  { value: "cascade", label: "🔄 Reschedule remaining sessions (0% only)" }
-];
+// Removed: Complex cascade options replaced with simple Yes/No session completion
 
 export default function DailyReportModern({ user }) {
   const [date, setDate] = useState(todayIST());
@@ -50,6 +41,7 @@ export default function DailyReportModern({ user }) {
   const [cascadePreview, setCascadePreview] = useState({});
   const [cascadeMoves, setCascadeMoves] = useState({});
   const [cascadeLoading, setCascadeLoading] = useState({});
+  const [firstUnreportedSession, setFirstUnreportedSession] = useState({});
   // Substitution: optional lesson plan suggestions (manual selection)
   // Stored per periodKey: { nextPlan, pullbackPreview }
   const [suggestedSubPlans, setSuggestedSubPlans] = useState({});
@@ -454,8 +446,12 @@ export default function DailyReportModern({ user }) {
         setCascadePreview(prev => ({ ...prev, [key]: { success: false, sessionsToReschedule: [], error: 'No lesson plan ID found for cascade.' } }));
       }
     }
+    // Fetch preview for continue_same option
+    if (field === 'cascadeOption' && value === 'continue_same') {
+      // Continue same session preview removed - now using sequential session enforcement
+    }
   }, [lessonPlans]);
-  
+
   const fetchCascadePreview = async (key, lpId) => {
     try {
       setCascadeLoading(prev => ({ ...prev, [key]: true }));
@@ -512,7 +508,7 @@ export default function DailyReportModern({ user }) {
     setUnreportedSessionsLoading(prev => ({ ...prev, [key]: true }));
     try {
       // TODO: Implement getUnreportedSessions API endpoint
-      console.warn('[Backfill] getUnreportedSessions not implemented yet');
+      // Backfill feature not yet implemented - silently disable it
       setUnreportedSessions(prev => ({ ...prev, [key]: [] }));
       setBackfillEnabled(false);
       return;
@@ -757,44 +753,35 @@ export default function DailyReportModern({ user }) {
       return;
     }
 
-    // Validation - check draft first, then fallback to lesson plan (regular periods)
+    // Simplified validation - session complete Yes/No
     const chapter = (draft.chapter || plan?.chapter || "").trim();
     const objectives = (draft.objectives || plan?.learningObjectives || "").trim();
-    const completionPercentage = Number(draft.completionPercentage || 0);
-    const deviationReason = (draft.deviationReason || "").trim();
-    const cascadeOption = draft.cascadeOption || "";
+    // Backward/forward compatible: accept either boolean or legacy percentage
+    const completionPct = Number(
+      (draft.sessionComplete === true || Number(draft.completionPercentage || 0) === 100)
+        ? 100
+        : 0
+    );
+    const sessionComplete = completionPct === 100;
+    const wantsReschedule = draft.wantsReschedule === true || String(draft.cascadeOption || '').trim() === 'cascade';
 
     if (!chapter) {
       setMessage({ text: "❌ Chapter/Topic is required", type: "error" });
       return;
     }
-    
-    // Validate remaining sessions action if chapter completed and has remaining sessions
-    if (draft.chapterCompleted && remainingSessions[key] && remainingSessions[key].length > 0 && !draft.remainingSessionsAction) {
-      setMessage({ text: "Please choose what to do with remaining sessions", type: "error" });
-      setSubmitting(prev => ({ ...prev, [key]: false }));
+
+    if (sessionComplete && !objectives) {
+      setMessage({ text: "❌ Learning Objectives required when session is complete", type: "error" });
       return;
     }
 
-    if (completionPercentage === 0 && !deviationReason) {
-      setMessage({ text: "❌ For 0% completion, please select a reason", type: "error" });
-      return;
-    }
-    
-    // For <=50% completion, require selecting a lesson plan action
-    if (plan && completionPercentage <= 50 && !cascadeOption) {
-      setMessage({ text: "❌ Select lesson plan action (Continue same session / Continue next session / Reschedule)", type: "error" });
+    if (!sessionComplete && !String(draft.deviationReason || '').trim()) {
+      setMessage({ text: "❌ Please select reason for incomplete session", type: "error" });
       return;
     }
 
-    // Cascade is only for 0% completion
-    if (cascadeOption === 'cascade' && completionPercentage !== 0) {
-      setMessage({ text: "❌ Reschedule (cascade) can only be used for 0% completion", type: "error" });
-      return;
-    }
-
-    if (completionPercentage > 0 && !objectives) {
-      setMessage({ text: "❌ Learning Objectives required when teaching was done", type: "error" });
+    if (sessionComplete && draft.chapterCompleted && remainingSessions[key] && remainingSessions[key].length > 0 && !draft.remainingSessionsAction) {
+      setMessage({ text: "❌ Please choose what to do with remaining sessions", type: "error" });
       return;
     }
 
@@ -813,18 +800,18 @@ export default function DailyReportModern({ user }) {
         chapter: chapter,
         sessionNo: Number(draft.sessionNo || plan?.session || 1),
         totalSessions: Number(draft.totalSessions || plan?.totalSessions || plan?.noOfSessions || 1),
-        completionPercentage: completionPercentage,
-        chapterStatus: draft.chapterCompleted ? 'Chapter Complete' : 'Session Complete',
-        deviationReason: deviationReason,
-        difficulties: draft.difficulties || "",
-        nextSessionPlan: draft.nextSessionPlan || "",
+        // Send both for compatibility (backend supports either)
+        sessionComplete: sessionComplete,
+        completionPercentage: completionPct,
+        deviationReason: String(draft.deviationReason || ''),
+        chapterCompleted: !!draft.chapterCompleted,
+        remainingSessionsAction: draft.remainingSessionsAction || null,
+        remainingSessions: (draft.chapterCompleted && remainingSessions[key]) ? remainingSessions[key].map(s => s.lpId) : [],
+        completionRationale: String(draft.completionRationale || ''),
+        cascadeOption: (!sessionComplete && wantsReschedule) ? 'cascade' : '',
         objectives: objectives,
         activities: draft.activities || "",
-        notes: draft.notes || "",
-        chapterCompleted: draft.chapterCompleted || false,
-        remainingSessionsAction: draft.chapterCompleted && draft.remainingSessionsAction ? draft.remainingSessionsAction : null,
-        remainingSessions: draft.chapterCompleted && remainingSessions[key] ? remainingSessions[key].map(s => s.lpId) : [],
-        completionRationale: draft.completionRationale || ''
+        notes: draft.notes || ""
       };
 
       console.log('📝 SUBMITTING DAILY REPORT:', payload);
@@ -839,7 +826,7 @@ export default function DailyReportModern({ user }) {
         console.log('✅ Daily report submitted successfully');
         // Handle auto-cascade feedback (backend may have moved sessions automatically)
         const autoCascade = result.autoCascade || result.data?.autoCascade || null;
-        if (autoCascade && autoCascade.attempted && cascadeOption !== 'cascade') {
+        if (autoCascade && autoCascade.attempted && payload.cascadeOption !== 'cascade') {
           if (autoCascade.success) {
             setMessage({ text: `✅ Report submitted. Auto-cascade rescheduled ${autoCascade.updatedCount} session(s).`, type: 'success' });
           } else if (autoCascade.reason === 'auto_disabled') {
@@ -851,16 +838,8 @@ export default function DailyReportModern({ user }) {
           }
         }
         
-        // Friendly reminder for partial completion workflow
-        if (completionPercentage > 0 && completionPercentage <= 50 && cascadeOption === 'continue_same') {
-          setMessage({
-            text: `✅ Report submitted. Reminder: continue the SAME session next day (set Session Number to ${Number(draft.sessionNo || plan?.session || 1)} again).`,
-            type: 'success'
-          });
-        }
-
-        // Execute cascade if option was selected (0% only)
-        if (completionPercentage === 0 && cascadeOption === 'cascade' && cascadePreview[key]) {
+        // Execute cascade if requested for incomplete session
+        if (!sessionComplete && wantsReschedule && cascadePreview[key]) {
           console.log('🔄 Executing cascade...');
           try {
             const sessionsToUpdate = cascadePreview[key].sessionsToReschedule || [];
@@ -1011,8 +990,9 @@ export default function DailyReportModern({ user }) {
     }
   };
 
-  const getCompletionLevel = (percentage) => {
-    return COMPLETION_LEVELS.find(l => l.value === percentage) || COMPLETION_LEVELS[0];
+  const getSessionCompleteLabel = (completionPercentage) => {
+    // For old reports: 100% = Complete, anything else = Incomplete
+    return completionPercentage === 100 ? '✅ Complete' : '⭕ Incomplete';
   };
 
   const displayDate = useMemo(() => {
@@ -1172,15 +1152,16 @@ export default function DailyReportModern({ user }) {
                   lessonPlansIndex.get(`${pNorm}|${clsNorm}`) ||
                   null;
               }
-              const completionLevel = getCompletionLevel(isSubmitted ? (report.completionPercentage || 0) : (draft.completionPercentage || 0));
+              const completionLabel = getSessionCompleteLabel(isSubmitted ? (report.completionPercentage || 0) : (draft.completionPercentage || 0));
               return (
                 <PeriodCard
                   key={key}
+                  teacherEmail={email}
                   period={period}
                   isExpanded={isExpanded}
                   isSubmitted={isSubmitted}
                   isSubmitting={isSubmitting}
-                  completionLevel={completionLevel}
+                  completionLabel={completionLabel}
                   draft={draft}
                   report={report}
                   plan={plan}
@@ -1212,11 +1193,12 @@ export default function DailyReportModern({ user }) {
 
 // Period Card Component
 function PeriodCard({ 
+  teacherEmail = '',
   period, 
   isExpanded, 
   isSubmitted, 
   isSubmitting,
-  completionLevel, 
+  completionLabel, 
   draft = {}, 
   report = null, 
   plan = null,
@@ -1267,18 +1249,43 @@ function PeriodCard({
     notesText.includes('cascad');
 
   // When selecting "In plan", prefill the reporting draft from the plan (still editable where allowed)
-  const handleSubPlanSelect = (value) => {
+  const handleSubPlanSelect = async (value) => {
     onUpdate('lessonPlanId', value);
     if (!value) return;
     if (!nextPlan) return;
     const id = String(nextPlan.lpId || '').trim();
     if (id && String(value).trim() === id) {
       if (nextPlan.chapter) onUpdate('chapter', String(nextPlan.chapter));
-      if (nextPlan.sessionNo) onUpdate('sessionNo', Number(nextPlan.sessionNo));
       if (nextPlan.totalSessions) onUpdate('totalSessions', Number(nextPlan.totalSessions));
       if (nextPlan.learningObjectives) onUpdate('objectives', String(nextPlan.learningObjectives));
       if (nextPlan.teachingMethods) onUpdate('activities', String(nextPlan.teachingMethods));
       if (!data.completionPercentage && data.completionPercentage !== 0) onUpdate('completionPercentage', 0);
+      
+      // Fetch first unreported session for sequential enforcement
+      const email = String(teacherEmail || '').trim();
+      if (email && nextPlan.chapter && nextPlan.totalSessions && period?.class && period?.subject) {
+        try {
+          const result = await getFirstUnreportedSession(
+            email,
+            period.class,
+            period.subject,
+            nextPlan.chapter,
+            nextPlan.totalSessions
+          );
+          if (result?.success && result?.firstUnreportedSession) {
+            onUpdate('sessionNo', Number(result.firstUnreportedSession));
+          } else if (nextPlan.sessionNo) {
+            // Fallback to plan's session number if API fails
+            onUpdate('sessionNo', Number(nextPlan.sessionNo));
+          }
+        } catch (error) {
+          console.error('Failed to fetch first unreported session:', error);
+          // Fallback to plan's session number
+          if (nextPlan.sessionNo) onUpdate('sessionNo', Number(nextPlan.sessionNo));
+        }
+      } else if (nextPlan.sessionNo) {
+        onUpdate('sessionNo', Number(nextPlan.sessionNo));
+      }
     }
   };
 
@@ -1319,9 +1326,8 @@ function PeriodCard({
 
           <div className="flex items-center gap-3">
             {/* Completion Badge */}
-            <div className={`px-4 py-2 rounded-full border-2 flex items-center gap-2 ${isSub ? 'bg-amber-50 border-amber-300' : completionLevel.color}`}>
-              <span className="text-lg">{completionLevel.icon}</span>
-              <span className="text-sm font-medium">{completionPercentage}%</span>
+            <div className={`px-4 py-2 rounded-full border-2 flex items-center gap-2 ${isSub ? 'bg-amber-50 border-amber-300' : (completionPercentage === 100 ? 'bg-green-50 border-green-500' : 'bg-orange-50 border-orange-500')}`}>
+              <span className="text-sm font-medium">{completionLabel}</span>
             </div>
 
             {/* Status Badge */}
@@ -1430,7 +1436,7 @@ function PeriodCard({
                   {nextPlan && String(nextPlan.lpId || '').trim() && (
                     <option value={String(nextPlan.lpId || '').trim()}>
                       In plan — {String(nextPlan.chapter || 'Lesson Plan').trim()}
-                      {nextPlan.sessionNo ? ` (S${nextPlan.sessionNo}` : ''}
+                      {nextPlan.sessionNo ? ` (Plan: S${nextPlan.sessionNo}` : ''}
                       {(nextPlan.sessionNo && nextPlan.totalSessions) ? `/${nextPlan.totalSessions})` : (nextPlan.sessionNo ? ')' : '')}
                       {nextPlan.selectedDate ? ` • ${nextPlan.selectedDate}` : ''}
                       {nextPlan.selectedPeriod ? ` • P${nextPlan.selectedPeriod}` : ''}
@@ -1439,6 +1445,11 @@ function PeriodCard({
                 </select>
                 {substitutionPlansLoading && (
                   <div className="text-xs text-amber-700 mt-1">Loading suggested plans…</div>
+                )}
+                {nextPlan && !substitutionPlansLoading && (
+                  <div className="text-xs text-blue-600 mt-1">
+                    💡 Session number will be auto-set to first unreported session when selected
+                  </div>
                 )}
               </div>
 
@@ -1575,7 +1586,7 @@ function PeriodCard({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Session Number
+                Session Number {isSub && inPlanMode && <span className="text-blue-600 text-xs ml-1">(enforced sequentially)</span>}
               </label>
               <div className="flex gap-2">
                 <input
@@ -1584,7 +1595,9 @@ function PeriodCard({
                   onChange={(e) => onUpdate('sessionNo', e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()}
                   min="1"
-                  className="w-24 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  readOnly={isSub && inPlanMode}
+                  className={`w-24 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${isSub && inPlanMode ? 'bg-gray-50 cursor-not-allowed' : ''}`}
+                  title={isSub && inPlanMode ? 'Session number is automatically set to first unreported session' : ''}
                 />
                 <span className="py-2 text-gray-500">of</span>
                 <input
@@ -1596,6 +1609,11 @@ function PeriodCard({
                   className="w-24 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
+              {isSub && inPlanMode && (
+                <p className="text-xs text-blue-600 mt-1">
+                  📌 Session number is set to first unreported session (sequential enforcement)
+                </p>
+              )}
             </div>
           </div>
           )}
@@ -1634,37 +1652,60 @@ function PeriodCard({
             </div>
           )}
 
-          {/* Completion Percentage */}
+          {/* Session Complete: Yes/No */}
           {showPlannedFields && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-3">
-              Session Completion level <span className="text-red-500">*</span>
+              Session Completed? <span className="text-red-500">*</span>
             </label>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-              {COMPLETION_LEVELS.map((level) => (
-                <button
-                  key={level.value}
-                  type="button"
-                  onClick={() => onUpdate('completionPercentage', level.value)}
-                  className={`p-4 rounded-xl border-2 transition-all ${
-                    completionPercentage === level.value
-                      ? level.color + ' border-blue-500 shadow-md'
-                      : 'bg-white border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <div className="text-2xl mb-1">{level.icon}</div>
-                  <div className="text-xs font-medium text-gray-700">{level.label}</div>
-                </button>
-              ))}
+            <div className="grid grid-cols-2 gap-4">
+              <button
+                type="button"
+                onClick={() => {
+                  onUpdate('sessionComplete', true);
+                  onUpdate('completionPercentage', 100);
+                  // Clear incomplete-only fields
+                  onUpdate('deviationReason', '');
+                  onUpdate('cascadeOption', '');
+                }}
+                className={`p-6 rounded-xl border-2 transition-all ${
+                  completionPercentage === 100
+                    ? 'bg-green-50 border-green-500 shadow-md'
+                    : 'bg-white border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <div className="text-3xl mb-2">✅</div>
+                <div className="text-base font-medium text-gray-700">Yes - Complete</div>
+                <div className="text-xs text-gray-500 mt-1">Session fully delivered</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onUpdate('sessionComplete', false);
+                  onUpdate('completionPercentage', 0);
+                  // Clear chapter completion when marking incomplete
+                  onUpdate('chapterCompleted', false);
+                  onUpdate('remainingSessionsAction', null);
+                }}
+                className={`p-6 rounded-xl border-2 transition-all ${
+                  completionPercentage === 0
+                    ? 'bg-orange-50 border-orange-500 shadow-md'
+                    : 'bg-white border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <div className="text-3xl mb-2">⭕</div>
+                <div className="text-base font-medium text-gray-700">No - Incomplete</div>
+                <div className="text-xs text-gray-500 mt-1">Need to reschedule</div>
+              </button>
             </div>
           </div>
           )}
 
-          {/* Deviation Reason (only for 0%) */}
+          {/* Reason for Incomplete Session */}
           {allowPlanActions && completionPercentage === 0 && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Reason for 0% Completion <span className="text-red-500">*</span>
+                Reason for Incomplete Session <span className="text-red-500">*</span>
               </label>
               <select
                 value={data.deviationReason || ""}
@@ -1678,27 +1719,24 @@ function PeriodCard({
             </div>
           )}
 
-          {/* Lesson Plan Action (for <=50% completion; for 0% show only after reason selected) */}
-          {allowPlanActions && effectivePlan && completionPercentage <= 50 && (completionPercentage > 0 || !!data.deviationReason) && (
+          {/* Cascade Option (only for incomplete sessions) */}
+          {allowPlanActions && effectivePlan && completionPercentage === 0 && data.deviationReason && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Lesson Plan Action <span className="text-red-500">*</span>
+              <label className="flex items-center gap-2 cursor-pointer p-4 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={data.cascadeOption === 'cascade'}
+                  onChange={(e) => onUpdate('cascadeOption', e.target.checked ? 'cascade' : '')}
+                  className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                />
+                <div>
+                  <div className="font-medium text-gray-700">🔄 Reschedule remaining sessions</div>
+                  <div className="text-sm text-gray-600 mt-1">
+                    Push all future sessions of this chapter to next available periods
+                  </div>
+                </div>
               </label>
-              <select
-                value={data.cascadeOption || ""}
-                onChange={(e) => onUpdate('cascadeOption', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                {CASCADE_OPTIONS.filter(opt => opt.value !== 'cascade' || completionPercentage === 0).map(option => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-              <p className="mt-2 text-sm text-gray-600">
-                {data.cascadeOption === 'continue_same' && '↩ You will continue the SAME session next day. Keep the Session Number unchanged while reporting until the session is completed.'}
-                {data.cascadeOption === 'continue' && '📌 Continue with the planned schedule (next session as per lesson plans).'}
-                {data.cascadeOption === 'cascade' && '🔄 Reschedule remaining sessions to next available periods (use only when 0% was delivered).'}
-              </p>
-              {completionPercentage === 0 && data.cascadeOption === 'cascade' && cascadeLoading && (
+              {data.cascadeOption === 'cascade' && cascadeLoading && (
                 <div className="mt-3 flex items-center gap-2 text-sm text-blue-600">
                   <span className="animate-spin inline-block w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full"></span>
                   Generating cascade preview...

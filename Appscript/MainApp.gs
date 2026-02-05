@@ -862,6 +862,16 @@
         return _respond(getCascadePreview(lpId, teacherEmail, originalDate));
       }
       
+      if (action === 'getFirstUnreportedSession') {
+        const teacherEmail = e.parameter.teacherEmail || '';
+        const classVal = e.parameter.class || '';
+        const subject = e.parameter.subject || '';
+        const chapter = e.parameter.chapter || '';
+        const totalSessions = Number(e.parameter.totalSessions || 0);
+        const firstUnreported = getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions);
+        return _respond({ success: true, session: firstUnreported });
+      }
+      
       // NEW: Batch endpoint for teacher timetable with reports (reduces 2 calls to 1)
       if (action === 'getTeacherDailyData') {
         return _handleGetTeacherDailyData(e.parameter);
@@ -1604,12 +1614,35 @@
           }
           if (!totalSessionsVal) totalSessionsVal = 1;
 
+          // *** SESSION SEQUENCE VALIDATION ***
+          // Enforce sequential reporting (no skipping sessions)
+          const reportedChapter = String((!isSubstitution && matchingPlan && matchingPlan.chapter) || (attachedPlan && attachedPlan.chapter) || data.chapter || '').trim();
+          const reportedSession = Number((!isSubstitution && (data.sessionNo || matchingPlan.session)) || (attachedPlan && attachedPlan.session) || Number(data.sessionNo || 0) || 0);
+          
+          if (reportedChapter && reportedSession > 0 && totalSessionsVal > 0) {
+            const sequenceCheck = validateSessionSequence(teacherEmail, reportClass, reportSubject, reportedChapter, reportedSession, totalSessionsVal);
+            if (!sequenceCheck.valid) {
+              appLog('WARN', 'Session sequence violation', { attempted: reportedSession, expected: sequenceCheck.expectedSession, chapter: reportedChapter });
+              return _respond({ 
+                ok: false, 
+                error: 'session_sequence_violation', 
+                expectedSession: sequenceCheck.expectedSession,
+                message: sequenceCheck.message 
+              });
+            }
+          }
+
           const now = new Date().toISOString();
           const reportId = _uuid();
           const inferredPlanType = isSubstitution ? 'substitution' : 'in plan';
           const attachedPlanId = attachedPlan ? String(attachedPlan.lpId || attachedPlan.lessonPlanId || attachedPlan.planId || attachedPlan.id || '').trim() : '';
           const attachedChapter = attachedPlan ? String(attachedPlan.chapter || '').trim() : '';
           const attachedSession = attachedPlan ? Number(attachedPlan.session || attachedPlan.sessionNo || 0) : 0;
+          
+          // Map binary sessionComplete to percentage for backward compatibility
+          const sessionComplete = data.sessionComplete === true || data.sessionComplete === 'true';
+          const completionPercentage = sessionComplete ? 100 : (Number(data.completionPercentage || 0));
+          
           const rowData = [
             reportId,
             data.date || '',
@@ -1623,7 +1656,7 @@
             String((!isSubstitution && matchingPlan && matchingPlan.chapter) || attachedChapter || data.chapter || ''),
             Number((!isSubstitution && (data.sessionNo || matchingPlan.session)) || attachedSession || Number(data.sessionNo || 0) || 0),
             Number(totalSessionsVal || 1),
-            Number(data.completionPercentage || 0),
+            completionPercentage,
             data.chapterStatus || '',
             data.deviationReason || '',
             data.difficulties || '',
@@ -1649,6 +1682,42 @@
           sh.appendRow(sanitizedRowData);
           SpreadsheetApp.flush();
           appLog('INFO', 'daily report submitted', { email: teacherEmail, class: reportClass, subject: reportSubject, period: reportPeriod });
+          
+          // *** MANUAL CASCADE OPTION FROM FRONTEND ***
+          // *** SIMPLIFIED CASCADE LOGIC ***
+          // Handle cascadeOption field: only 'cascade' is supported now
+          // If session incomplete (sessionComplete=false) and cascade requested
+          let manualCascade = null;
+          try {
+            const cascadeOption = String(data.cascadeOption || '').trim();
+            const sessionIsComplete = (data.sessionComplete === true || data.sessionComplete === 'true') || Number(data.completionPercentage || 0) === 100;
+            const completionPct = sessionIsComplete ? 100 : 0; // Map to percentage for backward compatibility
+            
+            if (cascadeOption === 'cascade' && !sessionIsComplete && reportedPlanId) {
+              // Manual cascade trigger (reschedule remaining sessions)
+              const preview = getCascadePreview(reportedPlanId, teacherEmail, reportDate);
+              if (preview && preview.success && preview.needsCascade && preview.canCascade && Array.isArray(preview.sessionsToReschedule) && preview.sessionsToReschedule.length) {
+                const execPayload = {
+                  sessionsToReschedule: preview.sessionsToReschedule,
+                  mode: preview.mode,
+                  dailyReportContext: { date: reportDate, teacherEmail, class: reportClass, subject: reportSubject, period: reportPeriod }
+                };
+                const cascadeResult = executeCascade(execPayload);
+                manualCascade = {
+                  action: 'cascade',
+                  success: cascadeResult && cascadeResult.success,
+                  updatedCount: cascadeResult && cascadeResult.updatedCount,
+                  errors: cascadeResult && cascadeResult.errors
+                };
+                appLog('INFO', 'manual cascade executed', manualCascade);
+              } else {
+                manualCascade = { action: 'cascade', success: false, reason: 'preview_not_cascadable' };
+              }
+            }
+          } catch (mcErr) {
+            manualCascade = { attempted: true, success: false, error: mcErr.message };
+            appLog('ERROR', 'manual cascade action failed', { message: mcErr.message, stack: mcErr.stack });
+          }
           
           // *** CHAPTER COMPLETION ACTION (INLINE) ***
           // If chapter completed and has remaining sessions action, apply it
@@ -1912,7 +1981,7 @@
             appLog('ERROR', 'Cache invalidation failed', { error: cacheErr.message });
           }
           
-          return _respond({ ok: true, submitted: true, autoCascade: autoCascade, absentCascade: absentCascade, substitutePullback: substitutePullback, isSubstitution });
+          return _respond({ ok: true, submitted: true, manualCascade: manualCascade, autoCascade: autoCascade, absentCascade: absentCascade, substitutePullback: substitutePullback, isSubstitution });
         } catch (err) {
           appLog('ERROR', 'submitDailyReport failed', { message: err.message, stack: err.stack });
           return _respond({ error: 'Failed to submit: ' + err.message });
@@ -3848,13 +3917,35 @@
         }).filter(x => x.lpId);
 
         // Determine the next plan:
-        // Prefer the first plan scheduled AFTER the reporting slot (if provided).
-        // Fallback to the first item after sorting.
+        // 1) Pick a base suggestion (prefer a plan scheduled AFTER the reporting slot).
+        // 2) Enforce sequential reporting by switching to the plan matching the FIRST UNREPORTED session
+        //    for that same chapter (even if that plan was scheduled earlier in the day).
         let nextPlan = null;
-        if (hasReportSlot) {
-          nextPlan = compact.find(p => isAfterReportSlot(p.selectedDate, p.selectedPeriod)) || null;
+        if (compact.length) {
+          if (hasReportSlot) {
+            nextPlan = compact.find(p => isAfterReportSlot(p.selectedDate, p.selectedPeriod)) || null;
+          }
+          if (!nextPlan) nextPlan = compact[0] || null;
+
+          const nextChapter = nextPlan && String(nextPlan.chapter || '').trim();
+          const nextTotalSessions = nextPlan && Number(nextPlan.totalSessions || 0);
+          if (nextPlan && nextChapter && nextTotalSessions) {
+            const firstUnreportedSessionNo = getFirstUnreportedSession(
+              teacherEmail,
+              cls,
+              subject,
+              nextChapter,
+              nextTotalSessions
+            );
+            if (firstUnreportedSessionNo) {
+              const matching = compact.find(p => (
+                String(p.chapter || '').trim() === nextChapter &&
+                Number(p.sessionNo || 0) === Number(firstUnreportedSessionNo)
+              ));
+              if (matching) nextPlan = matching;
+            }
+          }
         }
-        if (!nextPlan) nextPlan = compact.length ? compact[0] : null;
 
         let pullbackPreview = [];
         if (nextPlan && nextPlan.chapter) {
@@ -8477,5 +8568,73 @@ function getAllUsers() {
   } catch (err) {
     appLog('ERROR', 'getAllUsers', err.message);
     return { error: 'Failed to get users: ' + err.message };
+  }
+}
+
+/**
+ * Get first unreported session number for a chapter
+ * Ensures sequential session reporting (no skipping)
+ */
+function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions) {
+  try {
+    const reportsSheet = _getSheet('DailyReports');
+    const headers = _headers(reportsSheet);
+    const reports = _rows(reportsSheet).map(r => _indexByHeader(r, headers));
+    
+    // Get all reported sessions for this teacher+class+subject+chapter
+    const reportedSessions = reports
+      .filter(r => {
+        const emailMatch = String(r.teacherEmail || '').trim().toLowerCase() === String(teacherEmail || '').trim().toLowerCase();
+        const classMatch = String(r.class || '').trim() === String(classVal || '').trim();
+        const subjectMatch = String(r.subject || '').trim() === String(subject || '').trim();
+        const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
+        return emailMatch && classMatch && subjectMatch && chapterMatch;
+      })
+      .map(r => Number(r.sessionNo || 0))
+      .filter(n => n > 0)
+      .sort((a, b) => a - b);
+    
+    // Find first missing session starting from 1
+    for (let i = 1; i <= totalSessions; i++) {
+      if (!reportedSessions.includes(i)) {
+        return i;
+      }
+    }
+    
+    // All sessions reported
+    return null;
+  } catch (error) {
+    appLog('ERROR', 'getFirstUnreportedSession', error.message);
+    return 1; // Default to session 1 on error
+  }
+}
+
+/**
+ * Validate that teacher is reporting sessions sequentially (no skipping)
+ */
+function validateSessionSequence(teacherEmail, classVal, subject, chapter, attemptedSession, totalSessions) {
+  try {
+    const expectedSession = getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions);
+    
+    if (expectedSession === null) {
+      return {
+        valid: false,
+        expectedSession: null,
+        message: 'All sessions for this chapter have been reported'
+      };
+    }
+    
+    if (attemptedSession !== expectedSession) {
+      return {
+        valid: false,
+        expectedSession: expectedSession,
+        message: `Session ${expectedSession} must be reported first. Sequential reporting is required (cannot skip sessions).`
+      };
+    }
+    
+    return { valid: true, expectedSession: expectedSession };
+  } catch (error) {
+    appLog('ERROR', 'validateSessionSequence', error.message);
+    return { valid: true }; // Allow on error to prevent blocking
   }
 }
