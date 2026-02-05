@@ -869,7 +869,7 @@
         const chapter = e.parameter.chapter || '';
         const totalSessions = Number(e.parameter.totalSessions || 0);
         const firstUnreported = getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions);
-        return _respond({ success: true, session: firstUnreported });
+        return _respond({ success: true, session: firstUnreported, firstUnreportedSession: firstUnreported });
       }
       
       // NEW: Batch endpoint for teacher timetable with reports (reduces 2 calls to 1)
@@ -8614,9 +8614,50 @@ function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, tot
  */
 function validateSessionSequence(teacherEmail, classVal, subject, chapter, attemptedSession, totalSessions) {
   try {
-    const expectedSession = getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions);
+    const reportsSheet = _getSheet('DailyReports');
+    const headers = _headers(reportsSheet);
+    const reports = _rows(reportsSheet).map(r => _indexByHeader(r, headers));
     
-    if (expectedSession === null) {
+    // Get all reported sessions for this teacher+class+subject+chapter
+    const reportedSessions = reports
+      .filter(r => {
+        const emailMatch = String(r.teacherEmail || '').trim().toLowerCase() === String(teacherEmail || '').trim().toLowerCase();
+        const classMatch = String(r.class || '').trim() === String(classVal || '').trim();
+        const subjectMatch = String(r.subject || '').trim() === String(subject || '').trim();
+        const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
+        return emailMatch && classMatch && subjectMatch && chapterMatch;
+      })
+      .map(r => Number(r.sessionNo || 0))
+      .filter(n => n > 0)
+      .sort((a, b) => a - b);
+
+    const reportedSet = {};
+    for (let i = 0; i < reportedSessions.length; i++) {
+      reportedSet[reportedSessions[i]] = true;
+    }
+
+    // Compute the next expected session (first missing from 1..totalSessions)
+    let expectedSession = null;
+    for (let i = 1; i <= Number(totalSessions || 0); i++) {
+      if (!reportedSet[i]) {
+        expectedSession = i;
+        break;
+      }
+    }
+    
+    // Check if this session is already reported (duplicate check)
+    if (reportedSessions.includes(attemptedSession)) {
+      return {
+        valid: false,
+        expectedSession: expectedSession,
+        message: expectedSession
+          ? `Session ${attemptedSession} has already been reported for this chapter. Next expected session is ${expectedSession}.`
+          : `Session ${attemptedSession} has already been reported for this chapter. All sessions for this chapter appear to be reported.`
+      };
+    }
+
+    // If everything is already reported, block further submissions clearly
+    if (expectedSession === null && Number(totalSessions || 0) > 0) {
       return {
         valid: false,
         expectedSession: null,
@@ -8624,15 +8665,19 @@ function validateSessionSequence(teacherEmail, classVal, subject, chapter, attem
       };
     }
     
-    if (attemptedSession !== expectedSession) {
-      return {
-        valid: false,
-        expectedSession: expectedSession,
-        message: `Session ${expectedSession} must be reported first. Sequential reporting is required (cannot skip sessions).`
-      };
+    // Check if we're skipping any sessions
+    // For example: if sessions 1,2,3 are reported and we're trying to report session 5, that's a skip
+    for (let i = 1; i < attemptedSession; i++) {
+      if (!reportedSessions.includes(i)) {
+        return {
+          valid: false,
+          expectedSession: i,
+          message: `Session ${i} must be reported first. Sequential reporting is required (cannot skip sessions).`
+        };
+      }
     }
     
-    return { valid: true, expectedSession: expectedSession };
+    return { valid: true, expectedSession: attemptedSession };
   } catch (error) {
     appLog('ERROR', 'validateSessionSequence', error.message);
     return { valid: true }; // Allow on error to prevent blocking

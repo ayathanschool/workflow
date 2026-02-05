@@ -742,8 +742,18 @@ export default function DailyReportModern({ user }) {
             setMessage({ text: '✅ Substitution report submitted successfully.', type: 'success' });
           }
         } else {
-          const errMsg = result?.message || result?.error || 'Submission failed';
-          setMessage({ text: `❌ ${errMsg}`, type: 'error' });
+          if (result?.error === 'session_sequence_violation') {
+            const expected = result?.expectedSession;
+            if (expected) {
+              updateDraft(key, 'sessionNo', Number(expected));
+              setMessage({ text: `❌ ${result?.message || 'Session sequence violation'}. Session number updated to ${expected}. Please submit again.`, type: 'error' });
+            } else {
+              setMessage({ text: `❌ ${result?.message || 'Session sequence violation'}`, type: 'error' });
+            }
+          } else {
+            const errMsg = result?.message || result?.error || 'Submission failed';
+            setMessage({ text: `❌ ${errMsg}`, type: 'error' });
+          }
         }
       } catch (e) {
         setMessage({ text: `❌ ${e.message || e}`, type: 'error' });
@@ -1272,8 +1282,9 @@ function PeriodCard({
             nextPlan.chapter,
             nextPlan.totalSessions
           );
-          if (result?.success && result?.firstUnreportedSession) {
-            onUpdate('sessionNo', Number(result.firstUnreportedSession));
+          const firstUnreported = result && (result.firstUnreportedSession ?? result.session ?? result.data?.firstUnreportedSession ?? result.data?.session);
+          if (result?.success && firstUnreported) {
+            onUpdate('sessionNo', Number(firstUnreported));
           } else if (nextPlan.sessionNo) {
             // Fallback to plan's session number if API fails
             onUpdate('sessionNo', Number(nextPlan.sessionNo));
