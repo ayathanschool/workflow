@@ -6541,7 +6541,7 @@ const App = () => {
                   <label className="block text-xs font-medium text-gray-600 mb-1">From Date</label>
                   <input
                     type="date"
-                    value={filters.dateFrom}
+                    value={filters.dateFrom ?? ''}
                     onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })}
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
@@ -6550,7 +6550,7 @@ const App = () => {
                   <label className="block text-xs font-medium text-gray-600 mb-1">To Date</label>
                   <input
                     type="date"
-                    value={filters.dateTo}
+                    value={filters.dateTo ?? ''}
                     onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
@@ -7567,7 +7567,7 @@ const App = () => {
                         <td className="px-3 py-2">
                           <input
                             type="date"
-                            value={bulkRescheduleDates[idx]?.newDate || ''}
+                            value={bulkRescheduleDates[idx]?.newDate ?? ''}
                             onChange={async (e) => {
                               const selectedDate = e.target.value;
                               const updated = [...bulkRescheduleDates];
