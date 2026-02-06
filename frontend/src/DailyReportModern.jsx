@@ -9,7 +9,8 @@ import {
   getPlannedLessonsForDate,
   getTeacherWeeklyTimetable,
   getSuggestedPlansForSubstitution,
-  getFirstUnreportedSession
+  getFirstUnreportedSession,
+  deleteDailyReport
   // getUnreportedSessions // TODO: Implement backfill feature API
 } from "./api";
 import { todayIST } from "./utils/dateUtils";
@@ -19,7 +20,7 @@ import { confirmDestructive } from "./utils/confirm";
 // Backend maps: true → 100%, false → 0%
 
 const DEVIATION_REASONS = [
-  { value: "", label: "Select reason for 0% completion" },
+  { value: "", label: "Select reason for incomplete session" },
   { value: "Exam", label: "📝 Exam / Assessment" },
   { value: "Event", label: "🎉 School Event" },
   { value: "Holiday", label: "🏖️ Holiday / No Class" },
@@ -742,18 +743,8 @@ export default function DailyReportModern({ user }) {
             setMessage({ text: '✅ Substitution report submitted successfully.', type: 'success' });
           }
         } else {
-          if (result?.error === 'session_sequence_violation') {
-            const expected = result?.expectedSession;
-            if (expected) {
-              updateDraft(key, 'sessionNo', Number(expected));
-              setMessage({ text: `❌ ${result?.message || 'Session sequence violation'}. Session number updated to ${expected}. Please submit again.`, type: 'error' });
-            } else {
-              setMessage({ text: `❌ ${result?.message || 'Session sequence violation'}`, type: 'error' });
-            }
-          } else {
-            const errMsg = result?.message || result?.error || 'Submission failed';
-            setMessage({ text: `❌ ${errMsg}`, type: 'error' });
-          }
+          const errMsg = result?.message || result?.error || 'Submission failed';
+          setMessage({ text: `❌ ${errMsg}`, type: 'error' });
         }
       } catch (e) {
         setMessage({ text: `❌ ${e.message || e}`, type: 'error' });
@@ -1000,6 +991,66 @@ export default function DailyReportModern({ user }) {
     }
   };
 
+  const handleDeleteReport = async (period) => {
+    const key = periodKey(period);
+    const report = getReport(key);
+    
+    // Support both 'id' and 'reportId' fields
+    const reportId = report?.id || report?.reportId;
+    
+    if (!report || !reportId) {
+      setMessage({ text: "❌ No report found to delete", type: "error" });
+      console.error('Delete failed - report data:', report);
+      return;
+    }
+
+    const confirmed = confirmDestructive({
+      title: 'Delete this report?',
+      lines: [
+        `Class: ${period.class}`,
+        `Subject: ${period.subject}`,
+        `Period: ${period.period}`,
+        `Date: ${date}`,
+        '',
+        'This action cannot be undone.'
+      ]
+    });
+
+    if (!confirmed) return;
+
+    setSubmitting(prev => ({ ...prev, [key]: true }));
+    setMessage({ text: "", type: "" });
+
+    try {
+      const res = await deleteDailyReport(reportId, email);
+      const result = res?.data || res;
+
+      if (result && (result.ok || result.success)) {
+        // Remove report from state
+        setReports(prev => {
+          const updated = { ...prev };
+          delete updated[key];
+          return updated;
+        });
+        // Keep the period expanded in draft mode for immediate re-submission
+        setExpandedPeriod(key);
+        setMessage({ text: '✅ Report deleted successfully. You can now edit and submit again.', type: 'success' });
+        // Clear any submission state
+        setSubmitting(prev => {
+          const updated = { ...prev };
+          delete updated[key];
+          return updated;
+        });
+      } else {
+        setMessage({ text: `❌ ${result?.message || result?.error || 'Delete failed'}`, type: 'error' });
+      }
+    } catch (e) {
+      setMessage({ text: `❌ ${e.message || e}`, type: 'error' });
+    } finally {
+      setSubmitting(prev => ({ ...prev, [key]: false }));
+    }
+  };
+
   const getSessionCompleteLabel = (completionPercentage) => {
     // For old reports: 100% = Complete, anything else = Incomplete
     return completionPercentage === 100 ? '✅ Complete' : '⭕ Incomplete';
@@ -1189,6 +1240,7 @@ export default function DailyReportModern({ user }) {
                   onToggle={() => setExpandedPeriod(isExpanded ? null : key)}
                   onUpdate={(field, value) => updateDraft(key, field, value)}
                   onSubmit={() => handleSubmit(period)}
+                  onDelete={() => handleDeleteReport(period)}
                 />
               );
             })}
@@ -1225,7 +1277,8 @@ function PeriodCard({
   unreportedSessionsLoading = {},
   onToggle, 
   onUpdate, 
-  onSubmit 
+  onSubmit,
+  onDelete
 }) {
   const data = isSubmitted ? (report || {}) : (draft || {});
   const chapter = data.chapter || plan?.chapter || "";
@@ -1282,9 +1335,8 @@ function PeriodCard({
             nextPlan.chapter,
             nextPlan.totalSessions
           );
-          const firstUnreported = result && (result.firstUnreportedSession ?? result.session ?? result.data?.firstUnreportedSession ?? result.data?.session);
-          if (result?.success && firstUnreported) {
-            onUpdate('sessionNo', Number(firstUnreported));
+          if (result?.success && result?.firstUnreportedSession) {
+            onUpdate('sessionNo', Number(result.firstUnreportedSession));
           } else if (nextPlan.sessionNo) {
             // Fallback to plan's session number if API fails
             onUpdate('sessionNo', Number(nextPlan.sessionNo));
@@ -1422,6 +1474,33 @@ function PeriodCard({
                   <div className="text-xs font-medium text-gray-500">Next Session Plan</div>
                   <div className="text-sm text-gray-900 mt-1 whitespace-pre-wrap break-words">{data?.nextSessionPlan || '—'}</div>
                 </div>
+              </div>
+
+              {/* Delete Button for Submitted Report */}
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                <button
+                  onClick={onToggle}
+                  className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={onDelete}
+                  disabled={isSubmitting}
+                  className="px-6 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                      <span>Deleting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>🗑️</span>
+                      <span>Delete Report</span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
           ) : (
