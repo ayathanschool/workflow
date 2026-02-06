@@ -124,6 +124,9 @@ const App = () => {
     return appSettings || {
       lessonPlanningDay: '',
       allowNextWeekOnly: false,
+      allowBackfillReporting: false,
+      dailyReportDeleteMinutes: 0,
+      cascadeAutoEnabled: false,
       periodTimes: null,
       periodTimesWeekday: null,
       periodTimesFriday: null,
@@ -172,6 +175,9 @@ const App = () => {
           const newSettings = {
             lessonPlanningDay: settings.lessonPlanningDay || '',
             allowNextWeekOnly: false, // Ignore sheet value; do not restrict to next week
+            allowBackfillReporting: !!settings.allowBackfillReporting,
+            dailyReportDeleteMinutes: Number(settings.dailyReportDeleteMinutes ?? 0) || 0,
+            cascadeAutoEnabled: !!settings.cascadeAutoEnabled,
             periodTimes: settings.periodTimes || settings.periodTimesWeekday || null,
             periodTimesWeekday: settings.periodTimesWeekday || null,
             periodTimesFriday: settings.periodTimesFriday || null,
@@ -2122,7 +2128,7 @@ const App = () => {
                       </div>
                     </div>
                     <div className="bg-transparent">
-                      <DailyReportModern user={memoizedUser} />
+                      <DailyReportModern user={memoizedUser} settings={memoizedSettings} />
                     </div>
                   </div>
                 );
@@ -2946,7 +2952,6 @@ const App = () => {
   // Lesson Plans View - Based on Timetable with Approved Schemes Dropdown
   const LessonPlansView = () => {
     const [loading, setLoading] = useState(true);
-    const [timetableSlots, setTimetableSlots] = useState([]);
     const [lessonPlans, setLessonPlans] = useState([]);
     const [approvedSchemes, setApprovedSchemes] = useState([]);
     const [selectedSlot, setSelectedSlot] = useState(null);
@@ -2997,48 +3002,8 @@ const App = () => {
       }
     };
 
-    // Helper: normalize weekday names (tolerates typos like "Wedbnesday")
-    const normalizeDayNameClient = (input) => {
-      if (!input && input !== 0) return '';
-      const raw = String(input);
-      const s = raw.toLowerCase().replace(/[^a-z]/g, '');
-      const map = [
-        { k: 'mon', v: 'Monday' },
-        { k: 'tue', v: 'Tuesday' },
-        { k: 'wed', v: 'Wednesday' },
-        { k: 'thu', v: 'Thursday' },
-        { k: 'fri', v: 'Friday' },
-        { k: 'sat', v: 'Saturday' },
-        { k: 'sun', v: 'Sunday' }
-      ];
-      for (const { k, v } of map) {
-        if (s.includes(k)) return v;
-      }
-      // Fallback: best-effort capitalization
-      return raw.charAt(0).toUpperCase() + raw.slice(1);
-    };
-
-    // App settings for lesson plan preparation
-    const [lessonPlanSettings, setLessonPlanSettings] = useState({
-      lessonPlanningDay: '',       // No restriction until settings define it
-      allowNextWeekOnly: false,    // Next-week-only restriction disabled
-      periodTimes: null            // Will store custom period times if available
-    });
-    
-    // Create a memoized version of lessonPlanSettings to avoid unnecessary re-renders
-    const memoizedLessonPlanSettings = useMemo(() => {
-      return lessonPlanSettings || {
-        lessonPlanningDay: '',
-        allowNextWeekOnly: false,
-        periodTimes: null
-      };
-    }, [lessonPlanSettings]);
-    // Track when settings have been loaded to avoid enforcing defaults prematurely
-    const [settingsLoaded, setSettingsLoaded] = useState(false);
-    // Track if the user is trying to plan outside allowed days
-    const [planningRestricted, setPlanningRestricted] = useState(false);
-    // local normalization helper to compare class/subject values reliably
-    const normKeyLocal = (s) => (s || '').toString().toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+    // App settings for lesson plan preparation (using parent memoizedSettings)
+    // No planning restrictions - teachers can plan anytime
 
     // Fetch real timetable slots, lesson plans, approved schemes, and app settings from the API
     useEffect(() => {
@@ -3046,9 +3011,6 @@ const App = () => {
         setLoading(true);
         try {
           if (!user) return;
-          // Weekly timetable for the teacher
-          const timetableData = await api.getTeacherWeeklyTimetable(user.email);
-          setTimetableSlots(Array.isArray(timetableData) ? timetableData : []);
           // Teacher lesson plans
           const plans = await api.getTeacherLessonPlans(user.email);
           setLessonPlans(Array.isArray(plans) ? plans : []);
@@ -3076,15 +3038,6 @@ const App = () => {
               setApprovedSchemes([]);
             }
           }
-          
-          // Fetch app settings LAST so it's freshest when we check rules below
-          // Use the app-level settings instead of fetching again
-          setLessonPlanSettings({
-            lessonPlanningDay: memoizedSettings.lessonPlanningDay || '',
-            allowNextWeekOnly: false, // Ignore sheet value; do not restrict to next week
-            periodTimes: memoizedSettings.periodTimes || null
-          });
-          setSettingsLoaded(true);
         } catch (err) {
           console.error(err);
         } finally {
@@ -3117,42 +3070,19 @@ const App = () => {
     }, [refreshTeacherLessonPlans]);
 
     const handlePrepareLesson = (slot) => {
-      // First check if planning is allowed based on settings
-  const today = new Date();
-  const todayName = today.toLocaleDateString('en-US', { weekday: 'long' });
-      const normalizedSettingDay = normalizeDayNameClient(memoizedLessonPlanSettings.lessonPlanningDay || '');
-      const isAllowedPlanningDay = normalizedSettingDay
-        ? normalizeDayNameClient(todayName) === normalizedSettingDay
-        : true; // No restriction if no planning day configured
-      // Next-week-only restriction removed
-      const isNextWeekSlot = true;
-      
       // Find existing lesson plan for this class, subject, and date
       const existingPlan = lessonPlans.find(
-        plan => normKeyLocal(plan.class) === normKeyLocal(slot.class) &&
-                normKeyLocal(plan.subject) === normKeyLocal(slot.subject) &&
+        plan => appNormalize(plan.class) === appNormalize(slot.class) &&
+                appNormalize(plan.subject) === appNormalize(slot.subject) &&
                 String(plan.date || '') === String(slot.date || '')
       );
-      
-      // If settings haven't loaded yet, do not block the user
-      if (!settingsLoaded) {
-        // proceed without restriction while settings load
-      } else if (!existingPlan && (!isAllowedPlanningDay)) {
-        setPlanningRestricted(true);
-        const displayDay = normalizedSettingDay || 'the configured day';
-        error('Planning Restricted', `Lesson planning is only allowed on ${displayDay}.`);
-        return;
-      }
-      
-      // Reset restriction flag
-      setPlanningRestricted(false);
       
       setSelectedSlot(slot);
       setShowPreparationForm(true);
       
       // Filter relevant schemes outside the if/else to make it available for both paths
       const relevantSchemes = approvedSchemes.filter(
-        scheme => normKeyLocal(scheme.class) === normKeyLocal(slot.class) && normKeyLocal(scheme.subject) === normKeyLocal(slot.subject)
+        scheme => appNormalize(scheme.class) === appNormalize(slot.class) && appNormalize(scheme.subject) === appNormalize(slot.subject)
       );
       
       if (existingPlan) {
@@ -3228,8 +3158,8 @@ const App = () => {
       if (!selectedSlot) return;
       // Check if there is an existing plan for the selected session
       const existingPlan = lessonPlans.find(
-        plan => normKeyLocal(plan.class) === normKeyLocal(selectedSlot.class) && 
-                normKeyLocal(plan.subject) === normKeyLocal(selectedSlot.subject) && 
+        plan => appNormalize(plan.class) === appNormalize(selectedSlot.class) && 
+                appNormalize(plan.subject) === appNormalize(selectedSlot.subject) && 
                 Number(plan.session) === Number(sess) &&
                 String(plan.date || '') === String(selectedSlot.date || '')
       );
@@ -3262,8 +3192,8 @@ const App = () => {
   // Prevent duplicates based on class/subject/session/date/chapter combination
       // Allow editing existing lesson plans (when lpId matches)
       if (!selectedSlot.lpId) {
-        const normalizedClass = normKeyLocal(selectedSlot.class);
-        const normalizedSubject = normKeyLocal(selectedSlot.subject);
+        const normalizedClass = appNormalize(selectedSlot.class);
+        const normalizedSubject = appNormalize(selectedSlot.subject);
         // Use only the session number from the scheme, not timetable period
         const sessionNumber = Number(preparationData.session || 1);
         
@@ -3273,8 +3203,8 @@ const App = () => {
           const planChapter = planScheme?.chapter || '';
           
           return (
-            normKeyLocal(lp.class) === normalizedClass &&
-            normKeyLocal(lp.subject) === normalizedSubject &&
+            appNormalize(lp.class) === normalizedClass &&
+            appNormalize(lp.subject) === normalizedSubject &&
             Number(lp.session) === sessionNumber &&
             String(lp.date || '') === String(selectedSlot.date || '') &&
             // Check if the chapters match (strict duplicate check)
@@ -3423,7 +3353,7 @@ const App = () => {
                 >
                   <option value="">Select Approved Scheme</option>
                   {approvedSchemes
-                    .filter(scheme => normKeyLocal(scheme.class) === normKeyLocal(selectedSlot.class) && normKeyLocal(scheme.subject) === normKeyLocal(selectedSlot.subject))
+                    .filter(scheme => appNormalize(scheme.class) === appNormalize(selectedSlot.class) && appNormalize(scheme.subject) === appNormalize(selectedSlot.subject))
                     .map(scheme => (
                       <option key={scheme.schemeId} value={scheme.schemeId}>
                         {scheme.chapter} - {scheme.month} ({scheme.noOfSessions} sessions)
@@ -4745,7 +4675,7 @@ const App = () => {
         
         {/* Modern daily reporting with smooth UX - NO PAGE REFRESH */}
         <div className="bg-transparent">
-          <DailyReportModern user={memoizedUser} />
+          <DailyReportModern user={memoizedUser} settings={memoizedSettings} />
         </div>
       </div>
     );
@@ -7593,10 +7523,13 @@ const App = () => {
               </div>
               
               <div className="text-sm text-gray-600 bg-amber-50 p-3 rounded-lg">
-                <div>
-                  ℹ️ Select a date to see suggested periods. <span className="text-green-600">● Green</span> = {bulkRescheduleChapter.class} ({bulkRescheduleChapter.subject}), <span className="text-gray-600">● Gray</span> = Free, <span className="text-orange-600">● Orange</span> = Lesson already scheduled.
+                <div className="mb-3">
+                  ℹ️ <strong>Auto-fill Mode:</strong> Set the starting date and period for Session 1, and the system will automatically schedule subsequent sessions based on the teacher's timetable.
                 </div>
-                <label className="mt-2 flex items-center gap-2 text-xs text-gray-700">
+                <div className="mb-2">
+                  <span className="text-green-600">● Green</span> = {bulkRescheduleChapter.class} ({bulkRescheduleChapter.subject}), <span className="text-gray-600">● Gray</span> = Free, <span className="text-orange-600">● Orange</span> = Lesson already scheduled.
+                </div>
+                <label className="flex items-center gap-2 text-xs text-gray-700">
                   <input
                     type="checkbox"
                     checked={showOtherClassPeriodsBulk}
@@ -7615,7 +7548,6 @@ const App = () => {
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Current Period</th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">New Date</th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">New Period</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -7632,6 +7564,40 @@ const App = () => {
                               const selectedDate = e.target.value;
                               const updated = [...bulkRescheduleDates];
                               updated[idx] = { ...updated[idx], newDate: selectedDate, newPeriod: '' };
+                              
+                              // Auto-fill subsequent sessions if this is session 1
+                              if (idx === 0 && selectedDate) {
+                                // Get available periods for all sessions from this date forward
+                                try {
+                                  const teacherEmail = item.teacherEmail;
+                                  // Calculate end date (30 days from start)
+                                  const endDate = new Date(selectedDate);
+                                  endDate.setDate(endDate.getDate() + 30);
+                                  const endDateStr = endDate.toISOString().split('T')[0];
+                                  
+                                  const response = await api.getAvailablePeriodsForLessonPlan(
+                                    teacherEmail,
+                                    selectedDate,
+                                    endDateStr,
+                                    true,
+                                    bulkRescheduleChapter.class,
+                                    bulkRescheduleChapter.subject
+                                  );
+                                  
+                                  const actualData = response?.data || response;
+                                  if (actualData.success && actualData.availableSlots) {
+                                    const available = actualData.availableSlots.filter(p => p.isAvailable);
+                                    // Auto-fill all sessions with available slots
+                                    for (let i = 0; i < updated.length && i < available.length; i++) {
+                                      updated[i].newDate = available[i].date;
+                                      updated[i].newPeriod = String(available[i].period);
+                                    }
+                                  }
+                                } catch (err) {
+                                  console.error('Error auto-filling sessions:', err);
+                                }
+                              }
+                              
                               setBulkRescheduleDates(updated);
                               
                               // Fetch teacher timetable and lesson plans for this date
@@ -7659,101 +7625,128 @@ const App = () => {
                               }
                             }}
                             className="px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                            disabled={idx > 0}
+                            title={idx === 0 ? "Select date for Session 1 (will auto-fill subsequent sessions)" : "Auto-filled based on Session 1"}
                           />
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex flex-col gap-1">
-                            {(() => {
-                              const key = `${idx}-${bulkRescheduleDates[idx]?.newDate || ''}`;
-                              const timetableData = bulkTimetables[key];
-                              const periods = timetableData?.periods || [];
-                              const loading = timetableData?.loading;
-                              
-                              if (loading) {
-                                return <span className="text-xs text-gray-500">Loading...</span>;
-                              }
-                              
-                              if (bulkRescheduleDates[idx]?.newDate && periods.length > 0) {
-                                const norm = (v) => String(v || '').toLowerCase().trim();
-                                const targetClass = norm(bulkRescheduleChapter?.class);
-                                const targetSubject = norm(bulkRescheduleChapter?.subject);
-                                const plannedPeriods = bulkPlannedPeriods[key] || [];
-                                return (
-                                  <div className="flex flex-wrap gap-1">
-                                    {periods.map((p) => {
-                                      const periodNum = p.period || p.Period || p.periodNumber;
-                                      const isFree = !p.class || p.class === 'Free' || p.subject === 'Free';
-                                      const hasLessonPlan = plannedPeriods.includes(String(periodNum));
-                                      const isTarget = !isFree && norm(p.class) === targetClass && (!targetSubject || norm(p.subject) === targetSubject);
-                                      const isSelected = String(bulkRescheduleDates[idx]?.newPeriod) === String(periodNum);
+                            {idx > 0 ? (
+                              // For sessions 2+, show read-only auto-filled value
+                              <div className="px-2 py-1 text-sm bg-gray-100 border border-gray-300 rounded text-gray-700">
+                                {bulkRescheduleDates[idx]?.newPeriod 
+                                  ? `Period ${bulkRescheduleDates[idx].newPeriod} (Auto)`
+                                  : 'Auto-fill from Session 1'}
+                              </div>
+                            ) : (
+                              // Only Session 1 is editable
+                              (() => {
+                                const key = `${idx}-${bulkRescheduleDates[idx]?.newDate || ''}`;
+                                const timetableData = bulkTimetables[key];
+                                const periods = timetableData?.periods || [];
+                                const loading = timetableData?.loading;
+                                
+                                if (loading) {
+                                  return <span className="text-xs text-gray-500">Loading...</span>;
+                                }
+                                
+                                if (bulkRescheduleDates[idx]?.newDate && periods.length > 0) {
+                                  const norm = (v) => String(v || '').toLowerCase().trim();
+                                  const targetClass = norm(bulkRescheduleChapter?.class);
+                                  const targetSubject = norm(bulkRescheduleChapter?.subject);
+                                  const plannedPeriods = bulkPlannedPeriods[key] || [];
+                                  return (
+                                    <div className="flex flex-wrap gap-1">
+                                      {periods.map((p) => {
+                                        const periodNum = p.period || p.Period || p.periodNumber;
+                                        const isFree = !p.class || p.class === 'Free' || p.subject === 'Free';
+                                        const hasLessonPlan = plannedPeriods.includes(String(periodNum));
+                                        const isTarget = !isFree && norm(p.class) === targetClass && (!targetSubject || norm(p.subject) === targetSubject);
+                                        const isSelected = String(bulkRescheduleDates[idx]?.newPeriod) === String(periodNum);
 
-                                      if (!showOtherClassPeriodsBulk && !isFree && !isTarget) {
-                                        return null;
-                                      }
-                                      return (
-                                        <button
-                                          key={periodNum}
-                                          type="button"
-                                          onClick={() => {
-                                            const updated = [...bulkRescheduleDates];
-                                            updated[idx] = { ...updated[idx], newPeriod: String(periodNum) };
-                                            setBulkRescheduleDates(updated);
-                                          }}
-                                          className={`px-2 py-1 text-xs rounded border ${
-                                            isSelected
-                                              ? 'bg-blue-600 text-white border-blue-600'
-                                              : hasLessonPlan
-                                              ? 'bg-orange-50 text-orange-700 border-orange-300 hover:bg-orange-100'
-                                              : isTarget
-                                              ? 'bg-green-50 text-green-700 border-green-300 hover:bg-green-100'
-                                              : isFree
-                                              ? 'bg-gray-50 text-gray-700 border-gray-300 hover:bg-gray-100'
-                                              : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
-                                          }`}
-                                          title={hasLessonPlan ? `Period ${periodNum} - Lesson scheduled` : isTarget ? `Period ${periodNum} - ${bulkRescheduleChapter.class} ${bulkRescheduleChapter.subject}` : isFree ? `Period ${periodNum} - Free` : `Period ${periodNum} - ${p.class} ${p.subject}`}
-                                        >
-                                          {periodNum}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
+                                        if (!showOtherClassPeriodsBulk && !isFree && !isTarget) {
+                                          return null;
+                                        }
+                                        return (
+                                          <button
+                                            key={periodNum}
+                                            type="button"
+                                            onClick={async () => {
+                                              const updated = [...bulkRescheduleDates];
+                                              updated[idx] = { ...updated[idx], newPeriod: String(periodNum) };
+                                              
+                                              // Auto-fill subsequent sessions when session 1 period is selected
+                                              if (idx === 0 && bulkRescheduleDates[0]?.newDate) {
+                                                try {
+                                                  const teacherEmail = item.teacherEmail;
+                                                  const startDate = bulkRescheduleDates[0].newDate;
+                                                  const endDate = new Date(startDate);
+                                                  endDate.setDate(endDate.getDate() + 30);
+                                                  const endDateStr = endDate.toISOString().split('T')[0];
+                                                  
+                                                  const response = await api.getAvailablePeriodsForLessonPlan(
+                                                    teacherEmail,
+                                                    startDate,
+                                                    endDateStr,
+                                                    true,
+                                                    bulkRescheduleChapter.class,
+                                                    bulkRescheduleChapter.subject
+                                                  );
+                                                  
+                                                  const actualData = response?.data || response;
+                                                  if (actualData.success && actualData.availableSlots) {
+                                                    const available = actualData.availableSlots.filter(p => p.isAvailable);
+                                                    for (let i = 0; i < updated.length && i < available.length; i++) {
+                                                      updated[i].newDate = available[i].date;
+                                                      updated[i].newPeriod = String(available[i].period);
+                                                    }
+                                                  }
+                                                } catch (err) {
+                                                  console.error('Error auto-filling sessions:', err);
+                                                }
+                                              }
+                                              
+                                              setBulkRescheduleDates(updated);
+                                            }}
+                                            className={`px-2 py-1 text-xs rounded border ${
+                                              isSelected
+                                                ? 'bg-blue-600 text-white border-blue-600'
+                                                : hasLessonPlan
+                                                ? 'bg-orange-50 text-orange-700 border-orange-300 hover:bg-orange-100'
+                                                : isTarget
+                                                ? 'bg-green-50 text-green-700 border-green-300 hover:bg-green-100'
+                                                : isFree
+                                                ? 'bg-gray-50 text-gray-700 border-gray-300 hover:bg-gray-100'
+                                                : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                                            }`}
+                                            title={hasLessonPlan ? `Period ${periodNum} - Lesson scheduled` : isTarget ? `Period ${periodNum} - ${bulkRescheduleChapter.class} ${bulkRescheduleChapter.subject}` : isFree ? `Period ${periodNum} - Free` : `Period ${periodNum} - ${p.class} ${p.subject}`}
+                                          >
+                                            {periodNum}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  );
+                                }
+                                
+                                return (
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="10"
+                                    value={bulkRescheduleDates[idx]?.newPeriod || ''}
+                                    onChange={(e) => {
+                                      const updated = [...bulkRescheduleDates];
+                                      updated[idx] = { ...updated[idx], newPeriod: e.target.value };
+                                      setBulkRescheduleDates(updated);
+                                    }}
+                                    placeholder="1-10"
+                                    className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                                  />
                                 );
-                              }
-                              
-                              return (
-                                <input
-                                  type="number"
-                                  min="1"
-                                  max="10"
-                                  value={bulkRescheduleDates[idx]?.newPeriod || ''}
-                                  onChange={(e) => {
-                                    const updated = [...bulkRescheduleDates];
-                                    updated[idx] = { ...updated[idx], newPeriod: e.target.value };
-                                    setBulkRescheduleDates(updated);
-                                  }}
-                                  placeholder="1-10"
-                                  className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                                />
-                              );
-                            })()}
+                              })()
+                            )}
                           </div>
-                        </td>
-                        <td className="px-3 py-2">
-                          <button
-                            onClick={() => {
-                              if (bulkRescheduleDates[idx]?.newDate) {
-                                const dateToApply = bulkRescheduleDates[idx].newDate;
-                                const updated = bulkRescheduleDates.map((item, i) => 
-                                  i >= idx ? { ...item, newDate: dateToApply } : item
-                                );
-                                setBulkRescheduleDates(updated);
-                              }
-                            }}
-                            className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                            title="Apply this date to all sessions below"
-                          >
-                            Apply ↓
-                          </button>
                         </td>
                       </tr>
                     ))}
@@ -10894,7 +10887,6 @@ const App = () => {
   const MyDailyReportsView = () => {
     const [reports, setReports] = useState([]);
     const [loading, setLoading] = useState(false);
-    const [deletingId, setDeletingId] = useState(null);
     const [rangeMode, setRangeMode] = useState('7d'); // 7d | month | custom
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
@@ -11179,31 +11171,7 @@ const App = () => {
                                   return s;
                                 })();
                                 const completedVal = getCompletionLabel(r);
-                                const isOwner = String(r.teacherEmail || '').toLowerCase() === String(email || '').toLowerCase();
                                 const subTag = isSubstitutionReport(r);
-                                const onDelete = async () => {
-                                  if (!id) return alert('Missing report id');
-                                  if (!confirm(
-                                    `Delete this report? This cannot be undone.\n\n` +
-                                    `Date: ${displayDate || '-'}\n` +
-                                    `Class: ${r.class || '-'}\n` +
-                                    `Subject: ${r.subject || '-'}\n` +
-                                    `Period: ${r.period || '-'}\n`
-                                  )) return;
-                                  try {
-                                    setDeletingId(id);
-                                    const res = await api.deleteDailyReport(id, email);
-                                    if (res && res.success) {
-                                      setReports(prev => prev.filter(x => (x.id || x.reportId || '') !== id));
-                                    } else {
-                                      alert('Delete failed: ' + (res && res.error ? res.error : 'Not allowed'));
-                                    }
-                                  } catch (err) {
-                                    alert('Delete failed: ' + (err && err.message ? err.message : String(err)));
-                                  } finally {
-                                    setDeletingId(null);
-                                  }
-                                };
                                 return (
                                   <tr key={id || `${r.date}|${r.class}|${r.subject}|${r.period}`}>
                                     <td className="px-2 py-2 text-xs text-gray-900">{displayDate}</td>
@@ -11240,14 +11208,7 @@ const App = () => {
                                         <span className="text-xs text-gray-700">Submitted</span>
                                       )}
                                     </td>
-                                    <td className="px-2 py-2 text-xs text-right">
-                                      {isOwner && (
-                                        <button onClick={onDelete} disabled={!id || deletingId === id} className="px-2 py-1 border rounded text-red-600 hover:bg-red-50 disabled:opacity-40 inline-flex items-center">
-                                          {deletingId === id && (<span className="inline-block h-3 w-3 mr-1 border-2 border-red-600/70 border-t-transparent rounded-full animate-spin"></span>)}
-                                          {deletingId === id ? 'Deleting…' : 'Delete'}
-                                        </button>
-                                      )}
-                                    </td>
+                                      <td className="px-2 py-2 text-xs text-right"></td>
                                   </tr>
                                 );
                               })}
