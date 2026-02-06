@@ -5689,6 +5689,7 @@ const App = () => {
       dateTo: ''
     });
     const [bulkSubmitting, setBulkSubmitting] = useState(false);
+    const [autoFillLoading, setAutoFillLoading] = useState(false);
     // View-only: open a modal showing all sessions in the same chapter
     const viewChapterSessions = (baseLesson) => {
       if (!baseLesson) return;
@@ -7522,6 +7523,13 @@ const App = () => {
                 </p>
               </div>
               
+              {autoFillLoading && (
+                <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg flex items-center gap-3">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                  <span className="text-sm text-blue-800 font-medium">Auto-filling sessions based on timetable...</span>
+                </div>
+              )}
+              
               <div className="text-sm text-gray-600 bg-amber-50 p-3 rounded-lg">
                 <div className="mb-3">
                   ℹ️ <strong>Auto-fill Mode:</strong> Set the starting date and period for Session 1, and the system will automatically schedule subsequent sessions based on the teacher's timetable.
@@ -7564,40 +7572,6 @@ const App = () => {
                               const selectedDate = e.target.value;
                               const updated = [...bulkRescheduleDates];
                               updated[idx] = { ...updated[idx], newDate: selectedDate, newPeriod: '' };
-                              
-                              // Auto-fill subsequent sessions if this is session 1
-                              if (idx === 0 && selectedDate) {
-                                // Get available periods for all sessions from this date forward
-                                try {
-                                  const teacherEmail = item.teacherEmail;
-                                  // Calculate end date (30 days from start)
-                                  const endDate = new Date(selectedDate);
-                                  endDate.setDate(endDate.getDate() + 30);
-                                  const endDateStr = endDate.toISOString().split('T')[0];
-                                  
-                                  const response = await api.getAvailablePeriodsForLessonPlan(
-                                    teacherEmail,
-                                    selectedDate,
-                                    endDateStr,
-                                    true,
-                                    bulkRescheduleChapter.class,
-                                    bulkRescheduleChapter.subject
-                                  );
-                                  
-                                  const actualData = response?.data || response;
-                                  if (actualData.success && actualData.availableSlots) {
-                                    const available = actualData.availableSlots.filter(p => p.isAvailable);
-                                    // Auto-fill all sessions with available slots
-                                    for (let i = 0; i < updated.length && i < available.length; i++) {
-                                      updated[i].newDate = available[i].date;
-                                      updated[i].newPeriod = String(available[i].period);
-                                    }
-                                  }
-                                } catch (err) {
-                                  console.error('Error auto-filling sessions:', err);
-                                }
-                              }
-                              
                               setBulkRescheduleDates(updated);
                               
                               // Fetch teacher timetable and lesson plans for this date
@@ -7625,7 +7599,7 @@ const App = () => {
                               }
                             }}
                             className="px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
-                            disabled={idx > 0}
+                            disabled={idx > 0 || autoFillLoading}
                             title={idx === 0 ? "Select date for Session 1 (will auto-fill subsequent sessions)" : "Auto-filled based on Session 1"}
                           />
                         </td>
@@ -7672,11 +7646,22 @@ const App = () => {
                                             key={periodNum}
                                             type="button"
                                             onClick={async () => {
+                                              // Check if this period already has a lesson plan
+                                              if (hasLessonPlan && idx === 0) {
+                                                if (!window.confirm(
+                                                  `⚠️ Warning: Period ${periodNum} already has a lesson plan scheduled.\n\n` +
+                                                  `Do you want to proceed with this period anyway?`
+                                                )) {
+                                                  return;
+                                                }
+                                              }
+                                              
                                               const updated = [...bulkRescheduleDates];
                                               updated[idx] = { ...updated[idx], newPeriod: String(periodNum) };
                                               
                                               // Auto-fill subsequent sessions when session 1 period is selected
                                               if (idx === 0 && bulkRescheduleDates[0]?.newDate) {
+                                                setAutoFillLoading(true);
                                                 try {
                                                   const teacherEmail = item.teacherEmail;
                                                   const startDate = bulkRescheduleDates[0].newDate;
@@ -7688,26 +7673,52 @@ const App = () => {
                                                     teacherEmail,
                                                     startDate,
                                                     endDateStr,
-                                                    true,
+                                                    false, // Don't exclude existing - we want to include the selected starting slot
                                                     bulkRescheduleChapter.class,
                                                     bulkRescheduleChapter.subject
                                                   );
                                                   
                                                   const actualData = response?.data || response;
                                                   if (actualData.success && actualData.availableSlots) {
-                                                    const available = actualData.availableSlots.filter(p => p.isAvailable);
-                                                    for (let i = 0; i < updated.length && i < available.length; i++) {
-                                                      updated[i].newDate = available[i].date;
-                                                      updated[i].newPeriod = String(available[i].period);
+                                                    // Filter to start from selected date/period
+                                                    const allSlots = actualData.availableSlots;
+                                                    const startIdx = allSlots.findIndex(
+                                                      s => s.date === startDate && String(s.period) === String(periodNum)
+                                                    );
+                                                    
+                                                    if (startIdx >= 0) {
+                                                      // Start from the selected slot and take subsequent available slots
+                                                      const slotsFromStart = allSlots.slice(startIdx).filter(p => p.isAvailable);
+                                                      for (let i = 0; i < updated.length && i < slotsFromStart.length; i++) {
+                                                        updated[i].newDate = slotsFromStart[i].date;
+                                                        updated[i].newPeriod = String(slotsFromStart[i].period);
+                                                      }
+                                                    } else {
+                                                      // Fallback: just use available slots from start date onwards
+                                                      const available = allSlots.filter(p => 
+                                                        p.isAvailable && p.date >= startDate
+                                                      );
+                                                      // Manually set first session to selected slot
+                                                      updated[0].newDate = startDate;
+                                                      updated[0].newPeriod = String(periodNum);
+                                                      // Fill rest with available slots
+                                                      for (let i = 1; i < updated.length && i - 1 < available.length; i++) {
+                                                        updated[i].newDate = available[i - 1].date;
+                                                        updated[i].newPeriod = String(available[i - 1].period);
+                                                      }
                                                     }
                                                   }
                                                 } catch (err) {
                                                   console.error('Error auto-filling sessions:', err);
+                                                  alert('Failed to auto-fill sessions. Please try again.');
+                                                } finally {
+                                                  setAutoFillLoading(false);
                                                 }
                                               }
                                               
                                               setBulkRescheduleDates(updated);
                                             }}
+                                            disabled={autoFillLoading}
                                             className={`px-2 py-1 text-xs rounded border ${
                                               isSelected
                                                 ? 'bg-blue-600 text-white border-blue-600'
