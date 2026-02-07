@@ -264,6 +264,45 @@
     try {
       _clearRequestCache(); // PERFORMANCE: Clear cache at start of each request
 
+      // VERSION CHECK ENDPOINT - helps verify what code is deployed
+      if (action === 'version') {
+        return _respond({
+          success: true,
+          version: '83',
+          deployed: '2026-02-07T02:50:00+05:30',
+          cacheVersion: 'v2026-02-07-schemeId-in-reports',
+          optimizations: ['TextFinder', 'sparse-sessions', 'indexed-lookups', 'precomputed-completion', 'sequential-gating', 'reduced-gating-calls', 'schemeId-in-dailyreports']
+        });
+      }
+
+      // DEBUG: Get execution logs
+      if (action === 'debug.logs') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
+        try {
+          const logs = Logger.getLog();
+          return _respond({ success: true, logs: logs });
+        } catch (err) {
+          return _respond({ success: false, error: String(err) });
+        }
+      }
+
+      // BACKFILL: Populate schemeId for existing DailyReports
+      if (action === 'admin.backfillSchemeIds') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        }
+        try {
+          const result = backfillDailyReportSchemeIds();
+          return _respond({ success: true, ...result });
+        } catch (err) {
+          return _respond({ success: false, error: String(err), stack: err.stack });
+        }
+      }
+
       // Enforce authentication (configurable) and always protect sensitive endpoints.
       var authResp = _ensureAuthenticatedOrRespond_(e, null, action);
       if (authResp) return authResp;
@@ -1467,7 +1506,7 @@
 
           const sh = _getSheet('DailyReports');
           // Include id as first column to match configured schema and new UUID flow
-          const headers = ['id', 'date', 'teacherEmail', 'teacherName', 'class', 'subject', 'period', 'planType', 'lessonPlanId', 'chapter', 'sessionNo', 'totalSessions', 'completionPercentage', 'chapterStatus', 'deviationReason', 'difficulties', 'nextSessionPlan', 'objectives', 'activities', 'completed', 'notes', 'createdAt', 'isSubstitution', 'absentTeacher', 'regularSubject', 'substituteSubject'];
+          const headers = ['id', 'date', 'teacherEmail', 'teacherName', 'class', 'subject', 'schemeId', 'period', 'planType', 'lessonPlanId', 'chapter', 'sessionNo', 'totalSessions', 'completionPercentage', 'chapterStatus', 'deviationReason', 'difficulties', 'nextSessionPlan', 'objectives', 'activities', 'completed', 'notes', 'createdAt', 'isSubstitution', 'absentTeacher', 'regularSubject', 'substituteSubject'];
           _ensureHeaders(sh, headers);
 
           const reportDate = _normalizeQueryDate(data.date);
@@ -1643,6 +1682,9 @@
           const sessionComplete = data.sessionComplete === true || data.sessionComplete === 'true';
           const completionPercentage = sessionComplete ? 100 : (Number(data.completionPercentage || 0));
           
+          // Extract schemeId from matching plan or attached plan
+          const reportSchemeId = String((!isSubstitution && matchingPlan && matchingPlan.schemeId) || (attachedPlan && attachedPlan.schemeId) || data.schemeId || '').trim();
+          
           const rowData = [
             reportId,
             data.date || '',
@@ -1650,6 +1692,7 @@
             data.teacherName || '',
             data.class || '',
             data.subject || '',
+            reportSchemeId,
             Number(data.period || 0),
             inferredPlanType,
             String((!isSubstitution && matchingPlan && matchingPlan.lpId) || attachedPlanId || data.lessonPlanId || ''),
@@ -8636,5 +8679,104 @@ function validateSessionSequence(teacherEmail, classVal, subject, chapter, attem
   } catch (error) {
     appLog('ERROR', 'validateSessionSequence', error.message);
     return { valid: true }; // Allow on error to prevent blocking
+  }
+}
+
+/**
+ * Backfill schemeId for existing DailyReports by matching to LessonPlans
+ * This function populates the schemeId column for reports that don't have it yet
+ */
+function backfillDailyReportSchemeIds() {
+  try {
+    appLog('INFO', 'backfillDailyReportSchemeIds START');
+    
+    // Get DailyReports sheet
+    const reportsSheet = _getSheet('DailyReports');
+    const reportHeaders = _headers(reportsSheet);
+    const reportRows = _rows(reportsSheet);
+    
+    // Find schemeId column index (add if missing)
+    let schemeIdColIndex = reportHeaders.indexOf('schemeId');
+    if (schemeIdColIndex === -1) {
+      // Add schemeId column after subject
+      const subjectIndex = reportHeaders.indexOf('subject');
+      schemeIdColIndex = subjectIndex + 1;
+      reportsSheet.insertColumnAfter(subjectIndex + 1);
+      reportsSheet.getRange(1, schemeIdColIndex + 1).setValue('schemeId');
+      appLog('INFO', 'Added schemeId column at index', { index: schemeIdColIndex });
+    }
+    
+    // Get LessonPlans to lookup schemeId
+    const plansSheet = _getSheet('LessonPlans');
+    const planHeaders = _headers(plansSheet);
+    const plans = _rows(plansSheet).map(r => _indexByHeader(r, planHeaders));
+    
+    // Create lookup map: lessonPlanId -> schemeId
+    const lpIdToSchemeId = new Map();
+    for (const plan of plans) {
+      const lpId = String(plan.lpId || plan.lessonPlanId || plan.planId || plan.id || '').trim();
+      const schemeId = String(plan.schemeId || '').trim();
+      if (lpId && schemeId) {
+        lpIdToSchemeId.set(lpId, schemeId);
+      }
+    }
+    appLog('INFO', 'Built lessonPlan lookup map', { size: lpIdToSchemeId.size });
+    
+    // Process each report
+    let updatedCount = 0;
+    let skippedCount = 0;
+    let notFoundCount = 0;
+    
+    for (let i = 0; i < reportRows.length; i++) {
+      const row = reportRows[i];
+      const report = _indexByHeader(row, reportHeaders);
+      const rowNum = i + 2; // +1 for header, +1 for 0-index
+      
+      // Skip if schemeId already exists
+      const existingSchemeId = String(report.schemeId || '').trim();
+      if (existingSchemeId) {
+        skippedCount++;
+        continue;
+      }
+      
+      // Get lessonPlanId from report
+      const lessonPlanId = String(report.lessonPlanId || '').trim();
+      if (!lessonPlanId) {
+        notFoundCount++;
+        continue; // Can't backfill without lessonPlanId
+      }
+      
+      // Lookup schemeId
+      const schemeId = lpIdToSchemeId.get(lessonPlanId);
+      if (schemeId) {
+        // Update the cell
+        reportsSheet.getRange(rowNum, schemeIdColIndex + 1).setValue(schemeId);
+        updatedCount++;
+        
+        if (updatedCount % 50 === 0) {
+          SpreadsheetApp.flush();
+          appLog('INFO', 'Backfill progress', { updated: updatedCount });
+        }
+      } else {
+        notFoundCount++;
+      }
+    }
+    
+    SpreadsheetApp.flush();
+    
+    const result = {
+      totalReports: reportRows.length,
+      updatedCount: updatedCount,
+      skippedCount: skippedCount,
+      notFoundCount: notFoundCount,
+      message: `Backfill complete. Updated ${updatedCount} reports, skipped ${skippedCount} (already had schemeId), ${notFoundCount} couldn't be matched.`
+    };
+    
+    appLog('INFO', 'backfillDailyReportSchemeIds COMPLETE', result);
+    return result;
+    
+  } catch (error) {
+    appLog('ERROR', 'backfillDailyReportSchemeIds', { message: error.message, stack: error.stack });
+    throw error;
   }
 }
