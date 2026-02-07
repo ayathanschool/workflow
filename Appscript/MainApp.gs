@@ -268,10 +268,10 @@
       if (action === 'version') {
         return _respond({
           success: true,
-          version: '85',
-          deployed: '2026-02-07T04:10:00+05:30',
-          cacheVersion: 'v2026-02-07-extended-session-reporting-fix',
-          optimizations: ['TextFinder', 'sparse-sessions', 'indexed-lookups', 'precomputed-completion', 'sequential-gating', 'reduced-gating-calls', 'schemeId-in-dailyreports', 'extended-session-validation-bypass']
+          version: '86',
+          deployed: '2026-02-08T04:30:00+05:30',
+          cacheVersion: 'v2026-02-08-extended-sessions-in-ui',
+          optimizations: ['TextFinder', 'sparse-sessions', 'indexed-lookups', 'precomputed-completion', 'sequential-gating', 'reduced-gating-calls', 'schemeId-in-dailyreports', 'extended-session-validation-bypass', 'extended-sessions-in-response']
         });
       }
 

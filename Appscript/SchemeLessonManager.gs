@@ -1141,6 +1141,59 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
             cascadeMarked: cascadeMarked
           };
         });
+        
+        // EXTENDED SESSIONS: Check for lesson plans beyond original numberOfSessions
+        const originalSessionCount = sessions.length;
+        const extendedPlans = [];
+        for (const [key, plan] of plansByKey.entries()) {
+          if (!key.startsWith(String(scheme.schemeId || '') + '|' + normKey(chapter.name) + '|')) continue;
+          const sessionNum = Number(plan.session || plan.sessionNo || 0);
+          if (sessionNum > originalSessionCount) {
+            extendedPlans.push({ sessionNum, plan });
+          }
+        }
+        
+        // Sort extended plans by session number
+        extendedPlans.sort((a, b) => a.sessionNum - b.sessionNum);
+        
+        // Add extended sessions to sessionsWithStatus
+        for (const { sessionNum, plan } of extendedPlans) {
+          const rawStatus = String(plan.status || 'planned').trim();
+          const statusLower = rawStatus.toLowerCase();
+          const hasOriginalSlotChange = plan.originalDate && plan.originalDate !== plan.selectedDate;
+          const isOriginalCascade = /rescheduled\s*\(cascade\)/i.test(rawStatus);
+          
+          const lpId = String(plan.lpId || plan.lessonPlanId || '').trim();
+          const hasReport = lpId
+            ? reportsByLessonPlanId.has(lpId)
+            : hasReportBySessionFallback.has(reportSessionKey(scheme.class, scheme.subject, chapter.name, sessionNum));
+          
+          let status = 'not-planned';
+          let cascadeMarked = false;
+          
+          if (isOriginalCascade && hasOriginalSlotChange) {
+            cascadeMarked = true;
+            status = hasReport && !['cancelled','rejected'].includes(statusLower) ? 'Reported' : 'Cascaded';
+          } else if (hasReport && !['cancelled','rejected'].includes(statusLower)) {
+            status = 'Reported';
+          } else {
+            status = rawStatus;
+          }
+          
+          sessionsWithStatus.push({
+            sessionNumber: sessionNum,
+            sessionName: `Session ${sessionNum} (Extended)`,
+            estimatedDuration: '45 minutes',
+            status: status,
+            plannedDate: plan.selectedDate || null,
+            plannedPeriod: plan.selectedPeriod || null,
+            originalDate: plan.originalDate || null,
+            originalPeriod: plan.originalPeriod || null,
+            lessonPlanId: plan.lpId || null,
+            cascadeMarked: cascadeMarked,
+            isExtended: true
+          });
+        }
 
         // PERFORMANCE: return a sparse sessions array by default (only planned/reported/cascaded/etc).
         // Frontend can reconstruct placeholders using totalSessions.
