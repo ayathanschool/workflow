@@ -174,6 +174,8 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
             const byNumber = new Map(rawSessions.map(ss => [Number(ss && ss.sessionNumber), ss]));
             const fullSessions = [];
+            
+            // Add all original sessions (1 to totalSessions)
             for (let i = 1; i <= totalSessions; i++) {
               const existing = byNumber.get(i);
               if (existing) {
@@ -197,6 +199,11 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                 });
               }
             }
+            
+            // Add extended sessions (sessionNumber > totalSessions)
+            const extendedSessions = rawSessions.filter(s => Number(s.sessionNumber) > totalSessions);
+            extendedSessions.sort((a, b) => Number(a.sessionNumber) - Number(b.sessionNumber));
+            fullSessions.push(...extendedSessions);
 
             return {
               ...ch,
