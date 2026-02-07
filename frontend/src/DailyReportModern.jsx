@@ -971,17 +971,8 @@ export default function DailyReportModern({ user }) {
       } else if (result && result.error === 'duplicate') {
         setReports(prev => ({ ...prev, [key]: payload }));
         setMessage({ text: "Already submitted", type: "info" });
-      } else if (result && result.error === 'session_sequence_violation') {
-        // Handle sequential reporting enforcement error
-        const expectedSession = result.expectedSession;
-        const currentSession = payload.sessionNo;
-        setMessage({ 
-          text: `❌ ${result.message || `Sequential reporting required: Please report Session ${expectedSession} first (attempted Session ${currentSession})`}`, 
-          type: "error" 
-        });
       } else {
-        const errorMsg = result?.message || result?.error || "Failed to submit report";
-        setMessage({ text: `❌ ${errorMsg}`, type: "error" });
+        setMessage({ text: "Failed to submit report", type: "error" });
       }
     } catch (error) {
       console.error("Submit error:", error);

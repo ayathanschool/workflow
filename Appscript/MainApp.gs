@@ -268,10 +268,10 @@
       if (action === 'version') {
         return _respond({
           success: true,
-          version: '83',
-          deployed: '2026-02-07T02:50:00+05:30',
-          cacheVersion: 'v2026-02-07-schemeId-in-reports',
-          optimizations: ['TextFinder', 'sparse-sessions', 'indexed-lookups', 'precomputed-completion', 'sequential-gating', 'reduced-gating-calls', 'schemeId-in-dailyreports']
+          version: '85',
+          deployed: '2026-02-07T04:10:00+05:30',
+          cacheVersion: 'v2026-02-07-extended-session-reporting-fix',
+          optimizations: ['TextFinder', 'sparse-sessions', 'indexed-lookups', 'precomputed-completion', 'sequential-gating', 'reduced-gating-calls', 'schemeId-in-dailyreports', 'extended-session-validation-bypass']
         });
       }
 
@@ -8654,16 +8654,49 @@ function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, tot
 
 /**
  * Validate that teacher is reporting sessions sequentially (no skipping)
+ * Extended sessions (sessionNum > totalSessions) are allowed if previous session reported
  */
 function validateSessionSequence(teacherEmail, classVal, subject, chapter, attemptedSession, totalSessions) {
   try {
+    // Extended sessions (beyond original totalSessions) bypass normal sequence validation
+    if (attemptedSession > totalSessions) {
+      // For extended sessions, verify previous session (attemptedSession - 1) is reported
+      const reportsSheet = _getSheet('DailyReports');
+      const headers = _headers(reportsSheet);
+      const reports = _rows(reportsSheet).map(r => _indexByHeader(r, headers));
+      
+      const reportedSessions = reports
+        .filter(r => {
+          const emailMatch = String(r.teacherEmail || '').trim().toLowerCase() === String(teacherEmail || '').trim().toLowerCase();
+          const classMatch = String(r.class || '').trim() === String(classVal || '').trim();
+          const subjectMatch = String(r.subject || '').trim() === String(subject || '').trim();
+          const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
+          return emailMatch && classMatch && subjectMatch && chapterMatch;
+        })
+        .map(r => Number(r.sessionNo || 0))
+        .filter(n => n > 0);
+      
+      const previousSession = attemptedSession - 1;
+      if (previousSession > 0 && !reportedSessions.includes(previousSession)) {
+        return {
+          valid: false,
+          expectedSession: previousSession,
+          message: `Session ${previousSession} must be reported before extended session ${attemptedSession}.`
+        };
+      }
+      
+      return { valid: true, isExtended: true };
+    }
+    
+    // Normal sessions: enforce sequential reporting within original totalSessions
     const expectedSession = getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions);
     
     if (expectedSession === null) {
+      // All original sessions reported - this shouldn't happen for normal sessions
       return {
         valid: false,
         expectedSession: null,
-        message: 'All sessions for this chapter have been reported'
+        message: 'All original sessions for this chapter have been reported. Use "Add Extended Session" if more sessions are needed.'
       };
     }
     

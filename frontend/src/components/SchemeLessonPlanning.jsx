@@ -130,11 +130,14 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
       timeoutId = setTimeout(() => {
         console.warn('⚠️ Scheme loading timeout - forcing loading=false');
         didSoftTimeout = true;
-        setError('Still loading… server is slow (cold start). Please wait a bit longer.');
+        // Force reset loading state after timeout
+        setLoading(false);
+        loadingRef.current = false;
+        setError('Loading is taking longer than expected. The server may be slow. You can try refreshing or wait a bit longer.');
       }, 60000); // 60s soft-timeout
 
-      // Load summary-only first for quick initial render
-      // Load FULL details in one call (schemes + chapters + sessions)
+      // HYBRID APPROACH: Load summary first (fast), then fetch full details in background
+      // This gives immediate feedback while loading complete data
       const response = await api.getApprovedSchemesForLessonPlanning(userEmail, false);
 
       console.log('Scheme response:', response);
@@ -152,11 +155,65 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
             return Number.isFinite(n) ? n : 0;
           };
           const overallProgress = Math.max(0, Math.min(100, toNum(s.overallProgress)));
+
+          // If backend returns sparse sessions for performance, reconstruct placeholders.
+          const chapters = Array.isArray(s.chapters) ? s.chapters : null;
+          const normalizedChapters = chapters ? chapters.map(ch => {
+            const totalSessions = toNum(ch.totalSessions);
+            const sparse = !!ch.sessionsSparse;
+            const rawSessions = Array.isArray(ch.sessions) ? ch.sessions : [];
+
+            if (!sparse || totalSessions <= 0) {
+              return {
+                ...ch,
+                totalSessions,
+                plannedSessions: toNum(ch.plannedSessions),
+                sessions: rawSessions
+              };
+            }
+
+            const byNumber = new Map(rawSessions.map(ss => [Number(ss && ss.sessionNumber), ss]));
+            const fullSessions = [];
+            for (let i = 1; i <= totalSessions; i++) {
+              const existing = byNumber.get(i);
+              if (existing) {
+                fullSessions.push({
+                  ...existing,
+                  sessionNumber: Number(existing.sessionNumber) || i,
+                  sessionName: existing.sessionName || `Session ${i}`
+                });
+              } else {
+                fullSessions.push({
+                  sessionNumber: i,
+                  sessionName: `Session ${i}`,
+                  estimatedDuration: '',
+                  status: 'not-planned',
+                  plannedDate: null,
+                  plannedPeriod: null,
+                  originalDate: null,
+                  originalPeriod: null,
+                  lessonPlanId: null,
+                  cascadeMarked: false
+                });
+              }
+            }
+
+            return {
+              ...ch,
+              totalSessions,
+              plannedSessions: toNum(ch.plannedSessions),
+              numberOfSessions: toNum(ch.numberOfSessions) || totalSessions,
+              sessions: fullSessions,
+              sessionsSparse: false
+            };
+          }) : null;
+
           return {
             ...s,
             totalSessions: toNum(s.totalSessions),
             plannedSessions: toNum(s.plannedSessions),
             overallProgress,
+            chapters: normalizedChapters || s.chapters,
             chaptersLoaded: true
           };
         });
@@ -193,7 +250,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
       if (didSoftTimeout) {
         setError(prev => {
           const p = String(prev || '');
-          return p.includes('Still loading') ? null : prev;
+          return p.includes('taking longer') || p.includes('Still loading') ? null : prev;
         });
       }
     }
@@ -607,6 +664,9 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               onClick={() => {
                 // Clear cache before refresh for fresh data
                 api.clearCache('getApprovedSchemesForLessonPlanning');
+                // Force reset loading state before refresh
+                loadingRef.current = false;
+                setLoading(false);
                 loadApprovedSchemes();
               }}
               disabled={loading}
@@ -745,6 +805,18 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   return { total, lpPlanned, reported };
                 })();
 
+                const schemePercents = (() => {
+                  const total = Number(schemeTotals.total) || 0;
+                  const lpPlanned = Number(schemeTotals.lpPlanned) || 0;
+                  const reported = schemeTotals.reported == null ? null : (Number(schemeTotals.reported) || 0);
+                  const clamp = (n) => Math.max(0, Math.min(100, n));
+                  const plannedPercent = total > 0 ? clamp(Math.round((lpPlanned / total) * 100)) : 0;
+                  const reportedPercent = (reported == null)
+                    ? null
+                    : (total > 0 ? clamp(Math.round((reported / total) * 100)) : 0);
+                  return { plannedPercent, reportedPercent };
+                })();
+
                 const headerChapterNode = (() => {
                   const chapters = Array.isArray(scheme.chapters) ? scheme.chapters : [];
                   if (chapters.length > 0) {
@@ -803,14 +875,23 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                         <div className="text-xs sm:text-sm text-gray-600 mb-1">
                           Progress: LP {schemeTotals.lpPlanned}/{schemeTotals.total}{schemeTotals.reported != null ? `, Reported ${schemeTotals.reported}/${schemeTotals.total}` : ''}
                         </div>
-                        <div className="w-full sm:w-32 bg-gray-200 rounded-full h-2">
+                        <div className="w-full sm:w-32 bg-gray-200 rounded-full h-2 relative overflow-hidden">
+                          {/* Planned (LP) progress */}
                           <div
-                            className={`h-2 rounded-full ${getProgressColor(scheme.overallProgress)}`}
-                            style={{ width: `${Math.max(0, Math.min(100, Number(scheme.overallProgress) || 0))}%` }}
+                            className={`h-2 ${getProgressColor(schemePercents.plannedPercent)}`}
+                            style={{ width: `${schemePercents.plannedPercent}%` }}
                           ></div>
+                          {/* Reported progress (overlay) */}
+                          {schemePercents.reportedPercent != null && (
+                            <div
+                              className="h-2 bg-green-500 absolute left-0 top-0"
+                              style={{ width: `${Math.min(schemePercents.reportedPercent, schemePercents.plannedPercent)}%` }}
+                              title="Reported sessions"
+                            ></div>
+                          )}
                         </div>
                         <div className="text-xs text-gray-500 mt-1">
-                          {scheme.overallProgress}% complete
+                          {schemePercents.plannedPercent}% planned{schemePercents.reportedPercent != null ? `, ${schemePercents.reportedPercent}% reported` : ''}
                         </div>
                       </div>
                     </div>
@@ -912,6 +993,28 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                 >
                                   <Plus className="w-4 h-4" />
                                   Prepare All ({chapter.totalSessions} Sessions)
+                                </button>
+                              )}
+                              
+                              {/* Add Extended Session button - show when all sessions reported but NOT marked complete */}
+                              {!showChapterCompleteBadge && showAllReportedBadge && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const nextSessionNum = chapter.plannedSessions + 1;
+                                    const extendedSession = {
+                                      sessionNumber: nextSessionNum,
+                                      sessionName: `Session ${nextSessionNum} (Extended)`,
+                                      status: 'not-planned',
+                                      isExtended: true
+                                    };
+                                    handleSessionClick(scheme, chapter, extendedSession);
+                                  }}
+                                  className="px-4 py-2 text-sm bg-amber-600 text-white rounded-lg font-semibold transition-colors inline-flex items-center gap-2 shadow-sm hover:bg-amber-700 hover:shadow-md"
+                                  title="Add an extended session to complete this chapter"
+                                >
+                                  <Plus className="w-4 h-4" />
+                                  Add Extended Session
                                 </button>
                               )}
                             </div>

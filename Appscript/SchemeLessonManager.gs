@@ -427,11 +427,16 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         const matchesClass = String(report.class || '').trim().toLowerCase() === String(scheme.class || '').trim().toLowerCase();
         const matchesSubject = String(report.subject || '').trim().toLowerCase() === String(scheme.subject || '').trim().toLowerCase();
         
+        // IMPORTANT: Filter by schemeId if available to ensure we check reports from current scheme only
+        const reportSchemeId = String(report.schemeId || '').trim();
+        const currentSchemeId = String(scheme.schemeId || '').trim();
+        const matchesScheme = !reportSchemeId || !currentSchemeId || reportSchemeId === currentSchemeId;
+        
         if (matchesTeacher && matchesClass && matchesSubject) {
-          Logger.log(`Report chapter: "${report.chapter}" -> matches chapter: ${matchesChapter}, session: ${report.sessionNo || report.session}`);
+          Logger.log(`Report chapter: "${report.chapter}" -> matches chapter: ${matchesChapter}, session: ${report.sessionNo || report.session}, schemeId: ${reportSchemeId}, matchesScheme: ${matchesScheme}`);
         }
         
-        return matchesTeacher && matchesChapter && matchesClass && matchesSubject;
+        return matchesTeacher && matchesChapter && matchesClass && matchesSubject && matchesScheme;
       });
       
       Logger.log(`Found ${chapterReports.length} reports for this chapter`);
@@ -440,7 +445,7 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
       if (chapterReports.length === 0) {
         Logger.log(`No reports for chapter ${chapter.name} yet - checking previous chapters`);
         
-        // Get all reports for this teacher/class/subject
+        // Get all reports for this teacher/class/subject (filtered by schemeId if available)
         const teacherReports = allReports.filter(report => {
           // Safety check: ensure report is an object
           if (!report || typeof report !== 'object') return false;
@@ -449,7 +454,12 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           const matchesClass = String(report.class || '') === String(scheme.class || '');
           const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
           
-          return matchesTeacher && matchesClass && matchesSubject;
+          // IMPORTANT: Filter by schemeId to only check reports from current scheme
+          const reportSchemeId = String(report.schemeId || '').trim();
+          const currentSchemeId = String(scheme.schemeId || '').trim();
+          const matchesScheme = !reportSchemeId || !currentSchemeId || reportSchemeId === currentSchemeId;
+          
+          return matchesTeacher && matchesClass && matchesSubject && matchesScheme;
         });
         
         // If no reports at all, allow (first chapter)
