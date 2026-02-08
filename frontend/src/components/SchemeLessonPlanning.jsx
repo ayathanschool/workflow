@@ -52,6 +52,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   const [planningDateRange, setPlanningDateRange] = useState(null);
   const [classFilter, setClassFilter] = useState('all');
   const [subjectFilter, setSubjectFilter] = useState('all');
+  const [chapterFilter, setChapterFilter] = useState('all');
   const [lessonPlanData, setLessonPlanData] = useState({
     learningObjectives: '',
     teachingMethods: '',
@@ -308,13 +309,37 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
     return [...new Set(schemes.map(s => s.subject))].sort();
   }, [schemes]);
 
+  // Memoize available chapters to prevent recalculation on every render
+  const availableChapters = useMemo(() => {
+    const names = [];
+    schemes
+      .filter(s => (classFilter === 'all' || s.class === classFilter))
+      .filter(s => (subjectFilter === 'all' || s.subject === subjectFilter))
+      .forEach(s => {
+        if (s && s.chapter) names.push(String(s.chapter));
+        const chapters = Array.isArray(s && s.chapters) ? s.chapters : [];
+        chapters.forEach(ch => {
+          const name = ch && (ch.chapterName || ch.name || ch.title);
+          if (name) names.push(String(name));
+        });
+      });
+    return [...new Set(names.map(n => n.trim()).filter(Boolean))].sort();
+  }, [schemes, classFilter, subjectFilter]);
+
   // Memoize filtered schemes to prevent recalculation on every render
   const filteredSchemes = useMemo(() => {
-    return schemes.filter(s => 
-      (classFilter === 'all' || s.class === classFilter) &&
-      (subjectFilter === 'all' || s.subject === subjectFilter)
-    );
-  }, [schemes, classFilter, subjectFilter]);
+    return schemes.filter(s => {
+      if (classFilter !== 'all' && s.class !== classFilter) return false;
+      if (subjectFilter !== 'all' && s.subject !== subjectFilter) return false;
+      if (chapterFilter === 'all') return true;
+      if (s.chapter === chapterFilter) return true;
+      const chapters = Array.isArray(s && s.chapters) ? s.chapters : [];
+      return chapters.some(ch => {
+        const name = ch && (ch.chapterName || ch.name || ch.title);
+        return String(name || '') === chapterFilter;
+      });
+    });
+  }, [schemes, classFilter, subjectFilter, chapterFilter]);
 
   // Memoize statistics to prevent recalculation on every render
   const statistics = useMemo(() => {
@@ -766,6 +791,22 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                 ))}
               </select>
             </div>
+            <div className="flex items-center space-x-2 flex-1">
+              <label htmlFor="chapter-filter" className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap">
+                Chapter:
+              </label>
+              <select
+                id="chapter-filter"
+                value={chapterFilter}
+                onChange={(e) => setChapterFilter(e.target.value)}
+                className="flex-1 border border-gray-300 rounded-md px-2 sm:px-3 py-1.5 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="all">All Chapters</option>
+                {availableChapters.map(chapter => (
+                  <option key={chapter} value={chapter}>{chapter}</option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -783,6 +824,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   No schemes found
                   {classFilter !== 'all' && ` for class "${classFilter}"`}
                   {subjectFilter !== 'all' && ` for subject "${subjectFilter}"`}
+                  {chapterFilter !== 'all' && ` for chapter "${chapterFilter}"`}
                 </p>
                 <div className="mt-2 space-x-2">
                   {classFilter !== 'all' && (
@@ -801,9 +843,17 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                       Clear Subject Filter
                     </button>
                   )}
-                  {(classFilter !== 'all' || subjectFilter !== 'all') && (
+                  {chapterFilter !== 'all' && (
                     <button
-                      onClick={() => { setClassFilter('all'); setSubjectFilter('all'); }}
+                      onClick={() => setChapterFilter('all')}
+                      className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                      Clear Chapter Filter
+                    </button>
+                  )}
+                  {(classFilter !== 'all' || subjectFilter !== 'all' || chapterFilter !== 'all') && (
+                    <button
+                      onClick={() => { setClassFilter('all'); setSubjectFilter('all'); setChapterFilter('all'); }}
                       className="px-4 py-2 text-sm bg-gray-600 text-white rounded hover:bg-gray-700"
                     >
                       Clear All Filters
