@@ -878,7 +878,7 @@ export async function getSuggestedPlansForSubstitution(teacherEmail, cls, subjec
   return response?.data || response;
 }
 
-export async function getFirstUnreportedSession(teacherEmail, cls, subject, chapter, totalSessions) {
+export async function getFirstUnreportedSession(teacherEmail, cls, subject, chapter, totalSessions, schemeId = '') {
   const params = new URLSearchParams({
     action: 'getFirstUnreportedSession',
     teacherEmail,
@@ -887,6 +887,7 @@ export async function getFirstUnreportedSession(teacherEmail, cls, subject, chap
     chapter,
     totalSessions: String(totalSessions)
   });
+  if (schemeId) params.set('schemeId', schemeId);
   const response = await getJSON(`${BASE_URL}?${params.toString()}`, NO_CACHE);
   return response;
 }

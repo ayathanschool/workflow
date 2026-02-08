@@ -3011,32 +3011,28 @@ const App = () => {
         setLoading(true);
         try {
           if (!user) return;
-          // Teacher lesson plans
-          const plans = await api.getTeacherLessonPlans(user.email);
-          setLessonPlans(Array.isArray(plans) ? plans : []);
-          
-          // Load data silently
-          // Fetch all schemes submitted by this teacher and filter to approved
-          try {
-            // Use the teacher's own schemes (this was the original working approach)
-            const teacherSchemes = await api.getTeacherSchemes(user.email);
+          const [plansResult, schemesResult] = await Promise.allSettled([
+            api.getTeacherLessonPlans(user.email),
+            api.getTeacherSchemes(user.email)
+          ]);
+
+          if (plansResult.status === 'fulfilled') {
+            const plans = plansResult.value;
+            setLessonPlans(Array.isArray(plans) ? plans : []);
+          } else {
+            console.warn('Error loading lesson plans:', plansResult.reason);
+            setLessonPlans([]);
+          }
+
+          if (schemesResult.status === 'fulfilled') {
+            const teacherSchemes = schemesResult.value;
             const approved = Array.isArray(teacherSchemes)
               ? teacherSchemes.filter(s => String(s.status || '').toLowerCase() === 'approved')
               : [];
             setApprovedSchemes(approved);
-          } catch (err) {
-            console.warn('Error loading approved schemes:', err);
-            // Fall back to teacher's own schemes if getAllApprovedSchemes fails
-            try {
-              const teacherSchemes = await api.getTeacherSchemes(user.email);
-              const approved = Array.isArray(teacherSchemes)
-                ? teacherSchemes.filter(s => String(s.status || '').toLowerCase() === 'approved')
-                : [];
-              setApprovedSchemes(approved);
-            } catch (innerErr) {
-              console.warn('Error loading teacher schemes:', innerErr);
-              setApprovedSchemes([]);
-            }
+          } else {
+            console.warn('Error loading approved schemes:', schemesResult.reason);
+            setApprovedSchemes([]);
           }
         } catch (err) {
           console.error(err);

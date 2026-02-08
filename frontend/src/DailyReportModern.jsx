@@ -4,6 +4,7 @@ import {
 	getTeacherDailyData,
   getTeacherDailyTimetable,
   getTeacherDailyReportsForDate,
+  getDailyReports,
   submitDailyReport,
   checkChapterCompletion,
   getPlannedLessonsForDate,
@@ -56,6 +57,10 @@ export default function DailyReportModern({ user }) {
   // Debounce + cooldown to prevent frequent refresh on global re-renders (e.g., theme toggle)
   const lastRemainingFetchAtRef = useRef(0);
   const pendingRemainingFetchRef = useRef(null);
+
+  // Preview of already reported sessions per chapter
+  const [reportedChapterSessions, setReportedChapterSessions] = useState({});
+  const [reportedChapterSessionsLoading, setReportedChapterSessionsLoading] = useState({});
   
   // Backfill reporting - unreported sessions (HM-controlled feature)
   const [unreportedSessions, setUnreportedSessions] = useState({});
@@ -86,6 +91,15 @@ export default function DailyReportModern({ user }) {
     const m = s.match(/(\d+)/);
     return m ? m[1] : s;
   }, []);
+
+  const getChapterKey = useCallback((cls, subject, chapter, schemeId) => {
+    const c = normalizeText(cls);
+    const s = normalizeText(subject);
+    const ch = normalizeText(chapter);
+    const sid = String(schemeId || '').trim();
+    if (!c || !s || !ch) return '';
+    return sid ? `${c}|${s}|${ch}|${sid}` : `${c}|${s}|${ch}`;
+  }, [normalizeText]);
 
   // Build a normalized index so "Ready" lesson plans match even if timetable strings vary.
   const lessonPlansIndex = useMemo(() => {
@@ -552,6 +566,68 @@ export default function DailyReportModern({ user }) {
       }
     }
   }, [expandedPeriod, periods, reports, drafts, lessonPlans, fetchUnreportedSessions]);
+
+  const fetchReportedSessions = useCallback(async (cls, subject, chapter, schemeId) => {
+    const chapterKey = getChapterKey(cls, subject, chapter, schemeId);
+    if (!chapterKey) return;
+    if (!email) return;
+    if (Object.prototype.hasOwnProperty.call(reportedChapterSessions, chapterKey)) return;
+    if (reportedChapterSessionsLoading[chapterKey]) return;
+
+    setReportedChapterSessionsLoading(prev => ({ ...prev, [chapterKey]: true }));
+    try {
+      const result = await getDailyReports({ teacher: email, cls, subject, chapter });
+      const data = Array.isArray(result) ? result : [];
+      const clsNorm = normalizeText(cls);
+      const subjNorm = normalizeText(subject);
+      const chNorm = normalizeText(chapter);
+      const schemeNorm = String(schemeId || '').trim();
+      let filtered = data.filter(r => {
+        if (!r) return false;
+        const rClass = normalizeText(r.class);
+        const rSubj = normalizeText(r.subject);
+        const rChap = normalizeText(r.chapter);
+        if (rClass !== clsNorm) return false;
+        const subjMatch = rSubj === subjNorm || rSubj.includes(subjNorm) || subjNorm.includes(rSubj);
+        const chapMatch = rChap === chNorm || rChap.includes(chNorm) || chNorm.includes(rChap);
+        return subjMatch && chapMatch;
+      });
+      if (schemeNorm) {
+        filtered = filtered.filter(r => String(r.schemeId || '').trim() === schemeNorm);
+      }
+
+      const sorted = filtered.slice().sort((a, b) => {
+        const aSession = Number(a.sessionNo || 0);
+        const bSession = Number(b.sessionNo || 0);
+        if (aSession && bSession && aSession !== bSession) return aSession - bSession;
+        const aDate = String(a.date || '');
+        const bDate = String(b.date || '');
+        if (aDate !== bDate) return aDate.localeCompare(bDate);
+        return Number(a.period || 0) - Number(b.period || 0);
+      });
+
+      setReportedChapterSessions(prev => ({ ...prev, [chapterKey]: sorted }));
+    } catch (error) {
+      console.error('Error fetching reported sessions preview:', error);
+      setReportedChapterSessions(prev => ({ ...prev, [chapterKey]: [] }));
+    } finally {
+      setReportedChapterSessionsLoading(prev => ({ ...prev, [chapterKey]: false }));
+    }
+  }, [email, getChapterKey, normalizeText, reportedChapterSessions, reportedChapterSessionsLoading]);
+
+  useEffect(() => {
+    if (!expandedPeriod || periods.length === 0) return;
+    const period = periods.find(p => periodKey(p) === expandedPeriod);
+    if (!period) return;
+    const draft = drafts[expandedPeriod] || {};
+    const report = reports[expandedPeriod] || null;
+    const plan = lessonPlans[expandedPeriod] || null;
+    const subject = period.substituteSubject || period.subject || '';
+    const chapter = String(draft.chapter || report?.chapter || plan?.chapter || '').trim();
+    const schemeId = String(report?.schemeId || plan?.schemeId || '').trim();
+    if (!chapter || !subject || !period.class) return;
+    fetchReportedSessions(period.class, subject, chapter, schemeId);
+  }, [expandedPeriod, periods, drafts, reports, lessonPlans, fetchReportedSessions]);
   
   const fetchRemainingSessions = useCallback(async (key, period, currentDraft = null) => {
     // Use passed draft if provided (for immediate state), else get from state
@@ -1226,6 +1302,21 @@ export default function DailyReportModern({ user }) {
                   draft={draft}
                   report={report}
                   plan={plan}
+                  reportingDate={date}
+                  reportedChapterSessions={(() => {
+                    const subject = period.substituteSubject || period.subject || '';
+                    const chapter = String((isSubmitted ? report?.chapter : (draft.chapter || plan?.chapter || '')) || '').trim();
+                    const schemeId = String(report?.schemeId || plan?.schemeId || '').trim();
+                    const key = getChapterKey(period.class, subject, chapter, schemeId);
+                    return key ? reportedChapterSessions[key] : null;
+                  })()}
+                  reportedChapterSessionsLoading={(() => {
+                    const subject = period.substituteSubject || period.subject || '';
+                    const chapter = String((isSubmitted ? report?.chapter : (draft.chapter || plan?.chapter || '')) || '').trim();
+                    const schemeId = String(report?.schemeId || plan?.schemeId || '').trim();
+                    const key = getChapterKey(period.class, subject, chapter, schemeId);
+                    return key ? !!reportedChapterSessionsLoading[key] : false;
+                  })()}
                   substitutionPlanData={suggestedSubPlans[key] || { nextPlan: null, pullbackPreview: [] }}
                   substitutionPlansLoading={!!suggestedSubPlansLoading[key]}
                   cascadePreview={cascadePreview[key]}
@@ -1264,6 +1355,9 @@ function PeriodCard({
   draft = {}, 
   report = null, 
   plan = null,
+  reportingDate = '',
+  reportedChapterSessions = null,
+  reportedChapterSessionsLoading = false,
   substitutionPlanData = { nextPlan: null, pullbackPreview: [] },
   substitutionPlansLoading = false,
   cascadePreview = null,
@@ -1297,6 +1391,25 @@ function PeriodCard({
   const effectivePlan = (isSub && selectedSubPlan) ? selectedSubPlan : plan;
   const showPlannedFields = !isSub || inPlanMode;
   const allowPlanActions = !isSub || (inPlanMode && !!effectivePlan);
+
+  const previewSubject = period.substituteSubject || period.subject || '';
+  const previewSchemeId = String(report?.schemeId || effectivePlan?.schemeId || plan?.schemeId || '').trim();
+  const previewList = Array.isArray(reportedChapterSessions) ? reportedChapterSessions : [];
+  const filteredPreviewList = previewList.filter(r => {
+    if (!r) return false;
+    if (!isSubmitted && reportingDate) {
+      const rDate = String(r.date || '').slice(0, 10);
+      const rPeriod = Number(r.period || 0);
+      if (rDate === String(reportingDate) && rPeriod === Number(period.period)) return false;
+    }
+    return true;
+  });
+  const formatPreviewDate = (value) => {
+    if (!value) return '-';
+    const d = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  };
 
   // Preserve cascaded context even after reporting.
   // Sources:
@@ -1333,10 +1446,13 @@ function PeriodCard({
             period.class,
             period.subject,
             nextPlan.chapter,
-            nextPlan.totalSessions
+            nextPlan.totalSessions,
+            nextPlan.schemeId
           );
-          if (result?.success && result?.firstUnreportedSession) {
-            onUpdate('sessionNo', Number(result.firstUnreportedSession));
+          const payload = result?.data || result || {};
+          const firstUnreported = payload?.firstUnreportedSession || payload?.session;
+          if (payload?.success && firstUnreported) {
+            onUpdate('sessionNo', Number(firstUnreported));
           } else if (nextPlan.sessionNo) {
             // Fallback to plan's session number if API fails
             onUpdate('sessionNo', Number(nextPlan.sessionNo));
@@ -1444,6 +1560,44 @@ function PeriodCard({
                   <div className="text-xs text-gray-500">Submitted: {String(report.createdAt)}</div>
                 ) : null}
               </div>
+
+              {chapter && previewSubject && period.class && (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">Reported sessions preview</div>
+                      <div className="text-xs text-slate-600 mt-1">
+                        {chapter} • {previewSubject} • {period.class}
+                        {previewSchemeId ? ` • Scheme ${previewSchemeId}` : ''}
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-600">Reported: {filteredPreviewList.length}</div>
+                  </div>
+                  {reportedChapterSessionsLoading ? (
+                    <div className="mt-3 flex items-center gap-2 text-xs text-slate-600">
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-400 border-t-transparent"></div>
+                      <span>Loading reported sessions...</span>
+                    </div>
+                  ) : filteredPreviewList.length > 0 ? (
+                    <div className="mt-3 max-h-40 overflow-y-auto space-y-2">
+                      {filteredPreviewList.map(r => (
+                        <div
+                          key={r.reportId || r.id || `${r.date || 'date'}-${r.period || 'p'}-${r.sessionNo || 's'}`}
+                          className="text-xs bg-white border border-slate-200 rounded-md p-2 flex items-center justify-between gap-2"
+                        >
+                          <div className="font-medium text-slate-800">
+                            {r.sessionNo ? `Session ${r.sessionNo}` : 'Session'}
+                            {r.totalSessions ? ` / ${r.totalSessions}` : ''}
+                          </div>
+                          <div className="text-slate-600">{formatPreviewDate(r.date)} • P{r.period || '-'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-xs text-slate-600">No reported sessions yet for this chapter.</div>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
@@ -1581,6 +1735,9 @@ function PeriodCard({
                 <div className="flex-1">
                   <div className="font-medium text-green-900">Lesson Plan: {effectivePlan.chapter}</div>
                   <div className="text-sm text-green-700 mt-1">Session {effectivePlan.sessionNo || effectivePlan.session} of {effectivePlan.totalSessions || effectivePlan.noOfSessions || 1}</div>
+                  {(effectivePlan.schemeId || plan?.schemeId) && (
+                    <div className="text-xs text-green-700 mt-1">Scheme ID: {effectivePlan.schemeId || plan?.schemeId}</div>
+                  )}
                   <div className="text-xs text-green-600 mt-1">Plan ID: {effectivePlan.lpId}</div>
                   {effectivePlan.learningObjectives && (
                     <div className="text-xs text-green-700 mt-2">
@@ -1636,6 +1793,44 @@ function PeriodCard({
               </div>
             </div>
           ))}
+
+          {chapter && previewSubject && period.class && (
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">Reported sessions preview</div>
+                  <div className="text-xs text-slate-600 mt-1">
+                    {chapter} • {previewSubject} • {period.class}
+                    {previewSchemeId ? ` • Scheme ${previewSchemeId}` : ''}
+                  </div>
+                </div>
+                <div className="text-xs text-slate-600">Reported: {filteredPreviewList.length}</div>
+              </div>
+              {reportedChapterSessionsLoading ? (
+                <div className="mt-3 flex items-center gap-2 text-xs text-slate-600">
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-400 border-t-transparent"></div>
+                  <span>Loading reported sessions...</span>
+                </div>
+              ) : filteredPreviewList.length > 0 ? (
+                <div className="mt-3 max-h-40 overflow-y-auto space-y-2">
+                  {filteredPreviewList.map(r => (
+                    <div
+                      key={r.reportId || r.id || `${r.date || 'date'}-${r.period || 'p'}-${r.sessionNo || 's'}`}
+                      className="text-xs bg-white border border-slate-200 rounded-md p-2 flex items-center justify-between gap-2"
+                    >
+                      <div className="font-medium text-slate-800">
+                        {r.sessionNo ? `Session ${r.sessionNo}` : 'Session'}
+                        {r.totalSessions ? ` / ${r.totalSessions}` : ''}
+                      </div>
+                      <div className="text-slate-600">{formatPreviewDate(r.date)} • P{r.period || '-'}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-2 text-xs text-slate-600">No reported sessions yet for this chapter.</div>
+              )}
+            </div>
+          )}
 
           {/* Substitution form: notes-only OR in-plan (planned reporting fields) */}
           {isSub && !inPlanMode ? (

@@ -907,8 +907,9 @@
         const subject = e.parameter.subject || '';
         const chapter = e.parameter.chapter || '';
         const totalSessions = Number(e.parameter.totalSessions || 0);
-        const firstUnreported = getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions);
-        return _respond({ success: true, session: firstUnreported });
+        const schemeId = e.parameter.schemeId || '';
+        const firstUnreported = getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions, schemeId);
+        return _respond({ success: true, session: firstUnreported, firstUnreportedSession: firstUnreported });
       }
       
       // NEW: Batch endpoint for teacher timetable with reports (reduces 2 calls to 1)
@@ -1653,13 +1654,16 @@
           }
           if (!totalSessionsVal) totalSessionsVal = 1;
 
+          // Extract schemeId from matching plan or attached plan (needed for sequence validation)
+          const reportSchemeId = String((!isSubstitution && matchingPlan && matchingPlan.schemeId) || (attachedPlan && attachedPlan.schemeId) || data.schemeId || '').trim();
+
           // *** SESSION SEQUENCE VALIDATION ***
           // Enforce sequential reporting (no skipping sessions)
           const reportedChapter = String((!isSubstitution && matchingPlan && matchingPlan.chapter) || (attachedPlan && attachedPlan.chapter) || data.chapter || '').trim();
           const reportedSession = Number((!isSubstitution && (data.sessionNo || matchingPlan.session)) || (attachedPlan && attachedPlan.session) || Number(data.sessionNo || 0) || 0);
           
           if (reportedChapter && reportedSession > 0 && totalSessionsVal > 0) {
-            const sequenceCheck = validateSessionSequence(teacherEmail, reportClass, reportSubject, reportedChapter, reportedSession, totalSessionsVal);
+            const sequenceCheck = validateSessionSequence(teacherEmail, reportClass, reportSubject, reportedChapter, reportedSession, totalSessionsVal, reportSchemeId);
             if (!sequenceCheck.valid) {
               appLog('WARN', 'Session sequence violation', { attempted: reportedSession, expected: sequenceCheck.expectedSession, chapter: reportedChapter });
               return _respond({ 
@@ -1682,8 +1686,7 @@
           const sessionComplete = data.sessionComplete === true || data.sessionComplete === 'true';
           const completionPercentage = sessionComplete ? 100 : (Number(data.completionPercentage || 0));
           
-          // Extract schemeId from matching plan or attached plan
-          const reportSchemeId = String((!isSubstitution && matchingPlan && matchingPlan.schemeId) || (attachedPlan && attachedPlan.schemeId) || data.schemeId || '').trim();
+          // reportSchemeId already computed above
           
           const rowData = [
             reportId,
@@ -2779,7 +2782,20 @@
       _ensureHeaders(sh, headers);
       
       const now = new Date().toISOString();
-      const schemeId = _generateId('SCH_');
+      const existingSchemeIds = new Set();
+      try {
+        const existingRows = _rows(sh);
+        const existingHeaders = _headers(sh);
+        const idIdx = existingHeaders.indexOf('schemeId');
+        if (idIdx !== -1) {
+          for (const row of existingRows) {
+            const v = row[idIdx];
+            if (v) existingSchemeIds.add(String(v).trim());
+          }
+        }
+      } catch (e) {}
+
+      const schemeId = _generateReadableSchemeId_(data, existingSchemeIds);
       
       // Lookup teacher name from Users sheet to ensure consistency
       const teacherEmail = String(data.teacherEmail || data.email || '').toLowerCase().trim();
@@ -2824,6 +2840,133 @@
       Logger.log('Error submitting scheme: ' + error.message);
       return _respond({ error: error.message });
     }
+  }
+
+  // ===== Scheme ID generation (readable + unique suffix) =====
+  function _schemeSlugToken_(value, opts) {
+    const s = String(value || '').trim();
+    if (!s) return '';
+    const cleaned = s.replace(/[^A-Za-z0-9 ]+/g, ' ').trim();
+    if (!cleaned) return '';
+    const words = cleaned.split(/\s+/g).filter(Boolean);
+    if (opts && opts.mode === 'initials') {
+      const initials = words.map(w => w.charAt(0).toUpperCase()).join('');
+      return opts.maxLen ? initials.slice(0, opts.maxLen) : initials;
+    }
+    if (opts && opts.mode === 'camel') {
+      const camel = words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('');
+      return opts.maxLen ? camel.slice(0, opts.maxLen) : camel;
+    }
+    let out = words.join('');
+    if (opts && opts.upper) out = out.toUpperCase();
+    return opts && opts.maxLen ? out.slice(0, opts.maxLen) : out;
+  }
+
+  function _schemeIdSuffix_(len) {
+    const raw = String(Utilities.getUuid() || '').replace(/-/g, '').toUpperCase();
+    const n = Number(len || 6);
+    return raw.slice(0, Math.max(4, Math.min(12, n)));
+  }
+
+  function _generateReadableSchemeId_(data, existingIdsSet) {
+    const cls = _schemeSlugToken_(data && (data.class || data.className || ''), { upper: true });
+    const subject = _schemeSlugToken_(data && (data.subject || ''), { mode: 'initials', maxLen: 3 });
+    const chapter = _schemeSlugToken_(data && (data.chapter || ''), { mode: 'camel', maxLen: 10 });
+    const base = `SC_${cls || 'CLS'}_${subject || 'SUB'}_${chapter || 'CH'}`;
+    let id = `${base}_${_schemeIdSuffix_(4)}`;
+    if (!existingIdsSet || typeof existingIdsSet.has !== 'function') return id;
+    let guard = 0;
+    while (existingIdsSet.has(id) && guard < 10) {
+      id = `${base}_${_schemeIdSuffix_(4)}`;
+      guard++;
+    }
+    return id;
+  }
+
+  /**
+  * Migrate existing schemeIds to readable format and update related sheets.
+  * WARNING: This updates Schemes, LessonPlans, DailyReports, TeacherSchemeProgress (when present).
+  */
+  function migrateSchemeIdsReadable(dryRun) {
+    const doDryRun = (dryRun !== undefined) ? !!dryRun : true;
+    const schemeSheet = _getSheet('Schemes');
+    const schemeHeaders = _headers(schemeSheet);
+    const schemeRows = _rows(schemeSheet);
+    const schemeIdIdx = schemeHeaders.indexOf('schemeId');
+    if (schemeIdIdx === -1) {
+      return { success: false, error: 'Schemes sheet missing schemeId column' };
+    }
+
+    const existingIds = new Set();
+    for (const row of schemeRows) {
+      const v = row[schemeIdIdx];
+      if (v) existingIds.add(String(v).trim());
+    }
+
+    const mapping = new Map();
+    const updates = [];
+    for (let i = 0; i < schemeRows.length; i++) {
+      const row = schemeRows[i];
+      const oldId = String(row[schemeIdIdx] || '').trim();
+      if (!oldId) continue;
+
+      const data = {
+        class: row[schemeHeaders.indexOf('class')],
+        subject: row[schemeHeaders.indexOf('subject')],
+        chapter: row[schemeHeaders.indexOf('chapter')]
+      };
+      const newId = _generateReadableSchemeId_(data, existingIds);
+      if (newId && newId !== oldId) {
+        mapping.set(oldId, newId);
+        updates.push({ rowIndex: i + 2, newId: newId, oldId: oldId });
+        existingIds.add(newId);
+      }
+    }
+
+    if (doDryRun) {
+      return { success: true, dryRun: true, changes: updates.slice(0, 50), totalChanges: updates.length };
+    }
+
+    // Update Schemes sheet
+    for (const u of updates) {
+      schemeSheet.getRange(u.rowIndex, schemeIdIdx + 1).setValue(u.newId);
+    }
+
+    // Update related sheets that contain schemeId
+    const relatedSheets = ['LessonPlans', 'DailyReports', 'TeacherSchemeProgress'];
+    const relatedUpdates = {};
+    for (const name of relatedSheets) {
+      const sh = _getSheet(name);
+      if (!sh) continue;
+      const headers = _headers(sh);
+      const idIdx = headers.indexOf('schemeId');
+      if (idIdx === -1) continue;
+      const rows = _rows(sh);
+      let updatedCount = 0;
+      for (let i = 0; i < rows.length; i++) {
+        const v = String(rows[i][idIdx] || '').trim();
+        if (!v) continue;
+        const newId = mapping.get(v);
+        if (newId) {
+          sh.getRange(i + 2, idIdx + 1).setValue(newId);
+          updatedCount++;
+        }
+      }
+      relatedUpdates[name] = updatedCount;
+    }
+
+    return {
+      success: true,
+      dryRun: false,
+      schemesUpdated: updates.length,
+      relatedUpdates: relatedUpdates
+    };
+  }
+
+  function runSchemeIdMigration() {
+    const res = migrateSchemeIdsReadable(false);
+    Logger.log(JSON.stringify(res));
+    return res;
   }
 
   /**
@@ -3424,10 +3567,29 @@
    * Fetch teacher lesson plans from sheet (private helper for caching)
    */
   function _fetchTeacherLessonPlans(email, params) {
-    const sh = _getSheet('LessonPlans');
-    const headers = _headers(sh);
-    let lessonPlans = _rows(sh).map(row => _indexByHeader(row, headers))
-      .filter(plan => (plan.teacherEmail || '').toLowerCase() === email.toLowerCase());
+    const emailNorm = String(email || '').toLowerCase().trim();
+    let lessonPlans = [];
+
+    // FAST PATH: fetch only this teacher's rows using TextFinder (avoids full-sheet reads)
+    try {
+      const fetched = _slmFetchRowsByColumnExact_('LessonPlans', 'teacherEmail', emailNorm);
+      if (fetched && Array.isArray(fetched.rows)) {
+        lessonPlans = fetched.rows;
+      }
+    } catch (e) {
+      lessonPlans = [];
+    }
+
+    // FALLBACK: full-sheet scan if TextFinder failed or returned no rows
+    if (!lessonPlans || lessonPlans.length === 0) {
+      const sh = _getSheet('LessonPlans');
+      const headers = _headers(sh);
+      lessonPlans = _rows(sh).map(row => _indexByHeader(row, headers))
+        .filter(plan => String(plan.teacherEmail || '').toLowerCase().trim() === emailNorm);
+    } else {
+      // Safety: normalize filter in case of stray whitespace/case
+      lessonPlans = lessonPlans.filter(plan => String(plan.teacherEmail || '').toLowerCase().trim() === emailNorm);
+    }
     
     // Apply optional filters
     if (params.subject && params.subject.trim()) {
@@ -8243,6 +8405,7 @@
         teacherName: report.teacherName || '',
         class: report.class || '',
         subject: report.subject || '',
+        schemeId: report.schemeId || '',
         period: Number(report.period || 0),
         planType: report.planType || '',
         lessonPlanId: report.lessonPlanId || '',
@@ -8618,11 +8781,12 @@ function getAllUsers() {
  * Get first unreported session number for a chapter
  * Ensures sequential session reporting (no skipping)
  */
-function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions) {
+function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions, schemeId) {
   try {
     const reportsSheet = _getSheet('DailyReports');
     const headers = _headers(reportsSheet);
     const reports = _rows(reportsSheet).map(r => _indexByHeader(r, headers));
+    const schemeNorm = String(schemeId || '').trim();
     
     // Get all reported sessions for this teacher+class+subject+chapter
     const reportedSessions = reports
@@ -8631,7 +8795,9 @@ function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, tot
         const classMatch = String(r.class || '').trim() === String(classVal || '').trim();
         const subjectMatch = String(r.subject || '').trim() === String(subject || '').trim();
         const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
-        return emailMatch && classMatch && subjectMatch && chapterMatch;
+        if (!emailMatch || !classMatch || !subjectMatch || !chapterMatch) return false;
+        if (schemeNorm) return String(r.schemeId || '').trim() === schemeNorm;
+        return true;
       })
       .map(r => Number(r.sessionNo || 0))
       .filter(n => n > 0)
@@ -8656,7 +8822,7 @@ function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, tot
  * Validate that teacher is reporting sessions sequentially (no skipping)
  * Extended sessions (sessionNum > totalSessions) are allowed if previous session reported
  */
-function validateSessionSequence(teacherEmail, classVal, subject, chapter, attemptedSession, totalSessions) {
+function validateSessionSequence(teacherEmail, classVal, subject, chapter, attemptedSession, totalSessions, schemeId) {
   try {
     // Extended sessions (beyond original totalSessions) bypass normal sequence validation
     if (attemptedSession > totalSessions) {
@@ -8664,6 +8830,7 @@ function validateSessionSequence(teacherEmail, classVal, subject, chapter, attem
       const reportsSheet = _getSheet('DailyReports');
       const headers = _headers(reportsSheet);
       const reports = _rows(reportsSheet).map(r => _indexByHeader(r, headers));
+      const schemeNorm = String(schemeId || '').trim();
       
       const reportedSessions = reports
         .filter(r => {
@@ -8671,7 +8838,9 @@ function validateSessionSequence(teacherEmail, classVal, subject, chapter, attem
           const classMatch = String(r.class || '').trim() === String(classVal || '').trim();
           const subjectMatch = String(r.subject || '').trim() === String(subject || '').trim();
           const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
-          return emailMatch && classMatch && subjectMatch && chapterMatch;
+          if (!emailMatch || !classMatch || !subjectMatch || !chapterMatch) return false;
+          if (schemeNorm) return String(r.schemeId || '').trim() === schemeNorm;
+          return true;
         })
         .map(r => Number(r.sessionNo || 0))
         .filter(n => n > 0);
@@ -8689,7 +8858,7 @@ function validateSessionSequence(teacherEmail, classVal, subject, chapter, attem
     }
     
     // Normal sessions: enforce sequential reporting within original totalSessions
-    const expectedSession = getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions);
+    const expectedSession = getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions, schemeId);
     
     if (expectedSession === null) {
       // All original sessions reported - this shouldn't happen for normal sessions

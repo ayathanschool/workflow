@@ -12,7 +12,7 @@ const apiRequest = async (action, params = {}, method = 'GET') => {
       switch (action) {
         case 'getApprovedSchemesForLessonPlanning':
           console.log('Calling getApprovedSchemesForLessonPlanning with:', params.teacherEmail);
-          return await api.getApprovedSchemesForLessonPlanning(params.teacherEmail);
+          return await api.getApprovedSchemesForLessonPlanning(params.teacherEmail, params.summaryOnly !== false);
         case 'getAvailablePeriodsForLessonPlan':
           return await api.getAvailablePeriodsForLessonPlan(
             params.teacherEmail,
@@ -93,12 +93,112 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
     return sessions.every(_isSessionReported);
   };
 
+  const normalizeSchemePayload = (scheme) => {
+    const toNum = (v) => {
+      const n = Number(String(v ?? '').trim());
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const overallProgress = Math.max(0, Math.min(100, toNum(scheme.overallProgress)));
+    const chapters = Array.isArray(scheme.chapters) ? scheme.chapters : null;
+    const normalizedChapters = chapters ? chapters.map(ch => {
+      const totalSessions = toNum(ch.totalSessions);
+      const sparse = !!ch.sessionsSparse;
+      const rawSessions = Array.isArray(ch.sessions) ? ch.sessions : [];
+
+      if (!sparse || totalSessions <= 0) {
+        return {
+          ...ch,
+          totalSessions,
+          plannedSessions: toNum(ch.plannedSessions),
+          sessions: rawSessions
+        };
+      }
+
+      const byNumber = new Map(rawSessions.map(ss => [Number(ss && ss.sessionNumber), ss]));
+      const fullSessions = [];
+
+      // Add all original sessions (1 to totalSessions)
+      for (let i = 1; i <= totalSessions; i++) {
+        const existing = byNumber.get(i);
+        if (existing) {
+          fullSessions.push({
+            ...existing,
+            sessionNumber: Number(existing.sessionNumber) || i,
+            sessionName: existing.sessionName || `Session ${i}`
+          });
+        } else {
+          fullSessions.push({
+            sessionNumber: i,
+            sessionName: `Session ${i}`,
+            estimatedDuration: '',
+            status: 'not-planned',
+            plannedDate: null,
+            plannedPeriod: null,
+            originalDate: null,
+            originalPeriod: null,
+            lessonPlanId: null,
+            cascadeMarked: false
+          });
+        }
+      }
+
+      // Add extended sessions (sessionNumber > totalSessions)
+      const extendedSessions = rawSessions.filter(s => Number(s.sessionNumber) > totalSessions);
+      extendedSessions.sort((a, b) => Number(a.sessionNumber) - Number(b.sessionNumber));
+      fullSessions.push(...extendedSessions);
+
+      return {
+        ...ch,
+        totalSessions,
+        plannedSessions: toNum(ch.plannedSessions),
+        numberOfSessions: toNum(ch.numberOfSessions) || totalSessions,
+        sessions: fullSessions,
+        sessionsSparse: false
+      };
+    }) : null;
+
+    return {
+      ...scheme,
+      totalSessions: toNum(scheme.totalSessions),
+      plannedSessions: toNum(scheme.plannedSessions),
+      overallProgress,
+      chapters: normalizedChapters || scheme.chapters || null
+    };
+  };
+
   // Load detailed chapter/session data for a specific scheme (lazy loading)
   const loadSchemeDetails = useCallback(async (schemeId) => {
-    // Just toggle expanded state - data is already loaded
     const isCurrentlyExpanded = expandedSchemes[schemeId];
-    setExpandedSchemes(prev => ({ ...prev, [schemeId]: !isCurrentlyExpanded }));
-  }, [expandedSchemes]);
+    const nextExpanded = !isCurrentlyExpanded;
+    setExpandedSchemes(prev => ({ ...prev, [schemeId]: nextExpanded }));
+
+    if (!nextExpanded) return;
+    if (!schemeId || !userEmail) return;
+    if (loadingSchemeDetails[schemeId]) return;
+
+    const existing = schemes.find(s => s.schemeId === schemeId);
+    const hasChapters = existing && Array.isArray(existing.chapters) && existing.chapters.length > 0;
+    if (hasChapters) return;
+
+    try {
+      setLoadingSchemeDetails(prev => ({ ...prev, [schemeId]: true }));
+      const response = await api.getSchemeDetails(schemeId, userEmail);
+      const data = response?.data || response;
+
+      if (data && data.success) {
+        const normalized = normalizeSchemePayload(data);
+        setSchemes(prev => prev.map(s => (s.schemeId === schemeId ? { ...s, ...normalized, chaptersLoaded: true } : s)));
+      } else {
+        const errorMsg = data?.error || data?.message || 'Failed to load scheme details';
+        console.warn('Scheme details load failed:', errorMsg);
+      }
+    } catch (err) {
+      console.warn('Scheme details load failed:', err);
+    } finally {
+      setLoadingSchemeDetails(prev => ({ ...prev, [schemeId]: false }));
+    }
+  }, [expandedSchemes, loadingSchemeDetails, schemes, userEmail, normalizeSchemePayload]);
 
   const loadApprovedSchemes = useCallback(async () => {
     // Prevent duplicate calls (React StrictMode can trigger twice)
@@ -149,81 +249,10 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
       if (response.data && response.data.success) {
         // Normalize numeric fields so progress bar width/classes always compute correctly
-        const normalizedSchemes = (response.data.schemes || []).map(s => {
-          const toNum = (v) => {
-            const n = Number(String(v ?? '').trim());
-            return Number.isFinite(n) ? n : 0;
-          };
-          const overallProgress = Math.max(0, Math.min(100, toNum(s.overallProgress)));
-
-          // If backend returns sparse sessions for performance, reconstruct placeholders.
-          const chapters = Array.isArray(s.chapters) ? s.chapters : null;
-          const normalizedChapters = chapters ? chapters.map(ch => {
-            const totalSessions = toNum(ch.totalSessions);
-            const sparse = !!ch.sessionsSparse;
-            const rawSessions = Array.isArray(ch.sessions) ? ch.sessions : [];
-
-            if (!sparse || totalSessions <= 0) {
-              return {
-                ...ch,
-                totalSessions,
-                plannedSessions: toNum(ch.plannedSessions),
-                sessions: rawSessions
-              };
-            }
-
-            const byNumber = new Map(rawSessions.map(ss => [Number(ss && ss.sessionNumber), ss]));
-            const fullSessions = [];
-            
-            // Add all original sessions (1 to totalSessions)
-            for (let i = 1; i <= totalSessions; i++) {
-              const existing = byNumber.get(i);
-              if (existing) {
-                fullSessions.push({
-                  ...existing,
-                  sessionNumber: Number(existing.sessionNumber) || i,
-                  sessionName: existing.sessionName || `Session ${i}`
-                });
-              } else {
-                fullSessions.push({
-                  sessionNumber: i,
-                  sessionName: `Session ${i}`,
-                  estimatedDuration: '',
-                  status: 'not-planned',
-                  plannedDate: null,
-                  plannedPeriod: null,
-                  originalDate: null,
-                  originalPeriod: null,
-                  lessonPlanId: null,
-                  cascadeMarked: false
-                });
-              }
-            }
-            
-            // Add extended sessions (sessionNumber > totalSessions)
-            const extendedSessions = rawSessions.filter(s => Number(s.sessionNumber) > totalSessions);
-            extendedSessions.sort((a, b) => Number(a.sessionNumber) - Number(b.sessionNumber));
-            fullSessions.push(...extendedSessions);
-
-            return {
-              ...ch,
-              totalSessions,
-              plannedSessions: toNum(ch.plannedSessions),
-              numberOfSessions: toNum(ch.numberOfSessions) || totalSessions,
-              sessions: fullSessions,
-              sessionsSparse: false
-            };
-          }) : null;
-
-          return {
-            ...s,
-            totalSessions: toNum(s.totalSessions),
-            plannedSessions: toNum(s.plannedSessions),
-            overallProgress,
-            chapters: normalizedChapters || s.chapters,
-            chaptersLoaded: true
-          };
-        });
+        const normalizedSchemes = (response.data.schemes || []).map(s => ({
+          ...normalizeSchemePayload(s),
+          chaptersLoaded: Array.isArray(s.chapters) && s.chapters.length > 0
+        }));
         setSchemes(normalizedSchemes);
         setPlanningDateRange(response.data.planningDateRange || null);
         

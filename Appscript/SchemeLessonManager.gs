@@ -406,17 +406,15 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
     // For sessions 2+ within same chapter: Check if previous session exists in daily reports
     // This allows continuing within the same chapter
     try {
-      const drSh = _getSheet('DailyReports');
-      const drHeaders = _headers(drSh);
-      const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
+      const allReports = _fetchTeacherReportsForScheme_();
       
       // First, check if this chapter has ANY reports (is it started?)
-      Logger.log(`=== LOOKING FOR CHAPTER REPORTS ===`);
-      Logger.log(`Scheme teacher: "${scheme.teacherEmail}"`);
-      Logger.log(`Chapter name: "${chapter.name}"`);
-      Logger.log(`Scheme class: "${scheme.class}"`);
-      Logger.log(`Scheme subject: "${scheme.subject}"`);
-      Logger.log(`Total reports in sheet: ${allReports.length}`);
+      _log(`=== LOOKING FOR CHAPTER REPORTS ===`);
+      _log(`Scheme teacher: "${scheme.teacherEmail}"`);
+      _log(`Chapter name: "${chapter.name}"`);
+      _log(`Scheme class: "${scheme.class}"`);
+      _log(`Scheme subject: "${scheme.subject}"`);
+      _log(`Total reports in scope: ${allReports.length}`);
       
       const chapterReports = allReports.filter(report => {
         // Safety check: ensure report is an object
@@ -433,17 +431,17 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         const matchesScheme = !reportSchemeId || !currentSchemeId || reportSchemeId === currentSchemeId;
         
         if (matchesTeacher && matchesClass && matchesSubject) {
-          Logger.log(`Report chapter: "${report.chapter}" -> matches chapter: ${matchesChapter}, session: ${report.sessionNo || report.session}, schemeId: ${reportSchemeId}, matchesScheme: ${matchesScheme}`);
+          _log(`Report chapter: "${report.chapter}" -> matches chapter: ${matchesChapter}, session: ${report.sessionNo || report.session}, schemeId: ${reportSchemeId}, matchesScheme: ${matchesScheme}`);
         }
         
         return matchesTeacher && matchesChapter && matchesClass && matchesSubject && matchesScheme;
       });
       
-      Logger.log(`Found ${chapterReports.length} reports for this chapter`);
+      _log(`Found ${chapterReports.length} reports for this chapter`);
       
       // If chapter has no reports, check if previous chapters are complete
       if (chapterReports.length === 0) {
-        Logger.log(`No reports for chapter ${chapter.name} yet - checking previous chapters`);
+        _log(`No reports for chapter ${chapter.name} yet - checking previous chapters`);
         
         // Get all reports for this teacher/class/subject (filtered by schemeId if available)
         const teacherReports = allReports.filter(report => {
@@ -464,7 +462,7 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         
         // If no reports at all, allow (first chapter)
         if (teacherReports.length === 0) {
-          Logger.log(`No previous reports - allowing first chapter`);
+          _log(`No previous reports - allowing first chapter`);
           return {
             allowed: true,
             reason: 'first_chapter',
@@ -543,7 +541,7 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         }
         
         if (incompletedChapters.length > 0) {
-          Logger.log(`Previous chapters incomplete - blocking new chapter ${chapter.name}`);
+          _log(`Previous chapters incomplete - blocking new chapter ${chapter.name}`);
           return {
             allowed: false,
             reason: 'previous_chapters_incomplete',
@@ -552,7 +550,7 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         }
         
         // All previous chapters complete - allow this new chapter
-        Logger.log(`All previous chapters complete - allowing new chapter ${chapter.name}`);
+        _log(`All previous chapters complete - allowing new chapter ${chapter.name}`);
         return {
           allowed: true,
           reason: 'previous_chapters_completed',
@@ -562,22 +560,22 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
       
       // Chapter has reports - check if previous session has daily report submitted
       // Support both 'sessionNo' and legacy 'session' column names
-      Logger.log(`=== LOOKING FOR PREVIOUS SESSION ${sessionNum - 1} ===`);
-      Logger.log(`Chapter reports found: ${chapterReports.length}`);
+      _log(`=== LOOKING FOR PREVIOUS SESSION ${sessionNum - 1} ===`);
+      _log(`Chapter reports found: ${chapterReports.length}`);
       chapterReports.forEach(r => {
         const sessNum = Number(r.sessionNo || r.session || 0);
-        Logger.log(`  Report: session=${sessNum}, sessionNo="${r.sessionNo}", session="${r.session}", date=${r.date}`);
+        _log(`  Report: session=${sessNum}, sessionNo="${r.sessionNo}", session="${r.session}", date=${r.date}`);
       });
       
       const previousSessionReport = chapterReports.find(report => {
         const num = Number(report.sessionNo || report.session || 0);
-        Logger.log(`  Checking report: sessionNo="${report.sessionNo}", session="${report.session}" -> parsed as ${num}, looking for ${sessionNum - 1}`);
+        _log(`  Checking report: sessionNo="${report.sessionNo}", session="${report.session}" -> parsed as ${num}, looking for ${sessionNum - 1}`);
         return num === (sessionNum - 1);
       });
       
       if (!previousSessionReport) {
-        Logger.log(`❌ Previous session ${sessionNum - 1} not found`);
-        Logger.log(`Available sessions in reports: ${chapterReports.map(r => Number(r.sessionNo || r.session || 0)).join(', ')}`);
+        _log(`❌ Previous session ${sessionNum - 1} not found`);
+        _log(`Available sessions in reports: ${chapterReports.map(r => Number(r.sessionNo || r.session || 0)).join(', ')}`);
         return {
           allowed: false,
           reason: 'previous_session_not_completed',
@@ -585,7 +583,7 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         };
       }
       
-      Logger.log(`✅ Found previous session ${sessionNum - 1} report`);
+      _log(`✅ Found previous session ${sessionNum - 1} report`);
       
       // CRITICAL FIX: Check if CURRENT session we're trying to create is beyond the original count
       // This means previous session MUST be the last original session and MUST be marked complete
@@ -593,7 +591,7 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         // Trying to create extended session - previous session MUST be last original session and marked complete
         const isMarkedComplete = String(previousSessionReport.completed || '').toLowerCase().includes('chapter complete');
         
-        Logger.log(`Attempting to create extended session ${sessionNum} (beyond original ${originalSessionCount}). Previous session ${sessionNum - 1} marked complete: ${isMarkedComplete}, completed field: "${previousSessionReport.completed}"`);
+        _log(`Attempting to create extended session ${sessionNum} (beyond original ${originalSessionCount}). Previous session ${sessionNum - 1} marked complete: ${isMarkedComplete}, completed field: "${previousSessionReport.completed}"`);
         
         if (!isMarkedComplete) {
           return {
@@ -604,7 +602,7 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         }
       }
       
-      Logger.log(`Previous session ${sessionNum - 1} has daily report - allowing session ${sessionNum}`);
+      _log(`Previous session ${sessionNum - 1} has daily report - allowing session ${sessionNum}`);
       return {
         allowed: true,
         reason: 'continuing_chapter',
@@ -847,7 +845,10 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
     Logger.log(`[PERF] Fetching schemes for ${teacherEmailNorm}`);
     const schemesFetchStart = Date.now();
     try {
-      const fetched = _slmFetchRowsByColumnExact_('Schemes', 'teacherEmail', teacherEmailNorm);
+      const fetched = _slmFetchRowsByColumnExact_('Schemes', 'teacherEmail', teacherEmailNorm, [
+        'schemeId', 'teacherEmail', 'status', 'class', 'subject', 'academicYear', 'term',
+        'chapter', 'content', 'chapters', 'noOfSessions', 'createdAt', 'approvedAt'
+      ]);
       perfMetrics.stages.schemesFetch = Date.now() - schemesFetchStart;
       perfMetrics.schemesMethod = 'TextFinder';
       Logger.log(`[PERF] TextFinder fetch took ${perfMetrics.stages.schemesFetch}ms, got ${fetched && fetched.rows ? fetched.rows.length : 0} rows`);
@@ -904,7 +905,11 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
     let teacherPlans = [];
     const plansStart = Date.now();
     try {
-      const fetchedPlans = _slmFetchRowsByColumnExact_('LessonPlans', 'teacherEmail', teacherEmailNorm);
+      const fetchedPlans = _slmFetchRowsByColumnExact_('LessonPlans', 'teacherEmail', teacherEmailNorm, [
+        'lpId', 'lessonPlanId', 'schemeId', 'teacherEmail', 'class', 'subject', 'chapter',
+        'session', 'sessionNo', 'status', 'selectedDate', 'selectedPeriod',
+        'originalDate', 'originalPeriod', 'createdAt', 'updatedAt'
+      ]);
       if (fetchedPlans && Array.isArray(fetchedPlans.rows)) teacherPlans = fetchedPlans.rows;
       perfMetrics.plansMethod = 'TextFinder';
     } catch (_e) {
@@ -927,7 +932,11 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
     let teacherReports = [];
     const reportsStart = Date.now();
     try {
-      const fetchedReports = _slmFetchRowsByColumnExact_('DailyReports', 'teacherEmail', teacherEmailNorm);
+      const fetchedReports = _slmFetchRowsByColumnExact_('DailyReports', 'teacherEmail', teacherEmailNorm, [
+        'teacherEmail', 'class', 'subject', 'chapter', 'sessionNo', 'session',
+        'lessonPlanId', 'schemeId', 'date', 'createdAt',
+        'chapterStatus', 'chapterCompleted', 'completed'
+      ]);
       if (fetchedReports && Array.isArray(fetchedReports.rows)) teacherReports = fetchedReports.rows;
       perfMetrics.reportsMethod = 'TextFinder';
     } catch (_e2) {
@@ -945,6 +954,14 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
     }
     perfMetrics.stages.reportsFetch = Date.now() - reportsStart;
     perfMetrics.reportsCount = teacherReports.length;
+
+    // Seed request cache so _generateSessionsForChapter can reuse this data without another fetch.
+    try {
+      if (typeof REQUEST_SHEET_CACHE === 'object' && REQUEST_SHEET_CACHE) {
+        if (!REQUEST_SHEET_CACHE.__slmDailyReportsByTeacher) REQUEST_SHEET_CACHE.__slmDailyReportsByTeacher = {};
+        REQUEST_SHEET_CACHE.__slmDailyReportsByTeacher[teacherEmailNorm] = teacherReports;
+      }
+    } catch (e) {}
 
     // PERFORMANCE: build indexes for O(1) lookups instead of repeated .find/.some
     const normKey = function(v) { return String(v || '').toLowerCase().trim(); };
@@ -1655,8 +1672,10 @@ function _slmFindColumnIndex_(headers, headerName) {
 function _slmRowNumbersByExactValue_(sh, colIndex0, value) {
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return [];
+  const want = String(value || '').trim();
+  if (!want) return [];
   const colRange = sh.getRange(2, colIndex0 + 1, lastRow - 1, 1);
-  const re = `^${_slmEscapeRegex_(String(value || '').trim())}$`;
+  const re = `^\\s*${_slmEscapeRegex_(want)}\\s*$`;
   const finder = colRange.createTextFinder(re).useRegularExpression(true).matchCase(false);
   const matches = finder.findAll();
   const rows = [];
@@ -1702,20 +1721,23 @@ function _slmReadRowsBatched_(sh, headers, rowNumbers, colNamesFilter) {
   const out = [];
   for (const [start, end] of segments) {
     const numRows = end - start + 1;
-    // Always batch-read ALL columns first (one fast API call)
-    const values = sh.getRange(start, 1, numRows, lastCol).getValues();
-    
     if (colIndexes && colIndexes.length > 0) {
-      // Filter to needed columns in memory (fast)
+      // Read only the needed column span to reduce data transfer.
+      const minIdx = Math.min.apply(null, colIndexes);
+      const maxIdx = Math.max.apply(null, colIndexes);
+      const span = maxIdx - minIdx + 1;
+      const values = sh.getRange(start, minIdx + 1, numRows, span).getValues();
+
       for (const row of values) {
         const obj = {};
         for (const colIdx of colIndexes) {
-          obj[headers[colIdx]] = row[colIdx];
+          obj[headers[colIdx]] = row[colIdx - minIdx];
         }
         out.push(obj);
       }
     } else {
-      // Return full rows
+      // Batch-read ALL columns (one fast API call)
+      const values = sh.getRange(start, 1, numRows, lastCol).getValues();
       for (const row of values) out.push(_indexByHeader(row, headers));
     }
   }
