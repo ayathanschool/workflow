@@ -23,8 +23,6 @@ const AUDIT_ACTIONS = {
   ASSIGN: 'assigned',
   ACKNOWLEDGE: 'acknowledged',
   VERIFY: 'verified',
-  MARK_HOLIDAY: 'marked_undeclared_holiday',
-  DELETE_HOLIDAY: 'deleted_holiday',
   CASCADE_LESSONS: 'cascaded_lesson_plans'
 };
 
@@ -55,6 +53,45 @@ const AUDIT_SEVERITY = {
   WARNING: 'warning',  // Important changes
   CRITICAL: 'critical' // Security-sensitive actions
 };
+
+const AUDIT_ROLE_SCOPES = {
+  HM_ALLOWED_ENTITIES: [
+    AUDIT_ENTITIES.STUDENT,
+    AUDIT_ENTITIES.SCHEME,
+    AUDIT_ENTITIES.LESSON_PLAN,
+    AUDIT_ENTITIES.DAILY_REPORT,
+    AUDIT_ENTITIES.EXAM,
+    AUDIT_ENTITIES.EXAM_MARKS,
+    AUDIT_ENTITIES.SUBSTITUTION,
+    AUDIT_ENTITIES.TIMETABLE,
+    AUDIT_ENTITIES.SETTINGS,
+    AUDIT_ENTITIES.SYLLABUS,
+    AUDIT_ENTITIES.ACADEMIC_CALENDAR,
+    AUDIT_ENTITIES.HOLIDAY
+  ]
+};
+
+function _normalizeAuditEntityType(entityType) {
+  return String(entityType || '').toLowerCase().trim();
+}
+
+function _filterAuditLogsByEntity(logs, allowedEntities) {
+  if (!Array.isArray(logs)) return [];
+  const allowed = new Set((allowedEntities || []).map(_normalizeAuditEntityType));
+  return logs.filter(log => allowed.has(_normalizeAuditEntityType(log.entityType)));
+}
+
+function _auditAllowedEntitiesForHM() {
+  return AUDIT_ROLE_SCOPES.HM_ALLOWED_ENTITIES.slice();
+}
+
+function getAuditLogsForRequester(filters = {}, requesterEmail) {
+  const email = String(requesterEmail || '').toLowerCase().trim();
+  if (email && isSuperAdmin(email)) return getAuditLogs(filters);
+  if (!email || !isHMOrSuperAdmin(email)) return [];
+  const logs = getAuditLogs(filters);
+  return _filterAuditLogsByEntity(logs, _auditAllowedEntitiesForHM());
+}
 
 /**
  * Log an audit event
@@ -150,11 +187,9 @@ function logAudit(params) {
  */
 function getAuditLogs(filters = {}) {
   try {
-    Logger.log('[getAuditLogs] Called with filters: ' + JSON.stringify(filters));
     const sh = _getSheet('AuditLog');
     const headers = _headers(sh);
     let logs = _rows(sh).map(r => _indexByHeader(r, headers));
-    Logger.log('[getAuditLogs] Total logs from sheet: ' + logs.length);
     
     // Apply filters
     if (filters.userEmail) {
@@ -195,7 +230,6 @@ function getAuditLogs(filters = {}) {
       logs = logs.slice(0, filters.limit);
     }
     
-    Logger.log('[getAuditLogs] Returning ' + logs.length + ' logs after filters');
     return logs;
     
   } catch (error) {
@@ -260,6 +294,20 @@ function exportAuditLogs(filters = {}) {
   }));
 }
 
+function exportAuditLogsForRequester(filters = {}, requesterEmail) {
+  const logs = getAuditLogsForRequester(filters, requesterEmail);
+  return logs.map(log => ({
+    timestamp: log.timestamp,
+    user: `${log.userName} (${log.userEmail})`,
+    role: log.userRole,
+    action: log.action,
+    entity: `${log.entityType} #${log.entityId}`,
+    description: log.changeDescription,
+    severity: log.severity,
+    ipAddress: log.ipAddress
+  }));
+}
+
 /**
  * Clean up old audit logs (retention policy)
  * @param {number} retentionDays - Keep logs for this many days (default: 365)
@@ -310,8 +358,14 @@ function cleanupAuditLogs(retentionDays = 365) {
  * @returns {Object} Summary statistics
  */
 function getAuditSummary(filters = {}) {
-  const logs = getAuditLogs(filters);
-  
+  return _buildAuditSummary(getAuditLogs(filters));
+}
+
+function getAuditSummaryForRequester(filters = {}, requesterEmail) {
+  return _buildAuditSummary(getAuditLogsForRequester(filters, requesterEmail));
+}
+
+function _buildAuditSummary(logs) {
   const summary = {
     totalEvents: logs.length,
     byAction: {},
@@ -320,21 +374,12 @@ function getAuditSummary(filters = {}) {
     byUser: {},
     recentCritical: []
   };
-  
+
   logs.forEach(log => {
-    // Count by action
     summary.byAction[log.action] = (summary.byAction[log.action] || 0) + 1;
-    
-    // Count by entity type
     summary.byEntity[log.entityType] = (summary.byEntity[log.entityType] || 0) + 1;
-    
-    // Count by severity
     summary.bySeverity[log.severity] = (summary.bySeverity[log.severity] || 0) + 1;
-    
-    // Count by user
     summary.byUser[log.userEmail] = (summary.byUser[log.userEmail] || 0) + 1;
-    
-    // Collect critical events
     if (log.severity === AUDIT_SEVERITY.CRITICAL && summary.recentCritical.length < 10) {
       summary.recentCritical.push({
         timestamp: log.timestamp,
@@ -345,6 +390,6 @@ function getAuditSummary(filters = {}) {
       });
     }
   });
-  
+
   return summary;
 }

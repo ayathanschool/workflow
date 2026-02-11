@@ -568,12 +568,14 @@ export async function getPlannedLessonForPeriod(email, date, period, className, 
 
 // BATCH: Get all planned lessons for a date (replaces multiple getPlannedLessonForPeriod calls)
 // Performance: Reduces 6-8 API calls to 1 call
-export async function getPlannedLessonsForDate(email, date) {
+export async function getPlannedLessonsForDate(email, date, options = {}) {
+  const includeAll = options && options.includeAll ? '1' : '';
   const q = new URLSearchParams({
     action: "getPlannedLessonsForDate",
     email,
     date
   });
+  if (includeAll) q.append('includeAll', includeAll);
   const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
   return result?.data || result || { success: false, lessonsByPeriod: {} };
 }
@@ -589,6 +591,20 @@ export async function getTeacherDailyData(email, date) {
   });
   const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
   return result?.data || result || { success: false, timetable: {}, reports: [] };
+}
+
+// Unified teacher dashboard data (missing reports + live period + today's plans)
+export async function getTeacherDashboardData(email, options = {}) {
+  const q = new URLSearchParams({
+    action: 'getTeacherDashboardData',
+    email
+  });
+  if (options.date) q.append('date', options.date);
+  if (options.from) q.append('from', options.from);
+  if (options.to) q.append('to', options.to);
+  if (options.includeWeekends) q.append('includeWeekends', '1');
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
+  return result?.data || result || { success: false };
 }
 
 export async function submitDailyReport(data) {
@@ -931,6 +947,17 @@ export async function getAppSettings() {
   return res || {};
 }
 
+export async function updateAppSettings(email, settingsUpdates = [], name = '') {
+  const payload = {
+    action: 'updateAppSettings',
+    email: email || '',
+    name: name || '',
+    settings: Array.isArray(settingsUpdates) ? settingsUpdates : []
+  };
+  const result = await postJSON(`${BASE_URL}?action=updateAppSettings`, payload);
+  return result?.data || result || {};
+}
+
 // === Admin Data Editor (Super Admin only) ===
 export async function adminListSheets(email) {
   const payload = { action: 'admin.listSheets', email: email || '' };
@@ -1230,39 +1257,6 @@ export async function exportAuditLogs(filters = {}) {
 
 // === HOLIDAY MANAGEMENT FUNCTIONS ===
 
-// Mark a date as undeclared holiday
-export async function markUndeclaredHoliday(date, reason) {
-  let userEmail = null;
-  let userName = null;
-  
-  // Extract user from stored session
-  const basicUser = localStorage.getItem('user');
-  if (basicUser) {
-    try { 
-      const user = JSON.parse(basicUser);
-      userEmail = user.email;
-      userName = user.name;
-    } catch (e) {}
-  }
-  if (!userEmail) {
-    const googleSession = localStorage.getItem('sf_google_session');
-    if (googleSession) {
-      try { 
-        const session = JSON.parse(googleSession);
-        userEmail = session.user?.email;
-        userName = session.user?.name;
-      } catch (e) {}
-    }
-  }
-  
-  const result = await postJSON(`${BASE_URL}?action=markUndeclaredHoliday`, {
-    date,
-    reason,
-    email: userEmail,
-    name: userName
-  });
-  return result?.data || result;
-}
 
 // Get all undeclared holidays
 export async function getUndeclaredHolidays(activeOnly = true) {
@@ -1283,38 +1277,6 @@ export async function getUndeclaredHolidays(activeOnly = true) {
     activeOnly
   });
   return result?.data || result || [];
-}
-
-// Delete an undeclared holiday
-export async function deleteUndeclaredHoliday(holidayId) {
-  let userEmail = null;
-  let userName = null;
-  
-  const basicUser = localStorage.getItem('user');
-  if (basicUser) {
-    try { 
-      const user = JSON.parse(basicUser);
-      userEmail = user.email;
-      userName = user.name;
-    } catch (e) {}
-  }
-  if (!userEmail) {
-    const googleSession = localStorage.getItem('sf_google_session');
-    if (googleSession) {
-      try { 
-        const session = JSON.parse(googleSession);
-        userEmail = session.user?.email;
-        userName = session.user?.name;
-      } catch (e) {}
-    }
-  }
-  
-  const result = await postJSON(`${BASE_URL}?action=deleteUndeclaredHoliday`, {
-    holidayId,
-    email: userEmail,
-    name: userName
-  });
-  return result?.data || result;
 }
 
 // Cascade lesson plans from a start date, skipping undeclared holidays
@@ -1456,30 +1418,6 @@ export async function getExamMarks(examId) {
   // Cache for 2 minutes - marks don't change frequently
   const result = await getJSON(`${BASE_URL}?${q.toString()}`, 120000)
   return result?.data || result || []
-}
-
-// Cached marks fetch to avoid repeated network calls (especially from dashboard)
-// ttlMs default 6 hours
-export async function getExamMarksCached(examId, opts = {}) {
-  const ttlMs = Number(opts.ttlMs || (6 * 60 * 60 * 1000));
-  const key = `examMarks:${String(examId || '').trim()}`;
-  if (!examId) return [];
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.t && Array.isArray(parsed.v) && (Date.now() - parsed.t) < ttlMs) {
-        return parsed.v;
-      }
-    }
-  } catch (e) { /* ignore cache read errors */ }
-
-  // Leverage existing in-flight de-dupe if present
-  const v = await getExamMarks(examId);
-  try {
-    localStorage.setItem(key, JSON.stringify({ t: Date.now(), v }));
-  } catch (e) { /* ignore quota */ }
-  return v;
 }
 
 

@@ -40,15 +40,12 @@ function getAILessonSuggestions(context) {
       };
     }
 
-    Logger.log('[getAILessonSuggestions] Successfully generated suggestions');
-    
     return {
       success: true,
       suggestions: suggestions.data
     };
     
   } catch (error) {
-    Logger.log(`[getAILessonSuggestions] Error: ${error.message}`);
     return {
       success: false,
       error: error.message
@@ -148,7 +145,6 @@ function _callGeminiAPI(prompt) {
     const responseText = response.getContentText();
     
     if (responseCode !== 200) {
-      Logger.log(`[Gemini API] Error ${responseCode}: ${responseText}`);
       return {
         success: false,
         error: `API returned status ${responseCode}. Check your API key and quota.`
@@ -175,7 +171,6 @@ function _callGeminiAPI(prompt) {
     };
     
   } catch (error) {
-    Logger.log(`[Gemini API] Exception: ${error.message}`);
     return {
       success: false,
       error: `API call failed: ${error.message}`
@@ -204,8 +199,6 @@ function _parseGeminiResponse(text) {
     
   } catch (parseError) {
     // If JSON parsing fails, try to extract sections manually
-    Logger.log('[parseGeminiResponse] JSON parse failed, extracting manually');
-    
     return {
       learningObjectives: _extractSection(text, 'learningObjectives') || _extractSection(text, 'LEARNING OBJECTIVES') || 'AI-generated objectives (format error)',
       teachingMethods: _extractSection(text, 'teachingMethods') || _extractSection(text, 'TEACHING METHODS') || 'AI-generated methods (format error)',

@@ -116,7 +116,6 @@ function _ensureHeaders(sh, cols) {
     const missingCols = cols.slice(currentLength);
     const startCol = currentLength + 1;
     sh.getRange(1, startCol, 1, missingCols.length).setValues([missingCols]);
-    Logger.log(`Added ${missingCols.length} new columns to ${sh.getName()}: ${missingCols.join(', ')}`);
   }
   
   // NOTE: If columns exist with different names, we preserve user's choice
@@ -269,7 +268,6 @@ function _readSheet(sheetName) {
     const cached = _getCachedSheetData(sheetName);
     return cached && Array.isArray(cached.data) ? cached.data : [];
   } catch (e) {
-    Logger.log('[SheetHelpers._readSheet] Error reading sheet ' + sheetName + ': ' + (e && e.message ? e.message : e));
     return [];
   }
 }
@@ -612,6 +610,24 @@ function deleteDailyReport(reportId, requesterEmail) {
 
     // Perform report deletion after attempted rollback
     sh.deleteRow(rowToDelete);
+
+    try {
+      let actorRole = 'Teacher';
+      try {
+        if (isHM) actorRole = 'HM';
+      } catch (e) {}
+      logAudit({
+        action: AUDIT_ACTIONS.DELETE,
+        entityType: AUDIT_ENTITIES.DAILY_REPORT,
+        entityId: String(reportObj.id || reportId),
+        userEmail: String(requesterEmail || '').toLowerCase().trim(),
+        userName: String(requesterEmail || '').trim(),
+        userRole: actorRole,
+        description: `Daily report deleted (${reportObj.class || ''} ${reportObj.subject || ''} Period ${reportObj.period || ''})`,
+        severity: AUDIT_SEVERITY.CRITICAL
+      });
+    } catch (auditErr) { /* ignore audit failures */ }
+
     return { success: true, deletedId: reportId, rollback: rollbackInfo };
   } catch (err) {
     console.error('deleteDailyReport error', err);
@@ -748,6 +764,19 @@ function verifyDailyReport(reportId, verifierEmail) {
     set('reopenedBy', '');
     set('reopenedAt', '');
 
+    try {
+      logAudit({
+        action: AUDIT_ACTIONS.VERIFY,
+        entityType: AUDIT_ENTITIES.DAILY_REPORT,
+        entityId: String((rowObj && rowObj.id) || reportIdStr),
+        userEmail: String(verifierEmail || '').toLowerCase().trim(),
+        userName: String(verifierEmail || '').trim(),
+        userRole: 'HM',
+        description: `Daily report verified (${rowObj && rowObj.class ? rowObj.class : ''} ${rowObj && rowObj.subject ? rowObj.subject : ''})`,
+        severity: AUDIT_SEVERITY.WARNING
+      });
+    } catch (auditErr) { /* ignore audit failures */ }
+
     return { success: true, verifiedId: reportId };
   } catch (err) {
     console.error('verifyDailyReport error', err);
@@ -822,6 +851,19 @@ function reopenDailyReport(reportId, requesterEmail, reason) {
     set('reopenReason', reason || '');
     set('reopenedBy', requesterEmail);
     set('reopenedAt', new Date().toISOString());
+
+    try {
+      logAudit({
+        action: AUDIT_ACTIONS.REOPEN,
+        entityType: AUDIT_ENTITIES.DAILY_REPORT,
+        entityId: String((rowObj && rowObj.id) || reportIdStr),
+        userEmail: String(requesterEmail || '').toLowerCase().trim(),
+        userName: String(requesterEmail || '').trim(),
+        userRole: 'HM',
+        description: `Daily report reopened for correction`,
+        severity: AUDIT_SEVERITY.WARNING
+      });
+    } catch (auditErr) { /* ignore audit failures */ }
 
     // Add notification + optional email to teacher
     try {
@@ -933,7 +975,7 @@ function _ensureLessonPlanCancellationHeaders(sheet) {
   _ensureHeadersEnhanced(sheet, ['cancelledAt', 'cancelReason', 'forRevision']);
 }
 
-function _collectRemainingPlansForChapter(teacherEmail, cls, subject, chapter, dateISO) {
+function _collectRemainingPlansForChapter(teacherEmail, cls, subject, chapter, dateISO, schemeId) {
   var lpSh = _getSheet('LessonPlans');
   var lpHdr = _headers(lpSh);
   var lpRows = _rows(lpSh);
@@ -944,6 +986,7 @@ function _collectRemainingPlansForChapter(teacherEmail, cls, subject, chapter, d
     class: _getIdx(lpHdr, ['class','className']),
     subject: _getIdx(lpHdr, ['subject','subjectName']),
     chapter: _getIdx(lpHdr, ['chapter','topic']),
+    schemeId: _getIdx(lpHdr, ['schemeId']),
     session: _getIdx(lpHdr, ['session','sessionNo']),
     selectedDate: _getIdx(lpHdr, ['selectedDate','date']),
     selectedPeriod: _getIdx(lpHdr, ['selectedPeriod','period']),
@@ -954,13 +997,19 @@ function _collectRemainingPlansForChapter(teacherEmail, cls, subject, chapter, d
     var r = lpRows[i];
     var tEmail = String(r[idx.teacherEmail] || '').toLowerCase().trim();
     if (tEmail !== String(teacherEmail || '').toLowerCase().trim()) continue;
-    // Normalize class/subject/chapter comparisons (trim + case-insensitive)
-    if (idx.class !== -1 && String(r[idx.class] || '').trim() !== String(cls || '').trim()) continue;
-    if (idx.subject !== -1 && String(r[idx.subject] || '').trim() !== String(subject || '').trim()) continue;
-    if (idx.chapter !== -1) {
-      var planChapter = String(r[idx.chapter] || '').trim().toLowerCase();
-      var targetChapter = String(chapter || '').trim().toLowerCase();
-      if (planChapter !== targetChapter) continue;
+    // Prefer schemeId match when available to avoid duplicate chapter name collisions.
+    var targetSchemeId = String(schemeId || '').trim();
+    if (targetSchemeId && idx.schemeId !== -1) {
+      if (String(r[idx.schemeId] || '').trim() !== targetSchemeId) continue;
+    } else {
+      // Normalize class/subject/chapter comparisons (trim + case-insensitive)
+      if (idx.class !== -1 && String(r[idx.class] || '').trim() !== String(cls || '').trim()) continue;
+      if (idx.subject !== -1 && String(r[idx.subject] || '').trim() !== String(subject || '').trim()) continue;
+      if (idx.chapter !== -1) {
+        var planChapter = String(r[idx.chapter] || '').trim().toLowerCase();
+        var targetChapter = String(chapter || '').trim().toLowerCase();
+        if (planChapter !== targetChapter) continue;
+      }
     }
     var dtStr = idx.selectedDate !== -1 ? _isoDateString(r[idx.selectedDate] || '') : '';
     if (cutoff && dtStr) {
@@ -993,10 +1042,18 @@ function checkChapterCompletion(params) {
     var subject = params && params.subject;
     var chapter = params && params.chapter;
     var date = params && params.date;
-    if (!teacherEmail || !cls || !subject || !chapter) {
+    var schemeId = params && params.schemeId;
+    if (!teacherEmail || (!schemeId && (!cls || !subject || !chapter))) {
       return { success: false, error: 'Missing required parameters' };
     }
-    var remainingPlans = _collectRemainingPlansForChapter(teacherEmail, cls, subject, chapter, _isoDateString(date || ''));
+    var remainingPlans = _collectRemainingPlansForChapter(
+      teacherEmail,
+      cls,
+      subject,
+      chapter,
+      _isoDateString(date || ''),
+      schemeId
+    );
     return { success: true, hasRemainingPlans: remainingPlans.length > 0, remainingPlans: remainingPlans };
   } catch (e) {
     return { success: false, error: e && e.message ? e.message : String(e) };

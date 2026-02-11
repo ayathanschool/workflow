@@ -3,7 +3,9 @@
   * These helpers ensure consistent date handling across all functions.
   * All dates are normalized to IST "YYYY-MM-DD" format for reliable comparisons.
   */
-  const TZ = 'Asia/Kolkata';
+  function _tz_() {
+    return 'Asia/Kolkata';
+  }
 
   // Request-scoped auth context (set per request when auth is required)
   var REQUEST_AUTH_CTX = null;
@@ -116,7 +118,7 @@
   /** Returns "YYYY-MM-DD" for *today* in IST */
   function _todayISO() {
     const now = new Date();
-    return Utilities.formatDate(now, TZ, 'yyyy-MM-dd');
+    return Utilities.formatDate(now, _tz_(), 'yyyy-MM-dd');
   }
 
   /** Coerce any sheet cell (Date | string | number) to a JS Date (best effort) */
@@ -135,13 +137,13 @@
   function _isoDateIST(value) {
     const d = _coerceToDate(value);
     if (!d) return '';
-    return Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
+    return Utilities.formatDate(d, _tz_(), 'yyyy-MM-dd');
   }
 
   /** Get day name in IST from any date-like input (e.g., "Monday") */
   function _dayNameIST(value) {
     const d = _coerceToDate(value) || new Date(); // default now
-    return Utilities.formatDate(d, TZ, 'EEEE'); // Monday, Tuesday...
+    return Utilities.formatDate(d, _tz_(), 'EEEE'); // Monday, Tuesday...
   }
 
   /** Parse a client-sent date string (e.g., "2025-11-07" or ISO) to IST "YYYY-MM-DD" */
@@ -168,7 +170,7 @@
     // Fallback: let JS parse and then format to IST
     const d = new Date(raw);
     if (isNaN(d.getTime())) return _todayISO();
-    return Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
+    return Utilities.formatDate(d, _tz_(), 'yyyy-MM-dd');
   }
 
   /** Determine if a lesson plan status should be treated as ready for teacher actions */
@@ -343,10 +345,10 @@
         const dayName = _dayName(todayISO);
         return _respond({
           serverTimeUTC: now.toISOString(),
-          serverTimeIST: Utilities.formatDate(now, TZ, 'yyyy-MM-dd HH:mm:ss EEEE'),
+          serverTimeIST: Utilities.formatDate(now, _tz_(), 'yyyy-MM-dd HH:mm:ss EEEE'),
           todayISO: todayISO,
           todayDayName: dayName,
-          timezone: TZ,
+          timezone: _tz_(),
           test: {
             input: '2025-11-24',
             parsed: _dayName('2025-11-24')
@@ -917,6 +919,11 @@
         return _handleGetTeacherDailyData(e.parameter);
       }
 
+      // NEW: Unified teacher dashboard data (missing reports + live period + today's plans)
+      if (action === 'getTeacherDashboardData') {
+        return _handleGetTeacherDashboardData(e.parameter);
+      }
+
       // Teacher helper: suggest Ready lesson plans for substitution periods (optional attach)
       if (action === 'getSuggestedPlansForSubstitution') {
         return _handleGetSuggestedPlansForSubstitution(e.parameter);
@@ -1096,7 +1103,7 @@
               lastRow: schemesSh.getLastRow(),
               lastColumn: schemesSh.getLastColumn()
             },
-            serverTimeIST: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm:ss')
+            serverTimeIST: Utilities.formatDate(new Date(), _tz_(), 'yyyy-MM-dd HH:mm:ss')
           };
           return _respond(response);
         } catch (diagErr) {
@@ -1152,8 +1159,9 @@
         const cls = e.parameter.class || '';
         const subject = e.parameter.subject || '';
         const chapter = e.parameter.chapter || '';
+        const schemeId = e.parameter.schemeId || '';
         const date = e.parameter.date || '';
-        return _respond(checkChapterCompletion({ teacherEmail: teacherEmail, class: cls, subject: subject, chapter: chapter, date: date }));
+        return _respond(checkChapterCompletion({ teacherEmail: teacherEmail, class: cls, subject: subject, chapter: chapter, schemeId: schemeId, date: date }));
       }
       
       // === ATTENDANCE ROUTES ===
@@ -1284,6 +1292,11 @@
         }
         return _respond(_adminDeleteRow(data.sheetName, data.rowNumber, email, data.name || ''));
       }
+
+      // === SETTINGS ROUTES (HM or Super Admin) ===
+      if (action === 'updateAppSettings') {
+        return _handleUpdateAppSettings(data);
+      }
       
       // === EXAM ROUTES ===
       if (action === 'createExam') {
@@ -1388,10 +1401,11 @@
       
       // === AUDIT LOG ROUTES ===
       if (action === 'getAuditLogs') {
-        if (!_isSuperAdminSafe(data.email || e.parameter.email)) {
-          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        const requesterEmail = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!_isHMOrSuperAdminSafe(requesterEmail)) {
+          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
         }
-        return _respond(getAuditLogs(data.filters || {}));
+        return _respond(getAuditLogsForRequester(data.filters || {}, requesterEmail));
       }
       
       if (action === 'getEntityAuditTrail') {
@@ -1402,17 +1416,19 @@
       }
       
       if (action === 'getAuditSummary') {
-        if (!_isSuperAdminSafe(data.email || e.parameter.email)) {
-          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        const requesterEmail = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!_isHMOrSuperAdminSafe(requesterEmail)) {
+          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
         }
-        return _respond(getAuditSummary(data.filters || {}));
+        return _respond(getAuditSummaryForRequester(data.filters || {}, requesterEmail));
       }
       
       if (action === 'exportAuditLogs') {
-        if (!_isSuperAdminSafe(data.email || e.parameter.email)) {
-          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        const requesterEmail = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!_isHMOrSuperAdminSafe(requesterEmail)) {
+          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
         }
-        return _respond(exportAuditLogs(data.filters || {}));
+        return _respond(exportAuditLogsForRequester(data.filters || {}, requesterEmail));
       }
 
 
@@ -1728,6 +1744,19 @@
           sh.appendRow(sanitizedRowData);
           SpreadsheetApp.flush();
           appLog('INFO', 'daily report submitted', { email: teacherEmail, class: reportClass, subject: reportSubject, period: reportPeriod });
+
+          try {
+            logAudit({
+              action: AUDIT_ACTIONS.SUBMIT,
+              entityType: AUDIT_ENTITIES.DAILY_REPORT,
+              entityId: reportId,
+              userEmail: teacherEmail,
+              userName: String(data.teacherName || '').trim(),
+              userRole: 'Teacher',
+              description: `Daily report submitted for ${reportClass} ${reportSubject} Period ${reportPeriod}`,
+              severity: AUDIT_SEVERITY.INFO
+            });
+          } catch (auditErr) { /* ignore audit failures */ }
           
           // *** MANUAL CASCADE OPTION FROM FRONTEND ***
           // *** SIMPLIFIED CASCADE LOGIC ***
@@ -1769,7 +1798,6 @@
           // If chapter completed and has remaining sessions action, apply it
           if (data.chapterCompleted && data.remainingSessionsAction && data.remainingSessions && data.remainingSessions.length > 0) {
             try {
-              Logger.log(`[ChapterCompletion] Applying action: ${data.remainingSessionsAction} for ${data.remainingSessions.length} sessions`);
               const completionResult = applyChapterCompletionAction({
                 action: data.remainingSessionsAction,
                 lessonPlanIds: data.remainingSessions,
@@ -1778,12 +1806,9 @@
               });
               
               if (completionResult.success) {
-                Logger.log(`[ChapterCompletion] Success: ${completionResult.updatedCount} plans updated`);
               } else {
-                Logger.log(`[ChapterCompletion] Warning: ${completionResult.error}`);
               }
             } catch (ccErr) {
-              Logger.log(`[ChapterCompletion] Error: ${ccErr.message}`);
               // Don't fail report submission if chapter action fails
             }
           }
@@ -2512,7 +2537,10 @@
   function _handleGetApprovedSchemesForLessonPlanning(params) {
     try {
       const teacherEmail = params.teacherEmail;
-      const summaryOnly = String(params.summaryOnly || '').trim() === 'true' || String(params.summaryOnly || '').trim() === '1';
+      const summaryOnlyRaw = String(params.summaryOnly || '').trim();
+      const summaryOnly = summaryOnlyRaw
+        ? (summaryOnlyRaw === 'true' || summaryOnlyRaw === '1')
+        : !!(_getLessonPlanSettings && _getLessonPlanSettings().summaryLoadingFirst);
       
       if (!teacherEmail) {
         return _respond({ success: false, error: 'Teacher email is required' });
@@ -2524,18 +2552,15 @@
       // Try the original function first
       try {
         if (typeof getApprovedSchemesForLessonPlanning === 'function') {
-          Logger.log(`Using original getApprovedSchemesForLessonPlanning function, summaryOnly: ${summaryOnly}`);
           const result = noCache && (typeof _fetchApprovedSchemesForLessonPlanning === 'function')
             ? _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly)
             : getApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly);
           return _respond(result);
         }
       } catch (originalError) {
-        Logger.log('Original function failed, using backup implementation:', originalError.message);
       }
       
       // ENHANCED BACKUP IMPLEMENTATION WITH CACHING
-      Logger.log(`Getting approved schemes for lesson planning (BACKUP): ${teacherEmail}`);
       
       // PERFORMANCE: Use cached sheet data instead of multiple _rows() calls
       const schemesData = _getCachedSheetData('Schemes').data;
@@ -2549,6 +2574,15 @@
       const teacherPlans = lessonPlansData.filter(plan =>
         (plan.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase()
       );
+
+      // Map lessonPlanId -> schemeId for scheme-scoped DailyReports matching
+      const planSchemeByLpId = new Map();
+      (teacherPlans || []).forEach(plan => {
+        if (!plan || typeof plan !== 'object') return;
+        const lpId = String(plan.lpId || plan.lessonPlanId || plan.planId || plan.id || '').trim();
+        const scId = String(plan.schemeId || '').trim();
+        if (lpId && scId) planSchemeByLpId.set(lpId, scId);
+      });
       
       // PERFORMANCE: Cache daily reports once for all schemes
       const dailyReportsData = _getCachedSheetData('DailyReports').data;
@@ -2566,20 +2600,25 @@
           try {
             // PERFORMANCE: Use cached daily reports instead of reading sheet again
             // Find daily reports for this chapter by this teacher
+            const schemeIdKey = String(scheme.schemeId || '').trim();
             const chapterReports = dailyReportsData.filter(report => {
               // Safety check: ensure report is an object
               if (!report || typeof report !== 'object') return false;
-              
-              const matchesTeacher = String(report.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
+              const reportTeacher = String(report.teacherEmail || '').toLowerCase();
+              const matchesTeacher = reportTeacher === String(teacherEmail || '').toLowerCase();
+              const reportLpId = String(report.lessonPlanId || '').trim();
+              const reportSchemeId = String(report.schemeId || '').trim() || (reportLpId ? (planSchemeByLpId.get(reportLpId) || '') : '');
+              if (reportSchemeId && schemeIdKey) {
+                return matchesTeacher && reportSchemeId === schemeIdKey;
+              }
+
               const matchesChapter = String(report.chapter || '') === String(chapterName || '');
               const matchesClass = String(report.class || '') === String(scheme.class || '');
               const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
-              
               return matchesTeacher && matchesChapter && matchesClass && matchesSubject;
             });
             
             if (chapterReports.length > 0) {
-              Logger.log(`Found ${chapterReports.length} daily reports for chapter ${chapterName}`);
               
               // Check if any sessions are below 75% completion threshold
               let hasIncompleteSessions = false;
@@ -2593,11 +2632,9 @@
                 if (sessionReport) {
                   maxExistingSession = Math.max(maxExistingSession, i);
                   const completion = Number(sessionReport.completionPercentage || 0);
-                  Logger.log(`Session ${i}: ${completion}% complete`);
                   
                   if (completion < 75) {
                     hasIncompleteSessions = true;
-                    Logger.log(`Session ${i} incomplete (${completion}% < 75%)`);
                   }
                 }
               }
@@ -2606,14 +2643,11 @@
               // NEW: More permissive logic - show extended if ANY session is incomplete  
               if (hasIncompleteSessions) {
                 extendedSessionCount = originalSessionCount + 1;
-                Logger.log(`Extending sessions to ${extendedSessionCount} due to incomplete sessions (any session <75%)`);
               }
             } else {
-              Logger.log(`No daily reports found for chapter ${chapterName} - using original session count`);
             }
             
           } catch (drError) {
-            Logger.log(`Error checking daily reports for extended sessions: ${drError.message}`);
             // Continue with original session count if error
           }
           
@@ -2696,12 +2730,9 @@
         }
       };
       
-      Logger.log('Backup implementation completed successfully');
       return _respond(result);
       
     } catch (error) {
-      Logger.log('Error in _handleGetApprovedSchemesForLessonPlanning:', error.message);
-      Logger.log('Error stack:', error.stack);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -2721,18 +2752,15 @@
       // Try the dedicated function first
       try {
         if (typeof getSchemeDetails === 'function') {
-          Logger.log(`Getting scheme details for ${schemeId}`);
           const result = getSchemeDetails(schemeId, teacherEmail);
           return _respond(result);
         }
       } catch (error) {
-        Logger.log('getSchemeDetails function failed:', error.message);
       }
       
       return _respond({ success: false, error: 'getSchemeDetails function not available' });
       
     } catch (error) {
-      Logger.log('Error in _handleGetSchemeDetails:', error.message);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -2755,14 +2783,12 @@
       if (!endDate) {
         const d = new Date(startDate + 'T00:00:00');
         d.setDate(d.getDate() + 30);
-        endDate = Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
+        endDate = Utilities.formatDate(d, _tz_(), 'yyyy-MM-dd');
       }
 
       if (!teacherEmail) {
         return _respond({ success: false, error: 'Teacher email is required' });
       }
-      
-      Logger.log(`Getting periods for ${teacherEmail} - filtering by class: ${schemeClass}, subject: ${schemeSubject}`);
       
       const result = getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excludeExisting, schemeClass, schemeSubject);
       return _respond(result);
@@ -2807,7 +2833,6 @@
       const dirName = u && u.name ? String(u.name || '').trim() : '';
       if (dirName && dirName.indexOf('@') === -1) {
         teacherName = dirName;
-        Logger.log(`Using teacher name from Users sheet: ${teacherName}`);
       } else if (teacherName && teacherName.indexOf('@') !== -1 && dirName) {
         // If Users has something but it's still email-like, keep teacherName (but at least normalize)
         teacherName = teacherEmail;
@@ -2835,9 +2860,20 @@
       ];
       
       sh.appendRow(line);
+      try {
+        logAudit({
+          action: AUDIT_ACTIONS.CREATE,
+          entityType: AUDIT_ENTITIES.SCHEME,
+          entityId: schemeId,
+          userEmail: teacherEmail,
+          userName: teacherName,
+          userRole: 'Teacher',
+          description: `Scheme submitted for ${data.class || ''} ${data.subject || ''}`,
+          severity: AUDIT_SEVERITY.INFO
+        });
+      } catch (auditErr) { /* ignore audit failures */ }
       return _respond({ ok: true, schemeId: schemeId });
     } catch (error) {
-      Logger.log('Error submitting scheme: ' + error.message);
       return _respond({ error: error.message });
     }
   }
@@ -2883,91 +2919,6 @@
     return id;
   }
 
-  /**
-  * Migrate existing schemeIds to readable format and update related sheets.
-  * WARNING: This updates Schemes, LessonPlans, DailyReports, TeacherSchemeProgress (when present).
-  */
-  function migrateSchemeIdsReadable(dryRun) {
-    const doDryRun = (dryRun !== undefined) ? !!dryRun : true;
-    const schemeSheet = _getSheet('Schemes');
-    const schemeHeaders = _headers(schemeSheet);
-    const schemeRows = _rows(schemeSheet);
-    const schemeIdIdx = schemeHeaders.indexOf('schemeId');
-    if (schemeIdIdx === -1) {
-      return { success: false, error: 'Schemes sheet missing schemeId column' };
-    }
-
-    const existingIds = new Set();
-    for (const row of schemeRows) {
-      const v = row[schemeIdIdx];
-      if (v) existingIds.add(String(v).trim());
-    }
-
-    const mapping = new Map();
-    const updates = [];
-    for (let i = 0; i < schemeRows.length; i++) {
-      const row = schemeRows[i];
-      const oldId = String(row[schemeIdIdx] || '').trim();
-      if (!oldId) continue;
-
-      const data = {
-        class: row[schemeHeaders.indexOf('class')],
-        subject: row[schemeHeaders.indexOf('subject')],
-        chapter: row[schemeHeaders.indexOf('chapter')]
-      };
-      const newId = _generateReadableSchemeId_(data, existingIds);
-      if (newId && newId !== oldId) {
-        mapping.set(oldId, newId);
-        updates.push({ rowIndex: i + 2, newId: newId, oldId: oldId });
-        existingIds.add(newId);
-      }
-    }
-
-    if (doDryRun) {
-      return { success: true, dryRun: true, changes: updates.slice(0, 50), totalChanges: updates.length };
-    }
-
-    // Update Schemes sheet
-    for (const u of updates) {
-      schemeSheet.getRange(u.rowIndex, schemeIdIdx + 1).setValue(u.newId);
-    }
-
-    // Update related sheets that contain schemeId
-    const relatedSheets = ['LessonPlans', 'DailyReports', 'TeacherSchemeProgress'];
-    const relatedUpdates = {};
-    for (const name of relatedSheets) {
-      const sh = _getSheet(name);
-      if (!sh) continue;
-      const headers = _headers(sh);
-      const idIdx = headers.indexOf('schemeId');
-      if (idIdx === -1) continue;
-      const rows = _rows(sh);
-      let updatedCount = 0;
-      for (let i = 0; i < rows.length; i++) {
-        const v = String(rows[i][idIdx] || '').trim();
-        if (!v) continue;
-        const newId = mapping.get(v);
-        if (newId) {
-          sh.getRange(i + 2, idIdx + 1).setValue(newId);
-          updatedCount++;
-        }
-      }
-      relatedUpdates[name] = updatedCount;
-    }
-
-    return {
-      success: true,
-      dryRun: false,
-      schemesUpdated: updates.length,
-      relatedUpdates: relatedUpdates
-    };
-  }
-
-  function runSchemeIdMigration() {
-    const res = migrateSchemeIdsReadable(false);
-    Logger.log(JSON.stringify(res));
-    return res;
-  }
 
   /**
   * Handle POST update scheme status
@@ -2996,98 +2947,33 @@
           sh.getRange(rowIndex + 2, approvedAtIdx + 1).setValue(new Date().toISOString());
         }
       }
+
+      try {
+        const statusNorm = String(status || '').toLowerCase().trim();
+        let actionType = AUDIT_ACTIONS.UPDATE;
+        if (statusNorm === 'approved') actionType = AUDIT_ACTIONS.APPROVE;
+        else if (statusNorm === 'rejected') actionType = AUDIT_ACTIONS.REJECT;
+
+        const actorEmail = String(data.requesterEmail || data.email || '').toLowerCase().trim();
+        let actorRole = 'HM';
+        try {
+          if (actorEmail && isSuperAdmin(actorEmail)) actorRole = 'Super Admin';
+        } catch (e) {}
+
+        logAudit({
+          action: actionType,
+          entityType: AUDIT_ENTITIES.SCHEME,
+          entityId: String(schemeId || ''),
+          userEmail: actorEmail,
+          userName: String(data.requesterName || data.name || actorEmail || '').trim(),
+          userRole: actorRole,
+          description: `Scheme status changed to ${status}`,
+          severity: AUDIT_SEVERITY.WARNING
+        });
+      } catch (auditErr) { /* ignore audit failures */ }
       
       return _respond({ submitted: true });
     } catch (error) {
-      Logger.log('Error updating scheme status: ' + error.message);
-      return _respond({ error: error.message });
-    }
-  }
-
-  /**
-  * Handle DELETE scheme (only allowed for Pending status)
-  */
-  function _handleDeleteScheme(data) {
-    try {
-      const { schemeId, teacherEmail } = data;
-      const sh = _getSheet('Schemes');
-      const headers = _headers(sh);
-      const allRows = _rows(sh);
-      const schemes = allRows.map(row => _indexByHeader(row, headers));
-      
-      const rowIndex = schemes.findIndex(row => row.schemeId === schemeId);
-      
-      if (rowIndex === -1) {
-        return _respond({ success: false, error: 'Scheme not found' });
-      }
-      
-      const scheme = schemes[rowIndex];
-      
-      // Verify ownership
-      if (String(scheme.teacherEmail || '').toLowerCase() !== String(teacherEmail || '').toLowerCase()) {
-        return _respond({ success: false, error: 'Not authorized to delete this scheme' });
-      }
-      
-      // Only allow deletion of Pending schemes
-      if (String(scheme.status || '').toLowerCase() !== 'pending') {
-        return _respond({ success: false, error: 'Can only delete schemes with Pending status' });
-      }
-      
-      // Delete the row (rowIndex + 2: 1 for header, 1 for 0-based to 1-based)
-      sh.deleteRow(rowIndex + 2);
-      
-      return _respond({ success: true, message: 'Scheme deleted successfully' });
-    } catch (error) {
-      Logger.log('Error deleting scheme: ' + error.message);
-      return _respond({ success: false, error: error.message });
-    }
-  }
-
-  /**
-  * Handle UPDATE scheme (edit existing scheme, only for Pending status)
-  */
-  function _handleUpdateScheme(data) {
-    try {
-      const { schemeId, teacherEmail, class: className, subject, term, unit, chapter, month, noOfSessions, content } = data;
-      const sh = _getSheet('Schemes');
-      const headers = _headers(sh);
-      const allRows = _rows(sh);
-      const schemes = allRows.map(row => _indexByHeader(row, headers));
-      
-      const rowIndex = schemes.findIndex(row => row.schemeId === schemeId);
-      
-      if (rowIndex === -1) {
-        return _respond({ success: false, error: 'Scheme not found' });
-      }
-      
-      const scheme = schemes[rowIndex];
-      
-      // Verify ownership
-      if (String(scheme.teacherEmail || '').toLowerCase() !== String(teacherEmail || '').toLowerCase()) {
-        return _respond({ success: false, error: 'Not authorized to update this scheme' });
-      }
-      
-      // Only allow editing of Pending schemes
-      if (String(scheme.status || '').toLowerCase() !== 'pending') {
-        return _respond({ success: false, error: 'Can only edit schemes with Pending status' });
-      }
-      
-      // Update the row (rowIndex + 2 for actual sheet row)
-      const actualRow = rowIndex + 2;
-      
-      // Update only the editable fields: class, subject, term, unit, chapter, month, noOfSessions, content
-      if (className !== undefined) sh.getRange(actualRow, headers.indexOf('class') + 1).setValue(className);
-      if (subject !== undefined) sh.getRange(actualRow, headers.indexOf('subject') + 1).setValue(subject);
-      if (term !== undefined) sh.getRange(actualRow, headers.indexOf('term') + 1).setValue(Number(term));
-      if (unit !== undefined) sh.getRange(actualRow, headers.indexOf('unit') + 1).setValue(Number(unit));
-      if (chapter !== undefined) sh.getRange(actualRow, headers.indexOf('chapter') + 1).setValue(chapter);
-      if (month !== undefined) sh.getRange(actualRow, headers.indexOf('month') + 1).setValue(month);
-      if (noOfSessions !== undefined) sh.getRange(actualRow, headers.indexOf('noOfSessions') + 1).setValue(Number(noOfSessions));
-      if (content !== undefined) sh.getRange(actualRow, headers.indexOf('content') + 1).setValue(content);
-      
-      return _respond({ success: true, message: 'Scheme updated successfully' });
-    } catch (error) {
-      Logger.log('Error updating scheme: ' + error.message);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -3127,18 +3013,29 @@
       // Delete the row (rowIndex + 2: 1 for header, 1 for 0-based to 1-based)
       sh.deleteRow(rowIndex + 2);
 
+      try {
+        logAudit({
+          action: AUDIT_ACTIONS.DELETE,
+          entityType: AUDIT_ENTITIES.LESSON_PLAN,
+          entityId: String(lessonPlan.lpId || ''),
+          userEmail: String(teacherEmail || lessonPlan.teacherEmail || '').toLowerCase().trim(),
+          userName: String(lessonPlan.teacherName || lessonPlan.teacherEmail || '').trim(),
+          userRole: 'Teacher',
+          description: `Lesson plan deleted by owner (${lessonPlan.class || ''} ${lessonPlan.subject || ''} ${lessonPlan.chapter || ''} Session ${lessonPlan.session || ''})`,
+          severity: AUDIT_SEVERITY.WARNING
+        });
+      } catch (auditErr) { /* ignore audit failures */ }
+
       // Invalidate caches so the UI reflects changes immediately
       try {
         const te = String(teacherEmail || lessonPlan.teacherEmail || '').toLowerCase().trim();
         if (te) invalidateCache('teacher_lessonplans_' + te);
         invalidateCache('approved_schemes');
       } catch (invErr) {
-        Logger.log(`Warning: cache invalidation failed after delete lesson plan: ${invErr.message}`);
       }
       
       return _respond({ success: true, message: 'Lesson plan deleted successfully' });
     } catch (error) {
-      Logger.log('Error deleting lesson plan: ' + error.message);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -3152,8 +3049,6 @@
    */
   function _checkChapterSessionsComplete(schemeId, chapter) {
     try {
-      Logger.log(`=== CHECKING CHAPTER COMPLETENESS ===`);
-      Logger.log(`Scheme ID: ${schemeId}, Chapter: ${chapter}`);
       
       // Get the scheme to find noOfSessions
       const schemesSheet = _getSheet('Schemes');
@@ -3162,12 +3057,10 @@
       
       const scheme = allSchemes.find(s => s.schemeId === schemeId);
       if (!scheme) {
-        Logger.log(`ERROR: Scheme ${schemeId} not found`);
         return { complete: false, error: 'Scheme not found' };
       }
       
       const totalSessions = parseInt(scheme.noOfSessions || 2);
-      Logger.log(`Total sessions expected: ${totalSessions}`);
       
       // Get all lesson plans for this scheme and chapter
       const lpSheet = _getSheet('LessonPlans');
@@ -3182,8 +3075,6 @@
         return matchScheme && matchChapter && notCancelled;
       });
       
-      Logger.log(`Found ${chapterPlans.length} active lesson plans for this chapter`);
-      
       // Check which sessions exist
       const existingSessions = new Set();
       chapterPlans.forEach(plan => {
@@ -3192,8 +3083,6 @@
           existingSessions.add(sessionNum);
         }
       });
-      
-      Logger.log(`Existing sessions: ${Array.from(existingSessions).sort((a, b) => a - b).join(', ')}`);
       
       // Find missing sessions
       const missingSessions = [];
@@ -3204,9 +3093,7 @@
       }
       
       const isComplete = missingSessions.length === 0;
-      Logger.log(`Chapter complete: ${isComplete}`);
       if (!isComplete) {
-        Logger.log(`Missing sessions: ${missingSessions.join(', ')}`);
       }
       
       return {
@@ -3217,14 +3104,12 @@
       };
       
     } catch (error) {
-      Logger.log(`Error checking chapter completeness: ${error.message}`);
       return { complete: false, error: error.message };
     }
   }
 
   function _handleUpdateLessonPlanStatus(data) {
     try {
-      Logger.log(`Updating lesson plan status: ${JSON.stringify(data)}`);
       const { lpId, status, reviewComments, remarks, requesterEmail } = data;
       
       // Accept either reviewComments or remarks (frontend compatibility)
@@ -3237,17 +3122,13 @@
       // ROLE CHECK: Only HM or Super Admin can approve lesson plans (status='Ready')
       if (status === 'Ready') {
         if (!requesterEmail) {
-          Logger.log('AUTHORIZATION FAILED: No requester email provided for approval');
           return _respond({ error: 'Authorization required: User email must be provided for approval' });
         }
         
         const isAuthorized = _isHMOrSuperAdminSafe(requesterEmail);
         if (!isAuthorized) {
-          Logger.log(`AUTHORIZATION FAILED: User ${requesterEmail} is not HM or Super Admin`);
           return _respond({ error: 'Unauthorized: Only Headmaster or Super Admin can approve lesson plans' });
         }
-        
-        Logger.log(`✅ Authorization passed: ${requesterEmail} is HM or Super Admin`);
       }
       
       const sh = _getSheet('LessonPlans');
@@ -3267,7 +3148,6 @@
         const completenessCheck = _checkChapterSessionsComplete(lessonPlan.schemeId, lessonPlan.chapter);
         
         if (!completenessCheck.complete) {
-          Logger.log(`APPROVAL BLOCKED: Chapter not complete`);
           return _respond({
             error: `Cannot approve: All ${completenessCheck.total} sessions must be submitted before approval. Missing sessions: ${completenessCheck.missing.join(', ')}`,
             incomplete: true,
@@ -3276,8 +3156,6 @@
             total: completenessCheck.total
           });
         }
-        
-        Logger.log(`✅ All ${completenessCheck.total} sessions submitted - approval allowed`);
       }
       
       // Find status column (case-insensitive) and update
@@ -3288,14 +3166,12 @@
         rawStatusIdx = normalizedHeaders.findIndex(h => h.toLowerCase() === 'status');
       }
       if (rawStatusIdx === -1) {
-        Logger.log('ERROR: Could not find status column (status/Status). Headers: ' + JSON.stringify(headers));
         return _respond({ error: 'Status column not found in sheet' });
       }
       const statusColIndex = rawStatusIdx + 1; // convert to 1-based
       const previousStatus = sh.getRange(rowIndex + 2, statusColIndex).getValue();
       sh.getRange(rowIndex + 2, statusColIndex).setValue(status);
       const writtenStatus = sh.getRange(rowIndex + 2, statusColIndex).getValue();
-      Logger.log(`Status cell write check: prev='${previousStatus}' new='${writtenStatus}' expected='${status}'`);
 
       // Invalidate caches so the UI reflects changes immediately
       try {
@@ -3303,7 +3179,6 @@
         if (te) invalidateCache('teacher_lessonplans_' + te);
         invalidateCache('approved_schemes');
       } catch (invErr) {
-        Logger.log(`Warning: cache invalidation failed after update lesson plan status: ${invErr.message}`);
       }
 
       // If the teacher resubmits an existing plan for review, notify HM(s) with full session details.
@@ -3316,7 +3191,6 @@
           _notifyHMOnLessonPlanSubmittedForReview(lpId);
         }
       } catch (mailErr) {
-        Logger.log(`Warning: HM notification email (resubmit) failed: ${mailErr.message}`);
       }
       
       // Update review comments if provided
@@ -3328,7 +3202,6 @@
         if (commentsIdx >= 0) {
           sh.getRange(rowIndex + 2, commentsIdx + 1).setValue(comments);
         } else {
-          Logger.log('WARNING: reviewComments column not found; skipping comment write');
         }
       }
       
@@ -3340,14 +3213,36 @@
       if (reviewedAtIdx >= 0) {
         sh.getRange(rowIndex + 2, reviewedAtIdx + 1).setValue(new Date().toISOString());
       } else {
-        Logger.log('INFO: reviewedAt column not present; timestamp skipped');
       }
+
+      try {
+        const statusNorm = String(status || '').toLowerCase().trim();
+        let actionType = AUDIT_ACTIONS.UPDATE;
+        if (statusNorm === 'ready') actionType = AUDIT_ACTIONS.APPROVE;
+        else if (statusNorm === 'rejected' || statusNorm === 'needs rework') actionType = AUDIT_ACTIONS.REJECT;
+        else if (statusNorm === 'pending review') actionType = AUDIT_ACTIONS.SUBMIT;
+
+        const actorEmail = String(requesterEmail || lessonPlan.teacherEmail || '').toLowerCase().trim();
+        let actorRole = 'Teacher';
+        try {
+          if (actorEmail && _isHMOrSuperAdminSafe(actorEmail)) actorRole = 'HM';
+        } catch (e) {}
+
+        logAudit({
+          action: actionType,
+          entityType: AUDIT_ENTITIES.LESSON_PLAN,
+          entityId: String(lpId),
+          userEmail: actorEmail,
+          userName: String(lessonPlan.teacherName || lessonPlan.teacherEmail || '').trim(),
+          userRole: actorRole,
+          description: `Lesson plan status changed from ${previousStatus} to ${writtenStatus}`,
+          severity: AUDIT_SEVERITY.WARNING
+        });
+      } catch (auditErr) { /* ignore audit failures */ }
       
-      Logger.log(`Lesson plan ${lpId} status updated to ${status} (verification: '${writtenStatus}')`);
       // Include verification data for debugging on client side
       return _respond({ success: true, message: 'Lesson plan status updated successfully', lpId, previousStatus, writtenStatus });
     } catch (error) {
-      Logger.log('Error updating lesson plan status: ' + error.message);
       return _respond({ error: error.message });
     }
   }
@@ -3359,10 +3254,8 @@
   function _handleBatchUpdateLessonPlanStatus(data) {
     try {
       // Feature disabled: batch lesson plan approval removed per requirements
-      Logger.log(`Batch lesson plan approval is disabled. Incoming payload (ignored): ${JSON.stringify(data)}`);
       return _respond({ success: false, error: 'Batch lesson plan approvals are disabled' });
     } catch (error) {
-      Logger.log(`Error in batch update: ${error.message}`);
       return _respond({ error: error.message });
     }
   }
@@ -3463,11 +3356,11 @@
       }
 
       // Update date and period (selectedDate/selectedPeriod in current schema)
+      const prevDate = sh.getRange(rowIndex, dateColIndex + 1).getValue();
+      const prevPeriod = sh.getRange(rowIndex, periodColIndex + 1).getValue();
       sh.getRange(rowIndex, dateColIndex + 1).setValue(newDate);
       sh.getRange(rowIndex, periodColIndex + 1).setValue(newPeriod);
 
-      Logger.log(`Rescheduled lesson plan ${lpId} to ${newDate} period ${newPeriod} by ${requesterEmail}`);
-      
       // Clear cache
       try {
         invalidateCache('teacher_lessonplans');
@@ -3479,6 +3372,19 @@
         // Ignore cache clear errors
       }
 
+      try {
+        logAudit({
+          action: AUDIT_ACTIONS.UPDATE,
+          entityType: AUDIT_ENTITIES.LESSON_PLAN,
+          entityId: String(lpId),
+          userEmail: requesterEmail,
+          userName: requesterEmail || '',
+          userRole: 'HM',
+          description: `Lesson plan rescheduled to ${newDate} period ${newPeriod}`,
+          severity: AUDIT_SEVERITY.WARNING
+        });
+      } catch (auditErr) { /* ignore audit failures */ }
+
       return _respond({ 
         success: true, 
         message: 'Lesson plan rescheduled successfully',
@@ -3487,7 +3393,6 @@
         newPeriod: newPeriod
       });
     } catch (error) {
-      Logger.log(`Error rescheduling lesson plan: ${error.message}`);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -3510,7 +3415,6 @@
       
       return _respond(cached);
     } catch (error) {
-      Logger.log('Error getting teacher schemes: ' + error.message);
       return _respond({ error: error.message });
     }
   }
@@ -3558,7 +3462,6 @@
       const cached = getCachedData(cacheKey, () => _fetchTeacherLessonPlans(email, params), CACHE_TTL.MEDIUM);
       return _respond(cached);
     } catch (error) {
-      Logger.log('Error getting teacher lesson plans: ' + error.message);
       return _respond({ error: error.message });
     }
   }
@@ -3569,6 +3472,33 @@
   function _fetchTeacherLessonPlans(email, params) {
     const emailNorm = String(email || '').toLowerCase().trim();
     let lessonPlans = [];
+    const _getTeacherEmail = function(plan) {
+      return String(
+        plan && (
+          plan.teacherEmail ||
+          plan.email ||
+          plan.teacher ||
+          plan.TeacherEmail ||
+          plan['Teacher Email'] ||
+          plan['Teacher email']
+        ) || ''
+      ).toLowerCase().trim();
+    };
+    const _normalizePlan = function(plan) {
+      if (!plan || typeof plan !== 'object') return plan;
+      if (!plan.teacherEmail) plan.teacherEmail = plan.email || plan.teacher || plan.TeacherEmail || plan['Teacher Email'] || plan['Teacher email'] || '';
+      if (!plan.status) plan.status = plan.Status || plan.lessonPlanStatus || plan.LessonPlanStatus || '';
+      if (!plan.session) plan.session = plan.sessionNo || plan.sessionNumber || plan.Session || plan.SessionNo || plan['Session No'] || '';
+      if (!plan.chapter) plan.chapter = plan.Chapter || plan.chapterName || plan.ChapterName || '';
+      if (!plan.class) plan.class = plan.Class || plan['Class'] || '';
+      if (!plan.subject) plan.subject = plan.Subject || plan['Subject'] || '';
+      if (!plan.lpId) plan.lpId = plan.lessonPlanId || plan.planId || plan.id || plan['Lesson Plan Id'] || '';
+      if (!plan.selectedDate) plan.selectedDate = plan.date || plan.Date || plan['Selected Date'] || plan['SelectedDate'] || '';
+      if (!plan.selectedPeriod) plan.selectedPeriod = plan.period || plan.Period || plan['Selected Period'] || plan['SelectedPeriod'] || '';
+      if (!plan.originalDate) plan.originalDate = plan.OriginalDate || plan['Original Date'] || plan.original_date || plan['OriginalDate'] || '';
+      if (!plan.originalPeriod) plan.originalPeriod = plan.OriginalPeriod || plan['Original Period'] || plan.original_period || plan['OriginalPeriod'] || '';
+      return plan;
+    };
 
     // FAST PATH: fetch only this teacher's rows using TextFinder (avoids full-sheet reads)
     try {
@@ -3585,11 +3515,29 @@
       const sh = _getSheet('LessonPlans');
       const headers = _headers(sh);
       lessonPlans = _rows(sh).map(row => _indexByHeader(row, headers))
-        .filter(plan => String(plan.teacherEmail || '').toLowerCase().trim() === emailNorm);
+        .filter(plan => _getTeacherEmail(plan) === emailNorm)
+        .map(_normalizePlan);
     } else {
       // Safety: normalize filter in case of stray whitespace/case
-      lessonPlans = lessonPlans.filter(plan => String(plan.teacherEmail || '').toLowerCase().trim() === emailNorm);
+      lessonPlans = lessonPlans.filter(plan => _getTeacherEmail(plan) === emailNorm).map(_normalizePlan);
     }
+
+    // Normalize legacy column names so frontend consistently reads status/session/chapter fields.
+    lessonPlans = (lessonPlans || []).map(plan => {
+      if (!plan || typeof plan !== 'object') return plan;
+      if (!plan.teacherEmail) plan.teacherEmail = plan.email || plan.teacher || plan.TeacherEmail || plan['Teacher Email'] || plan['Teacher email'] || plan.Teacher || '';
+      if (!plan.status) plan.status = plan.Status || plan.lessonPlanStatus || plan.LessonPlanStatus || '';
+      if (!plan.session) plan.session = plan.sessionNo || plan.sessionNumber || plan.Session || plan.SessionNo || '';
+      if (!plan.chapter) plan.chapter = plan.Chapter || plan.chapterName || plan.ChapterName || '';
+      if (!plan.class) plan.class = plan.Class || '';
+      if (!plan.subject) plan.subject = plan.Subject || '';
+      if (!plan.lpId) plan.lpId = plan.lessonPlanId || plan.planId || plan.id || '';
+      if (!plan.selectedDate) plan.selectedDate = plan.date || plan.Date || plan['Selected Date'] || plan['SelectedDate'] || '';
+      if (!plan.selectedPeriod) plan.selectedPeriod = plan.period || plan.Period || plan['Selected Period'] || plan['SelectedPeriod'] || '';
+      if (!plan.originalDate) plan.originalDate = plan.OriginalDate || plan['Original Date'] || plan.original_date || plan['OriginalDate'] || '';
+      if (!plan.originalPeriod) plan.originalPeriod = plan.OriginalPeriod || plan['Original Period'] || plan.original_period || plan['OriginalPeriod'] || '';
+      return plan;
+    });
     
     // Apply optional filters
     if (params.subject && params.subject.trim()) {
@@ -3634,7 +3582,6 @@
       
       return _respond(schemes);
     } catch (error) {
-      Logger.log('Error getting pending schemes: ' + error.message);
       return _respond({ error: error.message });
     }
   }
@@ -3645,14 +3592,10 @@
   */
   function _handleGetPendingLessonPlans(params) {
     try {
-      Logger.log('=== Getting Pending Lesson Plans ===');
-      Logger.log(`Filter params: ${JSON.stringify(params)}`);
-      
       const sh = _getSheet('LessonPlans');
       const headers = _headers(sh);
       
       const allLessonPlans = _rows(sh).map(row => _indexByHeader(row, headers));
-      Logger.log(`Total lesson plans found: ${allLessonPlans.length}`);
       
       // Normalize planned date/period fields for consistent filtering (selectedDate/selectedPeriod)
       const normalizedPlans = allLessonPlans.map(function(plan){
@@ -3719,8 +3662,6 @@
         );
       }
       
-      Logger.log(`Filtered lesson plans: ${filteredPlans.length}`);
-      
       // Enrich with noOfSessions from Schemes sheet
       const schemesSheet = _getSheet('Schemes');
       const schemesHeaders = _headers(schemesSheet);
@@ -3738,7 +3679,6 @@
       
       return _respond(filteredPlans);
     } catch (error) {
-      Logger.log('Error getting pending lesson plans: ' + error.message);
       return _respond({ error: error.message });
     }
   }
@@ -3748,20 +3688,14 @@
   */
   function _handleGetAllSchemes(params) {
     try {
-      Logger.log('=== Getting All Schemes with Filters ===');
-      Logger.log(`Filter params: ${JSON.stringify(params)}`);
-      
       const sh = _getSheet('Schemes');
       const headers = _headers(sh);
       
       const allRows = _rows(sh);
-      Logger.log(`Total rows found: ${allRows.length}`);
       
       let schemes = allRows
         .map(row => _indexByHeader(row, headers))
         .filter(scheme => scheme && scheme.schemeId);
-      
-      Logger.log(`Valid schemes before filtering: ${schemes.length}`);
       
       // Apply filters
       if (params.teacher && params.teacher !== '') {
@@ -3770,36 +3704,28 @@
           String(scheme.teacherName || '').toLowerCase().includes(teacherLower) ||
           String(scheme.teacherEmail || '').toLowerCase().includes(teacherLower)
         );
-        Logger.log(`After teacher filter (${params.teacher}): ${schemes.length}`);
       }
       
       if (params.class && params.class !== '') {
         schemes = schemes.filter(scheme =>
           String(scheme.class || '').toLowerCase() === params.class.toLowerCase()
         );
-        Logger.log(`After class filter (${params.class}): ${schemes.length}`);
       }
       
       if (params.subject && params.subject !== '') {
         schemes = schemes.filter(scheme =>
           String(scheme.subject || '').toLowerCase() === params.subject.toLowerCase()
         );
-        Logger.log(`After subject filter (${params.subject}): ${schemes.length}`);
       }
       
       if (params.status && params.status !== '' && params.status !== 'All') {
         schemes = schemes.filter(scheme =>
           String(scheme.status || '') === params.status
         );
-        Logger.log(`After status filter (${params.status}): ${schemes.length}`);
       }
-      
-      Logger.log(`Final filtered schemes: ${schemes.length}`);
       
       return _respond(schemes);
     } catch (error) {
-      Logger.log('Error getting all schemes: ' + error.message);
-      Logger.log('Error stack: ' + error.stack);
       return _respond({ error: error.message });
     }
   }
@@ -3809,10 +3735,7 @@
   */
   function _handleCreateSchemeLessonPlan(data) {
     try {
-      Logger.log(`_handleCreateSchemeLessonPlan called with data: ${JSON.stringify(data)}`);
-      
       if (!data.lessonPlanData) {
-        Logger.log('ERROR: No lessonPlanData in request');
         return _respond({ success: false, error: 'No lesson plan data provided' });
       }
       
@@ -3824,7 +3747,6 @@
         if (teacherEmail) invalidateCache('teacher_lessonplans_' + teacherEmail);
         invalidateCache('approved_schemes');
       } catch (invErr) {
-        Logger.log(`Warning: cache invalidation failed after create scheme lesson plan: ${invErr.message}`);
       }
 
       // If teacher explicitly submitted for review, notify HM(s) with full session details.
@@ -3834,13 +3756,10 @@
           _notifyHMOnLessonPlanSubmittedForReview(result.lessonPlanId);
         }
       } catch (mailErr) {
-        Logger.log(`Warning: HM notification email failed: ${mailErr.message}`);
       }
 
       return _respond(result);
     } catch (error) {
-      Logger.log(`ERROR in _handleCreateSchemeLessonPlan: ${error.message}`);
-      Logger.log(`Error stack: ${error.stack}`);
       console.error('Error handling create scheme lesson plan:', error);
       return _respond({ success: false, error: error.message || 'Unknown error occurred' });
     }
@@ -3851,10 +3770,7 @@
   */
   function _handleCreateBulkSchemeLessonPlans(data) {
     try {
-      Logger.log(`_handleCreateBulkSchemeLessonPlans called with data: ${JSON.stringify(data)}`);
-      
       if (!data.bulkPlanData) {
-        Logger.log('ERROR: No bulkPlanData in request');
         return _respond({ success: false, error: 'No bulk plan data provided' });
       }
       
@@ -3866,7 +3782,6 @@
         if (teacherEmail) invalidateCache('teacher_lessonplans_' + teacherEmail);
         invalidateCache('approved_schemes');
       } catch (invErr) {
-        Logger.log(`Warning: cache invalidation failed after bulk create scheme lesson plans: ${invErr.message}`);
       }
 
       // Bulk create puts sessions into Pending Review; notify HM once (best-effort).
@@ -3877,13 +3792,10 @@
           if (lpId) _notifyHMOnLessonPlanSubmittedForReview(lpId);
         }
       } catch (mailErr) {
-        Logger.log(`Warning: HM bulk notification email failed: ${mailErr.message}`);
       }
 
       return _respond(result);
     } catch (error) {
-      Logger.log(`ERROR in _handleCreateBulkSchemeLessonPlans: ${error.message}`);
-      Logger.log(`Error stack: ${error.stack}`);
       console.error('Error handling create bulk scheme lesson plans:', error);
       return _respond({ success: false, error: error.message || 'Unknown error occurred' });
     }
@@ -3901,8 +3813,6 @@
   function _handleGetTeacherDailyData(params) {
     try {
       const { email, date } = params;
-      
-      Logger.log(`[BATCH] Getting teacher daily data for: ${email} on ${date}`);
       
       if (!email || !date) {
         return _respond({ 
@@ -3935,11 +3845,247 @@
       });
       
     } catch (error) {
-      Logger.log(`[BATCH] Error getting teacher daily data: ${error.message}`);
       return _respond({ 
         success: false, 
         error: error.message 
       });
+    }
+  }
+
+  function _normalizeDailyTimetablePayload_(timetableRes) {
+    if (Array.isArray(timetableRes)) return timetableRes;
+    if (timetableRes && Array.isArray(timetableRes.periods)) return timetableRes.periods;
+    if (timetableRes && Array.isArray(timetableRes.data)) return timetableRes.data;
+    if (timetableRes && Array.isArray(timetableRes.timetable)) return timetableRes.timetable;
+    return [];
+  }
+
+  function _normalizeTextKey_(val) {
+    return String(val || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .replace(/[^a-z0-9 ]+/g, '');
+  }
+
+  function _normalizePeriodKey_(val) {
+    const s = String(val ?? '').trim();
+    const m = s.match(/(\d+)/);
+    return m ? m[1] : s;
+  }
+
+  function _buildDailyReportKey_(obj) {
+    const period = _normalizePeriodKey_(obj && (obj.period ?? obj.Period ?? obj.selectedPeriod ?? obj.periodNumber ?? obj.slot));
+    const cls = _normalizeTextKey_(obj && (obj.class ?? obj.Class ?? obj.className ?? obj.standard ?? obj.grade));
+    const subjRaw = (obj && obj.isSubstitution)
+      ? (obj.substituteSubject ?? obj.subject ?? obj.Subject ?? obj.subjectName)
+      : (obj.subject ?? obj.Subject ?? obj.subjectName);
+    const subj = _normalizeTextKey_(subjRaw);
+    return `${period}|${cls}|${subj}`;
+  }
+
+  function _dayNameFromISO_(iso) {
+    const d = new Date(String(iso || '').trim() + 'T00:00:00Z');
+    if (isNaN(d.getTime())) return '';
+    return Utilities.formatDate(d, _tz_(), 'EEEE');
+  }
+
+  function _isWeekendISO_(iso) {
+    const dayName = _dayNameFromISO_(iso);
+    return dayName === 'Saturday' || dayName === 'Sunday';
+  }
+
+  function _addDaysISO_(iso, deltaDays) {
+    const d = new Date(String(iso || '').trim() + 'T00:00:00Z');
+    if (isNaN(d.getTime())) return String(iso || '').trim();
+    d.setUTCDate(d.getUTCDate() + Number(deltaDays || 0));
+    return Utilities.formatDate(d, 'UTC', 'yyyy-MM-dd');
+  }
+
+  function _diffDaysISO_(fromIso, toIso) {
+    const a = new Date(String(fromIso || '').trim() + 'T00:00:00Z');
+    const b = new Date(String(toIso || '').trim() + 'T00:00:00Z');
+    if (isNaN(a.getTime()) || isNaN(b.getTime())) return 0;
+    const diffMs = b.getTime() - a.getTime();
+    return Math.floor(diffMs / 86400000);
+  }
+
+  function _getDateRangeDesc_(fromIso, toIso, maxDays, includeWeekends) {
+    const out = [];
+    const from = String(fromIso || '').trim();
+    const to = String(toIso || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return out;
+    if (from > to) return out;
+
+    const limit = Math.max(1, Number(maxDays || 1));
+    let cur = to;
+    let tries = 0;
+    while (tries < limit) {
+      if (includeWeekends || !_isWeekendISO_(cur)) out.push(cur);
+      if (cur === from) break;
+      cur = _addDaysISO_(cur, -1);
+      tries++;
+    }
+    return out;
+  }
+
+  function _fetchTeacherDailyReportsForDates_(email, dateList) {
+    const out = {};
+    if (!email || !Array.isArray(dateList) || dateList.length === 0) return out;
+    const dateSet = {};
+    dateList.forEach(d => { if (d) dateSet[String(d).trim()] = true; });
+
+    const drSh = _getSheet('DailyReports');
+    const drHeaders = _headers(drSh);
+    const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
+    const emailNorm = String(email || '').toLowerCase().trim();
+
+    allReports.forEach(report => {
+      if (!report || !report.date || !report.teacherEmail) return;
+      const reportDate = _isoDateIST(report.date);
+      if (!dateSet[reportDate]) return;
+      const reportEmail = String(report.teacherEmail || '').toLowerCase().trim();
+      if (reportEmail !== emailNorm) return;
+      if (!out[reportDate]) out[reportDate] = [];
+      out[reportDate].push({
+        ...report,
+        status: 'Submitted'
+      });
+    });
+
+    return out;
+  }
+
+  function _computeMissingDailyReports_(email, dateList, reportsByDate) {
+    const pending = [];
+    if (!email || !Array.isArray(dateList) || dateList.length === 0) {
+      return { pending: [], count: 0, missingDays: 0 };
+    }
+
+    dateList.forEach(date => {
+      const timetableRes = getTeacherDailyTimetable(email, date);
+      const periods = _normalizeDailyTimetablePayload_(timetableRes);
+      const reports = Array.isArray(reportsByDate && reportsByDate[date]) ? reportsByDate[date] : [];
+
+      const submitted = {};
+      reports.forEach(r => {
+        const key = _buildDailyReportKey_(r);
+        if (String(key).split('|').every(part => String(part || '').trim())) submitted[key] = true;
+      });
+
+      periods.forEach(p => {
+        const key = _buildDailyReportKey_(p);
+        const parts = String(key).split('|');
+        if (parts.length !== 3) return;
+        const subjKey = parts[2];
+        if (!parts[0] || !parts[1] || !subjKey) return;
+        if (subjKey === 'free' || subjKey === 'no class' || subjKey === 'noclass') return;
+        if (submitted[key]) return;
+        pending.push({
+          date: date,
+          period: p && (p.period ?? p.Period ?? p.periodNumber ?? p.slot ?? ''),
+          class: p && (p.class ?? p.Class ?? p.className ?? ''),
+          subject: p && (p.isSubstitution ? (p.substituteSubject ?? p.subject ?? p.Subject ?? '') : (p.subject ?? p.Subject ?? '')),
+          isSubstitution: !!(p && p.isSubstitution)
+        });
+      });
+    });
+
+    pending.sort((a, b) => {
+      const d = String(b.date || '').localeCompare(String(a.date || ''));
+      if (d !== 0) return d;
+      return Number(a.period || 0) - Number(b.period || 0);
+    });
+
+    const missingDays = Object.keys(pending.reduce((acc, item) => {
+      const k = String(item.date || '').trim();
+      if (k) acc[k] = true;
+      return acc;
+    }, {})).length;
+
+    return { pending: pending, count: pending.length, missingDays: missingDays };
+  }
+
+  /**
+  * BATCH ENDPOINT: Unified teacher dashboard data
+  * Includes: missing reports (range), today's timetable, today's reports, today's plans
+  */
+  function _handleGetTeacherDashboardData(params) {
+    try {
+      const email = String(params.email || '').toLowerCase().trim();
+      if (!email) {
+        return _respond({ success: false, error: 'Missing required parameter: email' });
+      }
+
+      const dateNorm = _normalizeQueryDate(params.date || _todayISO());
+
+      const settingsKv = _getCachedSettings();
+      const _numSetting = (key, defVal) => {
+        try {
+          const raw = settingsKv && Object.prototype.hasOwnProperty.call(settingsKv, key) ? settingsKv[key] : '';
+          const s = String(raw ?? '').trim();
+          if (!s) return defVal;
+          const n = Number(s);
+          return Number.isFinite(n) ? n : defVal;
+        } catch (e) {
+          return defVal;
+        }
+      };
+
+      const lookbackDays = Math.max(1, Math.min(60, _numSetting('MISSING_DAILY_REPORT_LOOKBACK_DAYS', 7)));
+      const maxRangeDays = Math.max(1, Math.min(90, _numSetting('MISSING_DAILY_REPORT_MAX_RANGE_DAYS', 31)));
+      const includeWeekends = String(params.includeWeekends || '').trim() === '1';
+
+      const yesterdayIso = _addDaysISO_(_todayISO(), -1);
+      const fromParam = String(params.from || params.startDate || '').trim();
+      const toParam = String(params.to || params.endDate || '').trim();
+
+      let rangeTo = toParam ? _normalizeQueryDate(toParam) : yesterdayIso;
+      if (rangeTo > yesterdayIso) rangeTo = yesterdayIso;
+
+      let rangeFrom = fromParam ? _normalizeQueryDate(fromParam) : _addDaysISO_(rangeTo, -(lookbackDays - 1));
+      if (rangeFrom > rangeTo) rangeFrom = rangeTo;
+
+      const diffDays = _diffDaysISO_(rangeFrom, rangeTo) + 1;
+      if (diffDays > maxRangeDays) {
+        rangeFrom = _addDaysISO_(rangeTo, -(maxRangeDays - 1));
+      }
+
+      const cacheKey = generateCacheKey('getTeacherDashboardData', {
+        email: email,
+        date: dateNorm,
+        from: rangeFrom,
+        to: rangeTo,
+        includeWeekends: includeWeekends ? '1' : ''
+      });
+
+      const dataOut = getCachedData(cacheKey, function() {
+        const dateList = _getDateRangeDesc_(rangeFrom, rangeTo, maxRangeDays, includeWeekends);
+        const reportsByDate = _fetchTeacherDailyReportsForDates_(email, dateList);
+        const missingReports = _computeMissingDailyReports_(email, dateList, reportsByDate);
+
+        const timetable = getTeacherDailyTimetable(email, dateNorm);
+        const todayReports = _fetchTeacherDailyReportsForDate(email, dateNorm);
+        const plannedLessons = _fetchPlannedLessonsForDate(email, dateNorm, true);
+
+        return {
+          success: true,
+          date: dateNorm,
+          timetable: timetable,
+          reports: Array.isArray(todayReports) ? todayReports : [],
+          plannedLessons: plannedLessons,
+          missingReports: {
+            range: { from: rangeFrom, to: rangeTo },
+            count: missingReports.count,
+            missingDays: missingReports.missingDays,
+            pending: missingReports.pending
+          }
+        };
+      }, CACHE_TTL.SHORT);
+
+      return _respond(dataOut);
+    } catch (error) {
+      return _respond({ success: false, error: error.message });
     }
   }
 
@@ -3951,8 +4097,7 @@
   function _handleGetPlannedLessonsForDate(params) {
     try {
       const { email, date } = params;
-      
-      Logger.log(`[BATCH] Getting all planned lessons for: ${email} on ${date}`);
+      const includeAll = String(params.includeAll || params.includeAllStatuses || '').trim() === '1';
       
       if (!email || !date) {
         return _respond({ 
@@ -3964,13 +4109,12 @@
       const queryDate = _normalizeQueryDate(date);
       
       // PERFORMANCE: Cache with SHORT TTL - lesson plans can change
-      const cacheKey = 'planned_lessons_' + email + '_' + queryDate;
+      const cacheKey = 'planned_lessons_' + email + '_' + queryDate + '_' + (includeAll ? 'all' : 'ready');
       return _respond(getCachedData(cacheKey, function() {
-        return _fetchPlannedLessonsForDate(email, queryDate);
+        return _fetchPlannedLessonsForDate(email, queryDate, includeAll);
       }, CACHE_TTL.SHORT));
       
     } catch (error) {
-      Logger.log('[BATCH] Error: ' + error.message);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -4202,12 +4346,11 @@
 
       return _respond(out);
     } catch (error) {
-      Logger.log('[getSuggestedPlansForSubstitution] Error: ' + error.message);
       return _respond({ success: false, error: error.message });
     }
   }
   
-  function _fetchPlannedLessonsForDate(email, queryDate) {
+  function _fetchPlannedLessonsForDate(email, queryDate, includeAll) {
     // Block lesson planning on non-teaching days (exams/holidays/events) from AcademicCalendar
     // Check if queryDate falls within any ExamsHolidaysEventsStart to ExamsHolidaysEventsEnd range
     let isNonTeachingDay = false;
@@ -4231,7 +4374,6 @@
         }
       }
     } catch (calErr) {
-      Logger.log(`[BATCH] AcademicCalendar check failed: ${calErr && calErr.message}`);
     }
 
     // NOTE: Do NOT hard-block returning plans here.
@@ -4243,9 +4385,13 @@
     const headers = _headers(sh);
     const allLessonPlans = _rows(sh).map(row => _indexByHeader(row, headers));
     
-    Logger.log(`[BATCH] Total lesson plans in sheet: ${allLessonPlans.length}`);
-    
     // Filter for Ready status, matching date, and matching teacher
+    const isActiveStatus = (statusRaw) => {
+      const s = String(statusRaw || '').trim().toLowerCase();
+      if (!s) return true;
+      return !['cancelled', 'rejected', 'skipped', 'completed early'].includes(s);
+    };
+
     const matchingPlans = allLessonPlans.filter(plan => {
       const planTeacher = String(plan.teacherEmail || plan.email || '').trim().toLowerCase();
       const qTeacher = String(email || '').trim().toLowerCase();
@@ -4269,11 +4415,9 @@
         }
         
         const statusRaw = String(plan.status || '');
-        const isFetchableStatus = _isPlanReadyForTeacher(statusRaw);
+        const isFetchableStatus = includeAll ? isActiveStatus(statusRaw) : _isPlanReadyForTeacher(statusRaw);
         return isFetchableStatus && planDate === queryDate;
       });
-      
-      Logger.log(`[BATCH] Found ${matchingPlans.length} lesson plans for ${queryDate}`);
       
       // Get scheme details for total sessions (batch lookup)
       const schemeSheet = _getSheet('Schemes');
@@ -4310,6 +4454,8 @@
           totalSessions: totalSessions,
           learningObjectives: plan.learningObjectives || '',
           teachingMethods: plan.teachingMethods || '',
+          resourcesRequired: plan.resourcesRequired || '',
+          assessmentMethods: plan.assessmentMethods || '',
           selectedDate: plan.selectedDate,
           selectedPeriod: periodVal,
           class: classVal,
@@ -4323,7 +4469,6 @@
       });
 
     if (isNonTeachingDay && matchingPlans.length === 0) {
-      Logger.log(`[BATCH] ${queryDate} is non-teaching (${nonTeachingReason}) and has no Ready plans for ${email}`);
       return {
         success: true,
         email: email,
@@ -4350,8 +4495,6 @@
     try {
       const { email, date, period, class: className, subject } = params;
       
-      Logger.log(`Getting planned lesson for: ${email}, ${date}, Period ${period}, ${className}, ${subject}`);
-      
       if (!email || !date || !period || !className || !subject) {
         return _respond({ 
           success: false, 
@@ -4362,9 +4505,6 @@
       const sh = _getSheet('LessonPlans');
       const headers = _headers(sh);
       const lessonPlans = _rows(sh).map(row => _indexByHeader(row, headers));
-      
-      Logger.log(`Total lesson plans in sheet: ${lessonPlans.length}`);
-      Logger.log(`Headers: ${JSON.stringify(headers)}`);
       
       // Find lesson plan matching the criteria
       // Status must be "Ready" (HM approved)
@@ -4394,8 +4534,6 @@
         const planPeriod = String(plan.selectedPeriod || plan.period || '');
         
         // Debug logging for each plan
-        Logger.log(`Checking plan ${plan.lpId}: status=${plan.status}, selectedDate=${plan.selectedDate}, selectedPeriod=${plan.selectedPeriod}, planDate=${planDate}, planPeriod=${planPeriod}, class=${plan.class}, subject=${plan.subject}`);
-        
         const statusRaw = String(plan.status || '');
         const isFetchableStatus = _isPlanReadyForTeacher(statusRaw);
         const matches = 
@@ -4405,18 +4543,10 @@
           String(plan.class || '').toLowerCase() === String(className).toLowerCase() &&
           String(plan.subject || '').toLowerCase() === String(subject).toLowerCase();
         
-        if (matches) {
-          Logger.log(`✅ FOUND MATCHING PLAN: ${plan.lpId} for ${className}/${subject}`);
-        } else if (/^(Ready|Rescheduled\s*\(Cascade\))$/i.test(String(plan.status || ''))) {
-          Logger.log(`❌ No match: planDate=${planDate} vs queryDate=${queryDate}, planPeriod=${planPeriod} vs ${period}, class=${plan.class} vs ${className}, subject=${plan.subject} vs ${subject}`);
-        }
-        
         return matches;
       });
       
       if (matchingPlan) {
-        Logger.log(`Returning lesson plan: ${matchingPlan.lpId}`);
-        
         // Get scheme details to include total sessions
         let totalSessions = 1;
         if (matchingPlan.schemeId) {
@@ -4429,10 +4559,8 @@
             
             if (matchingScheme && matchingScheme.noOfSessions) {
               totalSessions = Number(matchingScheme.noOfSessions);
-              Logger.log(`Found scheme with ${totalSessions} total sessions`);
             }
           } catch (schemeError) {
-            Logger.log(`Error fetching scheme details: ${schemeError.message}`);
           }
         }
         
@@ -4453,7 +4581,6 @@
           }
         });
       } else {
-        Logger.log(`No planned lesson found for ${className}/${subject} on ${date} period ${period}`);
         return _respond({
           success: true,
           hasPlannedLesson: false,
@@ -4462,7 +4589,6 @@
       }
       
     } catch (error) {
-      Logger.log('Error getting planned lesson for period: ' + error.message);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -4483,17 +4609,12 @@
       }, CACHE_TTL.SHORT));
       
     } catch (error) {
-      Logger.log('Error getting teacher daily reports: ' + error.message);
       return _respond({ success: false, error: error.message });
     }
   }
   
   function _fetchTeacherDailyReportsForDate(email, date) {
-    Logger.log(`=== GETTING TEACHER DAILY REPORTS ===`);
-    Logger.log(`Email: ${email}, Date: ${date}`);
-    
     if (!email) {
-      Logger.log('ERROR: Teacher email is required');
       return { success: false, error: 'Teacher email is required' };
     }
     
@@ -4502,12 +4623,9 @@
     const drHeaders = _headers(drSh);
     const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
     
-    Logger.log(`Total reports in sheet: ${allReports.length}`);
-    
     const reports = allReports.filter(report => {
       // Skip invalid reports
       if (!report || !report.date || !report.teacherEmail) {
-        Logger.log(`Skipping invalid report: ${JSON.stringify(report)}`);
         return false;
       }
       
@@ -4519,19 +4637,11 @@
       const dateMatch = reportDate === queryDate;
       const emailMatch = reportEmail === email;
       
-      Logger.log(`Report check: email="${reportEmail}" (match:${emailMatch}), date="${reportDate}" (match:${dateMatch}), period=${report.period}, class=${report.class}, subject=${report.subject}`);
-      
       return dateMatch && emailMatch;
     }).map(report => ({
       ...report,
       status: 'Submitted'  // Add status field so frontend knows this report is submitted
     }));
-    
-    Logger.log(`=== RETURNING ${reports.length} REPORTS FOR ${email} ON ${date} ===`);
-    if (reports.length > 0) {
-      Logger.log(`Sample report: ${JSON.stringify(reports[0])}`);
-    }
-    
     return reports;
   }
 
@@ -4550,26 +4660,17 @@
       
       // Enhanced logging for timezone debugging
       const now = new Date();
-      const istNow = Utilities.formatDate(now, TZ, 'yyyy-MM-dd HH:mm:ss EEEE');
+      const istNow = Utilities.formatDate(now, _tz_(), 'yyyy-MM-dd HH:mm:ss EEEE');
       const todayISO = _todayISO();
       const todayDayName = _dayName(todayISO);
       
-      Logger.log(`=== Daily Reports Request ===`);
-      Logger.log(`Current time (IST): ${istNow}`);
-      Logger.log(`Today (IST): ${todayISO} = ${todayDayName}`);
-      Logger.log(`Requested date: ${normalizedDate} = ${dayName}`);
-      Logger.log(`Date match: ${date === todayISO ? 'YES (today)' : 'NO (different day)'}`);
-      
       // Verify date parsing
       const testDate = new Date(date + 'T00:00:00');
-      Logger.log(`Test parse: ${date} -> ${testDate.toISOString()} -> ${Utilities.formatDate(testDate, TZ, 'EEEE, dd MMM yyyy')}`);
-      
       // Get timetable periods for THIS DAY ONLY (WITH substitutions/exchanges applied)
       // IMPORTANT: HM Live Period view should reflect substitutions immediately.
       // So we bypass long-lived timetable caches and use the merged daily timetable.
       const mergedDaily = _fetchDailyTimetableWithSubstitutions(normalizedDate);
       const todayTimetable = Array.isArray(mergedDaily && mergedDaily.timetable) ? mergedDaily.timetable : [];
-      Logger.log(`Merged timetable entries for ${normalizedDate} (${dayName}): ${todayTimetable.length}`);
       
       // Get all daily reports for this date
       const drSh = _getSheet('DailyReports');
@@ -4584,8 +4685,6 @@
           
           return reportDate === queryDate;
         });
-      
-      Logger.log(`Found ${todayTimetable.length} timetable periods and ${allReports.length} reports`);
       
       // Create a map of submitted reports by key (teacherEmail|class|subject|period)
       const reportMap = {};
@@ -4675,8 +4774,6 @@
         return a.period - b.period;
       });
       
-      Logger.log(`Returning ${result.length} total period records`);
-      
       return _respond({
         success: true,
         date: date,
@@ -4689,7 +4786,6 @@
       });
       
     } catch (error) {
-      Logger.log('Error getting daily reports for date: ' + error.message);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -4702,8 +4798,6 @@
     try {
       const date = params.date || _todayISO();
       const normalizedDate = _isoDateIST(date);
-      Logger.log(`Getting lesson plans for date: ${normalizedDate}`);
-      
       // Get all lesson plans for this date
       const lpSh = _getSheet('LessonPlans');
       const lpHeaders = _headers(lpSh);
@@ -4713,8 +4807,6 @@
           const lpDate = _isoDateIST(lp.selectedDate);
           return lpDate === normalizedDate;
         });
-      
-      Logger.log(`Found ${allLessonPlans.length} lesson plans for ${normalizedDate}`);
       
       // Get daily reports to check completion status
       const drSh = _getSheet('DailyReports');
@@ -4767,8 +4859,6 @@
         return a.class.localeCompare(b.class);
       });
       
-      Logger.log(`Returning ${result.length} lesson plan records`);
-      
       return _respond({
         success: true,
         date: normalizedDate,
@@ -4783,7 +4873,6 @@
       });
       
     } catch (error) {
-      Logger.log('Error getting lesson plans for date: ' + error.message);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -4795,9 +4884,6 @@
   function _handleSendCustomNotification(params) {
     try {
       const { userEmail, title, message, priority, recipients } = params;
-      
-      Logger.log(`=== Sending Custom Notification ===`);
-      Logger.log(`From: ${userEmail}, Title: ${title}, Recipients: ${recipients}, Priority: ${priority}`);
       
       if (!title || !message) {
         return _respond({ success: false, error: 'Title and message are required' });
@@ -4834,8 +4920,6 @@
         });
       }
       
-      Logger.log(`Found ${targetUsers.length} target users for notification`);
-      
       // Send email to each recipient
       let successCount = 0;
       let failCount = 0;
@@ -4868,13 +4952,9 @@
             failCount++;
           }
         } catch (err) {
-          Logger.log(`Failed to send email to ${userEmail}: ${err.message}`);
           failCount++;
         }
       });
-      
-      Logger.log(`Notification sent: ${successCount} successful, ${failCount} failed`);
-      
       return _respond({
         success: true,
         message: `Notice sent to ${successCount} recipients`,
@@ -4883,7 +4963,6 @@
       });
       
     } catch (error) {
-      Logger.log('Error sending custom notification: ' + error.message);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -4895,9 +4974,6 @@
   function _handleCheckCascadingIssues(params) {
     try {
       const { teacherEmail, chapter, sessionNo, class: className, subject } = params;
-      
-      Logger.log(`=== CHECKING CASCADING ISSUES ===`);
-      Logger.log(`Teacher: ${teacherEmail}, Chapter: ${chapter}, Session: ${sessionNo}, Class: ${className}, Subject: ${subject}`);
       
       if (!teacherEmail || !chapter || !sessionNo || !className || !subject) {
         return _respond({ 
@@ -4920,8 +4996,6 @@
       const drHeaders = _headers(drSh);
       const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
       
-      Logger.log(`Total reports in sheet: ${allReports.length}`);
-      
       // Filter reports for this chapter by this teacher
       const chapterReports = allReports.filter(report => {
         const matchesTeacher = String(report.teacherEmail || '').toLowerCase() === String(teacherEmail || '').toLowerCase();
@@ -4931,8 +5005,6 @@
         
         return matchesTeacher && matchesChapter && matchesClass && matchesSubject;
       });
-      
-      Logger.log(`Found ${chapterReports.length} reports for chapter "${chapter}"`);
       
       // Check previous sessions
       const warnings = [];
@@ -4945,7 +5017,6 @@
         
         if (sessionReport) {
           const completion = Number(sessionReport.completionPercentage || 0);
-          Logger.log(`Session ${checkSessionNo}: ${completion}% complete`);
           
           if (completion < 75) {
             incompleteSessions.push({
@@ -4957,8 +5028,6 @@
             });
           }
         } else {
-          Logger.log(`Session ${checkSessionNo}: Not found (0% complete)`);
-          
           incompleteSessions.push({
             session: checkSessionNo,
             completion: 0,
@@ -4983,8 +5052,6 @@
         });
       }
       
-      Logger.log(`=== CASCADING CHECK RESULT: ${warnings.length} warnings ===`);
-      
       return _respond({
         success: true,
         hasWarnings: warnings.length > 0,
@@ -4994,7 +5061,6 @@
       });
       
     } catch (error) {
-      Logger.log('Error checking cascading issues: ' + error.message);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -5028,6 +5094,16 @@
           return defVal;
         }
       };
+
+      const _stringSetting = (key, defVal) => {
+        try {
+          const raw = settingsKv && Object.prototype.hasOwnProperty.call(settingsKv, key) ? settingsKv[key] : '';
+          const s = String(raw ?? '').trim();
+          return s ? s : defVal;
+        } catch (e) {
+          return defVal;
+        }
+      };
       
       // Extract period times for different days
       const mondayToThursdaySetting = settingsData.find(row => 
@@ -5046,7 +5122,6 @@
         try {
           periodTimesWeekday = JSON.parse(mondayToThursdaySetting.value);
         } catch (e) {
-          Logger.log(`[getAppSettings] Failed to parse weekday period times: ${e.message}`);
         }
       }
       
@@ -5054,7 +5129,15 @@
         try {
           periodTimesFriday = JSON.parse(fridaySetting.value);
         } catch (e) {
-          Logger.log(`[getAppSettings] Failed to parse Friday period times: ${e.message}`);
+        }
+      }
+
+      const periodTimesByClassRaw = _stringSetting('periodTimesByClass', '');
+      let periodTimesByClass = null;
+      if (periodTimesByClassRaw) {
+        try {
+          periodTimesByClass = JSON.parse(periodTimesByClassRaw);
+        } catch (e) {
         }
       }
       
@@ -5063,6 +5146,21 @@
         periodTimesWeekday: periodTimesWeekday,
         periodTimesFriday: periodTimesFriday,
         periodTimes: periodTimesWeekday,  // Provide default weekday times
+        periodTimesByClass: periodTimesByClass,
+        periodTimesByClassRaw: periodTimesByClassRaw,
+
+        lessonplanBulkOnly: _boolSetting('lessonplan_bulk_only', false),
+
+        // Reporting and cascade settings
+        allowBackfillReporting: _boolSetting('allow_backfill_reporting', false),
+        dailyReportDeleteMinutes: _numSetting('DAILY_REPORT_DELETE_MINUTES', 0),
+        cascadeAutoEnabled: _boolSetting('cascade_auto_enabled', false),
+
+        // Lesson plan notification settings
+        lessonplanNotifyEnabled: _boolSetting('LESSONPLAN_NOTIFY_ENABLED', false),
+        lessonplanNotifyRoles: _stringSetting('LESSONPLAN_NOTIFY_ROLES', ''),
+        lessonplanNotifyEmails: _stringSetting('LESSONPLAN_NOTIFY_EMAILS', ''),
+        lessonplanNotifyEvents: _stringSetting('LESSONPLAN_NOTIFY_EVENTS', ''),
 
         // Missing Daily Reports (teacher dashboard)
         // These are controlled via Settings sheet (HM-controlled).
@@ -5076,9 +5174,94 @@
       });
       
     } catch (error) {
-      Logger.log('[getAppSettings] ERROR: ' + error.message);
-      Logger.log('[getAppSettings] Stack: ' + error.stack);
       return _respond({ success: false, error: error.message });
+    }
+  }
+
+  function _handleUpdateAppSettings(data) {
+    try {
+      const email = String((data && data.email) || '').toLowerCase().trim();
+      if (!_isHMOrSuperAdminSafe(email)) {
+        return _respond({ success: false, error: 'Permission denied. HM or Super Admin access required.' });
+      }
+
+      let updates = [];
+      if (Array.isArray(data && data.settings)) {
+        updates = data.settings;
+      } else if (Array.isArray(data && data.updates)) {
+        updates = data.updates;
+      } else if (data && data.key) {
+        updates = [{ key: data.key, value: data.value, description: data.description }];
+      }
+
+      if (!updates || updates.length === 0) {
+        return _respond({ success: false, error: 'No settings provided.' });
+      }
+
+      const sh = _getSheet('Settings');
+      _ensureHeaders(sh, ['key', 'value', 'description']);
+      const headers = _headers(sh);
+      const keyIdx = headers.indexOf('key');
+      const valueIdx = headers.indexOf('value');
+      const descIdx = headers.indexOf('description');
+
+      if (keyIdx < 0 || valueIdx < 0) {
+        return _respond({ success: false, error: 'Settings sheet missing required headers.' });
+      }
+
+      const rows = _rows(sh);
+      const keyToRow = {};
+      rows.forEach(function(row, idx) {
+        const obj = _indexByHeader(row, headers);
+        const k = String(obj.key || '').trim();
+        if (k) keyToRow[k] = idx + 2;
+      });
+
+      const updated = [];
+      const added = [];
+
+      updates.forEach(function(update) {
+        const key = String(update && update.key ? update.key : '').trim();
+        if (!key) return;
+        const value = (update && Object.prototype.hasOwnProperty.call(update, 'value')) ? update.value : '';
+        const description = (update && Object.prototype.hasOwnProperty.call(update, 'description')) ? update.description : null;
+
+        if (Object.prototype.hasOwnProperty.call(keyToRow, key)) {
+          const rowNumber = keyToRow[key];
+          sh.getRange(rowNumber, valueIdx + 1).setValue(value === null || value === undefined ? '' : value);
+          if (description !== null && descIdx >= 0) {
+            sh.getRange(rowNumber, descIdx + 1).setValue(description === null || description === undefined ? '' : description);
+          }
+          updated.push(key);
+        } else {
+          const row = new Array(headers.length).fill('');
+          row[keyIdx] = key;
+          row[valueIdx] = value === null || value === undefined ? '' : value;
+          if (descIdx >= 0 && description !== null) {
+            row[descIdx] = description === null || description === undefined ? '' : description;
+          }
+          sh.appendRow(row);
+          added.push(key);
+        }
+      });
+
+      try {
+        logAudit({
+          action: AUDIT_ACTIONS.UPDATE,
+          entityType: AUDIT_ENTITIES.SETTINGS,
+          entityId: 'Settings',
+          userEmail: email,
+          userName: data.name || email || '',
+          userRole: _isSuperAdminSafe(email) ? 'Super Admin' : 'HM',
+          afterData: { updated: updated, added: added },
+          description: `Updated ${updated.length + added.length} setting(s)`,
+          severity: AUDIT_SEVERITY.WARNING
+        });
+      } catch (_auditErr) { /* ignore audit failures */ }
+
+      return _respond({ success: true, updated: updated, added: added });
+    } catch (error) {
+      return _respond({ success: false, error: String(error && error.message ? error.message : error) });
     }
   }
 
@@ -5274,12 +5457,9 @@
   */
   function _handleUpdateSessionCompletion(data) {
     try {
-      Logger.log(`_handleUpdateSessionCompletion called with data: ${JSON.stringify(data)}`);
-      
       const result = updateSessionCompletion(data);
       return _respond(result);
     } catch (error) {
-      Logger.log(`ERROR in _handleUpdateSessionCompletion: ${error.message}`);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -5292,8 +5472,6 @@
   function _handleGetSchemeCompletionAnalytics(data) {
     try {
       const schemeId = data.schemeId || '';
-      Logger.log(`_handleGetSchemeCompletionAnalytics called for: ${schemeId}`);
-      
       if (!schemeId) {
         return _respond({ success: false, error: 'Scheme ID is required' });
       }
@@ -5301,7 +5479,6 @@
       const result = getSchemeCompletionAnalytics(schemeId);
       return _respond(result);
     } catch (error) {
-      Logger.log(`ERROR in _handleGetSchemeCompletionAnalytics: ${error.message}`);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -5312,8 +5489,6 @@
   function _handleGetSessionCompletionHistory(data) {
     try {
       const teacherEmail = data.teacherEmail || '';
-      Logger.log(`_handleGetSessionCompletionHistory called for: ${teacherEmail}`);
-      
       if (!teacherEmail) {
         return _respond({ success: false, error: 'Teacher email is required' });
       }
@@ -5327,7 +5502,6 @@
       
       return _respond(result);
     } catch (error) {
-      Logger.log(`ERROR in _handleGetSessionCompletionHistory: ${error.message}`);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -5337,13 +5511,10 @@
   */
   function _handleGetAllTeachersPerformance(data) {
     try {
-      Logger.log('_handleGetAllTeachersPerformance called');
-      
       // Use the heavy computation version from raw data
       const result = computeAllTeachersPerformanceFromRaw();
       return _respond(result);
     } catch (error) {
-      Logger.log(`ERROR in _handleGetAllTeachersPerformance: ${error.message}`);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -5354,12 +5525,9 @@
   function _handleGetSchoolSessionAnalytics(data) {
     try {
       const filters = data.filters || {};
-      Logger.log(`_handleGetSchoolSessionAnalytics called with filters: ${JSON.stringify(filters)}`);
-      
       const result = getSchoolSessionAnalytics(filters);
       return _respond(result);
     } catch (error) {
-      Logger.log(`ERROR in _handleGetSchoolSessionAnalytics: ${error.message}`);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -5369,12 +5537,9 @@
   */
   function _handleGetCascadingIssuesReport(data) {
     try {
-      Logger.log('_handleGetCascadingIssuesReport called');
-      
       const result = getCascadingIssuesReport();
       return _respond(result);
     } catch (error) {
-      Logger.log(`ERROR in _handleGetCascadingIssuesReport: ${error.message}`);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -5384,12 +5549,9 @@
   */
   function _handleSyncSessionDependencies(data) {
     try {
-      Logger.log('_handleSyncSessionDependencies called');
-      
       const result = syncSessionDependenciesFromReports();
       return _respond(result);
     } catch (error) {
-      Logger.log(`ERROR in _handleSyncSessionDependencies: ${error.message}`);
       return _respond({ success: false, error: error.message });
     }
   }
@@ -5422,8 +5584,6 @@
       const schemeSh = _getSheet('Schemes');
       const schemeHeaders = _headers(schemeSh);
       const allSchemes = _rows(schemeSh).map(row => _indexByHeader(row, schemeHeaders));
-      
-      Logger.log(`getAllTeachersPerformance: LP=${allLessonPlans.length}, DR=${allReports.length}, Schemes=${allSchemes.length}`);
       
       // Build teacher data structure with Plan vs Actual tracking
       const teacherData = {};
@@ -5601,7 +5761,7 @@
           // Additional info
           approvedPlans: teacher.approvedPlans,
           pendingPlans: teacher.pendingPlans,
-          lastSubmitDate: teacher.lastSubmitDate ? Utilities.formatDate(teacher.lastSubmitDate, TZ, 'yyyy-MM-dd') : 'Never',
+          lastSubmitDate: teacher.lastSubmitDate ? Utilities.formatDate(teacher.lastSubmitDate, _tz_(), 'yyyy-MM-dd') : 'Never',
           subjects: Array.from(teacher.subjects).join(', '),
           classes: Array.from(teacher.classes).join(', '),
           chapters: Array.from(teacher.chapters).length
@@ -5615,15 +5775,12 @@
         return b.qualityScore - a.qualityScore;
       });
       
-      Logger.log(`getAllTeachersPerformance: Computed performance for ${performances.length} teachers`);
-      
       return {
         success: true,
         performances: performances,
         generatedAt: new Date().toISOString()
       };
     } catch (error) {
-      Logger.log(`ERROR in getAllTeachersPerformance: ${error.message}`);
       return {
         success: false,
         error: error.message,
@@ -5647,8 +5804,6 @@
       const drSh = _getSheet('DailyReports');
       const drHeaders = _headers(drSh);
       const allReports = _rows(drSh).map(row => _indexByHeader(row, drHeaders));
-      
-      Logger.log(`getClassSubjectPerformance: LP=${allLessonPlans.length}, DR=${allReports.length}`);
       
       // STEP 1: Create lesson plan index for matching
       const lessonPlanIndex = {};
@@ -5858,7 +6013,6 @@
         generatedAt: new Date().toISOString()
       };
     } catch (error) {
-      Logger.log(`ERROR in getClassSubjectPerformance: ${error.message}`);
       return {
         success: false,
         error: error.message,
@@ -5946,7 +6100,6 @@
         generatedAt: new Date().toISOString()
       };
     } catch (error) {
-      Logger.log(`ERROR in getDailySubmissionMetrics: ${error.message}`);
       return {
         success: false,
         error: error.message,
@@ -6051,7 +6204,6 @@
       };
       
     } catch (error) {
-      Logger.log(`[getDailyReadinessStatus] Error: ${error.message}`);
       return {
         success: false,
         error: error.message
@@ -6074,7 +6226,6 @@
         seen.add(key);
         uniquePeriods.push(period);
       } else {
-        Logger.log(`[_calculateLessonPlanReadiness] Duplicate period found: ${key}`);
       }
     });
     
@@ -6115,8 +6266,6 @@
     // Group pending by teacher for easier follow-up
     const byTeacher = _groupPendingByTeacher(pendingDetails);
     
-    Logger.log(`[_calculateLessonPlanReadiness] Total: ${total}, Ready: ${readyCount}, Pending: ${pendingCount}`);
-    
     return {
       ready: readyCount,
       pending: pendingCount,
@@ -6143,7 +6292,6 @@
         seen.add(key);
         uniquePeriods.push(period);
       } else {
-        Logger.log(`[_calculateDailyReportStatus] Duplicate period found: ${key}`);
       }
     });
     
@@ -6182,8 +6330,6 @@
     
     // Group pending by teacher
     const byTeacher = _groupPendingByTeacher(pendingDetails);
-    
-    Logger.log(`[_calculateDailyReportStatus] Total: ${total}, Submitted: ${submittedCount}, Pending: ${pendingCount}`);
     
     return {
       submitted: submittedCount,
@@ -6267,7 +6413,6 @@
         generatedAt: new Date().toISOString()
       };
     } catch (error) {
-      Logger.log(`ERROR in getHMAnalyticsDashboard: ${error.message}`);
       return {
         success: false,
         error: error.message
@@ -6282,8 +6427,6 @@
   */
   function getSchemeSubmissionHelper(teacherEmail, className, subject, term) {
     try {
-      Logger.log(`[SchemeHelper] Request: ${teacherEmail}, ${className}, ${subject}, ${term}`);
-      
       // 1. Get Academic Calendar for the term
       const calendarData = _getCachedSheetData('AcademicCalendar');
       const termInfo = calendarData.data.find(row => 
@@ -6437,7 +6580,6 @@
       };
       
     } catch (error) {
-      Logger.log(`ERROR in getSchemeSubmissionHelper: ${error.message}\n${error.stack}`);
       return {
         success: false,
         error: error.message
@@ -6681,7 +6823,6 @@
       };
       
     } catch (error) {
-      Logger.log(`ERROR in getSyllabusPaceTracking: ${error.message}\n${error.stack}`);
       return {
         success: false,
         error: error.message
@@ -6699,9 +6840,6 @@
   */
   function getCascadePreview(lpId, teacherEmail, originalDate) {
     try {
-      Logger.log(`=== GET CASCADE PREVIEW ===`);
-      Logger.log(`LP ID: ${lpId}, Teacher: ${teacherEmail}, Original Date: ${originalDate}`);
-      
       const lpSh = _getSheet('LessonPlans');
       const lpHeaders = _headers(lpSh);
       const allPlans = _rows(lpSh).map(row => _indexByHeader(row, lpHeaders));
@@ -6814,10 +6952,8 @@
                 teachingMethods: upcoming[k].teachingMethods || ''
               });
             }
-            Logger.log(`[getCascadePreview] Fallback used: matched ${remainingSessions.length} upcoming sessions by teacher/class/subject`);
           }
         } catch (fbErr) {
-          Logger.log(`[getCascadePreview] Fallback error: ${fbErr && fbErr.message ? fbErr.message : fbErr}`);
         }
         if (remainingSessions.length === 0) {
           return {
@@ -6956,7 +7092,6 @@
       };
       
     } catch (error) {
-      Logger.log(`Error in getCascadePreview: ${error.message}`);
       return { success: false, error: error.message };
     }
   }
@@ -6968,10 +7103,7 @@
     const lock = LockService.getDocumentLock();
     try {
       lock.waitLock(10000);
-      
-      Logger.log(`=== EXECUTE CASCADE ===`);
       const cascadeId = 'CASCADE_' + Date.now();
-      Logger.log(`[executeCascade] id=${cascadeId} payload keys: ${Object.keys(cascadeData || {}).join(',')}`);
       
       const { sessionsToUpdate, sessionsToReschedule, mode } = cascadeData;
       // Support both naming from preview: sessionsToReschedule or legacy sessionsToUpdate
@@ -6990,7 +7122,6 @@
         if (!requiredHeaders.includes('originalPeriod')) requiredHeaders.push('originalPeriod');
         _ensureHeaders(lpSh, requiredHeaders);
       } catch (ensureErr) {
-        Logger.log(`[executeCascade] Header ensure warning: ${ensureErr && ensureErr.message ? ensureErr.message : ensureErr}`);
       }
       const lpHeaders = _headers(lpSh);
       const allPlans = _rows(lpSh).map((row, index) => ({ 
@@ -7011,7 +7142,6 @@
           const { lpId, proposedDate, proposedPeriod, learningObjectives, teachingMethods } = session;
           if (!lpId || !proposedDate || proposedPeriod === undefined || proposedPeriod === null) {
             skippedPlans.push({ lpId: lpId || 'UNKNOWN', reason: 'missing_fields' });
-            Logger.log(`[executeCascade] SKIP ${lpId} missing fields`);
             return;
           }
           
@@ -7040,7 +7170,6 @@
                 }
               }
             } catch (odErr) {
-              Logger.log(`[executeCascade] originalDate persist warning for ${lpId}: ${odErr && odErr.message ? odErr.message : odErr}`);
             }
             lpSh.getRange(rowNum, dateCol).setValue(proposedDate);
           }
@@ -7057,7 +7186,6 @@
                 }
               }
             } catch (opErr) {
-              Logger.log(`[executeCascade] originalPeriod persist warning for ${lpId}: ${opErr && opErr.message ? opErr.message : opErr}`);
             }
             lpSh.getRange(rowNum, periodCol).setValue(parseInt(proposedPeriod));
           }
@@ -7089,7 +7217,6 @@
               }
             }
           } catch (statusErr) {
-            Logger.log(`[executeCascade] Status update skipped for ${lpId}: ${statusErr.message}`);
           }
           
           updatedPlans.push({
@@ -7106,8 +7233,6 @@
             originalPeriod: plan.originalPeriod || plan.selectedPeriod
             , cascadeMarked: lpId === originalLpId
           });
-          
-          Logger.log(`✅ [${cascadeId}] Updated ${lpId}: ${plan.selectedDate} P${plan.selectedPeriod} → ${proposedDate} P${proposedPeriod}`);
           
         } catch (sessionError) {
           errors.push(`Error updating ${session.lpId}: ${sessionError.message}`);
@@ -7151,14 +7276,12 @@
                   const appendNote = `Cascade: plan moved to new dates (${updates.length} sessions rescheduled)`;
                   drSh.getRange(i + 2, notesCol).setValue(existingNotes ? (existingNotes + ' | ' + appendNote) : appendNote);
                 }
-                Logger.log(`DailyReport row updated for cascade (row ${i + 2})`);
                 break;
               }
             }
           }
         }
       } catch (drErr) {
-        Logger.log(`Warning: failed to update DailyReports for cascade context: ${drErr.message}`);
       }
 
       SpreadsheetApp.flush();
@@ -7176,7 +7299,6 @@
       };
       
     } catch (error) {
-      Logger.log(`Error in executeCascade: ${error.message}`);
       return { success: false, error: error.message };
     } finally {
       lock.releaseLock();
@@ -7195,15 +7317,12 @@
       const rows = _rows(settingsSheet).map(r => _indexByHeader(r, headers));
       const flagRow = rows.find(r => String(r.key || '').toLowerCase().trim() === 'cascade_auto_enabled');
       if (!flagRow || flagRow.value === undefined || flagRow.value === '') {
-        Logger.log('[autoCascadeFlag] Missing flag row – default ENABLED');
         return true;
       }
       const raw = String(flagRow.value).toLowerCase().trim();
       const enabled = ['1','true','yes','on','enabled'].includes(raw);
-      Logger.log(`[autoCascadeFlag] Raw="${raw}" → enabled=${enabled}`);
       return enabled;
     } catch (err) {
-      Logger.log(`[autoCascadeFlag] Error reading flag: ${err.message} – default ENABLED`);
       return true;
     }
   }
@@ -7569,66 +7688,6 @@
     }
   }
 
-  /**
-  * Migration: Add IDs to existing DailyReports rows that don't have them
-  * Run this once after deploying the 'id' column addition
-  */
-  function migrateDailyReportsAddIds() {
-    try {
-      Logger.log('=== Starting DailyReports ID Migration ===');
-      const sh = _getSheet('DailyReports');
-      _ensureHeaders(sh, SHEETS['DailyReports']); // Ensure 'id' column exists
-      const headers = _headers(sh);
-      const data = _rows(sh);
-      
-      Logger.log(`Total rows in DailyReports: ${data.length}`);
-      
-      const idIdx = headers.indexOf('id');
-      if (idIdx === -1) {
-        Logger.log('ERROR: id column not found in headers');
-        return { success: false, error: 'id column not found in headers' };
-      }
-      
-      Logger.log(`ID column found at index: ${idIdx}`);
-      
-      let updated = 0;
-      for (let i = 0; i < data.length; i++) {
-        const row = data[i];
-        const currentId = String(row[idIdx] || '').trim();
-        
-        // If ID is missing or empty, generate a new UUID
-        if (!currentId) {
-          const newId = _uuid();
-          sh.getRange(i + 2, idIdx + 1).setValue(newId); // +2 for header row and 0-index
-          updated++;
-          if (updated <= 3) {
-            Logger.log(`Row ${i+2}: Added ID ${newId}`);
-          }
-        }
-      }
-      
-      const result = { 
-        success: true, 
-        message: `Migration complete: ${updated} rows updated with new IDs`,
-        totalRows: data.length,
-        rowsUpdated: updated
-      };
-      
-      Logger.log(`=== Migration Complete ===`);
-      Logger.log(`Total rows: ${data.length}`);
-      Logger.log(`Rows updated: ${updated}`);
-      Logger.log(`Rows already had IDs: ${data.length - updated}`);
-      
-      return result;
-    } catch (err) {
-      Logger.log(`ERROR in migration: ${err.message}`);
-      return { 
-        success: false, 
-        error: err && err.message ? err.message : String(err) 
-      };
-    }
-  }
-
   // ===== Handlers: Chapter Completion =====
   function _handleCheckChapterCompletion(params) {
     try {
@@ -7636,8 +7695,9 @@
       var cls = params.class || '';
       var subject = params.subject || '';
       var chapter = params.chapter || '';
+      var schemeId = params.schemeId || '';
       var date = params.date || '';
-      return _respond(checkChapterCompletion({ teacherEmail: teacherEmail, class: cls, subject: subject, chapter: chapter, date: date }));
+      return _respond(checkChapterCompletion({ teacherEmail: teacherEmail, class: cls, subject: subject, chapter: chapter, schemeId: schemeId, date: date }));
     } catch (err) {
       return _respond({ success: false, error: err && err.message ? err.message : String(err) });
     }
@@ -7801,8 +7861,6 @@
       const comments = String(data.reviewComments || data.remarks || '').trim();
       const requesterEmail = String(data.requesterEmail || '').trim().toLowerCase();
 
-      Logger.log(`[BulkChapter] payload: schemeId=${schemeId}, chapter=${chapter}, status=${targetStatus}, by=${requesterEmail}`);
-
       if (!schemeId || !chapter || !targetStatus) {
         return _respond({ success: false, error: 'Missing required fields (schemeId, chapter, status)' });
       }
@@ -7815,17 +7873,13 @@
       // ROLE CHECK: Only HM or Super Admin can perform bulk approvals
       if (targetStatus === 'Ready') {
         if (!requesterEmail) {
-          Logger.log('[BulkChapter] AUTHORIZATION FAILED: No requester email provided for approval');
           return _respond({ success: false, error: 'Authorization required: User email must be provided for approval' });
         }
         
         const isAuthorized = _isHMOrSuperAdminSafe(requesterEmail);
         if (!isAuthorized) {
-          Logger.log(`[BulkChapter] AUTHORIZATION FAILED: User ${requesterEmail} is not HM or Super Admin`);
           return _respond({ success: false, error: 'Unauthorized: Only Headmaster or Super Admin can approve lesson plans' });
         }
-        
-        Logger.log(`[BulkChapter] ✅ Authorization passed: ${requesterEmail} is HM or Super Admin`);
       }
 
       // For approval to Ready, require completeness of chapter
@@ -7843,7 +7897,6 @@
             });
           }
         } catch (eComp) {
-          Logger.log(`[BulkChapter] completeness check error: ${eComp && eComp.message}`);
           return _respond({ success: false, error: 'Approval blocked: failed to verify chapter completeness' });
         }
       }
@@ -7906,13 +7959,11 @@
           updated += 1;
           updatedIds.push(String(t.plan.lpId || ''));
         } catch (wErr) {
-          Logger.log(`[BulkChapter] write failed at row ${rowIndex}: ${wErr && wErr.message}`);
         }
       }
 
       return _respond({ success: true, updated: updated, skipped: (targets.length - updated), totalTargeted: targets.length, lpIdsUpdated: updatedIds });
     } catch (error) {
-      Logger.log(`[BulkChapter] error: ${error && error.message}`);
       return _respond({ success: false, error: error && error.message });
     } finally {
       try { lock.releaseLock(); } catch (e) {}
@@ -8028,7 +8079,6 @@
 
       return _respond({ total: filtered.length, groupCount: groups.length, groups: groups });
     } catch (error) {
-      Logger.log('Error grouping lesson plans by chapter: ' + error.message);
       return _respond({ error: error.message });
     }
   }
@@ -8115,7 +8165,6 @@
 
       return _respond({ total: filtered.length, classGroupCount: groups.length, groups: groups });
     } catch (error) {
-      Logger.log('Error grouping lesson plans by class: ' + error.message);
       return _respond({ error: error.message });
     }
   }
@@ -8136,8 +8185,6 @@
 
   function _fetchMissingLessonPlans(teacherEmail, daysAhead) {
     try {
-      Logger.log(`Getting missing lesson plans for ${teacherEmail}, ${daysAhead} days ahead`);
-      
       // Get teacher's timetable
       const timetableSheet = _getSheet('Timetable');
       const timetableHeaders = _headers(timetableSheet);
@@ -8194,8 +8241,6 @@
       const startDate = schoolDays.length > 0 ? schoolDays[0].date : _todayISO();
       const endDateISO = schoolDays.length > 0 ? schoolDays[schoolDays.length - 1].date : _todayISO();
       
-      Logger.log(`Date range: ${startDate} to ${endDateISO} (${schoolDays.length} school days)`);
-      
       // Get existing lesson plans
       const lessonPlansSheet = _getSheet('LessonPlans');
       const lessonPlansHeaders = _headers(lessonPlansSheet);
@@ -8208,17 +8253,11 @@
       
       // Find missing lesson plans
       const missing = [];
-      
-      Logger.log(`Checking ${schoolDays.length} school days for ${teacherEmail}`);
-      
       schoolDays.forEach(day => {
         // Get periods for this teacher on this day
         const dayPeriods = teacherTimetable.filter(slot =>
           String(slot.dayOfWeek || slot.day || '').toLowerCase() === day.dayName.toLowerCase()
         );
-        
-        Logger.log(`${day.date} (${day.dayName}): ${dayPeriods.length} periods scheduled`);
-        
         dayPeriods.forEach(period => {
           // Check if period is substituted (teacher is absent)
           const isSubstituted = substitutions.some(sub => 
@@ -8228,7 +8267,6 @@
           );
           
           if (isSubstituted) {
-            Logger.log(`  Period ${period.period} (${period.class} ${period.subject}): SUBSTITUTED - skipping`);
             return; // Skip substituted periods
           }
           
@@ -8240,9 +8278,6 @@
             String(plan.class || '').toLowerCase() === String(period.class || '').toLowerCase() &&
             String(plan.subject || '').toLowerCase() === String(period.subject || '').toLowerCase()
           );
-          
-          Logger.log(`  Period ${period.period} (${period.class} ${period.subject}): ${hasLessonPlan ? 'HAS PLAN ✓' : 'MISSING ✗'}`);
-          
           if (!hasLessonPlan) {
             // Calculate urgency (days until period)
             const daysUntil = Math.ceil((new Date(day.date) - today) / (1000 * 60 * 60 * 24));
@@ -8285,7 +8320,6 @@
       };
       
     } catch (error) {
-      Logger.log(`ERROR in getMissingLessonPlans: ${error.message}\n${error.stack}`);
       return {
         success: false,
         error: error.message
@@ -8321,13 +8355,9 @@
   
   function _fetchDailyReports(teacher = '', fromDate = '', toDate = '', cls = '', subject = '', chapter = '') {
     try {
-      Logger.log(`getDailyReports: teacher=${teacher}, fromDate=${fromDate}, toDate=${toDate}, class=${cls}, subject=${subject}, chapter=${chapter}`);
-      
       const drSh = _getSheet('DailyReports');
       const headers = _headers(drSh);
       const allReports = _rows(drSh).map(row => _indexByHeader(row, headers));
-      
-      Logger.log(`Total daily reports: ${allReports.length}`);
       
       // Apply filters
       let filtered = allReports.filter(report => {
@@ -8393,9 +8423,6 @@
         
         return Number(a.period || 0) - Number(b.period || 0);
       });
-      
-      Logger.log(`Filtered daily reports: ${filtered.length}`);
-      
       // Format dates for frontend display
       const result = filtered.map(report => ({
         id: report.id || '',
@@ -8437,7 +8464,6 @@
       return result;
       
     } catch (error) {
-      Logger.log(`ERROR in getDailyReports: ${error.message}\n${error.stack}`);
       return [];
     }
   }
@@ -8449,8 +8475,6 @@
    */
   function getAllMissingLessonPlans(daysAhead = 7) {
     try {
-      Logger.log(`Getting all missing lesson plans, ${daysAhead} days ahead`);
-      
       // Get all teachers
       const usersSheet = _getSheet('Users');
       const usersHeaders = _headers(usersSheet);
@@ -8460,8 +8484,6 @@
         const roles = String(user.role || '').toLowerCase();
         return roles.includes('teacher') || roles.includes('class teacher');
       });
-      
-      Logger.log(`Found ${teachers.length} teachers`);
       
       // Get missing lesson plans for each teacher
       const byTeacher = [];
@@ -8512,7 +8534,6 @@
       };
       
     } catch (error) {
-      Logger.log(`ERROR in getAllMissingLessonPlans: ${error.message}\n${error.stack}`);
       return {
         success: false,
         error: error.message
@@ -8528,7 +8549,7 @@
 /**
  * Delete a lesson plan
  */
-function deleteLessonPlan(lessonPlanId) {
+function deleteLessonPlan(lessonPlanId, requesterEmail, requesterName) {
   try {
     const sh = _getSheet('LessonPlans');
     const headers = _headers(sh);
@@ -8537,7 +8558,20 @@ function deleteLessonPlan(lessonPlanId) {
     for (let i = 1; i < data.length; i++) {
       const row = _indexByHeader(data[i], headers);
       if (row.lessonPlanId === lessonPlanId) {
+        const rowObj = _indexByHeader(data[i], headers);
         sh.deleteRow(i + 1);
+        try {
+          logAudit({
+            action: AUDIT_ACTIONS.DELETE,
+            entityType: AUDIT_ENTITIES.LESSON_PLAN,
+            entityId: String(lessonPlanId || ''),
+            userEmail: String(requesterEmail || '').toLowerCase().trim(),
+            userName: String(requesterName || requesterEmail || '').trim(),
+            userRole: 'Super Admin',
+            description: `Lesson plan deleted by super admin (${rowObj.class || ''} ${rowObj.subject || ''})`,
+            severity: AUDIT_SEVERITY.CRITICAL
+          });
+        } catch (auditErr) { /* ignore audit failures */ }
         appLog('INFO', 'deleteLessonPlan', 'Deleted lesson plan: ' + lessonPlanId);
         return { success: true, message: 'Lesson plan deleted successfully' };
       }
@@ -8552,7 +8586,7 @@ function deleteLessonPlan(lessonPlanId) {
 /**
  * Delete a scheme
  */
-function deleteScheme(schemeId) {
+function deleteScheme(schemeId, requesterEmail, requesterName) {
   try {
     const sh = _getSheet('Schemes');
     const headers = _headers(sh);
@@ -8561,7 +8595,20 @@ function deleteScheme(schemeId) {
     for (let i = 1; i < data.length; i++) {
       const row = _indexByHeader(data[i], headers);
       if (row.schemeId === schemeId) {
+        const rowObj = _indexByHeader(data[i], headers);
         sh.deleteRow(i + 1);
+        try {
+          logAudit({
+            action: AUDIT_ACTIONS.DELETE,
+            entityType: AUDIT_ENTITIES.SCHEME,
+            entityId: String(schemeId || ''),
+            userEmail: String(requesterEmail || '').toLowerCase().trim(),
+            userName: String(requesterName || requesterEmail || '').trim(),
+            userRole: 'Super Admin',
+            description: `Scheme deleted by super admin (${rowObj.class || ''} ${rowObj.subject || ''})`,
+            severity: AUDIT_SEVERITY.CRITICAL
+          });
+        } catch (auditErr) { /* ignore audit failures */ }
         appLog('INFO', 'deleteScheme', 'Deleted scheme: ' + schemeId);
         return { success: true, message: 'Scheme deleted successfully' };
       }
@@ -8576,7 +8623,7 @@ function deleteScheme(schemeId) {
 /**
  * Delete a daily report
  */
-function deleteReport(reportId) {
+function deleteReport(reportId, requesterEmail, requesterName) {
   try {
     const sh = _getSheet('DailyReports');
     const headers = _headers(sh);
@@ -8585,7 +8632,20 @@ function deleteReport(reportId) {
     for (let i = 1; i < data.length; i++) {
       const row = _indexByHeader(data[i], headers);
       if (row.reportId === reportId) {
+        const rowObj = _indexByHeader(data[i], headers);
         sh.deleteRow(i + 1);
+        try {
+          logAudit({
+            action: AUDIT_ACTIONS.DELETE,
+            entityType: AUDIT_ENTITIES.DAILY_REPORT,
+            entityId: String(reportId || ''),
+            userEmail: String(requesterEmail || '').toLowerCase().trim(),
+            userName: String(requesterName || requesterEmail || '').trim(),
+            userRole: 'Super Admin',
+            description: `Daily report deleted by super admin (${rowObj.class || ''} ${rowObj.subject || ''} Period ${rowObj.period || ''})`,
+            severity: AUDIT_SEVERITY.CRITICAL
+          });
+        } catch (auditErr) { /* ignore audit failures */ }
         appLog('INFO', 'deleteReport', 'Deleted report: ' + reportId);
         return { success: true, message: 'Report deleted successfully' };
       }

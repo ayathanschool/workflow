@@ -16,8 +16,6 @@ function updateSessionCompletion(sessionData) {
   try {
     lock.waitLock(5000);
     
-    Logger.log(`Updating session completion (cascading tracking only): ${JSON.stringify(sessionData)}`);
-    
     // Validate required fields
     const requiredFields = ['lpId', 'completionPercentage', 'teacherEmail', 'completionDate'];
     const missing = requiredFields.filter(field => !sessionData[field]);
@@ -50,18 +48,14 @@ function updateSessionCompletion(sessionData) {
       newStatus = 'Started';
     }
     
-    Logger.log(`✅ Lesson plan found: ${currentPlan.lpId}, Status: ${newStatus}`);
-    
     // === CRITICAL FIX: DO NOT MODIFY LESSONPLANS SHEET COLUMNS ===
     // The LessonPlans sheet has a fixed structure. Adding/modifying columns causes data corruption.
     // Instead, we only track cascading dependencies in the SessionDependencies sheet.
     
     // Handle cascading effects if session is incomplete
     if (sessionData.completionPercentage < 100) {
-      Logger.log(`⚠️ Session incomplete (${sessionData.completionPercentage}%) - tracking cascading effects`);
       _handleCascadingDelays(currentPlan, sessionData);
     } else {
-      Logger.log(`✅ Session complete (100%) - no cascading effects`);
     }
     
     // TeacherPerformance tracking removed
@@ -75,13 +69,11 @@ function updateSessionCompletion(sessionData) {
     };
     
   } catch (error) {
-    Logger.log(`Error updating session completion: ${error.message}`);
     return { success: false, error: error.message };
   } finally {
     try {
       lock.releaseLock();
     } catch (e) {
-      Logger.log(`Error releasing lock: ${e.message}`);
     }
   }
 }
@@ -94,8 +86,6 @@ function updateSessionCompletion(sessionData) {
  */
 function _handleCascadingDelays(incompletePlan, sessionData) {
   try {
-    Logger.log(`Handling cascading delays for incomplete session: ${incompletePlan.lpId}`);
-    
     const lessonPlansSheet = _getSheet('LessonPlans');
     const headers = _headers(lessonPlansSheet);
     const allPlans = _rows(lessonPlansSheet).map(row => _indexByHeader(row, headers));
@@ -108,8 +98,6 @@ function _handleCascadingDelays(incompletePlan, sessionData) {
       plan.teacherEmail === incompletePlan.teacherEmail
     );
     
-    Logger.log(`Found ${subsequentSessions.length} subsequent sessions that may be affected`);
-    
     // === CRITICAL FIX: DO NOT MODIFY LESSONPLANS SHEET ===
     // Only create session dependency tracking entries
     // This prevents data corruption from column misalignment
@@ -117,13 +105,10 @@ function _handleCascadingDelays(incompletePlan, sessionData) {
     if (subsequentSessions.length > 0) {
       // Create session dependency tracking in separate sheet
       _trackSessionDependencies(incompletePlan, subsequentSessions, sessionData.completionPercentage);
-      Logger.log(`✅ Created ${subsequentSessions.length} cascading dependency entries in SessionDependencies sheet`);
     } else {
-      Logger.log(`No subsequent sessions found - no cascading tracking needed`);
     }
     
   } catch (error) {
-    Logger.log(`Error handling cascading delays: ${error.message}`);
   }
 }
 
@@ -167,7 +152,6 @@ function _trackSessionDependencies(incompletePlan, subsequentSessions, completio
     });
     
   } catch (error) {
-    Logger.log(`Error tracking session dependencies: ${error.message}`);
   }
 }
 
@@ -230,7 +214,6 @@ function getSchemeCompletionAnalytics(schemeId) {
     };
     
   } catch (error) {
-    Logger.log(`Error getting scheme completion analytics: ${error.message}`);
     return { success: false, error: error.message };
   }
 }
@@ -351,7 +334,6 @@ function getSchoolSessionAnalytics(filters = {}) {
     };
     
   } catch (error) {
-    Logger.log(`Error getting school session analytics: ${error.message}`);
     return { success: false, error: error.message };
   }
 }
@@ -402,7 +384,6 @@ function getCascadingIssuesReport() {
     };
     
   } catch (error) {
-    Logger.log(`Error getting cascading issues report: ${error.message}`);
     return { success: false, error: error.message };
   }
 }

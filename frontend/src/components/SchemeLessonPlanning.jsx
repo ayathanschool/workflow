@@ -618,7 +618,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   };
 
   const getStatusIcon = (status) => {
-    const normalizedStatus = String(status || '').toLowerCase();
+    const normalizedStatus = _normStatus(status);
     switch (normalizedStatus) {
       case 'cascaded':
         return <CheckCircle className="w-4 h-4 text-orange-600" />;
@@ -1111,12 +1111,32 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
                           {chapterExpanded && (
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                            {chapter.sessions.map((session) => (
+                            {chapter.sessions.map((session) => {
+                              const normalizedStatus = _normStatus(session.status);
+                              const isReported = normalizedStatus === 'reported';
+                              const isCascaded = normalizedStatus === 'cascaded' ||
+                                (!!session.originalDate || !!session.originalPeriod) ||
+                                (_normStatus(session.planStatus).includes('cascad'));
+
+                              const base = isReported
+                                ? 'bg-purple-50 border-2 border-purple-300 opacity-90 cursor-default'
+                                : normalizedStatus === 'cascaded'
+                                  ? 'bg-orange-50 border-2 border-orange-300 hover:bg-orange-100 cursor-default'
+                                  : normalizedStatus === 'ready'
+                                    ? 'bg-blue-50 border-2 border-blue-300 hover:bg-blue-100 cursor-pointer'
+                                    : ['planned', 'pending review'].includes(normalizedStatus)
+                                      ? 'bg-green-50 border-2 border-green-300 hover:bg-green-100 cursor-pointer'
+                                      : normalizedStatus === 'cancelled'
+                                        ? 'bg-gray-50 border-2 border-gray-300 opacity-60 cursor-not-allowed'
+                                        : 'bg-red-50 border-2 border-red-300 hover:bg-red-100 cursor-pointer';
+
+                              // Keep a visible cascade indicator even after reporting.
+                              const cascadeAccent = isCascaded ? ' border-l-4 border-orange-400' : '';
+
+                              return (
                               <div
                                 key={`${scheme.schemeId}-${chapter.chapterNumber}-${session.sessionNumber}`}
                                 onClick={() => {
-                                  const normalizedStatus = String(session.status || '').toLowerCase();
-                                  
                                   // If session is already planned/reported/etc, show view modal
                                   if (['planned', 'pending review', 'ready', 'cascaded', 'reported'].includes(normalizedStatus)) {
                                     setViewSessionData({ scheme, chapter, session });
@@ -1150,29 +1170,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                   // Single-session prep allowed (or extended session exception)
                                   handleSessionClick(scheme, chapter, session);
                                 }}
-                                className={`${(() => {
-                                  const normalizedStatus = String(session.status || '').toLowerCase();
-                                  const isReported = normalizedStatus === 'reported';
-                                  const isCascaded = normalizedStatus === 'cascaded' ||
-                                    (!!session.originalDate || !!session.originalPeriod) ||
-                                    (String(session.planStatus || '').toLowerCase().includes('cascad'));
-
-                                  const base = isReported
-                                    ? 'bg-purple-50 border-2 border-purple-300 opacity-90 cursor-default'
-                                    : normalizedStatus === 'cascaded'
-                                      ? 'bg-orange-50 border-2 border-orange-300 hover:bg-orange-100 cursor-default'
-                                      : normalizedStatus === 'ready'
-                                        ? 'bg-blue-50 border-2 border-blue-300 hover:bg-blue-100 cursor-pointer'
-                                        : ['planned', 'pending review'].includes(normalizedStatus)
-                                          ? 'bg-green-50 border-2 border-green-300 hover:bg-green-100 cursor-pointer'
-                                          : normalizedStatus === 'cancelled'
-                                            ? 'bg-gray-50 border-2 border-gray-300 opacity-60 cursor-not-allowed'
-                                            : 'bg-red-50 border-2 border-red-300 hover:bg-red-100 cursor-pointer';
-
-                                  // Keep a visible cascade indicator even after reporting.
-                                  const cascadeAccent = isCascaded ? ' border-l-4 border-orange-400' : '';
-                                  return `p-3 rounded transition-colors ${base}${cascadeAccent}`;
-                                })()}`}
+                                className={`p-3 rounded transition-colors ${base}${cascadeAccent}`}
                               >
                                 <div className="flex items-center justify-between mb-1">
                                   <span className="text-sm font-medium">
@@ -1183,7 +1181,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                 <div className="text-xs text-gray-600 mb-1">
                                   {session.sessionName}
                                 </div>
-                                {String(session.status || '').toLowerCase() === 'reported' && (
+                                {normalizedStatus === 'reported' && (
                                   <div className="space-y-1">
                                     <div className="text-xs text-purple-700 font-semibold bg-purple-100 rounded px-2 py-1 inline-block">
                                       ✓ Reported
@@ -1194,8 +1192,8 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                   </div>
                                 )}
                                 {/* Cascaded indicator: show for cascaded AND reported+cascaded sessions */}
-                                {(String(session.status || '').toLowerCase() === 'cascaded' || String(session.status || '').toLowerCase() === 'reported') && (
-                                  (session.originalDate || session.originalPeriod || String(session.planStatus || '').toLowerCase().includes('cascad')) ? (
+                                {(normalizedStatus === 'cascaded' || normalizedStatus === 'reported') && (
+                                  (session.originalDate || session.originalPeriod || _normStatus(session.planStatus).includes('cascad')) ? (
                                   <div className="space-y-1" title={`Moved from ${session.originalDate ? formatDate(session.originalDate) : 'original date unavailable'}${session.originalPeriod ? ` P${session.originalPeriod}` : ''} → ${session.plannedDate ? formatDate(session.plannedDate) : ''}${session.plannedPeriod ? ` P${session.plannedPeriod}` : ''}`}>
                                     <div className="text-xs text-orange-700 font-semibold bg-orange-100 rounded px-2 py-1 inline-block">
                                       ↻ Cascaded
@@ -1215,7 +1213,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                   </div>
                                   ) : null
                                 )}
-                                {String(session.status || '').toLowerCase() === 'ready' && (
+                                {normalizedStatus === 'ready' && (
                                   <div className="space-y-1">
                                     <div className="text-xs text-blue-700 font-semibold bg-blue-100 rounded px-2 py-1 inline-block">
                                       ✓ Approved
@@ -1225,7 +1223,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                     </div>
                                   </div>
                                 )}
-                                {['planned', 'pending review'].includes(String(session.status || '').toLowerCase()) && (
+                                {['planned', 'pending review'].includes(normalizedStatus) && (
                                   <div className="space-y-1">
                                     <div className="text-xs text-green-700 font-semibold bg-green-100 rounded px-2 py-1 inline-block">
                                       ⏳ Pending Review
@@ -1235,7 +1233,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                     </div>
                                   </div>
                                 )}
-                                {String(session.status || '').toLowerCase() === 'cancelled' && (
+                                {normalizedStatus === 'cancelled' && (
                                   <div className="space-y-1">
                                     <div className="text-xs text-gray-700 font-semibold bg-gray-200 rounded px-2 py-1 inline-block">
                                       ❌ Cancelled
@@ -1245,14 +1243,15 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                     </div>
                                   </div>
                                 )}
-                                {session.status === 'not-planned' && (
+                                {normalizedStatus === 'not-planned' && (
                                   <div className="text-xs text-red-600 flex items-center">
                                     <Plus className="w-3 h-3 mr-1" />
                                     Click to plan
                                   </div>
                                 )}
                               </div>
-                            ))}
+                              );
+                            })}
                           </div>
                           )}
                         </div>

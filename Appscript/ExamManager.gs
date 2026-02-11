@@ -1694,7 +1694,6 @@ function getStudents(cls = '') {
     
     return allStudents;
   } catch (error) {
-    Logger.log('Error in getStudents: ' + error.message);
     return [];
   }
 }
@@ -1715,7 +1714,6 @@ function getStudentsBatch(classes) {
     const result = {};
     
     if (!Array.isArray(classes)) {
-      Logger.log('getStudentsBatch: classes parameter is not an array');
       return result;
     }
     
@@ -1731,11 +1729,8 @@ function getStudentsBatch(classes) {
       });
     });
     
-    Logger.log(`getStudentsBatch: Returned students for ${classes.length} classes`);
-    
     return result;
   } catch (error) {
-    Logger.log('Error in getStudentsBatch: ' + error.message);
     return {};
   }
 }
@@ -1746,8 +1741,6 @@ function getStudentsBatch(classes) {
  */
 function getStudentReportCard(examType, admNo = '', cls = '') {
   try {
-    Logger.log(`Getting report card for examType: ${examType}, admNo: ${admNo}, class: ${cls}`);
-
     // Normalize class values for comparisons only.
     // This avoids mismatches like "STD 4A" vs "4A" without altering stored data.
     const _normClassForReportCard = function (v) {
@@ -1769,8 +1762,6 @@ function getStudentReportCard(examType, admNo = '', cls = '') {
         return typeMatch && classMatch;
       });
     
-    Logger.log(`Found ${exams.length} exams for type ${examType}, class ${cls}`);
-    
     // Get marks for these exams
     const marksSh = _getSheet('ExamMarks');
     const marksHeaders = _headers(marksSh);
@@ -1786,8 +1777,6 @@ function getStudentReportCard(examType, admNo = '', cls = '') {
         return classMatch && admNoMatch;
       });
     
-    Logger.log(`Found ${students.length} students, ${allMarks.length} total marks`);
-    
     // Build report card data
     const reportData = {
       examType: examType,
@@ -1798,8 +1787,6 @@ function getStudentReportCard(examType, admNo = '', cls = '') {
         const studentMarks = allMarks.filter(mark => 
           String(mark.admNo || '').trim() === studentAdmNo
         );
-        
-        Logger.log(`Student ${student.name} (${studentAdmNo}): Found ${studentMarks.length} marks`);
         
         const subjects = {};
         let totalMarks = 0;
@@ -1838,8 +1825,6 @@ function getStudentReportCard(examType, admNo = '', cls = '') {
             const hasInternalMarks = _classHasInternalMarks(student.class);
             const gradeLabel = isAbsent ? _getLeastGradeForClass(student.class) : _calculateGradeFromBoundaries(perc, student.class);
 
-            Logger.log(`  Subject ${exam.subject}: ce=${ce}, te=${isAbsent ? 'A' : teNum}, internal=${internal}, external=${external}, total=${total}, max=${examMax}, percentage=${examMax > 0 ? (perc.toFixed(2)) : 0}%, grade=${gradeLabel}${isAbsent ? ' (Absent treated as fail)' : ''}`);
-
             // IMPORTANT: Use 'ce' and 'te' property names to match frontend expectations
             subjects[exam.subject] = {
               ce: hasInternalMarks ? internal : null,
@@ -1876,11 +1861,9 @@ function getStudentReportCard(examType, admNo = '', cls = '') {
       exams: exams
     };
     
-    Logger.log(`Returning report data with ${reportData.students.length} students`);
     return reportData;
     
   } catch (error) {
-    Logger.log('Error in getStudentReportCard: ' + error.message);
     return { students: [], exams: [], examType: examType, class: cls };
   }
 }
@@ -1890,8 +1873,6 @@ function getStudentReportCard(examType, admNo = '', cls = '') {
  */
 function getAttendance(cls, date) {
   try {
-    Logger.log(`Getting attendance for class: ${cls}, date: ${date}`);
-    
     // For now, return a basic attendance structure
     // This can be enhanced when attendance tracking is implemented
     const studentsResult = getStudents(cls);
@@ -1914,7 +1895,6 @@ function getAttendance(cls, date) {
     };
     
   } catch (error) {
-    Logger.log('Error in getAttendance: ' + error.message);
     return { success: false, error: error.message, students: [] };
   }
 }
@@ -1924,8 +1904,6 @@ function getAttendance(cls, date) {
  */
 function getStudentPerformance(cls) {
   try {
-    Logger.log(`Getting student performance for class: ${cls}`);
-    
     // Get students for this class
     const studentsResult = getStudents(cls);
     const students = studentsResult || [];
@@ -2029,7 +2007,6 @@ function getStudentPerformance(cls) {
     };
     
   } catch (error) {
-    Logger.log('Error in getStudentPerformance: ' + error.message);
     return { success: false, error: error.message, students: [] };
   }
 }
@@ -2041,15 +2018,12 @@ function getStudentPerformance(cls) {
  */
 function recalculateAllGrades() {
   try {
-    Logger.log('Starting grade recalculation...');
-    
     // Get ExamMarks sheet
     const marksSh = _getSheet('ExamMarks');
     const headers = _headers(marksSh);
     const data = marksSh.getDataRange().getValues();
     
     if (data.length <= 1) {
-      Logger.log('No marks to recalculate');
       return { success: true, message: 'No marks found', updated: 0 };
     }
     
@@ -2082,7 +2056,6 @@ function recalculateAllGrades() {
       // Find exam to get totalMax
       const exam = exams.find(e => e.examId === examId);
       if (!exam) {
-        Logger.log(`Row ${rowNum}: Exam ${examId} not found, skipping`);
         continue;
       }
       
@@ -2096,12 +2069,8 @@ function recalculateAllGrades() {
       if (oldGrade !== newGrade) {
         marksSh.getRange(rowNum, gradeCol).setValue(newGrade);
         updatedCount++;
-        Logger.log(`Row ${rowNum}: ${className} - ${total}/${totalMax} (${percentage.toFixed(1)}%) - Changed ${oldGrade} → ${newGrade}`);
       }
     }
-    
-    Logger.log(`Grade recalculation complete. Updated ${updatedCount} out of ${data.length - 1} records.`);
-    
     return {
       success: true,
       message: `Successfully recalculated grades`,
@@ -2111,7 +2080,6 @@ function recalculateAllGrades() {
     };
     
   } catch (error) {
-    Logger.log('Error in recalculateAllGrades: ' + error.message);
     return { success: false, error: error.message };
   }
 }

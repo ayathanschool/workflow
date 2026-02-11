@@ -633,6 +633,7 @@ export default function DailyReportModern({ user }) {
     // Use passed draft if provided (for immediate state), else get from state
     const draft = currentDraft || drafts[key] || {};
     const plan = lessonPlans[key] || null;
+    const report = reports[key] || null;
     
     console.log('[RemainingSessions] Debug data:', {
       key,
@@ -645,7 +646,8 @@ export default function DailyReportModern({ user }) {
       allPlanKeys: plan ? Object.keys(plan) : 'no plan'
     });
     
-    const chapter = draft.chapter || plan?.chapter || '';
+    const chapter = draft.chapter || plan?.chapter || report?.chapter || '';
+    const schemeId = String(draft.schemeId || report?.schemeId || plan?.schemeId || '').trim();
     
     if (!chapter) {
       console.log('[RemainingSessions] No chapter available (draft/plan), cannot check. Draft:', draft, 'Plan:', plan);
@@ -663,6 +665,7 @@ export default function DailyReportModern({ user }) {
         class: period.class,
         subject: period.subject,
         chapter: chapter,
+        schemeId: schemeId,
         date: date
       });
       

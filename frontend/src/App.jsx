@@ -43,7 +43,8 @@ import {
   XCircle,
   Shield,
   DollarSign,
-  Target
+  Target,
+  Settings
 } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
 import * as api from './api'
@@ -80,6 +81,7 @@ const SuperAdminDashboard = lazy(() => import('./components/SuperAdminDashboard'
 const UserManagement = lazy(() => import('./components/UserManagement'));
 const AuditLog = lazy(() => import('./components/AuditLog'));
 const AdminDataEditor = lazy(() => import('./components/AdminDataEditor'));
+const SettingsPanel = lazy(() => import('./components/SettingsPanel'));
 const SchemeApprovalsView = lazy(() => import('./views/SchemeApprovalsView'));
 const SubstitutionAnalyticsView = lazy(() => import('./components/SubstitutionAnalyticsView'));
 const MissingDailyReportsTeacherwiseView = lazy(() => import('./components/MissingDailyReportsTeacherwiseView'));
@@ -103,11 +105,19 @@ const App = () => {
   
   // App settings for the whole application
   const [appSettings, setAppSettings] = useState({
-    lessonPlanningDay: '',       // No restriction until settings define it
     allowNextWeekOnly: false,    // Next-week-only restriction disabled
+    allowBackfillReporting: false,
+    dailyReportDeleteMinutes: 0,
+    cascadeAutoEnabled: false,
+    lessonplanBulkOnly: false,
+    lessonplanNotifyEnabled: false,
+    lessonplanNotifyRoles: '',
+    lessonplanNotifyEmails: '',
+    lessonplanNotifyEvents: '',
     periodTimes: null,           // Will store custom period times if available
     periodTimesWeekday: null,    // Monday-Thursday period times
     periodTimesFriday: null,     // Friday period times
+    periodTimesByClassRaw: '',
 
     // Missing Daily Reports (teacher dashboard)
     // Controlled by HM via Settings sheet (served from getAppSettings)
@@ -122,14 +132,19 @@ const App = () => {
   // Create a memoized version of appSettings to avoid unnecessary re-renders
   const memoizedSettings = useMemo(() => {
     return appSettings || {
-      lessonPlanningDay: '',
       allowNextWeekOnly: false,
       allowBackfillReporting: false,
       dailyReportDeleteMinutes: 0,
       cascadeAutoEnabled: false,
+      lessonplanBulkOnly: false,
+      lessonplanNotifyEnabled: false,
+      lessonplanNotifyRoles: '',
+      lessonplanNotifyEmails: '',
+      lessonplanNotifyEvents: '',
       periodTimes: null,
       periodTimesWeekday: null,
       periodTimesFriday: null,
+      periodTimesByClassRaw: '',
       missingDailyReports: {
         lookbackDays: 7,
         escalationDays: 2,
@@ -161,6 +176,38 @@ const App = () => {
     window.addEventListener('api-error', handler);
     return () => window.removeEventListener('api-error', handler);
   }, []);
+
+  const normalizeSettings = (settings) => {
+    const s = settings || {};
+    return {
+      allowNextWeekOnly: false, // Ignore sheet value; do not restrict to next week
+      allowBackfillReporting: !!s.allowBackfillReporting,
+      dailyReportDeleteMinutes: Number(s.dailyReportDeleteMinutes ?? 0) || 0,
+      cascadeAutoEnabled: !!s.cascadeAutoEnabled,
+      lessonplanBulkOnly: !!s.lessonplanBulkOnly,
+      lessonplanNotifyEnabled: !!s.lessonplanNotifyEnabled,
+      lessonplanNotifyRoles: String(s.lessonplanNotifyRoles || ''),
+      lessonplanNotifyEmails: String(s.lessonplanNotifyEmails || ''),
+      lessonplanNotifyEvents: String(s.lessonplanNotifyEvents || ''),
+      periodTimes: s.periodTimes || s.periodTimesWeekday || null,
+      periodTimesWeekday: s.periodTimesWeekday || null,
+      periodTimesFriday: s.periodTimesFriday || null,
+      periodTimesByClassRaw: String(s.periodTimesByClassRaw || ''),
+      missingDailyReports: {
+        lookbackDays: Number(s?.missingDailyReports?.lookbackDays ?? 7) || 7,
+        escalationDays: Number(s?.missingDailyReports?.escalationDays ?? 2) || 2,
+        maxRangeDays: Number(s?.missingDailyReports?.maxRangeDays ?? 31) || 31,
+        allowCustomRange: s?.missingDailyReports?.allowCustomRange !== false
+      }
+    };
+  };
+
+  const handleSettingsUpdated = (response) => {
+    const settings = response?.data || response;
+    if (settings) {
+      setAppSettings(normalizeSettings(settings));
+    }
+  };
   
   // Fetch app settings from the API
   useEffect(() => {
@@ -172,23 +219,7 @@ const App = () => {
         const settings = response?.data || response;
         
         if (settings) {
-          const newSettings = {
-            lessonPlanningDay: settings.lessonPlanningDay || '',
-            allowNextWeekOnly: false, // Ignore sheet value; do not restrict to next week
-            allowBackfillReporting: !!settings.allowBackfillReporting,
-            dailyReportDeleteMinutes: Number(settings.dailyReportDeleteMinutes ?? 0) || 0,
-            cascadeAutoEnabled: !!settings.cascadeAutoEnabled,
-            periodTimes: settings.periodTimes || settings.periodTimesWeekday || null,
-            periodTimesWeekday: settings.periodTimesWeekday || null,
-            periodTimesFriday: settings.periodTimesFriday || null,
-            missingDailyReports: {
-              lookbackDays: Number(settings?.missingDailyReports?.lookbackDays ?? 7) || 7,
-              escalationDays: Number(settings?.missingDailyReports?.escalationDays ?? 2) || 2,
-              maxRangeDays: Number(settings?.missingDailyReports?.maxRangeDays ?? 31) || 31,
-              allowCustomRange: settings?.missingDailyReports?.allowCustomRange !== false
-            }
-          };
-          setAppSettings(newSettings);
+          setAppSettings(normalizeSettings(settings));
         }
       } catch (err) {
         console.error('Error loading settings:', err);
@@ -571,6 +602,7 @@ const App = () => {
         { id: 'missing-daily-reports', label: 'Missing Daily Reports', icon: AlertTriangle },
         { id: 'class-data', label: 'School Data', icon: UserCheck },
         { id: 'admin-data', label: 'Admin Data', icon: Edit2 },
+        { id: 'settings', label: 'Settings', icon: Settings },
         { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
         { id: 'assessments', label: 'Assessments', icon: Award },
         { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
@@ -620,6 +652,8 @@ const App = () => {
 
     if (hasRole('h m')) {
       items.push(
+        { id: 'audit-log', label: 'Audit Log', icon: Shield },
+        { id: 'settings', label: 'Settings', icon: Settings },
         { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
         { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
         { id: 'daily-oversight', label: 'Daily Oversight (Enhanced)', icon: ClipboardCheck },
@@ -642,6 +676,8 @@ const App = () => {
     // Keep this scoped (reports-only) unless explicitly expanded.
     if (!hasRole('h m') && hasAnyRole(['admin'])) {
       items.push(
+        { id: 'audit-log', label: 'Audit Log', icon: Shield },
+        { id: 'settings', label: 'Settings', icon: Settings },
         { id: 'daily-reports-management', label: 'All Reports', icon: FileText },
         { id: 'missing-daily-reports', label: 'Missing Daily Reports', icon: AlertTriangle }
       );
@@ -691,28 +727,23 @@ const App = () => {
     const [dashboardLoading, setDashboardLoading] = useState(false);
     const [dashboardLoaded, setDashboardLoaded] = useState(false);
 
-    // Lightweight lesson plan warning (teacher dashboard)
-    const [missingPlansSummary, setMissingPlansSummary] = useState({ loading: false, count: 0 });
+    // Lesson plan warning removed from teacher dashboard
+
+    const [todaysPlansState, setTodaysPlansState] = useState({
+      loading: false,
+      periods: [],
+      lessonsByPeriod: {},
+      error: null,
+      isNonTeachingDay: false,
+      reason: '',
+      date: todayIST()
+    });
 
     // Live period (teacher dashboard)
     const [liveTimetableState, setLiveTimetableState] = useState({ loading: false, periods: [], error: null });
     const [nowTick, setNowTick] = useState(0);
 
-    // Pending daily reports (teacher dashboard)
-    const [pendingReportsSummary, setPendingReportsSummary] = useState({
-      loading: false,
-      date: todayIST(),
-      count: 0,
-      pending: [],
-      missingDays: 0,
-      range: { from: '', to: '' }
-    });
-
-    const [missingReportsExpanded, setMissingReportsExpanded] = useState(false);
-
-    const [missingRange, setMissingRange] = useState({ from: '', to: '' });
-    const [missingRangeDraft, setMissingRangeDraft] = useState({ from: '', to: '' });
-    const [missingRangeTouched, setMissingRangeTouched] = useState(false);
+    // Missing daily reports moved to My Reports History
 
     // Send notification modal state - now using app-level state
     // const [showSendNotification, setShowSendNotification] = useState(true); // Removed - moved to app level
@@ -1062,247 +1093,9 @@ const App = () => {
       Array.isArray(currentUser?.classTeacherFor) ? currentUser.classTeacherFor.join('|') : String(currentUser?.classTeacherFor || '')
     ]);
 
-    // Fetch missing lesson plan summary for next 2 days (today + tomorrow)
-    useEffect(() => {
-      let cancelled = false;
-      const run = async () => {
-        if (!currentUser?.email) return;
-        if (!hasAnyRole(['teacher', 'class teacher', 'daily reporting teachers'])) return;
-        // HM/Super Admin should not see teacher prep warnings
-        if (hasAnyRole(['h m', 'super admin', 'superadmin', 'super_admin'])) return;
+    // Lesson plan pending summary removed from teacher dashboard
 
-        try {
-          setMissingPlansSummary(prev => ({ ...prev, loading: true }));
-          const res = await api.getMissingLessonPlans(currentUser.email, 2);
-          if (cancelled) return;
-          const count = Number(res?.missingCount || 0);
-          setMissingPlansSummary({ loading: false, count: Number.isFinite(count) ? count : 0 });
-        } catch (e) {
-          if (cancelled) return;
-          setMissingPlansSummary({ loading: false, count: 0 });
-        }
-      };
-      run();
-      return () => { cancelled = true; };
-    }, [currentUser?.email, Array.isArray(currentUser?.roles) ? currentUser.roles.join('|') : String(currentUser?.roles || '')]);
-
-    // Missing daily reports: compute for recent past days up to yesterday (11:59pm IST). Excludes today.
-    useEffect(() => {
-      if (!currentUser?.email) return;
-      if (!hasAnyRole(['teacher', 'class teacher', 'daily reporting teachers'])) return;
-      if (hasAnyRole(['h m', 'super admin', 'superadmin', 'super_admin'])) return;
-
-      let cancelled = false;
-
-      const normalizeText = (v) => String(v || '')
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, ' ')
-        .replace(/[^a-z0-9 ]+/g, '');
-
-      const normalizePeriod = (v) => {
-        const s = String(v ?? '').trim();
-        const m = s.match(/(\d+)/);
-        return m ? m[1] : s;
-      };
-
-      const normalizePeriods = (timetableRes) => {
-        if (Array.isArray(timetableRes)) return timetableRes;
-        if (Array.isArray(timetableRes?.periods)) return timetableRes.periods;
-        if (Array.isArray(timetableRes?.data)) return timetableRes.data;
-        return [];
-      };
-
-      const buildKey = (obj) => {
-        const period = normalizePeriod(obj?.period ?? obj?.Period ?? obj?.selectedPeriod ?? obj?.periodNumber ?? obj?.slot);
-        const cls = normalizeText(obj?.class ?? obj?.Class ?? obj?.className ?? obj?.standard ?? obj?.grade);
-        const subjRaw = obj?.isSubstitution
-          ? (obj?.substituteSubject ?? obj?.subject ?? obj?.Subject ?? obj?.subjectName)
-          : (obj?.subject ?? obj?.Subject ?? obj?.subjectName);
-        const subj = normalizeText(subjRaw);
-        return `${period}|${cls}|${subj}`;
-      };
-
-      const istNow = () => {
-        try {
-          return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-        } catch {
-          return new Date();
-        }
-      };
-
-      const yesterdayIST = () => {
-        const base = istNow();
-        base.setDate(base.getDate() - 1);
-        return base;
-      };
-
-      const formatIST = (d) => {
-        try {
-          return d.toLocaleString('en-CA', {
-            timeZone: 'Asia/Kolkata',
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit'
-          }).split(',')[0];
-        } catch {
-          return todayIST();
-        }
-      };
-
-      const addDaysIso = (iso, deltaDays) => {
-        const d = new Date(`${iso}T00:00:00Z`);
-        if (isNaN(d.getTime())) return iso;
-        d.setUTCDate(d.getUTCDate() + Number(deltaDays || 0));
-        return d.toISOString().slice(0, 10);
-      };
-
-      const clampToYesterday = (iso) => {
-        const y = formatIST(yesterdayIST());
-        if (!iso) return y;
-        return String(iso) > String(y) ? y : String(iso);
-      };
-
-      const getDatesInRangeDesc = (fromIso, toIso, maxDays) => {
-        const out = [];
-        const from = String(fromIso || '').trim();
-        const to = String(toIso || '').trim();
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return out;
-        if (from > to) return out;
-        const max = Math.max(1, Number(maxDays || 1));
-        let cur = to;
-        for (let i = 0; i < max; i++) {
-          out.push(cur);
-          if (cur === from) break;
-          cur = addDaysIso(cur, -1);
-        }
-        return out;
-      };
-
-      const isWeekendIST = (iso) => {
-        try {
-          const dayName = new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Asia/Kolkata' });
-          return dayName === 'Saturday' || dayName === 'Sunday';
-        } catch {
-          return false;
-        }
-      };
-
-      // Initialize default range from HM settings (lookbackDays), ending at yesterday.
-      // Only applies if the teacher has not manually changed the range.
-      const maybeInitRange = () => {
-        if (missingRangeTouched) return;
-        const y = formatIST(yesterdayIST());
-        const lookback = Math.max(1, Number(memoizedSettings?.missingDailyReports?.lookbackDays ?? 7) || 7);
-        const from = addDaysIso(y, -(lookback - 1));
-        const nextRange = { from, to: y };
-
-        // Avoid unnecessary state churn
-        if (missingRange.from !== nextRange.from || missingRange.to !== nextRange.to) {
-          setMissingRange(nextRange);
-          setMissingRangeDraft(nextRange);
-        }
-      };
-
-      const run = async () => {
-        maybeInitRange();
-
-        const maxRangeDays = Math.max(1, Number(memoizedSettings?.missingDailyReports?.maxRangeDays ?? 31) || 31);
-        const from = String(missingRange.from || '').trim();
-        const to = clampToYesterday(String(missingRange.to || '').trim());
-        if (!from || !to) return;
-
-        const dates = getDatesInRangeDesc(from, to, maxRangeDays).filter(d => !isWeekendIST(d));
-        setPendingReportsSummary(prev => ({
-          ...prev,
-          loading: true,
-          date: to,
-          range: { from, to }
-        }));
-
-        try {
-          const results = await Promise.all(
-            dates.map(async (date) => {
-              try {
-                const daily = await api.getTeacherDailyData(currentUser.email, date);
-                const timetableRes = daily?.timetableWithReports || daily?.timetable || daily?.timetableData || daily?.timetableRes || daily;
-                const periods = normalizePeriods(timetableRes);
-                const reports = Array.isArray(daily?.reports) ? daily.reports : [];
-
-                const submitted = new Set(
-                  reports
-                    .map(r => buildKey(r))
-                    .filter(k => String(k).split('|').every(part => String(part || '').trim()))
-                );
-
-                const teachPeriods = (Array.isArray(periods) ? periods : [])
-                  .filter(p => {
-                    const k = buildKey(p);
-                    const parts = String(k).split('|');
-                    if (parts.length !== 3) return false;
-                    const [pp, cc, ss] = parts;
-                    if (!String(pp || '').trim() || !String(cc || '').trim() || !String(ss || '').trim()) return false;
-                    // ignore obvious free periods
-                    if (ss === 'free' || ss === 'no class' || ss === 'noclass') return false;
-                    return true;
-                  })
-                  .map(p => ({
-                    date,
-                    period: p?.period ?? p?.Period ?? p?.periodNumber ?? p?.slot ?? '',
-                    class: p?.class ?? p?.Class ?? p?.className ?? '',
-                    subject: p?.isSubstitution ? (p?.substituteSubject ?? p?.subject ?? p?.Subject ?? '') : (p?.subject ?? p?.Subject ?? ''),
-                    isSubstitution: !!p?.isSubstitution
-                  }));
-
-                const missing = teachPeriods.filter(p => !submitted.has(buildKey(p)));
-                return { date, missing };
-              } catch {
-                return { date, missing: [] };
-              }
-            })
-          );
-
-          const allMissing = results
-            .flatMap(r => Array.isArray(r?.missing) ? r.missing : [])
-            .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || (Number(a.period || 0) - Number(b.period || 0)));
-
-          const totalMissing = allMissing.length;
-          const missingDays = new Set(allMissing.map(m => String(m?.date || '').trim()).filter(Boolean)).size;
-
-          if (cancelled) return;
-
-          setPendingReportsSummary({
-            loading: false,
-            date: to,
-            count: totalMissing,
-            pending: allMissing,
-            missingDays,
-            range: { from, to }
-          });
-
-          setInsights(prev => ({
-            ...prev,
-            pendingReports: totalMissing
-          }));
-        } catch (_e) {
-          if (cancelled) return;
-          setPendingReportsSummary(prev => ({ ...prev, loading: false, count: 0, pending: [], missingDays: 0 }));
-          setInsights(prev => ({ ...prev, pendingReports: 0 }));
-        }
-      };
-
-      run();
-      return () => { cancelled = true; };
-    }, [
-      currentUser?.email,
-      Array.isArray(currentUser?.roles) ? currentUser.roles.join('|') : String(currentUser?.roles || ''),
-      missingRange.from,
-      missingRange.to,
-      memoizedSettings?.missingDailyReports?.lookbackDays,
-      memoizedSettings?.missingDailyReports?.maxRangeDays
-    ]);
-
-    // Live period data: fetch today's timetable (lightweight) and recompute periodically.
+    // Teacher dashboard: load today's timetable + plans in a single call.
     useEffect(() => {
       if (!currentUser?.email) return;
       if (!hasAnyRole(['teacher', 'class teacher', 'daily reporting teachers'])) return;
@@ -1314,30 +1107,114 @@ const App = () => {
         if (Array.isArray(timetableRes)) return timetableRes;
         if (Array.isArray(timetableRes?.periods)) return timetableRes.periods;
         if (Array.isArray(timetableRes?.data)) return timetableRes.data;
+        if (Array.isArray(timetableRes?.timetable)) return timetableRes.timetable;
         return [];
       };
 
+      const normalizePlanPayload = (plansRes) => {
+        const data = plansRes?.data || plansRes || {};
+        return {
+          lessonsByPeriod: data.lessonsByPeriod || {},
+          isNonTeachingDay: !!data.isNonTeachingDay,
+          reason: String(data.reason || '').trim()
+        };
+      };
+
+      const normalizeKey = (period, cls, subject) => {
+        const p = String(period ?? '').trim();
+        const c = stripStdPrefix(String(cls ?? '').trim()).toLowerCase().replace(/\s+/g, '');
+        const s = String(subject ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+        return `${p}|${c}|${s}`;
+      };
+
       const load = async () => {
+        setLiveTimetableState(prev => ({ ...prev, loading: true, error: null }));
+        setTodaysPlansState(prev => ({ ...prev, loading: true, error: null, date: todayIST() }));
+
         try {
-          setLiveTimetableState(prev => ({ ...prev, loading: true, error: null }));
-          const date = todayIST();
-          const timetableRes = await api.getTeacherDailyTimetable(currentUser.email, date);
-          const periods = normalizeDailyTimetable(timetableRes);
+          const res = await api.getTeacherDashboardData(currentUser.email, { date: todayIST() });
           if (cancelled) return;
-          setLiveTimetableState({ loading: false, periods: Array.isArray(periods) ? periods : [], error: null });
+          const payload = res?.data || res || {};
+          if (payload.success === false) throw new Error(payload.error || 'Failed to load dashboard data');
+
+          const timetableRes = payload.timetable || payload.timetableWithReports || payload.timetableData || payload.timetableRes;
+          const timetableData = normalizeDailyTimetable(timetableRes);
+          setLiveTimetableState({
+            loading: false,
+            periods: Array.isArray(timetableData) ? timetableData : [],
+            error: null
+          });
+
+          const plansPayload = normalizePlanPayload(payload.plannedLessons || payload.plans || payload.plannedLessonsForDate);
+          const normalizedLessons = {};
+          Object.entries(plansPayload.lessonsByPeriod || {}).forEach(([key, plan]) => {
+            const parts = String(key || '').split('|');
+            const period = parts[0];
+            const cls = parts[1];
+            const subj = parts.slice(2).join('|');
+            const normalizedKey = normalizeKey(period, cls, subj);
+            normalizedLessons[normalizedKey] = plan;
+          });
+
+          const periods = (Array.isArray(timetableData) ? timetableData : []).map(p => {
+            const periodVal = p?.period ?? p?.Period ?? p?.periodNumber ?? p?.slot ?? p?.slotNumber ?? p?.index;
+            const classVal = p?.class ?? p?.Class ?? p?.className ?? p?.standard ?? p?.grade ?? p?.Grade ?? p?.Standard;
+            const subjectVal = p?.subject ?? p?.Subject ?? p?.subjectName ?? p?.subj ?? p?.course ?? p?.topic ?? p?.Topic;
+            return {
+              period: periodVal,
+              class: classVal,
+              subject: subjectVal,
+              startTime: p?.startTime ?? p?.begin ?? p?.StartTime ?? '',
+              endTime: p?.endTime ?? p?.finish ?? p?.EndTime ?? '',
+              isSubstitution: !!(p?.isSubstitution || p?.absentTeacher || p?.regularSubject || p?.substituteSubject),
+              _key: normalizeKey(periodVal, classVal, subjectVal),
+              _raw: p
+            };
+          });
+
+          periods.sort((a, b) => {
+            const ap = Number(String(a.period ?? '').trim());
+            const bp = Number(String(b.period ?? '').trim());
+            if (Number.isFinite(ap) && Number.isFinite(bp)) return ap - bp;
+            return String(a.period ?? '').localeCompare(String(b.period ?? ''));
+          });
+
+          setTodaysPlansState({
+            loading: false,
+            periods,
+            lessonsByPeriod: normalizedLessons,
+            error: null,
+            isNonTeachingDay: plansPayload.isNonTeachingDay,
+            reason: plansPayload.reason,
+            date: todayIST()
+          });
         } catch (e) {
           if (cancelled) return;
           setLiveTimetableState({ loading: false, periods: [], error: String(e?.message || e || 'Failed to load timetable') });
+          setTodaysPlansState(prev => ({
+            ...prev,
+            loading: false,
+            periods: [],
+            lessonsByPeriod: {},
+            error: String(e?.message || e || 'Failed to load lesson plans')
+          }));
         }
       };
 
       load();
+      return () => { cancelled = true; };
+    }, [
+      currentUser?.email,
+      Array.isArray(currentUser?.roles) ? currentUser.roles.join('|') : String(currentUser?.roles || '')
+    ]);
+
+    useEffect(() => {
+      if (!currentUser?.email) return;
+      if (!hasAnyRole(['teacher', 'class teacher', 'daily reporting teachers'])) return;
+      if (hasAnyRole(['h m', 'super admin', 'superadmin', 'super_admin'])) return;
 
       const t = setInterval(() => setNowTick(Date.now()), 30_000);
-      return () => {
-        cancelled = true;
-        clearInterval(t);
-      };
+      return () => clearInterval(t);
     }, [
       currentUser?.email,
       Array.isArray(currentUser?.roles) ? currentUser.roles.join('|') : String(currentUser?.roles || '')
@@ -1390,6 +1267,7 @@ const App = () => {
         endTime: p?.endTime ?? p?.finish ?? p?.EndTime ?? '',
         chapterName: p?.chapterName ?? '',
         sessionNumber: p?.sessionNumber ?? '',
+        isSubstitution: !!(p?.isSubstitution || p?.absentTeacher || p?.regularSubject || p?.substituteSubject),
         _raw: p
       }));
 
@@ -1438,6 +1316,32 @@ const App = () => {
       }
       return { status: 'none', period: null, timeLabel: '' };
     }, [liveTimetableState?.periods, nowTick, memoizedSettings?.periodTimes, memoizedSettings?.periodTimesWeekday, memoizedSettings?.periodTimesFriday]);
+
+    const getPlanStatusMeta = (status) => {
+      const s = String(status || '').trim().toLowerCase();
+      if (!s) return { label: 'Not Prepared', className: 'bg-red-100 text-red-800' };
+      if (s.includes('pending review')) return { label: 'Pending Review', className: 'bg-blue-100 text-blue-800' };
+      if (s.includes('pending preparation') || s === 'draft') return { label: 'Pending Prep', className: 'bg-amber-100 text-amber-800' };
+      if (s.includes('ready') || s.includes('approved')) return { label: 'Ready', className: 'bg-green-100 text-green-800' };
+      if (s.includes('rescheduled') || s.includes('cascade')) return { label: 'Cascaded', className: 'bg-orange-100 text-orange-800' };
+      if (s.includes('rework')) return { label: 'Needs Rework', className: 'bg-orange-100 text-orange-800' };
+      return { label: status, className: 'bg-gray-100 text-gray-800' };
+    };
+
+    const getTodayPeriodTimes = () => {
+      const nowIst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+      const isFriday = nowIst.getDay() === 5;
+      if (isFriday && Array.isArray(memoizedSettings?.periodTimesFriday) && memoizedSettings.periodTimesFriday.length) {
+        return memoizedSettings.periodTimesFriday;
+      }
+      if (Array.isArray(memoizedSettings?.periodTimesWeekday) && memoizedSettings.periodTimesWeekday.length) {
+        return memoizedSettings.periodTimesWeekday;
+      }
+      if (Array.isArray(memoizedSettings?.periodTimes) && memoizedSettings.periodTimes.length) {
+        return memoizedSettings.periodTimes;
+      }
+      return null;
+    };
 
     return (
       <div className="max-w-7xl mx-auto space-y-4 md:space-y-6">
@@ -1495,55 +1399,6 @@ const App = () => {
                     <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Subjects assigned</div>
                   </div>
 
-                  <div
-                    className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/60"
-                    onClick={() => setMissingReportsExpanded(v => !v)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setMissingReportsExpanded(v => !v); }}
-                    aria-expanded={missingReportsExpanded ? 'true' : 'false'}
-                    title={missingReportsExpanded ? 'Hide missing reports' : 'Show missing reports'}
-                  >
-                    <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
-                      <FileText className="w-4 h-4 text-purple-600" /> Missing Reports
-                    </div>
-                    <div className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100">
-                      {pendingReportsSummary.loading ? '—' : insights.pendingReports}
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      {pendingReportsSummary.loading
-                        ? 'Checking till yesterday…'
-                        : (insights.pendingReports > 0
-                          ? `Range ${pendingReportsSummary?.range?.from || '-'} → ${pendingReportsSummary?.range?.to || pendingReportsSummary.date}`
-                          : `No missing reports up to ${pendingReportsSummary.date}`)}
-                    </div>
-                    {!pendingReportsSummary.loading && pendingReportsSummary.missingDays > Number(memoizedSettings?.missingDailyReports?.escalationDays ?? 2) && (
-                      <div className="mt-1 text-xs font-semibold text-red-700 dark:text-red-300">
-                        Meet the HM
-                      </div>
-                    )}
-                    {!pendingReportsSummary.loading && insights.pendingReports > 0 && Array.isArray(pendingReportsSummary.pending) && pendingReportsSummary.pending.length > 0 && (
-                      <div className="mt-2 space-y-0.5">
-                        {pendingReportsSummary.pending.slice(0, 3).map((p, idx) => (
-                          <div key={idx} className="text-xs text-gray-600 dark:text-gray-300">
-                            {String(p.date || '').trim() || '-'} · P{String(p.period || '').trim() || '-'} · {stripStdPrefix(String(p.class || '').trim() || '—')} · {String(p.subject || '').trim() || '—'}
-                          </div>
-                        ))}
-                        {pendingReportsSummary.pending.length > 3 && (
-                          <div className="text-xs text-gray-500 dark:text-gray-400">
-                            +{pendingReportsSummary.pending.length - 3} more
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setActiveView('reports'); }}
-                      className="mt-2 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
-                      type="button"
-                    >
-                      Open Daily Reports
-                    </button>
-                  </div>
 
                   {hasRole('class teacher') && (
                     <>
@@ -1570,228 +1425,119 @@ const App = () => {
                   )}
                 </div>
 
-                {missingReportsExpanded && (
-                  <div className="mt-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/10">
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
-                      <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                        Missing Daily Reports
-                        <span className="ml-2 text-xs font-normal text-gray-500 dark:text-gray-400">
-                          ({pendingReportsSummary?.range?.from || '-'} → {pendingReportsSummary?.range?.to || pendingReportsSummary.date})
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            try {
-                              const rows = Array.isArray(pendingReportsSummary?.pending) ? pendingReportsSummary.pending : [];
-                              const header = ['date','period','class','subject'];
-                              const csv = [header.join(',')]
-                                .concat(rows.map(r => {
-                                  const vals = [r?.date, r?.period, r?.class, r?.subject].map(v => {
-                                    const s = String(v ?? '').replace(/\r?\n/g, ' ').trim();
-                                    const escaped = s.replace(/"/g, '""');
-                                    return `"${escaped}"`;
-                                  });
-                                  return vals.join(',');
-                                }))
-                                .join('\n');
-                              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                              const url = URL.createObjectURL(blob);
-                              const a = document.createElement('a');
-                              a.href = url;
-                              a.download = `missing-daily-reports_${pendingReportsSummary?.range?.from || 'from'}_${pendingReportsSummary?.range?.to || 'to'}.csv`;
-                              document.body.appendChild(a);
-                              a.click();
-                              a.remove();
-                              URL.revokeObjectURL(url);
-                            } catch (_err) {
-                              // ignore download failures
-                            }
-                          }}
-                          className="text-xs text-gray-600 dark:text-gray-300 hover:underline"
-                        >
-                          Download CSV
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setMissingReportsExpanded(false)}
-                          className="text-xs text-gray-600 dark:text-gray-300 hover:underline"
-                        >
-                          Hide
-                        </button>
-                      </div>
-                    </div>
-
-                    {!pendingReportsSummary.loading && (
-                      <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                        <div className="text-xs text-gray-600 dark:text-gray-300">
-                          Missing days: <span className="font-semibold">{pendingReportsSummary.missingDays}</span>
-                          {' · '}
-                          Escalation threshold: <span className="font-semibold">{Number(memoizedSettings?.missingDailyReports?.escalationDays ?? 2)}</span>
-                        </div>
-
-                        {pendingReportsSummary.missingDays > Number(memoizedSettings?.missingDailyReports?.escalationDays ?? 2) && (
-                          <div className="text-xs font-semibold text-red-700 dark:text-red-300">
-                            Meet the HM
-                          </div>
-                        )}
-
-                        {memoizedSettings?.missingDailyReports?.allowCustomRange !== false && (
-                          <div className="flex items-center gap-2 text-xs">
-                            <label className="text-gray-600 dark:text-gray-300">
-                              From
-                              <input
-                                type="date"
-                                value={missingRangeDraft.from || ''}
-                                onChange={(e) => {
-                                  setMissingRangeTouched(true);
-                                  setMissingRangeDraft(prev => ({ ...prev, from: e.target.value }));
-                                }}
-                                className="ml-2 px-2 py-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                              />
-                            </label>
-                            <label className="text-gray-600 dark:text-gray-300">
-                              To
-                              <input
-                                type="date"
-                                value={missingRangeDraft.to || ''}
-                                onChange={(e) => {
-                                  setMissingRangeTouched(true);
-                                  setMissingRangeDraft(prev => ({ ...prev, to: e.target.value }));
-                                }}
-                                className="ml-2 px-2 py-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                              />
-                            </label>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setMissingRangeTouched(true);
-                                setMissingRange({
-                                  from: String(missingRangeDraft.from || '').trim(),
-                                  to: String(missingRangeDraft.to || '').trim()
-                                });
-                              }}
-                              className="px-2 py-1 rounded bg-gray-900 dark:bg-gray-700 text-white hover:bg-gray-800 dark:hover:bg-gray-600"
-                            >
-                              Apply
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {pendingReportsSummary.loading ? (
-                      <div className="p-3 text-sm text-gray-600 dark:text-gray-300">Loading…</div>
-                    ) : (!Array.isArray(pendingReportsSummary.pending) || pendingReportsSummary.pending.length === 0) ? (
-                      <div className="p-3 text-sm text-gray-600 dark:text-gray-300">No missing reports found.</div>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full text-sm">
-                          <thead className="bg-gray-50 dark:bg-gray-800/60 text-gray-700 dark:text-gray-200">
-                            <tr>
-                              <th className="text-left font-medium px-3 py-2">Date</th>
-                              <th className="text-left font-medium px-3 py-2">Period</th>
-                              <th className="text-left font-medium px-3 py-2">Class</th>
-                              <th className="text-left font-medium px-3 py-2">Subject</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {pendingReportsSummary.pending.map((p, idx) => (
-                              <tr key={idx} className="border-t border-gray-100 dark:border-gray-800">
-                                <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{String(p.date || '').trim() || '—'}</td>
-                                <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{String(p.period || '').trim() ? `P${String(p.period || '').trim()}` : '—'}</td>
-                                <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{stripStdPrefix(String(p.class || '').trim() || '—')}</td>
-                                <td className="px-3 py-2 text-gray-700 dark:text-gray-200">{String(p.subject || '').trim() || '—'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
 
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
-                <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Live Period</h3>
-                {liveTimetableState.loading ? (
-                  <div className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
-                    <RefreshCw className="w-4 h-4 animate-spin" /> Loading timetable...
-                  </div>
-                ) : liveTimetableState.error ? (
-                  <div className="text-sm text-gray-600 dark:text-gray-300">
-                    Unable to load live period.
-                  </div>
-                ) : livePeriodInfo.status === 'live' && livePeriodInfo.period ? (
-                  <div
-                    className={`space-y-2 rounded-lg p-3 md:p-4 ${
-                      livePeriodInfo?.period?.isSubstitution
-                        ? 'ring-2 ring-blue-400/60 dark:ring-blue-500/40 ring-offset-2 ring-offset-white dark:ring-offset-gray-800'
-                        : ''
-                    }`}
-                  >
-                    <div className="text-sm text-gray-600 dark:text-gray-300">Now teaching</div>
-                    <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      Period {String(livePeriodInfo.period.period ?? '').trim() || '-'}
-                    </div>
-                    <div className="text-sm text-gray-700 dark:text-gray-200">
-                      {stripStdPrefix(String(livePeriodInfo.period.class ?? '').trim() || '—')} · {String(livePeriodInfo.period.subject ?? '').trim() || '—'}
-                    </div>
-                    {livePeriodInfo.period.chapterName && (
-                      <div className="text-sm text-blue-600 dark:text-blue-400 font-medium">
-                        📖 {livePeriodInfo.period.chapterName}
-                        {livePeriodInfo.period.sessionNumber && (
-                          <span className="ml-2 text-xs bg-blue-100 dark:bg-blue-900 px-2 py-0.5 rounded">
-                            Session {livePeriodInfo.period.sessionNumber}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    {String(livePeriodInfo.timeLabel || '').trim() && (
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {String(livePeriodInfo.timeLabel || '').trim()}
-                      </div>
+                <div className="flex items-center justify-between gap-2 mb-4">
+                  <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100">Today</h3>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">{todaysPlansState.date}</span>
+                </div>
+
+                <div className="mt-4">
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Today's Lesson Plans</h4>
+                    {todaysPlansState.loading && (
+                      <span className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Loading
+                      </span>
                     )}
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="text-sm text-gray-600 dark:text-gray-300">No live period right now</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
-                      Based on today’s timetable.
+
+                  {liveTimetableState.loading ? (
+                    <div className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
+                      <RefreshCw className="w-4 h-4 animate-spin" /> Loading timetable...
                     </div>
-                  </div>
-                )}
-              </div>
-            </div>
-            {/* Lesson plan warning (next 2 days) */}
-            {!hasAnyRole(['h m', 'super admin', 'superadmin', 'super_admin']) && missingPlansSummary.count > 0 && (
-              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-900/40 rounded-xl p-4 md:p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-yellow-900 dark:text-yellow-100">
-                      Lesson plans pending
+                  ) : liveTimetableState.error ? (
+                    <div className="text-sm text-gray-600 dark:text-gray-300">
+                      Unable to load today’s timetable.
                     </div>
-                    <div className="text-sm text-yellow-800 dark:text-yellow-200 mt-1">
-                      You have {missingPlansSummary.count} period{missingPlansSummary.count === 1 ? '' : 's'} without lesson plans (today + tomorrow).
+                  ) : todaysPlansState.error ? (
+                    <div className="text-sm text-gray-600 dark:text-gray-300">Unable to load lesson plans.</div>
+                  ) : todaysPlansState.isNonTeachingDay && todaysPlansState.periods.length === 0 ? (
+                    <div className="text-sm text-gray-600 dark:text-gray-300">
+                      No classes scheduled today.{todaysPlansState.reason ? ` ${todaysPlansState.reason}` : ''}
                     </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveView('lessonplans');
-                      const params = new URLSearchParams(window.location.search);
-                      params.set('tab', 'draft');
-                      window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
-                    }}
-                    className="px-3 py-2 text-sm bg-gray-900 dark:bg-gray-700 text-white rounded-lg hover:bg-gray-800 dark:hover:bg-gray-600"
-                  >
-                    Open Lesson Plans
-                  </button>
+                  ) : todaysPlansState.periods.length === 0 ? (
+                    <div className="text-sm text-gray-600 dark:text-gray-300">No timetable periods found for today.</div>
+                  ) : (
+                    <div className="space-y-3">
+                      {todaysPlansState.periods.map((p, idx) => {
+                        const plan = todaysPlansState.lessonsByPeriod[p._key] || null;
+                        const statusMeta = getPlanStatusMeta(plan?.status);
+                        const periodTimes = getTodayPeriodTimes();
+                        const timeLabel = periodTimes ? periodToTimeString(p.period, periodTimes) : '';
+                        const isSub = !!p.isSubstitution;
+                        const liveMatch = livePeriodInfo?.status === 'live' && livePeriodInfo?.period
+                          ? String(p.period ?? '').trim() === String(livePeriodInfo.period.period ?? '').trim()
+                            && String(p.class ?? '').trim().toLowerCase() === String(livePeriodInfo.period.class ?? '').trim().toLowerCase()
+                            && String(p.subject ?? '').trim().toLowerCase() === String(livePeriodInfo.period.subject ?? '').trim().toLowerCase()
+                          : false;
+                        return (
+                          <button
+                            key={`${p._key}-${idx}`}
+                            type="button"
+                            onClick={() => {
+                              if (!plan) return;
+                              openLessonView({
+                                ...plan,
+                                class: plan.class || p.class,
+                                subject: plan.subject || p.subject,
+                                selectedDate: plan.selectedDate || todaysPlansState.date,
+                                selectedPeriod: plan.selectedPeriod || p.period,
+                                session: plan.session || plan.sessionNo,
+                                learningObjectives: plan.learningObjectives || '',
+                                teachingMethods: plan.teachingMethods || '',
+                                resourcesRequired: plan.resourcesRequired || '',
+                                assessmentMethods: plan.assessmentMethods || ''
+                              });
+                            }}
+                            className={`w-full text-left rounded-lg border px-3 py-2 transition-all ${
+                              plan ? 'hover:border-blue-300 hover:bg-blue-50/40 dark:hover:bg-gray-700' : 'cursor-default'
+                            } ${plan ? 'border-gray-200 dark:border-gray-700' : 'border-red-200 bg-red-50/40 dark:border-red-900/40'} ${
+                              isSub ? 'border-amber-300 bg-amber-50/60 dark:border-amber-700/60' : ''
+                            } ${liveMatch ? 'ring-2 ring-emerald-400/70 shadow-[0_0_18px_rgba(16,185,129,0.25)]' : ''}`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                  Period {String(p.period ?? '').trim() || '-'}
+                                  {timeLabel ? <span className="ml-2 text-xs text-gray-500">{timeLabel}</span> : null}
+                                </div>
+                                <div className="text-sm text-gray-700 dark:text-gray-300">
+                                  {stripStdPrefix(String(p.class ?? '').trim() || '—')} · {String(p.subject ?? '').trim() || '—'}
+                                </div>
+                                {liveMatch && (
+                                  <div className="text-xs text-emerald-700 mt-1 font-semibold">Live now</div>
+                                )}
+                                {isSub && (
+                                  <div className="text-xs text-amber-700 mt-1 font-medium">Substitution period</div>
+                                )}
+                                {plan ? (
+                                  <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                    {plan.chapter ? `Chapter: ${plan.chapter}` : 'Chapter: —'}
+                                    {plan.session || plan.sessionNo ? ` · Session ${plan.session || plan.sessionNo}` : ''}
+                                  </div>
+                                ) : (
+                                  <div className={`text-xs mt-1 ${isSub ? 'text-amber-700' : 'text-red-700'}`}>
+                                    {isSub
+                                      ? 'Substitution period: you can attach a ready lesson plan while submitting the report (optional).'
+                                      : 'You have not prepared a lesson plan for this period.'}
+                                  </div>
+                                )}
+                              </div>
+                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold ${statusMeta.className}`}>
+                                {statusMeta.label || 'Status'}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
-            )}
+            </div>
+            {/* Lesson plan warning removed from dashboard */}
             
             {/* Detailed Teaching Assignment - Shows specific classes and subjects */}
             {(insights.teachingClasses.length > 0 || insights.teachingSubjects.length > 0) && (
@@ -2189,6 +1935,8 @@ const App = () => {
                 return <ClassDataView />;
               case 'admin-data':
                 return <AdminDataEditor user={user} />;
+              case 'settings':
+                return <SettingsPanel user={user} settings={memoizedSettings} onSettingsUpdated={handleSettingsUpdated} />;
               case 'class-students':
                 return <ClassStudentsView />;
               case 'daily-reports-management':
@@ -2934,8 +2682,13 @@ const App = () => {
                 ))}
                 {filteredSchemes.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 text-center">
-                      {schemes.length === 0 ? 'No schemes submitted yet.' : 'No schemes match the selected filters.'}
+                    <td
+                      colSpan={7}
+                      className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 text-center"
+                    >
+                      {schemes.length === 0
+                        ? 'No schemes submitted yet.'
+                        : 'No schemes match the selected filters.'}
                     </td>
                   </tr>
                 )}
@@ -4678,7 +4431,6 @@ const App = () => {
   };
 
   const HMDashboardView = ({ insights: insightsProp }) => {
-    console.debug('🚀 HMDashboardView rendering with insights:', insightsProp);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [dailyReportsData, setDailyReportsData] = useState({ reports: [], stats: {} });
     const [autoRefresh, setAutoRefresh] = useState(true);
@@ -4689,6 +4441,7 @@ const App = () => {
 
     const [lessonPlansToday, setLessonPlansToday] = useState([]);
     const [loadingLessonPlansToday, setLoadingLessonPlansToday] = useState(false);
+    const lessonPlansLoadRef = useRef({ date: null, loading: false });
 
     // Live schedule focused period (Prev/Next controls). Auto-follows current period until user navigates.
     const [focusedPeriod, setFocusedPeriod] = useState(1);
@@ -4881,13 +4634,16 @@ const App = () => {
   useEffect(() => {
     const shouldLoad = Boolean(currentPeriod || selectedPeriod);
     if (!shouldLoad) return;
-    if (Array.isArray(lessonPlansToday) && lessonPlansToday.length > 0) return;
+    const today = new Date().toISOString().split('T')[0];
+    if (lessonPlansLoadRef.current.loading) return;
+    if (lessonPlansLoadRef.current.date === today) return;
 
     let cancelled = false;
     async function loadLessonPlansForToday() {
       try {
+        lessonPlansLoadRef.current.loading = true;
+        lessonPlansLoadRef.current.date = today;
         setLoadingLessonPlansToday(true);
-        const today = new Date().toISOString().split('T')[0];
         const response = await api.getLessonPlansForDate(today);
         const result = response?.data || response;
         const plans = Array.isArray(result?.lessonPlans) ? result.lessonPlans : (Array.isArray(result) ? result : []);
@@ -4897,12 +4653,13 @@ const App = () => {
         if (!cancelled) setLessonPlansToday([]);
       } finally {
         if (!cancelled) setLoadingLessonPlansToday(false);
+        lessonPlansLoadRef.current.loading = false;
       }
     }
 
     loadLessonPlansForToday();
     return () => { cancelled = true; };
-  }, [currentPeriod, selectedPeriod, lessonPlansToday]);
+  }, [currentPeriod, selectedPeriod]);
 
   const normalizeKeyPart = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, '');
 
@@ -10910,6 +10667,127 @@ const App = () => {
     const [schemeLookup, setSchemeLookup] = useState({});
     const email = user?.email || '';
 
+    const [missingReportsSummary, setMissingReportsSummary] = useState({
+      loading: false,
+      date: todayIST(),
+      count: 0,
+      pending: [],
+      missingDays: 0,
+      range: { from: '', to: '' }
+    });
+    const [missingRange, setMissingRange] = useState({ from: '', to: '' });
+    const [missingRangeDraft, setMissingRangeDraft] = useState({ from: '', to: '' });
+    const [missingRangeTouched, setMissingRangeTouched] = useState(false);
+
+    useEffect(() => {
+      if (!email) return;
+      if (!hasAnyRole(['teacher', 'class teacher', 'daily reporting teachers'])) return;
+      if (hasAnyRole(['h m', 'super admin', 'superadmin', 'super_admin'])) return;
+
+      let cancelled = false;
+
+      const istNow = () => {
+        try {
+          return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+        } catch {
+          return new Date();
+        }
+      };
+
+      const yesterdayIST = () => {
+        const base = istNow();
+        base.setDate(base.getDate() - 1);
+        return base;
+      };
+
+      const formatIST = (d) => {
+        try {
+          return d.toLocaleString('en-CA', {
+            timeZone: 'Asia/Kolkata',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+          }).split(',')[0];
+        } catch {
+          return todayIST();
+        }
+      };
+
+      const addDaysIso = (iso, deltaDays) => {
+        const d = new Date(`${iso}T00:00:00Z`);
+        if (isNaN(d.getTime())) return iso;
+        d.setUTCDate(d.getUTCDate() + Number(deltaDays || 0));
+        return d.toISOString().slice(0, 10);
+      };
+
+      const clampToYesterday = (iso) => {
+        const y = formatIST(yesterdayIST());
+        if (!iso) return y;
+        return String(iso) > String(y) ? y : String(iso);
+      };
+
+      const maybeInitRange = () => {
+        if (missingRangeTouched) return;
+        const y = formatIST(yesterdayIST());
+        const lookback = Math.max(1, Number(memoizedSettings?.missingDailyReports?.lookbackDays ?? 7) || 7);
+        const from = addDaysIso(y, -(lookback - 1));
+        const nextRange = { from, to: y };
+
+        if (missingRange.from !== nextRange.from || missingRange.to !== nextRange.to) {
+          setMissingRange(nextRange);
+          setMissingRangeDraft(nextRange);
+        }
+      };
+
+      const loadMissingReports = async () => {
+        maybeInitRange();
+        const from = String(missingRange.from || '').trim();
+        const to = clampToYesterday(String(missingRange.to || '').trim());
+        if (!from || !to) return;
+
+        setMissingReportsSummary(prev => ({
+          ...prev,
+          loading: true,
+          date: to,
+          range: { from, to }
+        }));
+
+        try {
+          const res = await api.getTeacherDashboardData(email, { from, to });
+          if (cancelled) return;
+          const payload = res?.data || res || {};
+          if (payload.success === false) throw new Error(payload.error || 'Failed to load missing reports');
+
+          const missing = payload.missingReports || {};
+          const range = missing.range || { from, to };
+          const pending = Array.isArray(missing.pending) ? missing.pending : [];
+          const count = Number(missing.count || 0);
+          const missingDays = Number(missing.missingDays || 0);
+
+          setMissingReportsSummary({
+            loading: false,
+            date: range.to || to,
+            count: Number.isFinite(count) ? count : 0,
+            pending,
+            missingDays: Number.isFinite(missingDays) ? missingDays : 0,
+            range
+          });
+        } catch (_e) {
+          if (cancelled) return;
+          setMissingReportsSummary(prev => ({ ...prev, loading: false, count: 0, pending: [], missingDays: 0 }));
+        }
+      };
+
+      loadMissingReports();
+      return () => { cancelled = true; };
+    }, [
+      email,
+      missingRange.from,
+      missingRange.to,
+      memoizedSettings?.missingDailyReports?.lookbackDays,
+      memoizedSettings?.missingDailyReports?.maxRangeDays
+    ]);
+
     const isSubstitutionReport = useCallback((r) => {
       if (!r) return false;
       const v = r.isSubstitution;
@@ -11036,6 +10914,31 @@ const App = () => {
       URL.revokeObjectURL(url);
     };
 
+    const exportMissingReportsCSV = () => {
+      const rows = Array.isArray(missingReportsSummary?.pending) ? missingReportsSummary.pending : [];
+      if (!rows.length) return;
+      const header = ['date','period','class','subject'];
+      const csv = [header.join(',')]
+        .concat(rows.map(r => {
+          const vals = [r?.date, r?.period, r?.class, r?.subject].map(v => {
+            const s = String(v ?? '').replace(/\r?\n/g, ' ').trim();
+            const escaped = s.replace(/"/g, '""');
+            return `"${escaped}"`;
+          });
+          return vals.join(',');
+        }))
+        .join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `missing-daily-reports_${missingReportsSummary?.range?.from || 'from'}_${missingReportsSummary?.range?.to || 'to'}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    };
+
     const getCompletionLabel = useCallback((r) => {
       const pct = Number(r?.completionPercentage);
       if (!isNaN(pct)) {
@@ -11063,6 +10966,113 @@ const App = () => {
           <button onClick={() => setRefreshTrigger(t => t + 1)} disabled={loading} className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-indigo-700 disabled:opacity-50">
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} /> {loading ? 'Refreshing…' : 'Refresh'}
           </button>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-gray-900">Missing Daily Reports</div>
+              <div className="text-xs text-gray-600 mt-1">
+                {missingReportsSummary.loading
+                  ? 'Checking till yesterday…'
+                  : `Range ${missingReportsSummary?.range?.from || '-'} → ${missingReportsSummary?.range?.to || missingReportsSummary.date}`}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {missingReportsSummary.missingDays > Number(memoizedSettings?.missingDailyReports?.escalationDays ?? 2) && !missingReportsSummary.loading && (
+                <span className="text-xs font-semibold text-red-700">Meet the HM</span>
+              )}
+              <button
+                type="button"
+                onClick={exportMissingReportsCSV}
+                disabled={missingReportsSummary.loading || !missingReportsSummary.pending.length}
+                className="px-3 py-2 text-xs bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-40"
+              >
+                Download CSV
+              </button>
+            </div>
+          </div>
+
+          {!missingReportsSummary.loading && memoizedSettings?.missingDailyReports?.allowCustomRange !== false && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+              <label className="text-gray-600">
+                From
+                <input
+                  type="date"
+                  value={missingRangeDraft.from || ''}
+                  onChange={(e) => {
+                    setMissingRangeTouched(true);
+                    setMissingRangeDraft(prev => ({ ...prev, from: e.target.value }));
+                  }}
+                  className="ml-2 px-2 py-1 rounded border border-gray-200 bg-white text-gray-900"
+                />
+              </label>
+              <label className="text-gray-600">
+                To
+                <input
+                  type="date"
+                  value={missingRangeDraft.to || ''}
+                  onChange={(e) => {
+                    setMissingRangeTouched(true);
+                    setMissingRangeDraft(prev => ({ ...prev, to: e.target.value }));
+                  }}
+                  className="ml-2 px-2 py-1 rounded border border-gray-200 bg-white text-gray-900"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setMissingRangeTouched(true);
+                  setMissingRange({
+                    from: String(missingRangeDraft.from || '').trim(),
+                    to: String(missingRangeDraft.to || '').trim()
+                  });
+                }}
+                className="px-3 py-1.5 rounded bg-gray-900 text-white hover:bg-gray-800"
+              >
+                Apply
+              </button>
+            </div>
+          )}
+
+          <div className="mt-3 text-xs text-gray-600">
+            Missing days: <span className="font-semibold">{missingReportsSummary.missingDays}</span> · Total missing: <span className="font-semibold">{missingReportsSummary.count}</span>
+          </div>
+
+          {missingReportsSummary.loading ? (
+            <div className="mt-3 text-sm text-gray-600">Loading…</div>
+          ) : (!Array.isArray(missingReportsSummary.pending) || missingReportsSummary.pending.length === 0) ? (
+            <div className="mt-3 text-sm text-gray-600">No missing reports found.</div>
+          ) : (
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 text-gray-700">
+                  <tr>
+                    <th className="text-left font-medium px-3 py-2">Date</th>
+                    <th className="text-left font-medium px-3 py-2">Period</th>
+                    <th className="text-left font-medium px-3 py-2">Class</th>
+                    <th className="text-left font-medium px-3 py-2">Subject</th>
+                    <th className="text-left font-medium px-3 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {missingReportsSummary.pending.map((p, idx) => (
+                    <tr key={idx} className="border-t border-gray-100">
+                      <td className="px-3 py-2 text-gray-700">{String(p.date || '').trim() || '—'}</td>
+                      <td className="px-3 py-2 text-gray-700">{String(p.period || '').trim() ? `P${String(p.period || '').trim()}` : '—'}</td>
+                      <td className="px-3 py-2 text-gray-700">{stripStdPrefix(String(p.class || '').trim() || '—')}</td>
+                      <td className="px-3 py-2 text-gray-700">{String(p.subject || '').trim() || '—'}</td>
+                      <td className="px-3 py-2 text-right">
+                        {p.isSubstitution && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">Substitution</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
         <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
           <div className="flex flex-wrap gap-3 items-end">

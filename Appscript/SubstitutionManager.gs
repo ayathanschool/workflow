@@ -166,7 +166,6 @@ function assignSubstitutionsBatch(payload) {
         item.regularSubject
       );
     } catch (cascadeErr) {
-      Logger.log(`[assignSubstitutionsBatch] Cascade error: ${cascadeErr.message}`);
     }
     cascadeResults.push(cascadeResult);
   }
@@ -205,8 +204,6 @@ function _fetchSubstitutionsForDate(normalizedDate) {
     return rowDate === normalizedDate;
   });
   
-  Logger.log(`[getSubstitutionsForDate] Found ${substitutions.length} substitutions for ${normalizedDate}`);
-  
   // Sort by period and class
   substitutions.sort((a, b) => {
     const periodCompare = (parseInt(a.period) || 0) - (parseInt(b.period) || 0);
@@ -236,8 +233,6 @@ function getTeacherSubstitutions(teacherEmail, date) {
     return rowDate === normalizedDate && rowTeacher === teacherEmail.toLowerCase();
   });
   
-  Logger.log(`[getTeacherSubstitutions] Found ${substitutions.length} substitutions for ${teacherEmail}`);
-  
   // Sort by period
   substitutions.sort((a, b) => (parseInt(a.period) || 0) - (parseInt(b.period) || 0));
   
@@ -265,8 +260,6 @@ function getTeacherSubstitutionsRange(teacherEmail, startDate, endDate) {
     const rowTeacher = String(r.substituteTeacher || '').toLowerCase();
     return rowTeacher === teacherEmail.toLowerCase() && rowDate >= normalizedStart && rowDate <= normalizedEnd;
   });
-  
-  Logger.log(`[getTeacherSubstitutionsRange] Found ${substitutions.length} substitutions for ${teacherEmail}`);
   
   // Sort by date descending, then by period
   substitutions.sort((a, b) => {
@@ -707,9 +700,6 @@ function getTeacherSubstitutionNotifications(teacherEmail) {
     
     // Sort by creation date (newest first)
     notifications.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-    
-    Logger.log(`[getTeacherSubstitutionNotifications] Found ${notifications.length} notifications for ${teacherEmail}`);
-    
     // Return in expected format with notifications array
     return {
       success: true,
@@ -717,7 +707,6 @@ function getTeacherSubstitutionNotifications(teacherEmail) {
       count: notifications.length
     };
   } catch (error) {
-    Logger.log(`[getTeacherSubstitutionNotifications] Error: ${error.message}`);
     return {
       success: false,
       error: error.message,
@@ -738,8 +727,6 @@ function acknowledgeSubstitutionAssignment(data) {
     const normalizedDate = _isoDateString(data.date);
     const teacherEmail = String(data.teacherEmail || '').toLowerCase();
     
-    Logger.log(`[acknowledgeSubstitutionAssignment] Looking for: date=${normalizedDate}, period=${data.period}, class=${data.class}, teacher=${teacherEmail}`);
-    
     // Find the substitution row
     for (let i = 1; i < rows.length; i++) {
       const row = _indexByHeader(rows[i], headers);
@@ -750,9 +737,6 @@ function acknowledgeSubstitutionAssignment(data) {
           String(row.period) === String(data.period) &&
           String(row.class || '').toLowerCase() === String(data.class || '').toLowerCase() &&
           rowSubstitute === teacherEmail) {
-        
-        Logger.log(`[acknowledgeSubstitutionAssignment] Found matching row at index ${i}`);
-        
         // Update acknowledgment fields
         const acknowledgedColIndex = headers.indexOf('acknowledged') + 1;
         const acknowledgedByColIndex = headers.indexOf('acknowledgedBy') + 1;
@@ -764,18 +748,12 @@ function acknowledgeSubstitutionAssignment(data) {
         
         // Invalidate cache for this teacher
         invalidateCache('sub_notifications_email:' + teacherEmail);
-        
-        Logger.log(`[acknowledgeSubstitutionAssignment] Successfully acknowledged`);
-        
         return { success: true, message: 'Substitution acknowledged successfully' };
       }
     }
-    
-    Logger.log(`[acknowledgeSubstitutionAssignment] No matching substitution found`);
     return { error: 'Substitution not found' };
     
   } catch (error) {
-    Logger.log(`[acknowledgeSubstitutionAssignment] Error: ${error}`);
     return { error: 'Failed to acknowledge substitution: ' + error.toString() };
   }
 }
@@ -806,15 +784,10 @@ function _handleAbsentTeacherLessonPlan(absentTeacher, date, period, className, 
     });
     
     if (!absentPlan) {
-      Logger.log('[_handleAbsentTeacherLessonPlan] No lesson plan found for absent teacher');
       return { handled: false, reason: 'no_plan_found' };
     }
-    
-    Logger.log(`[_handleAbsentTeacherLessonPlan] Found plan: ${absentPlan.lpId}, Chapter: ${absentPlan.chapter}, Session: ${absentPlan.session}`);
-    
     // Check if this is a scheme-based plan that can be cascaded
     if (absentPlan.lessonType !== 'scheme-based' || !absentPlan.schemeId) {
-      Logger.log('[_handleAbsentTeacherLessonPlan] Plan is not scheme-based, skipping cascade');
       return { handled: false, reason: 'not_scheme_based' };
     }
     
@@ -822,17 +795,14 @@ function _handleAbsentTeacherLessonPlan(absentTeacher, date, period, className, 
     const preview = getCascadePreview(absentPlan.lpId, absentEmail, normalizedDate);
     
     if (!preview || !preview.success) {
-      Logger.log('[_handleAbsentTeacherLessonPlan] Cascade preview failed');
       return { handled: false, reason: 'preview_failed', details: preview };
     }
     
     if (!preview.needsCascade) {
-      Logger.log('[_handleAbsentTeacherLessonPlan] No cascade needed');
       return { handled: false, reason: 'no_cascade_needed' };
     }
     
     if (!preview.canCascade || !Array.isArray(preview.sessionsToReschedule) || !preview.sessionsToReschedule.length) {
-      Logger.log('[_handleAbsentTeacherLessonPlan] Cannot cascade');
       return { handled: false, reason: 'cannot_cascade', details: preview };
     }
     
@@ -851,9 +821,6 @@ function _handleAbsentTeacherLessonPlan(absentTeacher, date, period, className, 
     };
     
     const result = executeCascade(execPayload);
-    
-    Logger.log(`[_handleAbsentTeacherLessonPlan] Cascade executed: ${JSON.stringify(result)}`);
-    
     return {
       handled: true,
       cascaded: result && result.success,
@@ -865,7 +832,6 @@ function _handleAbsentTeacherLessonPlan(absentTeacher, date, period, className, 
     };
     
   } catch (error) {
-    Logger.log(`[_handleAbsentTeacherLessonPlan] Error: ${error.message}`);
     return { 
       handled: false, 
       error: error.message 

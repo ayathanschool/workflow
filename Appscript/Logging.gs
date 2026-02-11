@@ -16,17 +16,5 @@ function _getCurrentLogLevel() {
 var _CURRENT_LOG_LEVEL = _getCurrentLogLevel();
 
 function appLog(level, msg, meta) {
-  level = (level || 'INFO').toUpperCase();
-  var rank = LOG_LEVELS[level] !== undefined ? LOG_LEVELS[level] : LOG_LEVELS.INFO;
-  if (rank <= _CURRENT_LOG_LEVEL) {
-    if (meta !== undefined) {
-      try {
-        Logger.log('[' + level + '] ' + msg + ' ' + (typeof meta === 'string' ? meta : JSON.stringify(meta)));
-      } catch(e) {
-        Logger.log('[' + level + '] ' + msg);
-      }
-    } else {
-      Logger.log('[' + level + '] ' + msg);
-    }
-  }
+  return;
 }

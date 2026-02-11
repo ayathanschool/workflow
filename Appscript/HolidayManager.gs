@@ -3,67 +3,6 @@
  * Manages undeclared/sudden holidays and cascades lesson plans
  */
 
-/**
- * Mark a date as undeclared holiday
- * @param {string} dateStr - Date string (YYYY-MM-DD)
- * @param {string} reason - Reason for holiday
- * @param {string} userEmail - User marking the holiday
- * @param {string} userName - User name
- * @returns {Object} Result with ok or error
- */
-function markUndeclaredHoliday(dateStr, reason, userEmail, userName) {
-  try {
-    if (!dateStr || !reason) {
-      return { error: 'Date and reason are required' };
-    }
-    
-    const sh = _getSheet('UndeclaredHolidays');
-    _ensureHeaders(sh, SHEETS.UndeclaredHolidays);
-    
-    // Check if holiday already exists for this date
-    const headers = _headers(sh);
-    const existing = _rows(sh).find(row => {
-      const data = _indexByHeader(row, headers);
-      return data.date === dateStr;
-    });
-    
-    if (existing) {
-      return { error: 'Holiday already marked for this date' };
-    }
-    
-    const now = new Date().toISOString();
-    const holidayId = 'HOL_' + Date.now();
-    
-    // Add holiday record
-    sh.appendRow([
-      holidayId,      // id
-      dateStr,        // date
-      reason,         // reason
-      userEmail,      // markedBy
-      now,            // markedAt
-      'active'        // status
-    ]);
-    
-    // Log audit
-    logAudit({
-      action: 'marked_undeclared_holiday',
-      entityType: 'Holiday',
-      entityId: holidayId,
-      userEmail: userEmail,
-      userName: userName,
-      userRole: 'HM',
-      afterData: { date: dateStr, reason: reason },
-      description: `Marked undeclared holiday on ${dateStr}: ${reason}`,
-      severity: AUDIT_SEVERITY.WARNING
-    });
-    
-    return { ok: true, holidayId: holidayId, message: 'Holiday marked successfully' };
-    
-  } catch (error) {
-    console.error('Error marking undeclared holiday:', error);
-    return { error: error.toString() };
-  }
-}
 
 /**
  * Get all undeclared holidays
@@ -103,52 +42,6 @@ function getUndeclaredHolidays(activeOnly = true) {
   }
 }
 
-/**
- * Delete/deactivate an undeclared holiday
- * @param {string} holidayId - Holiday ID
- * @param {string} userEmail - User email
- * @param {string} userName - User name
- * @returns {Object} Result with ok or error
- */
-function deleteUndeclaredHoliday(holidayId, userEmail, userName) {
-  try {
-    const sh = _getSheet('UndeclaredHolidays');
-    const headers = _headers(sh);
-    const allRows = _rows(sh);
-    
-    for (let i = 0; i < allRows.length; i++) {
-      const data = _indexByHeader(allRows[i], headers);
-      if (data.id === holidayId) {
-        const rowNum = i + 2; // +1 for header, +1 for 0-index
-        
-        // Update status to 'deleted' instead of actually deleting
-        const statusCol = headers.indexOf('status') + 1;
-        sh.getRange(rowNum, statusCol).setValue('deleted');
-        
-        // Log audit
-        logAudit({
-          action: 'deleted_holiday',
-          entityType: 'Holiday',
-          entityId: holidayId,
-          userEmail: userEmail,
-          userName: userName,
-          userRole: 'HM',
-          beforeData: data,
-          description: `Deleted undeclared holiday: ${data.date}`,
-          severity: AUDIT_SEVERITY.WARNING
-        });
-        
-        return { ok: true, message: 'Holiday deleted successfully' };
-      }
-    }
-    
-    return { error: 'Holiday not found' };
-    
-  } catch (error) {
-    console.error('Error deleting holiday:', error);
-    return { error: error.toString() };
-  }
-}
 
 /**
  * Check if a date is an undeclared holiday

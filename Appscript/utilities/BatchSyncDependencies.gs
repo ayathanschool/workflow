@@ -16,13 +16,10 @@
  */
 function syncSessionDependenciesFromReports() {
   try {
-    Logger.log('=== STARTING BATCH SYNC: SessionDependencies ===');
-    
     const dailyReportsSheet = _getSheet('DailyReports');
     const lessonPlansSheet = _getSheet('LessonPlans');
     
     if (!dailyReportsSheet || !lessonPlansSheet) {
-      Logger.log('ERROR: Required sheets not found');
       return { success: false, error: 'Required sheets not found' };
     }
     
@@ -31,8 +28,6 @@ function syncSessionDependenciesFromReports() {
     
     const reports = _rows(dailyReportsSheet).map(row => _indexByHeader(row, reportHeaders));
     const plans = _rows(lessonPlansSheet).map(row => _indexByHeader(row, planHeaders));
-    
-    Logger.log(`Found ${reports.length} reports and ${plans.length} lesson plans`);
     
     let processed = 0;
     let cascadingDetected = 0;
@@ -56,7 +51,6 @@ function syncSessionDependenciesFromReports() {
       // Find the lesson plan - use string comparison with trim
       const lessonPlan = plans.find(p => String(p.lpId || '').trim() === lpId);
       if (!lessonPlan) {
-        Logger.log(`Warning: Lesson plan not found for lpId: "${lpId}"`);
         skipped++;
         return;
       }
@@ -70,8 +64,6 @@ function syncSessionDependenciesFromReports() {
       );
       
       if (subsequentSessions.length > 0) {
-        Logger.log(`Processing incomplete session: lpId=${lpId}, completion=${completion}%, subsequent=${subsequentSessions.length}`);
-        
         // Track the dependencies (calls _trackSessionDependencies from SessionTrackingEnhancer.gs)
         _trackSessionDependencies(lessonPlan, subsequentSessions, completion);
         
@@ -80,12 +72,6 @@ function syncSessionDependenciesFromReports() {
       
       processed++;
     });
-    
-    Logger.log(`=== BATCH SYNC COMPLETE ===`);
-    Logger.log(`Total reports: ${reports.length}`);
-    Logger.log(`Processed: ${processed} incomplete sessions`);
-    Logger.log(`Skipped: ${skipped} (no lesson plan linked)`);
-    Logger.log(`Cascading effects detected: ${cascadingDetected}`);
     
     return {
       success: true,
@@ -99,8 +85,6 @@ function syncSessionDependenciesFromReports() {
     };
     
   } catch (error) {
-    Logger.log(`ERROR in batch sync: ${error.message}`);
-    Logger.log(`Stack trace: ${error.stack}`);
     return { success: false, error: error.message };
   }
 }
@@ -120,12 +104,10 @@ function clearSessionDependencies() {
     if (lastRow > 1) {
       // Delete all rows except header
       sheet.deleteRows(2, lastRow - 1);
-      Logger.log(`Cleared ${lastRow - 1} rows from SessionDependencies`);
     }
     
     return { success: true, message: `Cleared ${lastRow - 1} dependencies` };
   } catch (error) {
-    Logger.log(`Error clearing dependencies: ${error.message}`);
     return { success: false, error: error.message };
   }
 }
@@ -136,8 +118,6 @@ function clearSessionDependencies() {
  */
 function syncCompletionPercentagesToLessonPlans() {
   try {
-    Logger.log('=== SYNCING COMPLETION PERCENTAGES TO LESSON PLANS ===');
-    
     const dailyReportsSheet = _getSheet('DailyReports');
     const lessonPlansSheet = _getSheet('LessonPlans');
     
@@ -149,8 +129,6 @@ function syncCompletionPercentagesToLessonPlans() {
     const planHeaders = _headers(lessonPlansSheet);
     
     const reports = _rows(dailyReportsSheet).map(row => _indexByHeader(row, reportHeaders));
-    
-    Logger.log(`Found ${reports.length} daily reports`);
     
     // Ensure completionPercentage column exists in LessonPlans
     _ensureHeaders(lessonPlansSheet, ['completionPercentage', 'actualCompletionDate', 'sessionStatus']);
@@ -185,8 +163,6 @@ function syncCompletionPercentagesToLessonPlans() {
       });
       
       if (planRowIndex === -1) {
-        Logger.log(`Warning: Lesson plan not found for lpId: "${lpId}"`);
-        Logger.log(`Available lpIds: ${allPlans.slice(0, 5).map(p => _indexByHeader(p, finalHeaders).lpId).join(', ')}`);
         skipped++;
         return;
       }
@@ -216,15 +192,10 @@ function syncCompletionPercentagesToLessonPlans() {
         lessonPlansSheet.getRange(rowNum, statusCol).setValue(status);
       }
       
-      Logger.log(`Updated lpId ${lpId}: ${completion}% (${status})`);
       updated++;
     });
     
     SpreadsheetApp.flush();
-    
-    Logger.log(`=== SYNC COMPLETE ===`);
-    Logger.log(`Updated: ${updated} lesson plans`);
-    Logger.log(`Skipped: ${skipped}`);
     
     return {
       success: true,
@@ -236,8 +207,6 @@ function syncCompletionPercentagesToLessonPlans() {
     };
     
   } catch (error) {
-    Logger.log(`ERROR: ${error.message}`);
-    Logger.log(`Stack: ${error.stack}`);
     return { success: false, error: error.message };
   }
 }
@@ -248,23 +217,10 @@ function syncCompletionPercentagesToLessonPlans() {
  */
 function fullHistoricalSync() {
   try {
-    Logger.log('=== STARTING FULL HISTORICAL SYNC ===');
-    Logger.log('');
-    
     // Step 1: Sync completion percentages
-    Logger.log('STEP 1: Syncing completion percentages to LessonPlans...');
     const completionResult = syncCompletionPercentagesToLessonPlans();
-    Logger.log(`Result: ${completionResult.success ? 'SUCCESS' : 'FAILED'}`);
-    Logger.log('');
-    
     // Step 2: Sync dependencies
-    Logger.log('STEP 2: Syncing session dependencies...');
     const depsResult = syncSessionDependenciesFromReports();
-    Logger.log(`Result: ${depsResult.success ? 'SUCCESS' : 'FAILED'}`);
-    Logger.log('');
-    
-    Logger.log('=== FULL SYNC COMPLETE ===');
-    
     return {
       success: completionResult.success && depsResult.success,
       completionSync: completionResult,
@@ -272,7 +228,6 @@ function fullHistoricalSync() {
     };
     
   } catch (error) {
-    Logger.log(`ERROR: ${error.message}`);
     return { success: false, error: error.message };
   }
 }

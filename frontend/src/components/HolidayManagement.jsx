@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Plus, Trash2, AlertCircle, Check, X, RotateCcw, History } from 'lucide-react';
+import { Calendar, AlertCircle, Check, X, RotateCcw, History } from 'lucide-react';
 import * as api from '../api';
 
 const HolidayManagement = ({ user }) => {
@@ -9,9 +9,6 @@ const HolidayManagement = ({ user }) => {
   const [success, setSuccess] = useState(null);
   
   // Form states
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [selectedDate, setSelectedDate] = useState('');
-  const [reason, setReason] = useState('');
   const [cascadeDate, setCascadeDate] = useState('');
   const [showCascadeConfirm, setShowCascadeConfirm] = useState(false);
   const [affectedLessons, setAffectedLessons] = useState([]);
@@ -49,64 +46,6 @@ const HolidayManagement = ({ user }) => {
     } catch (err) {
       console.error('Error loading holidays:', err);
       setError('Failed to load holidays: ' + (err.message || 'Unknown error'));
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  const handleAddHoliday = async (e) => {
-    e.preventDefault();
-    
-    if (!selectedDate || !reason.trim()) {
-      setError('Please fill in all fields');
-      return;
-    }
-    
-    try {
-      setLoading(true);
-      setError(null);
-      setSuccess(null);
-      
-      const result = await api.markUndeclaredHoliday(selectedDate, reason);
-      
-      if (result.error) {
-        setError(result.error);
-      } else {
-        setSuccess('Holiday marked successfully');
-        setSelectedDate('');
-        setReason('');
-        setShowAddForm(false);
-        loadHolidays();
-      }
-    } catch (err) {
-      console.error('Error marking holiday:', err);
-      setError('Failed to mark holiday: ' + (err.message || 'Unknown error'));
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  const handleDeleteHoliday = async (holidayId) => {
-    if (!confirm('Are you sure you want to delete this holiday? This action cannot be undone.')) {
-      return;
-    }
-    
-    try {
-      setLoading(true);
-      setError(null);
-      setSuccess(null);
-      
-      const result = await api.deleteUndeclaredHoliday(holidayId);
-      
-      if (result.error) {
-        setError(result.error);
-      } else {
-        setSuccess('Holiday deleted successfully');
-        loadHolidays();
-      }
-    } catch (err) {
-      console.error('Error deleting holiday:', err);
-      setError('Failed to delete holiday: ' + (err.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }
@@ -232,7 +171,7 @@ const HolidayManagement = ({ user }) => {
           Undeclared Holiday Management
         </h1>
         <p className="text-gray-600">
-          Mark sudden/undeclared holidays and cascade lesson plans to maintain schedule continuity
+          Review undeclared holidays and cascade lesson plans to maintain schedule continuity
         </p>
       </div>
       
@@ -250,61 +189,6 @@ const HolidayManagement = ({ user }) => {
           <span className="text-red-800">{error}</span>
         </div>
       )}
-      
-      {/* Add Holiday Section */}
-      <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-800">Mark New Holiday</h2>
-          <button
-            onClick={() => setShowAddForm(!showAddForm)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center"
-          >
-            <Plus size={18} className="mr-1" />
-            {showAddForm ? 'Cancel' : 'Add Holiday'}
-          </button>
-        </div>
-        
-        {showAddForm && (
-          <form onSubmit={handleAddHoliday} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Date <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Reason <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="e.g., Heavy rain, Emergency closure"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-            </div>
-            
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full md:w-auto px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Adding...' : 'Add Holiday'}
-            </button>
-          </form>
-        )}
-      </div>
       
       {/* Cascade Section */}
       <div className="bg-white rounded-lg shadow-md p-6 mb-6">
@@ -476,7 +360,7 @@ const HolidayManagement = ({ user }) => {
           </div>
         ) : holidays.length === 0 ? (
           <div className="text-center py-8 text-gray-500">
-            No holidays marked yet. Add a holiday to get started.
+            No undeclared holidays found.
           </div>
         ) : (
           <div className="space-y-3">
@@ -508,14 +392,6 @@ const HolidayManagement = ({ user }) => {
                   </p>
                 </div>
                 
-                <button
-                  onClick={() => handleDeleteHoliday(holiday.id)}
-                  disabled={loading}
-                  className="p-2 text-red-600 hover:bg-red-50 rounded-md disabled:opacity-50"
-                  title="Delete holiday"
-                >
-                  <Trash2 size={18} />
-                </button>
               </div>
             ))}
           </div>

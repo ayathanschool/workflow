@@ -19,11 +19,34 @@ const AuditLog = ({ user }) => {
   const [stats, setStats] = useState(null);
   const { error: showError, success } = useToast();
 
+  const normalizedRoles = Array.isArray(user?.roles)
+    ? user.roles.map(r => String(r || '').toLowerCase().trim())
+    : [];
+  const hasRole = (token) => normalizedRoles.some(r => {
+    const t = String(token || '').toLowerCase().trim();
+    if (!t) return false;
+    if (r === t) return true;
+    if (r.includes(t)) return true;
+    if (r.replace(/\s+/g, '') === t.replace(/\s+/g, '')) return true;
+    return false;
+  });
+  const hasAnyRole = (tokens) => Array.isArray(tokens) && tokens.some(tok => hasRole(tok));
+  const isSuperAdmin = hasAnyRole(['super admin', 'superadmin', 'super_admin']);
+  const isHM = hasAnyRole(['hm', 'headmaster', 'h m', 'principal', 'admin']);
+  const canAccess = isSuperAdmin || isHM;
+
   // Entity types
-  const entityTypes = [
-    'User', 'Student', 'Scheme', 'LessonPlan', 'DailyReport', 
-    'Exam', 'ExamMarks', 'Substitution', 'Timetable', 'Settings'
+  const allEntityTypes = [
+    'User', 'Student', 'Scheme', 'LessonPlan', 'DailyReport',
+    'Exam', 'ExamMarks', 'Substitution', 'Timetable', 'Settings',
+    'Syllabus', 'AcademicCalendar', 'Holiday'
   ];
+  const hmEntityTypes = [
+    'Student', 'Scheme', 'LessonPlan', 'DailyReport',
+    'Exam', 'ExamMarks', 'Substitution', 'Timetable', 'Settings',
+    'Syllabus', 'AcademicCalendar', 'Holiday'
+  ];
+  const entityTypes = isSuperAdmin ? allEntityTypes : hmEntityTypes;
 
   // Actions
   const actions = [
@@ -35,11 +58,16 @@ const AuditLog = ({ user }) => {
   const severities = ['info', 'warning', 'critical'];
 
   useEffect(() => {
+    if (!user?.email || !canAccess) return;
     loadAuditLogs();
     loadAuditSummary();
-  }, []);
+  }, [user?.email, canAccess]);
 
   const loadAuditLogs = async () => {
+    if (!canAccess) {
+      setLogs([]);
+      return;
+    }
     setLoading(true);
     try {
       console.log('[AuditLog] Requesting with filters:', filters);
@@ -58,6 +86,10 @@ const AuditLog = ({ user }) => {
   };
 
   const loadAuditSummary = async () => {
+    if (!canAccess) {
+      setStats(null);
+      return;
+    }
     try {
       const result = await api.getAuditSummary(filters);
       setStats(result);
@@ -86,6 +118,20 @@ const AuditLog = ({ user }) => {
       loadAuditSummary();
     }, 100);
   };
+
+  if (!canAccess) {
+    return (
+      <div className="bg-white rounded-xl shadow-sm p-6">
+        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+          <Shield className="w-7 h-7 text-indigo-600" />
+          Audit Log
+        </h1>
+        <p className="text-gray-600 mt-2">
+          Access restricted. HM or Super Admin role required.
+        </p>
+      </div>
+    );
+  }
 
   const exportLogs = async () => {
     try {
@@ -153,6 +199,11 @@ const AuditLog = ({ user }) => {
             Audit Log
           </h1>
           <p className="text-gray-600 mt-1">System activity tracking and compliance monitoring</p>
+          <p className="text-xs text-gray-500 mt-1">
+            {isSuperAdmin
+              ? 'Scope: Full system logs'
+              : 'Scope: Operational logs (Lesson plans, reports, substitutions, timetable, exams)'}
+          </p>
         </div>
         <div className="flex gap-2">
           <button
