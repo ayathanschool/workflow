@@ -674,7 +674,7 @@ const App = () => {
 
     // Admin role should also be able to access reporting dashboards.
     // Keep this scoped (reports-only) unless explicitly expanded.
-    if (!hasRole('h m') && hasAnyRole(['admin'])) {
+    if (!hasRole('h m') && hasAnyRole(['admin', 'administrator'])) {
       items.push(
         { id: 'audit-log', label: 'Audit Log', icon: Shield },
         { id: 'settings', label: 'Settings', icon: Settings },
