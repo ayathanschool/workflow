@@ -72,10 +72,15 @@ function _slmNormalizeReportRow_(report) {
  */
 function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
   try {
+    // Clear DailyReports cache to ensure fresh data for gating checks
+    if (typeof REQUEST_SHEET_CACHE === 'object' && REQUEST_SHEET_CACHE && REQUEST_SHEET_CACHE.DailyReports) {
+      delete REQUEST_SHEET_CACHE.DailyReports;
+    }
+    
     const _norm = (v) => String(v || '').trim().toLowerCase();
 
     // Avoid excessive Logger I/O in hot paths. Enable only when actively debugging.
-    const _log = function(_msg) {};
+    const _log = function(msg) { try { Logger.log('[GATING] ' + msg); } catch(e) {} };
 
     // Ensure sessionNumber is a number
     const sessionNum = parseInt(sessionNumber);
@@ -117,7 +122,10 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
 
     function _fetchTeacherReportsForScheme_() {
       const bucket = _getRequestCacheBucket_();
-      if (bucket && Array.isArray(bucket.teacherReports)) return bucket.teacherReports;
+      if (bucket && Array.isArray(bucket.teacherReports)) {
+        _log(`Using cached teacher reports: ${bucket.teacherReports.length} reports`);
+        return bucket.teacherReports;
+      }
 
       // Prefer TextFinder-based fetch by teacherEmail; fallback to request-cached full sheet.
       let teacherReportsAll = null;
@@ -133,6 +141,8 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         }
       }
 
+      _log(`Fetched ${teacherReportsAll ? teacherReportsAll.length : 0} total reports for teacher ${teacherKey}`);
+
       // Filter by class/subject once
       const schemeStartMs = _slmSchemeStartMs_(scheme);
       const filtered = (teacherReportsAll || []).filter(r => {
@@ -144,6 +154,11 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         }
         return _norm(r.teacherEmail) === teacherKey && _norm(r.class) === classKey && _norm(r.subject) === subjectKey;
       });
+      
+      _log(`Filtered to ${filtered.length} reports matching class:${classKey}, subject:${subjectKey}`);
+      if (filtered.length > 0 && filtered.length <= 20) {
+        _log(`  Chapters in reports: ${[...new Set(filtered.map(r => r.chapter))].join(', ')}`);
+      }
 
       if (bucket) bucket.teacherReports = filtered;
       return filtered;
@@ -339,6 +354,12 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         for (const chapterName of startedChapters) {
           // Get all reports for this chapter
           const chapterReports = reportsByChapter[chapterName] || [];
+          
+          _log(`Checking chapter "${chapterName}" - Found ${chapterReports.length} reports`);
+          if (chapterReports.length > 0) {
+            _log(`  Sessions found: ${chapterReports.map(r => r.sessionNo).join(', ')}`);
+            _log(`  Sample report: ${JSON.stringify({ chapter: chapterReports[0].chapter, class: chapterReports[0].class, subject: chapterReports[0].subject, teacherEmail: chapterReports[0].teacherEmail })}`);
+          }
           
           if (chapterReports.length === 0) continue;
           
