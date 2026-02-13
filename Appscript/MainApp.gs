@@ -1049,6 +1049,72 @@
         return _handleGetAppSettings();
       }
       
+      // === HOLIDAY MANAGEMENT ROUTES ===
+      if (action === 'getUndeclaredHolidays') {
+        const activeOnly = e.parameter.activeOnly !== 'false';
+        return _respond({ success: true, holidays: getUndeclaredHolidays(activeOnly) });
+      }
+      
+      if (action === 'declareTodayAsHoliday') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isHMOrSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        const reason = e.parameter.reason || 'Undeclared holiday';
+        const userName = e.parameter.userName || '';
+        const result = declareTodayAsHoliday(reason, email, userName);
+        return _respond(result);
+      }
+      
+      if (action === 'declareHoliday') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isHMOrSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        const dateStr = e.parameter.date || '';
+        const reason = e.parameter.reason || 'Undeclared holiday';
+        const userName = e.parameter.userName || '';
+        if (!dateStr) {
+          return _respond({ success: false, error: 'Date parameter is required' });
+        }
+        const result = declareHoliday(dateStr, reason, email, userName);
+        return _respond(result);
+      }
+      
+      if (action === 'getAffectedLessonPlans') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isHMOrSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        const startDate = e.parameter.startDate || _todayISO();
+        // Pass true to check specific date only (preview mode, date not declared yet)
+        const result = getAffectedLessonPlans(startDate, true);
+        return _respond({ success: true, ...result });
+      }
+      
+      if (action === 'getRecentCascades') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isHMOrSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        const limit = parseInt(e.parameter.limit || '10');
+        return _respond({ success: true, cascades: getRecentCascades(limit) });
+      }
+      
+      if (action === 'undoCascade') {
+        const email = (e.parameter.email || '').toLowerCase().trim();
+        if (!_isHMOrSuperAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. HM or Super Admin access required.' });
+        }
+        const cascadeId = e.parameter.cascadeId || '';
+        const userName = e.parameter.userName || '';
+        if (!cascadeId) {
+          return _respond({ success: false, error: 'Missing cascadeId parameter' });
+        }
+        const result = undoCascade(cascadeId, email, userName);
+        return _respond(result);
+      }
+      
       // === NOTIFICATION ROUTES ===
       if (action === 'sendCustomNotification') {
         return _handleSendCustomNotification(e.parameter);
@@ -1436,7 +1502,8 @@
         if (!_isHMOrSuperAdminSafe(data.email || e.parameter.email)) {
           return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
         }
-        return _respond(getAffectedLessonPlans(data.startDate));
+        // Pass true to check specific date only (preview mode)
+        return _respond(getAffectedLessonPlans(data.startDate, true));
       }
 
       if (action === 'getRecentCascades') {
@@ -4798,10 +4865,13 @@
     try {
       const date = params.date || _todayISO();
       const normalizedDate = _isoDateIST(date);
+      
       // Get all lesson plans for this date
       const lpSh = _getSheet('LessonPlans');
       const lpHeaders = _headers(lpSh);
-      const allLessonPlans = _rows(lpSh).map(row => _indexByHeader(row, lpHeaders))
+      const allRows = _rows(lpSh);
+      
+      const allLessonPlans = allRows.map(row => _indexByHeader(row, lpHeaders))
         .filter(lp => {
           if (!lp || !lp.selectedDate) return false;
           const lpDate = _isoDateIST(lp.selectedDate);
@@ -8849,6 +8919,7 @@ function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, tot
     const schemeNorm = String(schemeId || '').trim();
     
     // Get all reported sessions for this teacher+class+subject+chapter
+    // EXCLUDE cascaded reports (sessions that were rescheduled and need to be reported again)
     const reportedSessions = reports
       .filter(r => {
         const emailMatch = String(r.teacherEmail || '').trim().toLowerCase() === String(teacherEmail || '').trim().toLowerCase();
@@ -8856,6 +8927,9 @@ function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, tot
         const subjectMatch = String(r.subject || '').trim() === String(subject || '').trim();
         const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
         if (!emailMatch || !classMatch || !subjectMatch || !chapterMatch) return false;
+        // Skip cascaded reports - they were rescheduled and still need to be reported
+        const planType = String(r.planType || '').trim().toLowerCase();
+        if (planType === 'cascaded') return false;
         if (schemeNorm) return String(r.schemeId || '').trim() === schemeNorm;
         return true;
       })
@@ -8892,6 +8966,7 @@ function validateSessionSequence(teacherEmail, classVal, subject, chapter, attem
       const reports = _rows(reportsSheet).map(r => _indexByHeader(r, headers));
       const schemeNorm = String(schemeId || '').trim();
       
+      // EXCLUDE cascaded reports (sessions that were rescheduled and need to be reported again)
       const reportedSessions = reports
         .filter(r => {
           const emailMatch = String(r.teacherEmail || '').trim().toLowerCase() === String(teacherEmail || '').trim().toLowerCase();
@@ -8899,6 +8974,9 @@ function validateSessionSequence(teacherEmail, classVal, subject, chapter, attem
           const subjectMatch = String(r.subject || '').trim() === String(subject || '').trim();
           const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
           if (!emailMatch || !classMatch || !subjectMatch || !chapterMatch) return false;
+          // Skip cascaded reports - they were rescheduled and still need to be reported
+          const planType = String(r.planType || '').trim().toLowerCase();
+          if (planType === 'cascaded') return false;
           if (schemeNorm) return String(r.schemeId || '').trim() === schemeNorm;
           return true;
         })

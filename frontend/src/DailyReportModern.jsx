@@ -2213,8 +2213,96 @@ function PeriodCard({
             </button>
             <button
               onClick={onSubmit}
-              disabled={isSubmitting}
+              disabled={
+                isSubmitting ||
+                // Check all validations before allowing submit
+                (() => {
+                  // Substitution validations
+                  if (isSub) {
+                    const lessonPlanId = String((data.lessonPlanId || '').trim());
+                    const whatDone = String((data.subNotes || data.objectives || '').trim());
+                    const hasChapter = !!String((data.chapter || '')).trim();
+                    const hasLessonPlan = !!lessonPlanId;
+                    
+                    // Must have either lesson plan or notes
+                    if (!hasLessonPlan && !whatDone) return true;
+                    
+                    // If lesson plan attached, need chapter and check chapter completion validations
+                    if (hasLessonPlan) {
+                      if (!hasChapter) return true;
+                      // Chapter completion validation
+                      if (data.chapterCompleted && remainingSessions[periodKey] && remainingSessions[periodKey].length > 0 && !data.remainingSessionsAction) {
+                        return true;
+                      }
+                      // 0% completion requires deviation reason
+                      if (Number(data.completionPercentage || 0) === 0 && !String(data.deviationReason || '').trim()) {
+                        return true;
+                      }
+                    }
+                    return false;
+                  }
+                  
+                  // Regular period validations
+                  const hasChapter = !!chapter;
+                  const hasObjectives = !!(objectives || (effectivePlan && effectivePlan.learningObjectives));
+                  const isComplete = completionPercentage === 100;
+                  const hasDeviationReason = !!String(data.deviationReason || '').trim();
+                  
+                  // Must have chapter
+                  if (!hasChapter) return true;
+                  
+                  // If complete (100%), must have objectives
+                  if (isComplete && !hasObjectives) return true;
+                  
+                  // If incomplete (0%), must have deviation reason
+                  if (!isComplete && !hasDeviationReason) return true;
+                  
+                  // Chapter completion validation: if marked complete with remaining sessions, must choose action
+                  if (isComplete && data.chapterCompleted && remainingSessions[periodKey] && remainingSessions[periodKey].length > 0 && !data.remainingSessionsAction) {
+                    return true;
+                  }
+                  
+                  return false;
+                })()
+              }
               className="px-8 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+              title={
+                isSubmitting ? 'Submitting...' :
+                (() => {
+                  // Substitution validations
+                  if (isSub) {
+                    const lessonPlanId = String((data.lessonPlanId || '').trim());
+                    const whatDone = String((data.subNotes || data.objectives || '').trim());
+                    const hasChapter = !!String((data.chapter || '')).trim();
+                    const hasLessonPlan = !!lessonPlanId;
+                    
+                    if (!hasLessonPlan && !whatDone) return 'Please describe what you did or select a lesson plan';
+                    if (hasLessonPlan && !hasChapter) return 'Chapter is required when using a lesson plan';
+                    if (data.chapterCompleted && remainingSessions[periodKey] && remainingSessions[periodKey].length > 0 && !data.remainingSessionsAction) {
+                      return 'Please choose what to do with remaining sessions';
+                    }
+                    if (Number(data.completionPercentage || 0) === 0 && !String(data.deviationReason || '').trim()) {
+                      return 'Please select a reason for 0% completion';
+                    }
+                    return 'Submit report';
+                  }
+                  
+                  // Regular period validations
+                  const hasChapter = !!chapter;
+                  const hasObjectives = !!(objectives || (effectivePlan && effectivePlan.learningObjectives));
+                  const isComplete = completionPercentage === 100;
+                  const hasDeviationReason = !!String(data.deviationReason || '').trim();
+                  
+                  if (!hasChapter) return 'Chapter/Topic is required';
+                  if (isComplete && !hasObjectives) return 'Learning Objectives required when session is complete';
+                  if (!isComplete && !hasDeviationReason) return 'Please select reason for incomplete session';
+                  if (isComplete && data.chapterCompleted && remainingSessions[periodKey] && remainingSessions[periodKey].length > 0 && !data.remainingSessionsAction) {
+                    return 'Please choose what to do with remaining sessions';
+                  }
+                  
+                  return 'Submit report';
+                })()
+              }
             >
               {isSubmitting ? (
                 <>
