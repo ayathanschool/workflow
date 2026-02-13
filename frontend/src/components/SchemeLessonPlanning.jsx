@@ -908,9 +908,15 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   if (chapters.length > 0) {
                     const current = chapters.find(ch => ch && ch.canPrepare !== false && !_isChapterFullyReported(ch));
                     if (current) {
+                      const isCurrentComplete = !!(current && current.chapterCompleted);
                       return (
                         <span className="ml-1 text-indigo-600 font-semibold">
                           Current: Ch {current.chapterNumber}: {current.chapterName}
+                          {isCurrentComplete && (
+                            <span className="ml-2 text-xs bg-green-100 text-green-700 border border-green-200 px-2 py-0.5 rounded-full font-semibold">
+                              Chapter Complete
+                            </span>
+                          )}
                         </span>
                       );
                     }
