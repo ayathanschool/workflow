@@ -4631,8 +4631,9 @@ const App = () => {
   }, [currentPeriod, focusedPeriodPinned]);
 
   // Lazy-load lesson plans for today so we can show chapter/session in live and selected periods.
-  // Load once on mount, not dependent on which period is selected
   useEffect(() => {
+    const shouldLoad = Boolean(currentPeriod || selectedPeriod);
+    if (!shouldLoad) return;
     const today = new Date().toISOString().split('T')[0];
     if (lessonPlansLoadRef.current.loading) return;
     if (lessonPlansLoadRef.current.date === today) return;
@@ -4646,26 +4647,21 @@ const App = () => {
         const response = await api.getLessonPlansForDate(today);
         const result = response?.data || response;
         const plans = Array.isArray(result?.lessonPlans) ? result.lessonPlans : (Array.isArray(result) ? result : []);
-        if (!cancelled) {
-          setLessonPlansToday(plans);
-        }
+        if (!cancelled) setLessonPlansToday(plans);
       } catch (err) {
         console.warn('Failed to load lesson plans for HM live period:', err);
         if (!cancelled) setLessonPlansToday([]);
       } finally {
-        if (!cancelled) {
-          setLoadingLessonPlansToday(false);
-        }
+        if (!cancelled) setLoadingLessonPlansToday(false);
         lessonPlansLoadRef.current.loading = false;
       }
     }
 
     loadLessonPlansForToday();
     return () => { cancelled = true; };
-  }, []); // Load once on mount
+  }, [currentPeriod, selectedPeriod]);
 
   const normalizeKeyPart = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, '');
-  const normalizeClassKey = (value) => normalizeKeyPart(stripStdPrefix(String(value || '')));
 
   const normalizeSubjectKey = (value) => {
     const s = normalizeKeyPart(value).replace(/[^a-z0-9]/g, '');
@@ -4678,7 +4674,7 @@ const App = () => {
 
   const buildLiveKey = (row) => {
     const period = String(row?.period || '').replace(/^Period\s*/i, '').trim();
-    const cls = normalizeClassKey(row?.class);
+    const cls = normalizeKeyPart(row?.class);
     const subj = normalizeSubjectKey(row?.subject);
     return `${period}|${cls}|${subj}`;
   };

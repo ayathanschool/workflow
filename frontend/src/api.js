@@ -1255,6 +1255,146 @@ export async function exportAuditLogs(filters = {}) {
   return result?.data || result || [];
 }
 
+// === HOLIDAY MANAGEMENT FUNCTIONS ===
+
+
+// Get all undeclared holidays
+export async function getUndeclaredHolidays(activeOnly = true) {
+  let userEmail = null;
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { userEmail = JSON.parse(basicUser).email; } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { userEmail = JSON.parse(googleSession).user?.email; } catch (e) {}
+    }
+  }
+  
+  const result = await postJSON(`${BASE_URL}?action=getUndeclaredHolidays`, {
+    email: userEmail,
+    activeOnly
+  });
+  return result?.data || result || [];
+}
+
+// Cascade lesson plans from a start date, skipping undeclared holidays
+export async function cascadeLessonPlans(startDate) {
+  let userEmail = null;
+  let userName = null;
+  
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { 
+      const user = JSON.parse(basicUser);
+      userEmail = user.email;
+      userName = user.name;
+    } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { 
+        const session = JSON.parse(googleSession);
+        userEmail = session.user?.email;
+        userName = session.user?.name;
+      } catch (e) {}
+    }
+  }
+  
+  const result = await postJSON(`${BASE_URL}?action=cascadeLessonPlans`, {
+    startDate,
+    email: userEmail,
+    name: userName
+  });
+  return result?.data || result;
+}
+
+// Get affected lesson plans for a start date (preview before cascading)
+export async function getAffectedLessonPlans(startDate) {
+  let userEmail = null;
+  
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { 
+      userEmail = JSON.parse(basicUser).email;
+    } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { 
+        userEmail = JSON.parse(googleSession).user?.email;
+      } catch (e) {}
+    }
+  }
+  
+  const result = await postJSON(`${BASE_URL}?action=getAffectedLessonPlans`, {
+    startDate,
+    email: userEmail
+  });
+  return result?.data || result;
+}
+
+// Get recent cascade operations
+export async function getRecentCascades(limit = 10) {
+  let userEmail = null;
+  
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { 
+      userEmail = JSON.parse(basicUser).email;
+    } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { 
+        userEmail = JSON.parse(googleSession).user?.email;
+      } catch (e) {}
+    }
+  }
+  
+  const result = await postJSON(`${BASE_URL}?action=getRecentCascades`, {
+    limit,
+    email: userEmail
+  });
+  return result?.data || result;
+}
+
+// Undo a cascade operation
+export async function undoCascade(cascadeId) {
+  let userEmail = null;
+  let userName = null;
+  
+  const basicUser = localStorage.getItem('user');
+  if (basicUser) {
+    try { 
+      const user = JSON.parse(basicUser);
+      userEmail = user.email;
+      userName = user.name;
+    } catch (e) {}
+  }
+  if (!userEmail) {
+    const googleSession = localStorage.getItem('sf_google_session');
+    if (googleSession) {
+      try { 
+        const session = JSON.parse(googleSession);
+        userEmail = session.user?.email;
+        userName = session.user?.name;
+      } catch (e) {}
+    }
+  }
+  
+  const result = await postJSON(`${BASE_URL}?action=undoCascade`, {
+    cascadeId,
+    email: userEmail,
+    name: userName
+  });
+  return result?.data || result;
+}
+
 // === EXAM FUNCTIONS ===
 
 // Update an existing exam. Requires examId and updated exam details.
@@ -1816,76 +1956,3 @@ export async function getAllMissingLessonPlans(daysAhead = 7) {
   return result?.data || result;
 }
 
-// ====== HOLIDAY MANAGEMENT ======
-export async function getUndeclaredHolidays(activeOnly = true) {
-  const q = new URLSearchParams({
-    action: 'getUndeclaredHolidays',
-    activeOnly: activeOnly ? 'true' : 'false'
-  });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
-  return result?.data || result;
-}
-
-export async function declareTodayAsHoliday(reason, email, userName) {
-  const q = new URLSearchParams({
-    action: 'declareTodayAsHoliday',
-    reason: reason || 'Undeclared holiday',
-    email: email || '',
-    userName: userName || ''
-  });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
-  return result;
-}
-
-export async function declareHoliday(date, reason, email, userName) {
-  const q = new URLSearchParams({
-    action: 'declareHoliday',
-    date: date || '',
-    reason: reason || 'Undeclared holiday',
-    email: email || '',
-    userName: userName || ''
-  });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
-  return result;
-}
-
-export async function getAffectedLessonPlans(startDate, email) {
-  const q = new URLSearchParams({
-    action: 'getAffectedLessonPlans',
-    startDate: startDate || '',
-    email: email || ''
-  });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
-  return result?.data || result;
-}
-
-export async function getRecentCascades(limit = 10, email) {
-  const q = new URLSearchParams({
-    action: 'getRecentCascades',
-    limit: limit.toString(),
-    email: email || ''
-  });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
-  return result?.data || result;
-}
-
-export async function undoCascade(cascadeId, email, userName) {
-  const q = new URLSearchParams({
-    action: 'undoCascade',
-    cascadeId: cascadeId || '',
-    email: email || '',
-    userName: userName || ''
-  });
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
-  return result;
-}
-
-// Legacy wrapper for backward compatibility with old HolidayManagement component
-// The functionality is now available in Settings > Holiday Management
-export async function cascadeLessonPlans(startDate) {
-  console.warn('cascadeLessonPlans is deprecated. Use Holiday Management in Settings instead.');
-  return { 
-    ok: false, 
-    error: 'This function is deprecated. Please use Holiday Management in Settings panel.'
-  };
-}

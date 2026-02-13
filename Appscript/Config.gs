@@ -87,11 +87,8 @@ const SHEETS = {
   // === NOTIFICATIONS (1 sheet) ===
   Notifications: ['email','type','message','payload','createdAt','readAt'],
   
-  // === HOLIDAY MANAGEMENT (1 sheet) ===
-  UndeclaredHolidays: ['holidayId','date','reason','status','declaredBy','declaredAt','createdAt'],
-  
   // === LESSON RESCHEDULING TRACKING (1 sheet) ===
-  CascadeHistory: ['cascadeId','cascadeDate','startDate','performedBy','performedAt','lessonPlanId','oldDate','newDate','teacherEmail','class','subject','status','oldPeriod','newPeriod']
+  CascadeHistory: ['cascadeId','cascadeDate','startDate','performedBy','performedAt','lessonPlanId','oldDate','newDate','teacherEmail','class','subject','status']
 };
 
 /**
