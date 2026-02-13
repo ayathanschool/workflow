@@ -59,6 +59,9 @@ function _slmNormalizeReportRow_(report) {
   if (!report.sessionNo) report.sessionNo = report.session || report.Session || report.SessionNo || report['Session No'] || '';
   if (!report.lessonPlanId) report.lessonPlanId = report.lpId || report.planId || report.id || report['Lesson Plan Id'] || '';
   if (!report.schemeId) report.schemeId = report.SchemeId || report.schemeID || report['Scheme Id'] || '';
+  if (!report.completed) report.completed = report.Completed || report['Completed'] || report['completed'] || '';
+  if (!report.chapterStatus) report.chapterStatus = report.ChapterStatus || report['Chapter Status'] || report['chapterStatus'] || '';
+  if (!report.chapterCompleted) report.chapterCompleted = report.ChapterCompleted || report['Chapter Completed'] || report['chapterCompleted'] || '';
   return report;
 }
 /**
@@ -72,15 +75,10 @@ function _slmNormalizeReportRow_(report) {
  */
 function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
   try {
-    // Clear DailyReports cache to ensure fresh data for gating checks
-    if (typeof REQUEST_SHEET_CACHE === 'object' && REQUEST_SHEET_CACHE && REQUEST_SHEET_CACHE.DailyReports) {
-      delete REQUEST_SHEET_CACHE.DailyReports;
-    }
-    
     const _norm = (v) => String(v || '').trim().toLowerCase();
 
     // Avoid excessive Logger I/O in hot paths. Enable only when actively debugging.
-    const _log = function(msg) { try { Logger.log('[GATING] ' + msg); } catch(e) {} };
+    const _log = function(_msg) {};
 
     // Ensure sessionNumber is a number
     const sessionNum = parseInt(sessionNumber);
@@ -122,10 +120,7 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
 
     function _fetchTeacherReportsForScheme_() {
       const bucket = _getRequestCacheBucket_();
-      if (bucket && Array.isArray(bucket.teacherReports)) {
-        _log(`Using cached teacher reports: ${bucket.teacherReports.length} reports`);
-        return bucket.teacherReports;
-      }
+      if (bucket && Array.isArray(bucket.teacherReports)) return bucket.teacherReports;
 
       // Prefer TextFinder-based fetch by teacherEmail; fallback to request-cached full sheet.
       let teacherReportsAll = null;
@@ -141,8 +136,6 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         }
       }
 
-      _log(`Fetched ${teacherReportsAll ? teacherReportsAll.length : 0} total reports for teacher ${teacherKey}`);
-
       // Filter by class/subject once
       const schemeStartMs = _slmSchemeStartMs_(scheme);
       const filtered = (teacherReportsAll || []).filter(r => {
@@ -154,11 +147,6 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         }
         return _norm(r.teacherEmail) === teacherKey && _norm(r.class) === classKey && _norm(r.subject) === subjectKey;
       });
-      
-      _log(`Filtered to ${filtered.length} reports matching class:${classKey}, subject:${subjectKey}`);
-      if (filtered.length > 0 && filtered.length <= 20) {
-        _log(`  Chapters in reports: ${[...new Set(filtered.map(r => r.chapter))].join(', ')}`);
-      }
 
       if (bucket) bucket.teacherReports = filtered;
       return filtered;
@@ -171,7 +159,10 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
       const bucket = _getRequestCacheBucket_();
       if (bucket && Array.isArray(bucket.teacherReportsForGating)) return bucket.teacherReportsForGating;
 
-      // Fetch teacher schemes for this class/subject (all terms/years for cross-term gating)
+      const currentTerm = _norm(scheme && scheme.term);
+      const currentYear = _norm(scheme && scheme.academicYear);
+
+      // Fetch teacher schemes for this class/subject (and same term/year when present)
       let teacherSchemes = null;
       try {
         const fetchedSchemes = _slmFetchRowsByColumnExact_('Schemes', 'teacherEmail', teacherKey);
@@ -186,17 +177,25 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
       }
 
       const allowedSchemeIds = new Set();
+      let minAllowedStartMs = 0;
       for (const s of (teacherSchemes || [])) {
         if (!s || typeof s !== 'object') continue;
         if (_norm(s.teacherEmail) !== teacherKey) continue;
         if (_norm(s.class) !== classKey || _norm(s.subject) !== subjectKey) continue;
         if (_norm(s.status) !== 'approved') continue;
 
-        // For gating: include ALL terms/years so previous term completions are recognized
-        // Term/year filtering removed to allow cross-term chapter completion validation
+        // If scheme has term/year, enforce same term/year. If missing, allow it (legacy rows).
+        const sTerm = _norm(s.term);
+        const sYear = _norm(s.academicYear);
+        if (currentTerm && sTerm && sTerm !== currentTerm) continue;
+        if (currentYear && sYear && sYear !== currentYear) continue;
 
         const id = String(s.schemeId || '').trim();
-        if (id) allowedSchemeIds.add(id);
+        if (id) {
+          allowedSchemeIds.add(id);
+          const startMs = _slmSchemeStartMs_(s);
+          if (startMs && (!minAllowedStartMs || startMs < minAllowedStartMs)) minAllowedStartMs = startMs;
+        }
       }
 
       // Fetch teacher lesson plans and build lpId -> schemeId map
@@ -244,9 +243,23 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         if (_norm(r.teacherEmail) !== teacherKey) return false;
         if (_norm(r.class) !== classKey || _norm(r.subject) !== subjectKey) return false;
         const lpId = String(r.lessonPlanId || '').trim();
-        if (!lpId) return false;
+        if (!lpId) {
+          // Legacy reports without lessonPlanId: allow if they are within the active term window.
+          if (minAllowedStartMs) {
+            const reportMs = _slmSafeDateMs_(r.date || r.createdAt);
+            if (!reportMs || reportMs < minAllowedStartMs) return false;
+          }
+          return true;
+        }
         const sid = lpIdToSchemeId.get(lpId);
-        if (!sid) return false;
+        if (!sid) {
+          // lessonPlanId exists but no mapping found - treat as legacy (date-based filter)
+          if (minAllowedStartMs) {
+            const reportMs = _slmSafeDateMs_(r.date || r.createdAt);
+            if (!reportMs || reportMs < minAllowedStartMs) return false;
+          }
+          return true;
+        }
         if (allowedSchemeIds.size > 0 && !allowedSchemeIds.has(sid)) return false;
         return true;
       });
@@ -258,7 +271,7 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
     function _buildReportsByChapterIndex_() {
       const bucket = _getRequestCacheBucket_();
       if (bucket && bucket.reportsByChapter) return bucket.reportsByChapter;
-      const reports = _fetchTeacherReportsForGating_(); // Use gating reports to include all terms
+      const reports = _fetchTeacherReportsForGating_();
       const idx = {};
       for (const r of reports) {
         const ch = _norm(r && r.chapter);
@@ -270,11 +283,11 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
       return idx;
     }
 
-    function _buildOriginalSessionsByScheme_() {
+    function _buildOriginalSessionsByChapter_() {
       const bucket = _getRequestCacheBucket_();
-      if (bucket && bucket.originalSessionsByScheme) return bucket.originalSessionsByScheme;
+      if (bucket && bucket.originalSessionsByChapter) return bucket.originalSessionsByChapter;
 
-      // Fetch this teacher's schemes to map schemeId -> noOfSessions
+      // Fetch this teacher's schemes (TextFinder) to map chapter->noOfSessions if your Schemes tab stores per-chapter rows.
       let teacherSchemes = null;
       try {
         const fetched = _slmFetchRowsByColumnExact_('Schemes', 'teacherEmail', teacherKey);
@@ -288,91 +301,80 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
         }
       }
 
-      const map = new Map();
+      const map = {};
       for (const s of (teacherSchemes || [])) {
         if (!s || typeof s !== 'object') continue;
         if (_norm(s.teacherEmail) !== teacherKey) continue;
         if (_norm(s.class) !== classKey || _norm(s.subject) !== subjectKey) continue;
-        const sid = String(s.schemeId || '').trim();
-        if (!sid) continue;
+        const ch = _norm(s.chapter);
+        if (!ch) continue;
         const n = parseInt(s.noOfSessions || 2, 10);
-        map.set(sid, isNaN(n) ? 2 : n);
+        map[ch] = isNaN(n) ? 2 : n;
       }
 
-      if (bucket) bucket.originalSessionsByScheme = map;
+      if (bucket) bucket.originalSessionsByChapter = map;
       return map;
     }
     
-    // For Session 1 of any chapter: Check if there are incomplete schemes (schemeId-based)
+    // For Session 1 of any chapter: Check if there are incomplete chapters
     if (sessionNum === 1) {
       try {
         const teacherReports = _fetchTeacherReportsForGating_();
         
-        // Check if this is the very first scheme (no reports exist yet)
+        // Check if this is the very first chapter (no reports exist yet)
         if (teacherReports.length === 0) {
-          _log('No previous reports - allowing first scheme session 1');
+          _log('No previous reports - allowing first chapter session 1');
           return {
             allowed: true,
-            reason: 'first_scheme',
-            message: `First scheme can be prepared any day`
+            reason: 'first_chapter',
+            message: `First chapter of the scheme can be prepared any day`
           };
         }
         
-        // Build map: schemeId → reports (schemeId = unique identifier per chapter)
+        // Build report index by schemeId (more reliable than chapter name)
         const reportsBySchemeId = new Map();
-        const schemeIdToChapter = new Map(); // For display names in error messages
-        
         for (const r of teacherReports) {
+          if (!r || typeof r !== 'object') continue;
           const sid = String(r.schemeId || '').trim();
-          if (!sid) continue; // Skip reports without schemeId
-          
-          if (!reportsBySchemeId.has(sid)) {
-            reportsBySchemeId.set(sid, []);
-            // Store chapter name for error messages
-            const chName = String(r.chapter || '').trim();
-            if (chName) schemeIdToChapter.set(sid, chName);
-          }
+          if (!sid) continue;
+          if (!reportsBySchemeId.has(sid)) reportsBySchemeId.set(sid, []);
           reportsBySchemeId.get(sid).push(r);
         }
         
-        const startedSchemeIds = [...reportsBySchemeId.keys()];
-        _log(`Started schemes for ${scheme.teacherEmail}: ${startedSchemeIds.join(', ')}`);
-        
-        // Check if the current scheme being prepared already has reports
+        // Get all started schemeIds
+        const startedSchemeIds = Array.from(reportsBySchemeId.keys());
         const currentSchemeId = String(scheme.schemeId || '').trim();
-        const currentSchemeStarted = currentSchemeId && reportsBySchemeId.has(currentSchemeId);
         
-        if (currentSchemeStarted) {
-          // This scheme was already started, allow continuation
+        // Check if current scheme already has reports (continuation)
+        if (startedSchemeIds.includes(currentSchemeId)) {
           _log(`Scheme ${currentSchemeId} already started - allowing session 1 (re-preparation)`);
           return {
             allowed: true,
-            reason: 'scheme_restart',
-            message: `Continuing previously started scheme`
+            reason: 'chapter_restart',
+            message: `Continuing previously started chapter`
           };
         }
         
         // NEW SCHEME - Check if ALL previously started schemes are marked complete
-        const incompletedSchemes = [];
+        const incompletedChapters = [];
         
-        // Get scheme metadata to know original session counts
-        const originalSessionsByScheme = _buildOriginalSessionsByScheme_();
+        const originalSessionsByChapter = _buildOriginalSessionsByChapter_();
         
         for (const schemeId of startedSchemeIds) {
           const schemeReports = reportsBySchemeId.get(schemeId) || [];
-          const displayName = schemeIdToChapter.get(schemeId) || schemeId;
-          
-          _log(`Checking scheme "${schemeId}" (${displayName}) - Found ${schemeReports.length} reports`);
           
           if (schemeReports.length === 0) continue;
           
-          // Find ALL session numbers that exist for this scheme (including extended)
+          // Get chapter name for display (fallback to schemeId if missing)
+          const chapterName = (schemeReports[0] && schemeReports[0].chapter) || schemeId;
+          
+          // Find ALL session numbers that exist for this scheme
           const sessionNumbers = schemeReports
             .map(r => Number(r.sessionNo || 0))
             .filter(n => n > 0);
           
           if (sessionNumbers.length === 0) {
-            incompletedSchemes.push(displayName);
+            incompletedChapters.push(chapterName);
             continue;
           }
           
@@ -380,22 +382,23 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           const lastSessionNo = Math.max(...sessionNumbers);
           
           // Get the scheme's original session count
-          const originalForScheme = originalSessionsByScheme.get(schemeId);
-          const originalSessionCountForScheme = (originalForScheme != null) ? parseInt(originalForScheme, 10) : originalSessionCount;
-          _log(`Scheme "${schemeId}" - Original sessions: ${originalSessionCountForScheme}, Highest session with report: ${lastSessionNo}`);
+          const originalForChapter = originalSessionsByChapter[_norm(chapterName)];
+          const originalSessionCountForChapter = (originalForChapter != null) ? parseInt(originalForChapter, 10) : originalSessionCount;
+          _log(`Scheme "${schemeId}" (${chapterName}) - Original sessions: ${originalSessionCountForChapter}, Highest session with report: ${lastSessionNo}`);
           
           // Check if ALL sessions from 1 to lastSessionNo have daily reports
           let missingSessions = [];
           
           for (let i = 1; i <= lastSessionNo; i++) {
             const sessionReport = schemeReports.find(r => Number(r.sessionNo) === i);
+            
             if (!sessionReport) {
               missingSessions.push(i);
             }
           }
           
           if (missingSessions.length > 0) {
-            incompletedSchemes.push(`${displayName} (Missing daily reports for session(s): ${missingSessions.join(', ')})`);
+            incompletedChapters.push(`${chapterName} (Missing daily reports for session(s): ${missingSessions.join(', ')})`);
             _log(`Scheme "${schemeId}" incomplete - missing sessions: ${missingSessions.join(', ')}`);
             continue;
           }
@@ -415,10 +418,10 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           );
           const isMarkedComplete = !!explicitComplete;
 
-          _log(`Scheme "${schemeId}" - Last session ${lastSessionNo} marked complete: ${isMarkedComplete}`);
+          _log(`Scheme "${schemeId}" - Last session ${lastSessionNo} marked complete: ${isMarkedComplete}, chapterStatus: "${lastSessionReport && lastSessionReport.chapterStatus ? lastSessionReport.chapterStatus : ''}", completed: "${lastSessionReport && lastSessionReport.completed ? lastSessionReport.completed : ''}"`);
           
           if (!isMarkedComplete) {
-            incompletedSchemes.push(`${displayName} (Last session ${lastSessionNo} not marked "Chapter Complete")`);
+            incompletedChapters.push(`${chapterName || 'Unnamed Chapter'} (Last session ${lastSessionNo} not marked "Chapter Complete")`);
             _log(`Scheme "${schemeId}" incomplete - last session not marked complete`);
             continue;
           }
@@ -426,21 +429,21 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           _log(`Scheme "${schemeId}" - All sessions complete and last session marked "Chapter Complete"`);
         }
         
-        if (incompletedSchemes.length > 0) {
-          _log(`Found incomplete schemes: ${incompletedSchemes.join(', ')} - blocking new scheme`);
+        if (incompletedChapters.length > 0) {
+          _log(`Found incomplete chapters: ${incompletedChapters.join(', ')} - blocking new chapter`);
           return {
             allowed: false,
-            reason: 'previous_schemes_incomplete',
-            message: `Previous chapter must be completed before preparing session 1 of new chapter. Incomplete: ${incompletedSchemes.join(', ')}. Mark "Chapter Complete" in the last session's daily report.`
+            reason: 'previous_chapters_incomplete',
+            message: `Previous chapter must be completed before preparing session 1 of new chapter. Incomplete: ${incompletedChapters.join(', ')}. Mark "Chapter Complete" in the last session's daily report.`
           };
         }
         
-        // All previous schemes completed - allow new scheme
-        _log(`All previous schemes completed - allowing new scheme ${currentSchemeId}`);
+        // All previous chapters completed - allow new chapter
+        _log(`All previous chapters completed - allowing new chapter ${chapter.name}`);
         return {
           allowed: true,
-          reason: 'previous_schemes_completed',
-          message: `All previous schemes completed - new scheme can be prepared`
+          reason: 'previous_chapters_completed',
+          message: `All previous chapters completed - new chapter can be prepared`
         };
         
       } catch (drError) {
@@ -489,81 +492,81 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
       
       _log(`Found ${chapterReports.length} reports for this chapter`);
       
-      // If chapter has no reports, check if previous schemes are complete (schemeId-based)
+      // If chapter has no reports, check if previous chapters are complete
       if (chapterReports.length === 0) {
-        _log(`No reports for chapter ${chapter.name} yet - checking previous schemes`);
+        _log(`No reports for chapter ${chapter.name} yet - checking previous chapters`);
         
-        // Get all reports for this teacher/class/subject
+        // Get all reports for this teacher/class/subject (filtered by schemeId if available)
         const teacherReports = allReports.filter(report => {
+          // Safety check: ensure report is an object
           if (!report || typeof report !== 'object') return false;
           
           const matchesTeacher = String(report.teacherEmail || '').toLowerCase() === String(scheme.teacherEmail || '').toLowerCase();
           const matchesClass = String(report.class || '') === String(scheme.class || '');
           const matchesSubject = String(report.subject || '') === String(scheme.subject || '');
           
-          return matchesTeacher && matchesClass && matchesSubject;
+          // IMPORTANT: Filter by schemeId to only check reports from current scheme
+          const reportSchemeId = String(report.schemeId || '').trim();
+          const currentSchemeId = String(scheme.schemeId || '').trim();
+          const matchesScheme = !reportSchemeId || !currentSchemeId || reportSchemeId === currentSchemeId;
+          
+          return matchesTeacher && matchesClass && matchesSubject && matchesScheme;
         });
         
-        // If no reports at all, allow (first scheme)
+        // If no reports at all, allow (first chapter)
         if (teacherReports.length === 0) {
-          _log(`No previous reports - allowing first scheme`);
+          _log(`No previous reports - allowing first chapter`);
           return {
             allowed: true,
-            reason: 'first_scheme',
-            message: `First scheme can be prepared any day`
+            reason: 'first_chapter',
+            message: `First chapter can be prepared any day`
           };
         }
         
-        // Build map: schemeId → reports
-        const reportsBySchemeId = new Map();
-        const schemeIdToChapter = new Map();
-        
-        for (const r of teacherReports) {
-          const sid = String(r.schemeId || '').trim();
-          if (!sid) continue; // Skip reports without schemeId
-          
-          if (!reportsBySchemeId.has(sid)) {
-            reportsBySchemeId.set(sid, []);
-            const chName = String(r.chapter || '').trim();
-            if (chName) schemeIdToChapter.set(sid, chName);
-          }
-          reportsBySchemeId.get(sid).push(r);
-        }
-        
-        const startedSchemeIds = [...reportsBySchemeId.keys()];
+        // Check if all previous chapters are complete
+        const startedChapters = [...new Set(teacherReports
+          .map(r => String(r.chapter || '').trim())
+          .filter(name => name))];
         const incompletedChapters = [];
         
-        // Get all schemes for reference (to get original session counts)
+        // Get all schemes for reference
         const schemesSheet = _getSheet('Schemes');
         const schemesHeaders = _headers(schemesSheet);
         const allSchemes = _rows(schemesSheet).map(row => _indexByHeader(row, schemesHeaders));
         
-        for (const schemeId of startedSchemeIds) {
-          const prevSchemeReports = reportsBySchemeId.get(schemeId) || [];
-          const displayName = schemeIdToChapter.get(schemeId) || schemeId;
+        for (const chapterName of startedChapters) {
+          const prevChapterReports = teacherReports.filter(report => 
+            String(report.chapter || '') === chapterName
+          );
           
-          if (prevSchemeReports.length === 0) continue;
+          if (prevChapterReports.length === 0) continue;
           
-          const sessionNumbers = prevSchemeReports
+          const sessionNumbers = prevChapterReports
             .map(r => Number(r.sessionNo || 0))
             .filter(n => n > 0);
           
           if (sessionNumbers.length === 0) {
-            incompletedChapters.push(displayName);
+            incompletedChapters.push(chapterName);
             continue;
           }
           
           const lastSessionNo = Math.max(...sessionNumbers);
           
-          // Get the scheme's original session count by schemeId
-          const schemeData = allSchemes.find(s => String(s.schemeId || '').trim() === schemeId);
-          const originalSessionCount = schemeData ? parseInt(schemeData.noOfSessions || 2) : 2;
+          // Get the scheme's original session count for this chapter
+          const chapterScheme = allSchemes.find(s => 
+            String(s.chapter || '').toLowerCase() === chapterName.toLowerCase() &&
+            String(s.teacherEmail || '').toLowerCase() === String(scheme.teacherEmail || '').toLowerCase() &&
+            String(s.class || '') === String(scheme.class || '') &&
+            String(s.subject || '') === String(scheme.subject || '')
+          );
+          
+          const originalSessionCount = chapterScheme ? parseInt(chapterScheme.noOfSessions || 2) : 2;
           
           // Check if ALL sessions from 1 to lastSessionNo have daily reports
           let missingSessions = [];
           
           for (let i = 1; i <= lastSessionNo; i++) {
-            const sessionReport = prevSchemeReports.find(r => Number(r.sessionNo) === i);
+            const sessionReport = prevChapterReports.find(r => Number(r.sessionNo) === i);
             
             if (!sessionReport) {
               missingSessions.push(i);
@@ -571,12 +574,12 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           }
           
           if (missingSessions.length > 0) {
-            incompletedChapters.push(`${displayName} (Missing session(s): ${missingSessions.join(', ')})`);
+            incompletedChapters.push(`${chapterName} (Missing session(s): ${missingSessions.join(', ')})`);
             continue;
           }
           
           // Check if the LAST SESSION is marked "Chapter Complete"
-          const lastSessionReport = prevSchemeReports.find(report => 
+          const lastSessionReport = prevChapterReports.find(report => 
             Number(report.sessionNo) === lastSessionNo
           );
           
@@ -585,16 +588,16 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           const isMarkedComplete = explicitCompletePrev || implicitCompletePrev;
           
           if (!isMarkedComplete) {
-            incompletedChapters.push(`${displayName} (Last session ${lastSessionNo} not marked "Chapter Complete")`);
+            incompletedChapters.push(`${chapterName || 'Unnamed Chapter'} (Last session ${lastSessionNo} not marked "Chapter Complete")`);
             continue;
           }
         }
         
         if (incompletedChapters.length > 0) {
-          _log(`Previous schemes incomplete - blocking new scheme`);
+          _log(`Previous chapters incomplete - blocking new chapter ${chapter.name}`);
           return {
             allowed: false,
-            reason: 'previous_schemes_incomplete',
+            reason: 'previous_chapters_incomplete',
             message: `Previous chapter must be completed before preparing session 1 of ${chapter.name}. Incomplete: ${incompletedChapters.join(', ')}. Mark "Chapter Complete" in the last session's daily report.`
           };
         }
