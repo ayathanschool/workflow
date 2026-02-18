@@ -2091,6 +2091,10 @@
         return _handleCreateBulkSchemeLessonPlans(data);
       }
       
+      if (action === 'verifyChapterPreparation') {
+        return _handleVerifyChapterPreparation(data);
+      }
+      
       // === AI LESSON PLAN SUGGESTIONS ===
       if (action === 'getAILessonSuggestions') {
         return _respond(getAILessonSuggestions(data.context || data));
@@ -3797,6 +3801,24 @@
       return _respond(result);
     } catch (error) {
       console.error('Error handling create bulk scheme lesson plans:', error);
+      return _respond({ success: false, error: error.message || 'Unknown error occurred' });
+    }
+  }
+
+  /**
+  * Handle POST verify chapter preparation (real-time check before opening form)
+  * This prevents teachers from wasting time filling forms that will be blocked at submission
+  */
+  function _handleVerifyChapterPreparation(data) {
+    try {
+      if (!data.verificationData) {
+        return _respond({ success: false, error: 'No verification data provided' });
+      }
+      
+      const result = verifyChapterPreparation(data.verificationData);
+      return _respond(result);
+    } catch (error) {
+      console.error('Error handling verify chapter preparation:', error);
       return _respond({ success: false, error: error.message || 'Unknown error occurred' });
     }
   }

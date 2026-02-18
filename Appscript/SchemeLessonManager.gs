@@ -2548,6 +2548,84 @@ function createSchemeLessonPlan(lessonPlanData) {
 }
 
 /**
+ * Verify if chapter preparation is allowed (real-time check before opening form)
+ * Returns: { success: true, allowed: true/false, message: string, reason: string }
+ * This prevents teachers from wasting time filling forms that will be blocked at submission
+ */
+function verifyChapterPreparation(verificationData) {
+  try {
+    // Validate required fields
+    const required = ['schemeId', 'chapter', 'teacherEmail'];
+    const missing = required.filter(field => !String(verificationData[field] ?? '').trim());
+    if (missing.length) {
+      return { 
+        success: false, 
+        error: `Missing required fields: ${missing.join(', ')}` 
+      };
+    }
+    
+    // Get scheme details
+    const schemeDetails = _getSchemeDetails(verificationData.schemeId);
+    if (!schemeDetails) {
+      return { 
+        success: false, 
+        allowed: false,
+        message: 'Scheme not found',
+        reason: 'scheme_not_found' 
+      };
+    }
+
+    // Parse scheme chapters and find target chapter
+    const schemeChapters = _parseSchemeChapters(schemeDetails);
+    const norm = function(v) { return String(v || '').toLowerCase().trim(); };
+    const targetChapterName = String(verificationData.chapter || '').trim();
+    const chapterObj = schemeChapters.find(ch => norm(ch && ch.name) === norm(targetChapterName)) || null;
+    
+    if (!chapterObj) {
+      return { 
+        success: false, 
+        allowed: false,
+        message: 'Chapter not found in scheme',
+        reason: 'chapter_not_found' 
+      };
+    }
+
+    // Check preparation gating rules (same logic as bulk creation)
+    const schemeForCheck = Object.assign({}, schemeDetails, { 
+      teacherEmail: verificationData.teacherEmail 
+    });
+    const gate = _isPreparationAllowedForSession(chapterObj, 1, schemeForCheck);
+    
+    if (!gate || !gate.allowed) {
+      return {
+        success: true,
+        allowed: false,
+        message: (gate && gate.message) ? gate.message : 'Previous chapter should be completed',
+        reason: (gate && gate.reason) ? gate.reason : 'previous_chapter_incomplete',
+        lockReason: (gate && gate.message) ? gate.message : 'Previous chapter should be completed'
+      };
+    }
+
+    // All checks passed
+    return {
+      success: true,
+      allowed: true,
+      message: 'Preparation allowed',
+      reason: 'ok'
+    };
+    
+  } catch (error) {
+    console.error('Error in verifyChapterPreparation:', error);
+    return {
+      success: false,
+      error: error.message || 'Verification failed',
+      allowed: false,
+      reason: 'error'
+    };
+  }
+}
+
+/**
  * Create multiple lesson plans for all sessions of a chapter at once
  * BULK OPERATION: Auto-assigns next N available periods
  */

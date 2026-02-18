@@ -1740,6 +1740,14 @@ export async function createBulkSchemeLessonPlans(bulkPlanData) {
   });
 }
 
+// Verify if chapter preparation is allowed (fresh check before opening form)
+export async function verifyChapterPreparation(verificationData) {
+  return postJSON(BASE_URL, {
+    action: 'verifyChapterPreparation',
+    verificationData
+  });
+}
+
 // Get AI-powered lesson plan suggestions
 export async function getAILessonSuggestions(context) {
   console.log('[api.js] Calling getAILessonSuggestions with:', context);

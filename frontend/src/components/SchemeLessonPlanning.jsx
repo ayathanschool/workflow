@@ -638,20 +638,63 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
     }
   };
 
-  const handleBulkPrepareClick = (scheme, chapter) => {
+  const handleBulkPrepareClick = async (scheme, chapter) => {
     console.log('Bulk prepare clicked:', { scheme, chapter });
 
+    // First check: Use cached canPrepare flag for quick feedback
     if (chapter && chapter.canPrepare === false) {
       alert(chapter.lockReason || 'Previous chapter should be completed');
       return;
     }
 
-    setBulkPrepData({
-      scheme,
-      chapter,
-      sessionCount: chapter.totalSessions
-    });
-    setShowBulkModal(true);
+    // Second check: Verify with fresh data from backend BEFORE opening modal
+    // This prevents teachers from wasting time filling forms only to be blocked at submission
+    try {
+      setLoading(true);
+      const verificationPayload = {
+        schemeId: scheme.schemeId,
+        chapter: chapter.chapterName,
+        teacherEmail: userEmail
+      };
+      
+      console.log('Verifying preparation allowance...', verificationPayload);
+      const verifyResponse = await api.verifyChapterPreparation(verificationPayload);
+      const verifyData = verifyResponse?.data || verifyResponse;
+      
+      if (!verifyData.success || !verifyData.allowed) {
+        const blockMessage = verifyData.message || verifyData.lockReason || 'Previous chapter should be completed';
+        alert(`❌ Cannot prepare lesson plans:\n\n${blockMessage}`);
+        console.warn('Preparation blocked:', verifyData);
+        return;
+      }
+      
+      console.log('✅ Preparation verified, opening modal');
+      // Verification passed - open the modal
+      setBulkPrepData({
+        scheme,
+        chapter,
+        sessionCount: chapter.totalSessions
+      });
+      setShowBulkModal(true);
+      
+    } catch (error) {
+      console.error('Error verifying preparation:', error);
+      // If verification fails, show error but don't block (fail-open for better UX)
+      const userChoice = confirm(
+        `⚠️ Could not verify preparation status:\n${error.message}\n\n` +
+        `Do you want to proceed anyway? (Submission may still be blocked if restrictions apply)`
+      );
+      if (userChoice) {
+        setBulkPrepData({
+          scheme,
+          chapter,
+          sessionCount: chapter.totalSessions
+        });
+        setShowBulkModal(true);
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getProgressColor = (percentage) => {
