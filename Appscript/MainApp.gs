@@ -8862,6 +8862,7 @@ function getAllUsers() {
 /**
  * Get first unreported session number for a chapter
  * Ensures sequential session reporting (no skipping)
+ * OPTIMIZED: Uses ONLY scheme ID for matching (scheme ID already identifies class+subject+chapter)
  */
 function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions, schemeId) {
   try {
@@ -8870,16 +8871,25 @@ function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, tot
     const reports = _rows(reportsSheet).map(r => _indexByHeader(r, headers));
     const schemeNorm = String(schemeId || '').trim();
     
-    // Get all reported sessions for this teacher+class+subject+chapter
+    // Get all reported sessions for this teacher+scheme
+    // CHANGED: Match by teacher email + scheme ID only (scheme ID is unique per class+subject+chapter)
+    // FALLBACK: If no scheme ID, use old matching (class+subject+chapter) for backward compatibility
     const reportedSessions = reports
       .filter(r => {
         const emailMatch = String(r.teacherEmail || '').trim().toLowerCase() === String(teacherEmail || '').trim().toLowerCase();
+        if (!emailMatch) return false;
+        
+        // PRIMARY: If scheme ID provided, use it exclusively (more accurate, avoids chapter name variations)
+        if (schemeNorm) {
+          const schemeIdMatch = String(r.schemeId || '').trim() === schemeNorm;
+          return schemeIdMatch;
+        }
+        
+        // FALLBACK: If no scheme ID, use old matching for backward compatibility
         const classMatch = String(r.class || '').trim() === String(classVal || '').trim();
         const subjectMatch = String(r.subject || '').trim() === String(subject || '').trim();
         const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
-        if (!emailMatch || !classMatch || !subjectMatch || !chapterMatch) return false;
-        if (schemeNorm) return String(r.schemeId || '').trim() === schemeNorm;
-        return true;
+        return classMatch && subjectMatch && chapterMatch;
       })
       .map(r => Number(r.sessionNo || 0))
       .filter(n => n > 0)
@@ -8914,15 +8924,23 @@ function validateSessionSequence(teacherEmail, classVal, subject, chapter, attem
       const reports = _rows(reportsSheet).map(r => _indexByHeader(r, headers));
       const schemeNorm = String(schemeId || '').trim();
       
+      // CHANGED: Match by teacher email + scheme ID only (with fallback for backward compatibility)
       const reportedSessions = reports
         .filter(r => {
           const emailMatch = String(r.teacherEmail || '').trim().toLowerCase() === String(teacherEmail || '').trim().toLowerCase();
+          if (!emailMatch) return false;
+          
+          // PRIMARY: If scheme ID provided, use it exclusively
+          if (schemeNorm) {
+            const schemeIdMatch = String(r.schemeId || '').trim() === schemeNorm;
+            return schemeIdMatch;
+          }
+          
+          // FALLBACK: If no scheme ID, use old matching
           const classMatch = String(r.class || '').trim() === String(classVal || '').trim();
           const subjectMatch = String(r.subject || '').trim() === String(subject || '').trim();
           const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
-          if (!emailMatch || !classMatch || !subjectMatch || !chapterMatch) return false;
-          if (schemeNorm) return String(r.schemeId || '').trim() === schemeNorm;
-          return true;
+          return classMatch && subjectMatch && chapterMatch;
         })
         .map(r => Number(r.sessionNo || 0))
         .filter(n => n > 0);
