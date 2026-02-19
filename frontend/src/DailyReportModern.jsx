@@ -12,7 +12,6 @@ import {
   getSuggestedPlansForSubstitution,
   getFirstUnreportedSession,
   deleteDailyReport
-  // getUnreportedSessions // TODO: Implement backfill feature API
 } from "./api";
 import { todayIST } from "./utils/dateUtils";
 import { confirmDestructive } from "./utils/confirm";
@@ -61,11 +60,6 @@ export default function DailyReportModern({ user }) {
   // Preview of already reported sessions per chapter
   const [reportedChapterSessions, setReportedChapterSessions] = useState({});
   const [reportedChapterSessionsLoading, setReportedChapterSessionsLoading] = useState({});
-  
-  // Backfill reporting - unreported sessions (HM-controlled feature)
-  const [unreportedSessions, setUnreportedSessions] = useState({});
-  const [unreportedSessionsLoading, setUnreportedSessionsLoading] = useState({});
-  const [backfillEnabled, setBackfillEnabled] = useState(false);
   
   // Prevent infinite reload loops
   const loadingRef = useRef(false);
@@ -138,6 +132,8 @@ export default function DailyReportModern({ user }) {
 
     const cls = String(p.class || '').trim();
     const subject = String(p.substituteSubject || p.subject || '').trim();
+    const chapterHint = String(p.chapter || '').trim();
+    const schemeHint = String(p.schemeId || '').trim();
     if (!cls || !subject) {
       setSuggestedSubPlans(prev => ({ ...prev, [expandedPeriod]: [] }));
       return;
@@ -146,12 +142,17 @@ export default function DailyReportModern({ user }) {
     (async () => {
       setSuggestedSubPlansLoading(prev => ({ ...prev, [expandedPeriod]: true }));
       try {
-        const res = await getSuggestedPlansForSubstitution(email, cls, subject, date, p.period);
+        const res = await getSuggestedPlansForSubstitution(email, cls, subject, date, p.period, {
+          chapter: chapterHint,
+          schemeId: schemeHint,
+          noCache: true
+        });
         const payload = res?.data || res;
         const plans = Array.isArray(payload?.plans) ? payload.plans : (Array.isArray(payload) ? payload : []);
         const nextPlan = payload?.nextPlan || plans[0] || null;
         const pullbackPreview = Array.isArray(payload?.pullbackPreview) ? payload.pullbackPreview : [];
-        setSuggestedSubPlans(prev => ({ ...prev, [expandedPeriod]: { nextPlan, pullbackPreview } }));
+        const expectedSession = payload?.expectedSession || null;
+        setSuggestedSubPlans(prev => ({ ...prev, [expandedPeriod]: { nextPlan, pullbackPreview, expectedSession } }));
       } catch (_e) {
         setSuggestedSubPlans(prev => ({ ...prev, [expandedPeriod]: { nextPlan: null, pullbackPreview: [] } }));
       } finally {
@@ -428,14 +429,6 @@ export default function DailyReportModern({ user }) {
       setRemainingSessions(prev => ({ ...prev, [key]: null }));
     }
     
-    // When chapter is entered, fetch unreported sessions (for backfill)
-    if (field === 'chapter' && value) {
-      const period = periods.find(p => periodKey(p) === key);
-      if (period) {
-        fetchUnreportedSessions(key, period, value);
-      }
-    }
-    
     // When cascade option is selected, fetch preview
     if (field === 'cascadeOption' && value === 'cascade') {
       // Robust plan lookup: direct key, fuzzy by period+class, fallback id fields
@@ -511,62 +504,6 @@ export default function DailyReportModern({ user }) {
     }
   };
 
-  // Fetch unreported sessions for backfill reporting (HM-controlled)
-  const fetchUnreportedSessions = useCallback(async (key, period, chapter) => {
-    if (!chapter) {
-      console.log('[Backfill] No chapter provided, skipping fetch');
-      setUnreportedSessions(prev => ({ ...prev, [key]: [] }));
-      return;
-    }
-    
-    console.log('[Backfill] Fetching unreported sessions:', { key, class: period.class, subject: period.subject, chapter });
-    setUnreportedSessionsLoading(prev => ({ ...prev, [key]: true }));
-    try {
-      // TODO: Implement getUnreportedSessions API endpoint
-      // Backfill feature not yet implemented - silently disable it
-      setUnreportedSessions(prev => ({ ...prev, [key]: [] }));
-      setBackfillEnabled(false);
-      return;
-      
-      // const result = await getUnreportedSessions(email, period.class, period.subject, chapter);
-      // const data = result.data || result;
-      
-      console.log('[Backfill] API response:', data);
-      
-      if (data.success && data.backfillEnabled) {
-        setBackfillEnabled(true);
-        setUnreportedSessions(prev => ({ ...prev, [key]: data.unreportedSessions || [] }));
-        console.log('[Backfill] Found', data.unreportedSessions?.length || 0, 'unreported sessions');
-      } else {
-        setBackfillEnabled(data.backfillEnabled || false);
-        setUnreportedSessions(prev => ({ ...prev, [key]: [] }));
-        console.log('[Backfill] Feature enabled:', data.backfillEnabled, '| Error:', data.error);
-      }
-    } catch (error) {
-      console.error('[Backfill] Error fetching unreported sessions:', error);
-      setUnreportedSessions(prev => ({ ...prev, [key]: [] }));
-    } finally {
-      setUnreportedSessionsLoading(prev => ({ ...prev, [key]: false }));
-    }
-  }, [email]);
-
-  // Fetch unreported sessions when period is expanded and has a chapter
-  useEffect(() => {
-    if (expandedPeriod && periods.length > 0) {
-      const period = periods.find(p => periodKey(p) === expandedPeriod);
-      if (period && !reports[expandedPeriod]) {
-        const draft = drafts[expandedPeriod] || {};
-        const plan = lessonPlans[expandedPeriod];
-        const chapter = draft.chapter || plan?.chapter;
-        
-        if (chapter) {
-          console.log('[Backfill] Fetching unreported sessions on expand:', { period, chapter });
-          fetchUnreportedSessions(expandedPeriod, period, chapter);
-        }
-      }
-    }
-  }, [expandedPeriod, periods, reports, drafts, lessonPlans, fetchUnreportedSessions]);
-
   const fetchReportedSessions = useCallback(async (cls, subject, chapter, schemeId) => {
     const chapterKey = getChapterKey(cls, subject, chapter, schemeId);
     if (!chapterKey) return;
@@ -576,7 +513,7 @@ export default function DailyReportModern({ user }) {
 
     setReportedChapterSessionsLoading(prev => ({ ...prev, [chapterKey]: true }));
     try {
-      const result = await getDailyReports({ teacher: email, cls, subject, chapter });
+      const result = await getDailyReports({ teacher: email, cls, subject, chapter, schemeId });
       const data = Array.isArray(result) ? result : [];
       const clsNorm = normalizeText(cls);
       const subjNorm = normalizeText(subject);
@@ -750,7 +687,7 @@ export default function DailyReportModern({ user }) {
       // If teacher attached a Ready plan for this substitution period, allow full planned-report options
       // (chapter completion + remaining sessions action + cascade preview/decision).
       const chapter = String((draft.chapter || '')).trim();
-      const completionPercentage = inPlan ? Number(draft.completionPercentage || 0) : 0;
+      const sessionComplete = draft.sessionComplete === true;
       const deviationReason = String((draft.deviationReason || '')).trim();
       if (inPlan) {
         if (!chapter) {
@@ -761,7 +698,7 @@ export default function DailyReportModern({ user }) {
           setMessage({ text: 'Please choose what to do with remaining sessions', type: 'error' });
           return;
         }
-        if (completionPercentage === 0 && !deviationReason) {
+        if (!sessionComplete && !deviationReason) {
           setMessage({ text: '❌ For 0% completion, please select a reason', type: 'error' });
           return;
         }
@@ -771,7 +708,6 @@ export default function DailyReportModern({ user }) {
       setMessage({ text: '', type: '' });
       try {
         const taughtSubject = period.substituteSubject || period.subject;
-        const completionPct = inPlan ? Number(draft.completionPercentage || 0) : 0;
         const sessionNo = inPlan ? Number(draft.sessionNo || 0) : 0;
         const totalSessions = inPlan ? Number(draft.totalSessions || 0) : 0;
         const payload = {
@@ -787,7 +723,7 @@ export default function DailyReportModern({ user }) {
           // Optional notes go into activities so objectives can come from plan.
           objectives: inPlan ? String(draft.objectives || '') : whatDone,
           activities: inPlan ? String(draft.activities || whatDone || '') : '',
-          completionPercentage: isNaN(completionPct) ? 0 : completionPct,
+          sessionComplete: sessionComplete,
           sessionNo: isNaN(sessionNo) ? 0 : sessionNo,
           totalSessions: isNaN(totalSessions) ? 0 : totalSessions,
           chapterStatus: (inPlan && draft.chapterCompleted) ? 'Chapter Complete' : 'Session Complete',
@@ -812,8 +748,9 @@ export default function DailyReportModern({ user }) {
           setReports(prev => ({ ...prev, [key]: { ...payload, reportId: result.reportId } }));
           setDrafts(prev => { const n = { ...prev }; delete n[key]; return n; });
           setExpandedPeriod(null);
-          const absentInfo = result?.absentCascade;
-          const pullback = result?.substitutePullback;
+          const cascade = result?.cascade || {};
+          const absentInfo = cascade?.absent;
+          const pullback = cascade?.substitutePullback;
           if (pullback?.attempted && pullback?.success && pullback?.updatedCount) {
             setMessage({ text: `✅ Substitution submitted. Your future lesson plans were pulled back (${pullback.updatedCount} plan(s) updated).`, type: 'success' });
           } else if (absentInfo?.attempted && absentInfo?.success) {
@@ -836,18 +773,29 @@ export default function DailyReportModern({ user }) {
     // Simplified validation - session complete Yes/No
     const chapter = (draft.chapter || plan?.chapter || "").trim();
     const objectives = (draft.objectives || plan?.learningObjectives || "").trim();
-    // Backward/forward compatible: accept either boolean or legacy percentage
-    const completionPct = Number(
-      (draft.sessionComplete === true || Number(draft.completionPercentage || 0) === 100)
-        ? 100
-        : 0
-    );
-    const sessionComplete = completionPct === 100;
+    // Standardized: use only sessionComplete boolean
+    const sessionComplete = draft.sessionComplete === true;
     const wantsReschedule = draft.wantsReschedule === true || String(draft.cascadeOption || '').trim() === 'cascade';
 
     if (!chapter) {
       setMessage({ text: "❌ Chapter/Topic is required", type: "error" });
       return;
+    }
+
+    // Substitution strict sequence: if a plan is selected, ensure it matches expected session.
+    if (period.isSubstitution && draft.lessonPlanId) {
+      const subData = suggestedSubPlans[key] || null;
+      const expectedSession = subData && subData.expectedSession ? Number(subData.expectedSession) : null;
+      const selectedPlan = subData && subData.nextPlan ? subData.nextPlan : null;
+      if (expectedSession && selectedPlan && Number(selectedPlan.sessionNo || 0) !== expectedSession) {
+        // Auto-clear mismatched plan to avoid invalid submission under strict sequencing.
+        onUpdate('lessonPlanId', '');
+        setMessage({
+          text: `❌ Session ${expectedSession} must be reported first. The selected plan was Session ${selectedPlan.sessionNo}, so it has been cleared.`,
+          type: "error"
+        });
+        return;
+      }
     }
 
     if (sessionComplete && !objectives) {
@@ -880,9 +828,8 @@ export default function DailyReportModern({ user }) {
         chapter: chapter,
         sessionNo: Number(draft.sessionNo || plan?.session || 1),
         totalSessions: Number(draft.totalSessions || plan?.totalSessions || plan?.noOfSessions || 1),
-        // Send both for compatibility (backend supports either)
+        // Send only sessionComplete boolean
         sessionComplete: sessionComplete,
-        completionPercentage: completionPct,
         deviationReason: String(draft.deviationReason || ''),
         chapterCompleted: !!draft.chapterCompleted,
         remainingSessionsAction: draft.remainingSessionsAction || null,
@@ -904,18 +851,20 @@ export default function DailyReportModern({ user }) {
       // Success criteria broadened to include 'success' flag from backend
       if (result && (result.ok || result.submitted || result.success)) {
         console.log('✅ Daily report submitted successfully');
-        // Handle auto-cascade feedback (backend may have moved sessions automatically)
-        const autoCascade = result.autoCascade || result.data?.autoCascade || null;
-        if (autoCascade && autoCascade.attempted && payload.cascadeOption !== 'cascade') {
-          if (autoCascade.success) {
-            setMessage({ text: `✅ Report submitted. Auto-cascade rescheduled ${autoCascade.updatedCount} session(s).`, type: 'success' });
-          } else if (autoCascade.reason === 'auto_disabled') {
-            setMessage({ text: 'ℹ️ Report submitted. Auto-cascade disabled. You can manually choose Reschedule.', type: 'info' });
-          } else if (autoCascade.reason === 'completion_not_zero_or_missing_lpId') {
-            // Do nothing: normal non-zero completion path
-          } else {
-            setMessage({ text: `⚠️ Report submitted. Cascade not applied (${autoCascade.reason || autoCascade.error || 'Unknown reason'}).`, type: 'warning' });
-          }
+        // Handle cascade feedback
+        const cascade = result.cascade || result.data?.cascade || {};
+        const appliedType = cascade.appliedType;
+        
+        // Show appropriate message based on which cascade was applied
+        if (appliedType === 'auto' && cascade.auto?.success) {
+          setMessage({ text: `✅ Report submitted. Auto-cascade rescheduled ${cascade.auto.updatedCount} session(s).`, type: 'success' });
+        } else if (appliedType === 'manual' && cascade.manual?.success) {
+          setMessage({ text: `✅ Report submitted. Sessions rescheduled (${cascade.manual.updatedCount} session(s) updated).`, type: 'success' });
+        } else if (!appliedType && cascade.auto && !cascade.auto.attempted) {
+          // Auto-cascade disabled, no special message needed
+        } else {
+          // Default success message
+          setMessage({ text: '✅ Report submitted successfully.', type: 'success' });
         }
         
         // Execute cascade if requested for incomplete session
@@ -1130,9 +1079,9 @@ export default function DailyReportModern({ user }) {
     }
   };
 
-  const getSessionCompleteLabel = (completionPercentage) => {
-    // For old reports: 100% = Complete, anything else = Incomplete
-    return completionPercentage === 100 ? '✅ Complete' : '⭕ Incomplete';
+  const getSessionCompleteLabel = (isComplete) => {
+    // Display binary completion status
+    return isComplete ? '✅ Complete' : '⭕ Incomplete';
   };
 
   const displayDate = useMemo(() => {
@@ -1292,7 +1241,11 @@ export default function DailyReportModern({ user }) {
                   lessonPlansIndex.get(`${pNorm}|${clsNorm}`) ||
                   null;
               }
-              const completionLabel = getSessionCompleteLabel(isSubmitted ? (report.completionPercentage || 0) : (draft.completionPercentage || 0));
+              const completionLabel = getSessionCompleteLabel(
+                isSubmitted 
+                  ? (report.completionPercentage === 100 || report.sessionComplete === true)
+                  : (draft.sessionComplete === true)
+              );
               return (
                 <PeriodCard
                   key={key}
@@ -1328,9 +1281,6 @@ export default function DailyReportModern({ user }) {
                   periodKey={key}
                   remainingSessions={remainingSessions}
                   remainingSessionsLoading={remainingSessionsLoading}
-                  backfillEnabled={backfillEnabled}
-                  unreportedSessions={unreportedSessions}
-                  unreportedSessionsLoading={unreportedSessionsLoading}
                   onToggle={() => setExpandedPeriod(isExpanded ? null : key)}
                   onUpdate={(field, value) => updateDraft(key, field, value)}
                   onSubmit={() => handleSubmit(period)}
@@ -1369,9 +1319,6 @@ function PeriodCard({
   periodKey = '',
   remainingSessions = {},
   remainingSessionsLoading = {},
-  backfillEnabled = false,
-  unreportedSessions = {},
-  unreportedSessionsLoading = {},
   onToggle, 
   onUpdate, 
   onSubmit,
@@ -1384,11 +1331,12 @@ function PeriodCard({
   const _resources = data.resources || plan?.resourcesRequired || "";
   const sessionNo = data.sessionNo || plan?.sessionNo || plan?.session || 1;
   const totalSessions = data.totalSessions || plan?.totalSessions || plan?.noOfSessions || 1;
-  const completionPercentage = data.completionPercentage || 0;
+  const sessionComplete = data.sessionComplete === true || data.completionPercentage === 100;
   const isSub = !!period.isSubstitution;
   const selectedSubPlanId = String(data.lessonPlanId || '').trim();
   const nextPlan = substitutionPlanData && substitutionPlanData.nextPlan ? substitutionPlanData.nextPlan : null;
   const pullbackPreview = substitutionPlanData && Array.isArray(substitutionPlanData.pullbackPreview) ? substitutionPlanData.pullbackPreview : [];
+  const expectedSession = substitutionPlanData && substitutionPlanData.expectedSession ? Number(substitutionPlanData.expectedSession) : null;
   const selectedSubPlan = isSub && selectedSubPlanId && nextPlan && String(nextPlan.lpId || '').trim() === selectedSubPlanId ? nextPlan : null;
   const inPlanMode = isSub && !!selectedSubPlanId;
   const effectivePlan = (isSub && selectedSubPlan) ? selectedSubPlan : plan;
@@ -1438,7 +1386,7 @@ function PeriodCard({
       if (nextPlan.totalSessions) onUpdate('totalSessions', Number(nextPlan.totalSessions));
       if (nextPlan.learningObjectives) onUpdate('objectives', String(nextPlan.learningObjectives));
       if (nextPlan.teachingMethods) onUpdate('activities', String(nextPlan.teachingMethods));
-      if (!data.completionPercentage && data.completionPercentage !== 0) onUpdate('completionPercentage', 0);
+      if (data.sessionComplete === undefined) onUpdate('sessionComplete', false);
       
       // Fetch first unreported session for sequential enforcement
       const email = String(teacherEmail || '').trim();
@@ -1508,7 +1456,7 @@ function PeriodCard({
 
           <div className="flex items-center gap-3">
             {/* Completion Badge */}
-            <div className={`px-4 py-2 rounded-full border-2 flex items-center gap-2 ${isSub ? 'bg-amber-50 border-amber-300' : (completionPercentage === 100 ? 'bg-green-50 border-green-500' : 'bg-orange-50 border-orange-500')}`}>
+            <div className={`px-4 py-2 rounded-full border-2 flex items-center gap-2 ${isSub ? 'bg-amber-50 border-amber-300' : (sessionComplete ? 'bg-green-50 border-green-500' : 'bg-orange-50 border-orange-500')}`}>
               <span className="text-sm font-medium">{completionLabel}</span>
             </div>
 
@@ -1693,9 +1641,25 @@ function PeriodCard({
                 {substitutionPlansLoading && (
                   <div className="text-xs text-amber-700 mt-1">Loading suggested plans…</div>
                 )}
-                {nextPlan && !substitutionPlansLoading && (
+                {nextPlan && expectedSession && Number(nextPlan.sessionNo || 0) !== Number(expectedSession) && !substitutionPlansLoading && (
+                  <div className="mt-2 p-3 bg-red-50 border border-red-300 rounded-lg text-sm text-red-800">
+                    <div className="font-semibold">⚠️ Session Mismatch Warning</div>
+                    <div className="mt-1">
+                      The suggested plan is <strong>Session {nextPlan.sessionNo}</strong>, but you must report <strong>Session {expectedSession}</strong> first (sequential enforcement).
+                    </div>
+                    <div className="mt-1 text-xs">
+                      The plan for Session {expectedSession} may not be prepared or may be from a missed period. You may need to prepare Session {expectedSession} first, or report without selecting a plan.
+                    </div>
+                  </div>
+                )}
+                {nextPlan && !substitutionPlansLoading && (!expectedSession || Number(nextPlan.sessionNo || 0) === Number(expectedSession)) && (
                   <div className="text-xs text-blue-600 mt-1">
                     💡 Session number will be auto-set to first unreported session when selected
+                  </div>
+                )}
+                {!nextPlan && expectedSession && !substitutionPlansLoading && (
+                  <div className="text-xs text-amber-700 mt-1">
+                    ⚠️ No Ready plan found for Session {expectedSession}. Prepare it or report without a plan.
                   </div>
                 )}
               </div>
@@ -1750,29 +1714,6 @@ function PeriodCard({
                 </div>
               </div>
               
-              {/* Unreported Sessions Dropdown (Backfill Feature - HM Controlled) */}
-              {backfillEnabled && unreportedSessions[key] && unreportedSessions[key].length > 0 && (
-                <div className="mt-4 bg-amber-50 border border-amber-300 rounded-lg p-3">
-                  <label className="block text-sm font-medium text-amber-900 mb-2">
-                    📋 Report Missed Session (Optional)
-                  </label>
-                  <select
-                    value={data.backfillSessionNo || ''}
-                    onChange={(e) => onUpdate('backfillSessionNo', e.target.value)}
-                    className="w-full px-3 py-2 border border-amber-400 bg-white rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                  >
-                    <option value="">Current session (reporting for today)</option>
-                    {unreportedSessions[key].map((session) => (
-                      <option key={session.sessionNo} value={session.sessionNo}>
-                        Session {session.sessionNo} - Originally planned for {new Date(session.plannedDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} P{session.plannedPeriod}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-amber-700 mt-2">
-                    💡 Select an unreported session to backfill missed reports. Feature enabled by HM.
-                  </p>
-                </div>
-              )}
             </div>
           ) : (!isSub && (
             <div className={`rounded-lg p-4 border ${cascadeMoves[periodKey] ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200'}`}>
@@ -1951,13 +1892,12 @@ function PeriodCard({
                 type="button"
                 onClick={() => {
                   onUpdate('sessionComplete', true);
-                  onUpdate('completionPercentage', 100);
                   // Clear incomplete-only fields
                   onUpdate('deviationReason', '');
                   onUpdate('cascadeOption', '');
                 }}
                 className={`p-6 rounded-xl border-2 transition-all ${
-                  completionPercentage === 100
+                  sessionComplete
                     ? 'bg-green-50 border-green-500 shadow-md'
                     : 'bg-white border-gray-200 hover:border-gray-300'
                 }`}
@@ -1970,13 +1910,12 @@ function PeriodCard({
                 type="button"
                 onClick={() => {
                   onUpdate('sessionComplete', false);
-                  onUpdate('completionPercentage', 0);
                   // Clear chapter completion when marking incomplete
                   onUpdate('chapterCompleted', false);
                   onUpdate('remainingSessionsAction', null);
                 }}
                 className={`p-6 rounded-xl border-2 transition-all ${
-                  completionPercentage === 0
+                  !sessionComplete
                     ? 'bg-orange-50 border-orange-500 shadow-md'
                     : 'bg-white border-gray-200 hover:border-gray-300'
                 }`}
@@ -1990,7 +1929,7 @@ function PeriodCard({
           )}
 
           {/* Reason for Incomplete Session */}
-          {allowPlanActions && completionPercentage === 0 && (
+          {allowPlanActions && !sessionComplete && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Reason for Incomplete Session <span className="text-red-500">*</span>
@@ -2008,7 +1947,7 @@ function PeriodCard({
           )}
 
           {/* Cascade Option (only for incomplete sessions) */}
-          {allowPlanActions && effectivePlan && completionPercentage === 0 && data.deviationReason && (
+          {allowPlanActions && effectivePlan && !sessionComplete && data.deviationReason && (
             <div>
               <label className="flex items-center gap-2 cursor-pointer p-4 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors">
                 <input
@@ -2033,8 +1972,8 @@ function PeriodCard({
             </div>
           )}
 
-              {/* Cascade Preview (0% only) */}
-              {completionPercentage === 0 && data.cascadeOption === 'cascade' && cascadePreview && !cascadeLoading && (
+              {/* Cascade Preview (incomplete only) */}
+              {!sessionComplete && data.cascadeOption === 'cascade' && cascadePreview && !cascadeLoading && (
                 <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
                   <h4 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
                     <span className="text-xl">🔄</span>
@@ -2071,8 +2010,8 @@ function PeriodCard({
                 </div>
               )}
 
-          {/* Learning Objectives - show for all cases when completion > 0 */}
-          {showPlannedFields && completionPercentage > 0 && !effectivePlan && (
+          {/* Learning Objectives - show for all cases when session complete */}
+          {showPlannedFields && sessionComplete && !effectivePlan && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Learning Objectives <span className="text-red-500">*</span>
@@ -2087,8 +2026,8 @@ function PeriodCard({
             </div>
           )}
 
-          {/* Activities - show for all cases when completion > 0 */}
-          {showPlannedFields && completionPercentage > 0 && !effectivePlan && (
+          {/* Activities - show for all cases when session complete */}
+          {showPlannedFields && sessionComplete && !effectivePlan && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Activities
@@ -2123,7 +2062,7 @@ function PeriodCard({
           </div>
 
           {/* Chapter Completion with Inline Dropdown */}
-          {allowPlanActions && completionPercentage === 100 && (
+          {allowPlanActions && sessionComplete && (
             <div className="space-y-3">
               <div className="flex items-center gap-3 p-4 bg-green-50 border-2 border-green-200 rounded-lg">
                 <input

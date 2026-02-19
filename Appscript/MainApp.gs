@@ -133,7 +133,10 @@
     return null;
   }
 
-  /** Return IST "YYYY-MM-DD" for any sheet cell (Date/string/number). Null-safe. */
+  /** 
+   * Return IST "YYYY-MM-DD" for any sheet cell (Date/string/number). Null-safe.
+   * Use this when reading date values FROM sheets.
+   */
   function _isoDateIST(value) {
     const d = _coerceToDate(value);
     if (!d) return '';
@@ -146,7 +149,11 @@
     return Utilities.formatDate(d, _tz_(), 'EEEE'); // Monday, Tuesday...
   }
 
-  /** Parse a client-sent date string (e.g., "2025-11-07" or ISO) to IST "YYYY-MM-DD" */
+  /** 
+   * Parse a client-sent date string (e.g., "2025-11-07" or ISO) to IST "YYYY-MM-DD"
+   * Use this when receiving date parameters FROM frontend/API calls.
+   * Handles multiple formats and defaults to today if invalid.
+   */
   function _normalizeQueryDate(dateStr) {
     if (!dateStr) return _todayISO();
     const raw = String(dateStr || '').trim();
@@ -1671,14 +1678,18 @@
           if (!totalSessionsVal) totalSessionsVal = 1;
 
           // Extract schemeId from matching plan or attached plan (needed for sequence validation)
-          const reportSchemeId = String((!isSubstitution && matchingPlan && matchingPlan.schemeId) || (attachedPlan && attachedPlan.schemeId) || data.schemeId || '').trim();
+          const reportSchemeId = String(data.schemeId || (!isSubstitution && matchingPlan && matchingPlan.schemeId) || (attachedPlan && attachedPlan.schemeId) || '').trim();
 
           // *** SESSION SEQUENCE VALIDATION ***
           // Enforce sequential reporting (no skipping sessions)
-          const reportedChapter = String((!isSubstitution && matchingPlan && matchingPlan.chapter) || (attachedPlan && attachedPlan.chapter) || data.chapter || '').trim();
-          const reportedSession = Number((!isSubstitution && (data.sessionNo || matchingPlan.session)) || (attachedPlan && attachedPlan.session) || Number(data.sessionNo || 0) || 0);
+          // Use the existing lock from parent function to ensure atomicity
+          // CRITICAL: Prioritize user's explicit draft values (data.*) over plan defaults
+          const reportedChapter = String(data.chapter || (!isSubstitution && matchingPlan && matchingPlan.chapter) || (attachedPlan && attachedPlan.chapter) || '').trim();
+          const reportedSession = Number(data.sessionNo || (!isSubstitution && matchingPlan && (matchingPlan.session || matchingPlan.sessionNo)) || (isSubstitution && attachedPlan && (attachedPlan.session || attachedPlan.sessionNo)) || 0);
           
           if (reportedChapter && reportedSession > 0 && totalSessionsVal > 0) {
+            // Validation happens within the lock acquired at the start of submitDailyReport
+            // This prevents race conditions during concurrent submissions
             const sequenceCheck = validateSessionSequence(teacherEmail, reportClass, reportSubject, reportedChapter, reportedSession, totalSessionsVal, reportSchemeId);
             if (!sequenceCheck.valid) {
               appLog('WARN', 'Session sequence violation', { attempted: reportedSession, expected: sequenceCheck.expectedSession, chapter: reportedChapter });
@@ -1697,10 +1708,18 @@
           const attachedPlanId = attachedPlan ? String(attachedPlan.lpId || attachedPlan.lessonPlanId || attachedPlan.planId || attachedPlan.id || '').trim() : '';
           const attachedChapter = attachedPlan ? String(attachedPlan.chapter || '').trim() : '';
           const attachedSession = attachedPlan ? Number(attachedPlan.session || attachedPlan.sessionNo || 0) : 0;
+          const attachedSchemeId = attachedPlan ? String(attachedPlan.schemeId || '').trim() : '';
           
-          // Map binary sessionComplete to percentage for backward compatibility
-          const sessionComplete = data.sessionComplete === true || data.sessionComplete === 'true';
-          const completionPercentage = sessionComplete ? 100 : (Number(data.completionPercentage || 0));
+          // For substitution, use the attached plan ID directly (teacher's choice from Ready plans)
+          let finalPlanId = '';
+          if (isSubstitution && attachedPlan) {
+            finalPlanId = attachedPlanId;
+          }
+          
+          // Standardize on sessionComplete boolean only
+          // Frontend sends sessionComplete (boolean) - convert to percentage for sheet storage
+          const sessionComplete = data.sessionComplete === true || data.sessionComplete === 'true' || String(data.sessionComplete).toLowerCase() === 'true';
+          const completionPercentage = sessionComplete ? 100 : 0;
           
           // reportSchemeId already computed above
           
@@ -1714,9 +1733,9 @@
             reportSchemeId,
             Number(data.period || 0),
             inferredPlanType,
-            String((!isSubstitution && matchingPlan && matchingPlan.lpId) || attachedPlanId || data.lessonPlanId || ''),
-            String((!isSubstitution && matchingPlan && matchingPlan.chapter) || attachedChapter || data.chapter || ''),
-            Number((!isSubstitution && (data.sessionNo || matchingPlan.session)) || attachedSession || Number(data.sessionNo || 0) || 0),
+            String((!isSubstitution && matchingPlan && matchingPlan.lpId) || finalPlanId || ''),
+            reportedChapter,  // Use the validated chapter value
+            reportedSession,  // Use the validated session value
             Number(totalSessionsVal || 1),
             completionPercentage,
             data.chapterStatus || '',
@@ -1758,110 +1777,95 @@
             });
           } catch (auditErr) { /* ignore audit failures */ }
           
-          // *** MANUAL CASCADE OPTION FROM FRONTEND ***
           // *** SIMPLIFIED CASCADE LOGIC ***
-          // Handle cascadeOption field: only 'cascade' is supported now
-          // If session incomplete (sessionComplete=false) and cascade requested
-          let manualCascade = null;
-          try {
-            const cascadeOption = String(data.cascadeOption || '').trim();
-            const sessionIsComplete = (data.sessionComplete === true || data.sessionComplete === 'true') || Number(data.completionPercentage || 0) === 100;
-            const completionPct = sessionIsComplete ? 100 : 0; // Map to percentage for backward compatibility
-            
-            if (cascadeOption === 'cascade' && !sessionIsComplete && reportedPlanId) {
-              // Manual cascade trigger (reschedule remaining sessions)
-              const preview = getCascadePreview(reportedPlanId, teacherEmail, reportDate);
-              if (preview && preview.success && preview.needsCascade && preview.canCascade && Array.isArray(preview.sessionsToReschedule) && preview.sessionsToReschedule.length) {
-                const execPayload = {
-                  sessionsToReschedule: preview.sessionsToReschedule,
-                  mode: preview.mode,
-                  dailyReportContext: { date: reportDate, teacherEmail, class: reportClass, subject: reportSubject, period: reportPeriod }
-                };
-                const cascadeResult = executeCascade(execPayload);
-                manualCascade = {
-                  action: 'cascade',
-                  success: cascadeResult && cascadeResult.success,
-                  updatedCount: cascadeResult && cascadeResult.updatedCount,
-                  errors: cascadeResult && cascadeResult.errors
-                };
-                appLog('INFO', 'manual cascade executed', manualCascade);
+          // Cascade precedence (only one type applies per submission):
+          // 1. Manual cascade (frontend explicit request)
+          // 2. Auto-cascade (enabled via settings, 0% completion)
+          // 3. Absent teacher cascade (substitution scenario)
+          // 4. Substitute pullback (substitution with attached plan)
+          
+          let cascadeResults = {
+            manual: null,
+            auto: null,
+            absent: null,
+            substitutePullback: null,
+            appliedType: null
+          };
+
+          // 1. MANUAL CASCADE: Frontend explicitly requested reschedule
+          if (!sessionComplete && String(data.cascadeOption || '').trim() === 'cascade') {
+            try {
+              const reportedPlanId = String((!isSubstitution && matchingPlan && matchingPlan.lpId) || finalPlanId || '').trim();
+              if (reportedPlanId) {
+                const preview = getCascadePreview(reportedPlanId, teacherEmail, reportDate);
+                if (preview && preview.success && preview.needsCascade && preview.canCascade && Array.isArray(preview.sessionsToReschedule) && preview.sessionsToReschedule.length) {
+                  const execPayload = {
+                    sessionsToReschedule: preview.sessionsToReschedule,
+                    mode: preview.mode,
+                    dailyReportContext: { date: reportDate, teacherEmail, class: reportClass, subject: reportSubject, period: reportPeriod }
+                  };
+                  const cascadeResult = executeCascade(execPayload);
+                  cascadeResults.manual = {
+                    success: cascadeResult && cascadeResult.success,
+                    updatedCount: cascadeResult && cascadeResult.updatedCount,
+                    errors: cascadeResult && cascadeResult.errors
+                  };
+                  cascadeResults.appliedType = 'manual';
+                  appLog('INFO', 'Manual cascade executed', cascadeResults.manual);
+                } else {
+                  cascadeResults.manual = { success: false, reason: 'preview_not_cascadable' };
+                }
               } else {
-                manualCascade = { action: 'cascade', success: false, reason: 'preview_not_cascadable' };
+                cascadeResults.manual = { success: false, reason: 'no_lesson_plan_id' };
               }
+            } catch (mcErr) {
+              cascadeResults.manual = { success: false, error: mcErr.message };
+              appLog('ERROR', 'Manual cascade failed', { message: mcErr.message });
             }
-          } catch (mcErr) {
-            manualCascade = { attempted: true, success: false, error: mcErr.message };
-            appLog('ERROR', 'manual cascade action failed', { message: mcErr.message, stack: mcErr.stack });
           }
           
-          // *** CHAPTER COMPLETION ACTION (INLINE) ***
-          // If chapter completed and has remaining sessions action, apply it
-          if (data.chapterCompleted && data.remainingSessionsAction && data.remainingSessions && data.remainingSessions.length > 0) {
+          // 2. AUTO-CASCADE: Enabled via settings, triggers on incomplete session
+          // Only apply if manual cascade was not requested
+          if (!cascadeResults.appliedType && !sessionComplete) {
             try {
-              const completionResult = applyChapterCompletionAction({
-                action: data.remainingSessionsAction,
-                lessonPlanIds: data.remainingSessions,
-                requesterEmail: data.teacherEmail,
-                rationale: data.completionRationale || 'Chapter completed early'
-              });
-              
-              if (completionResult.success) {
+              const lpIdForCascade = String((!isSubstitution && matchingPlan && matchingPlan.lpId) || finalPlanId || '').trim();
+              const autoCascadeEnabled = _isAutoCascadeEnabled();
+              if (autoCascadeEnabled && lpIdForCascade) {
+                appLog('INFO', 'Auto-cascade check passed', { lpId: lpIdForCascade });
+                const preview = getCascadePreview(lpIdForCascade, teacherEmail, reportDate);
+                if (preview && preview.success && preview.needsCascade && preview.canCascade && Array.isArray(preview.sessionsToReschedule) && preview.sessionsToReschedule.length) {
+                  appLog('INFO', 'Auto-cascade executing', { affected: preview.sessionsToReschedule.length });
+                  const execPayload = {
+                    sessionsToReschedule: preview.sessionsToReschedule,
+                    mode: preview.mode,
+                    dailyReportContext: { date: reportDate, teacherEmail: teacherEmail, class: reportClass, subject: reportSubject, period: reportPeriod }
+                  };
+                  const cascadeResult = executeCascade(execPayload);
+                  cascadeResults.auto = {
+                    previewSessions: preview.sessionsToReschedule.length,
+                    success: cascadeResult && cascadeResult.success,
+                    updatedCount: cascadeResult && cascadeResult.updatedCount,
+                    errors: cascadeResult && cascadeResult.errors,
+                    flagEnabled: autoCascadeEnabled
+                  };
+                  cascadeResults.appliedType = 'auto';
+                  appLog('INFO', 'Auto-cascade result', cascadeResults.auto);
+                } else {
+                  cascadeResults.auto = { success: false, reason: 'preview_not_cascadable', flagEnabled: autoCascadeEnabled };
+                }
               } else {
+                cascadeResults.auto = { attempted: false, reason: autoCascadeEnabled ? 'missing_lpId' : 'auto_disabled', flagEnabled: autoCascadeEnabled };
               }
-            } catch (ccErr) {
-              // Don't fail report submission if chapter action fails
+            } catch (acErr) {
+              cascadeResults.auto = { success: false, error: acErr.message, flagEnabled: _isAutoCascadeEnabled() };
+              appLog('ERROR', 'Auto-cascade exception', { message: acErr.message });
             }
           }
 
-          // Optional AUTO-CASCADE: if 0% completion and a lessonPlanId provided, attempt cascade immediately
-          let autoCascade = null;
-          try {
-            const completionPct = Number(data.completionPercentage || 0);
-            const lpIdForCascade = String((matchingPlan && matchingPlan.lpId) || data.lessonPlanId || '').trim();
-            const autoCascadeEnabled = _isAutoCascadeEnabled();
-            if (autoCascadeEnabled && completionPct === 0 && lpIdForCascade) {
-              appLog('INFO', 'autoCascade trigger check passed', { lpId: lpIdForCascade });
-              // Use reportDate (normalized) as originalDate reference
-              const preview = getCascadePreview(lpIdForCascade, teacherEmail, reportDate);
-              if (preview && preview.success && preview.needsCascade && preview.canCascade && Array.isArray(preview.sessionsToReschedule) && preview.sessionsToReschedule.length) {
-                appLog('INFO', 'autoCascade executing', { affected: preview.sessionsToReschedule.length });
-                const execPayload = {
-                  sessionsToReschedule: preview.sessionsToReschedule,
-                  mode: preview.mode,
-                  dailyReportContext: {
-                    date: reportDate,
-                    teacherEmail: teacherEmail,
-                    class: reportClass,
-                    subject: reportSubject,
-                    period: reportPeriod
-                  }
-                };
-                const cascadeResult = executeCascade(execPayload);
-                autoCascade = {
-                  attempted: true,
-                  previewSessions: preview.sessionsToReschedule.length,
-                  success: cascadeResult && cascadeResult.success,
-                  updatedCount: cascadeResult && cascadeResult.updatedCount,
-                  errors: cascadeResult && cascadeResult.errors,
-                  flagEnabled: autoCascadeEnabled
-                };
-                appLog('INFO', 'autoCascade result', autoCascade);
-              } else {
-                autoCascade = { attempted: true, success: false, reason: 'preview_not_cascadable', preview: preview, flagEnabled: autoCascadeEnabled };
-                appLog('INFO', 'autoCascade preview not cascadable', { preview });
-              }
-            } else {
-              autoCascade = { attempted: false, reason: autoCascadeEnabled ? 'completion_not_zero_or_missing_lpId' : 'auto_disabled', flagEnabled: autoCascadeEnabled };
-            }
-          } catch (acErr) {
-            autoCascade = { attempted: true, success: false, error: acErr.message, flagEnabled: _isAutoCascadeEnabled() };
-            appLog('ERROR', 'autoCascade exception', { message: acErr.message, stack: acErr.stack });
-          }
-
-          // NEW: If this was a substitution, also cascade the ABSENT teacher's plan for this slot (if any)
-          let absentCascade = null;
-          try {
-            if (isSubstitution && subAbsentTeacher && subRegularSubject) {
+          // 3. ABSENT TEACHER CASCADE: For substitution, cascade the absent teacher's plan
+          // Only applies to substitutions
+          if (isSubstitution && subAbsentTeacher && subRegularSubject) {
+            try {
               const absentEmail = String(subAbsentTeacher || '').toLowerCase().trim();
               const absentPlan = lessonPlans.find(p => {
                 const emailMatch = String(p.teacherEmail || '').trim().toLowerCase() === absentEmail;
@@ -1877,35 +1881,27 @@
                   const execPayload = {
                     sessionsToReschedule: preview.sessionsToReschedule,
                     mode: preview.mode,
-                    dailyReportContext: {
-                      date: reportDate,
-                      teacherEmail: absentEmail,
-                      class: reportClass,
-                      subject: subRegularSubject,
-                      period: reportPeriod
-                    }
+                    dailyReportContext: { date: reportDate, teacherEmail: absentEmail, class: reportClass, subject: subRegularSubject, period: reportPeriod }
                   };
                   const exec = executeCascade(execPayload);
-                  absentCascade = { attempted: true, success: exec && exec.success, updatedCount: exec && exec.updatedCount, errors: exec && exec.errors };
+                  cascadeResults.absent = { success: exec && exec.success, updatedCount: exec && exec.updatedCount, errors: exec && exec.errors };
+                  appLog('INFO', 'Absent teacher cascade executed', cascadeResults.absent);
                 } else {
-                  absentCascade = { attempted: true, success: false, reason: 'preview_not_cascadable' };
+                  cascadeResults.absent = { attempted: true, success: false, reason: 'preview_not_cascadable' };
                 }
               } else {
-                absentCascade = { attempted: false, reason: 'no_absent_plan_found' };
+                cascadeResults.absent = { attempted: false, reason: 'no_absent_plan_found' };
               }
+            } catch (abErr) {
+              cascadeResults.absent = { success: false, error: abErr && abErr.message };
+              appLog('ERROR', 'Absent cascade failed', { message: abErr && abErr.message });
             }
-          } catch (abErr) {
-            absentCascade = { attempted: true, success: false, error: abErr && abErr.message };
           }
 
-          // NEW: If this was a substitution where the SUBSTITUTE teacher attached their own plan,
-          // pull back the teacher's future sessions for the same chapter by shifting each session
-          // into the previous session's existing scheduled slot.
-          // This matches the requested behavior: show only the next session plan, and when used,
-          // shift remaining sessions earlier starting from the reporting date.
-          let substitutePullback = null;
-          try {
-            if (isSubstitution && attachedPlan && attachedPlanId) {
+          // 4. SUBSTITUTE PULLBACK: When substitute uses their own plan, pull back future sessions
+          // Only applies to substitutions with attached plan
+          if (isSubstitution && attachedPlan && attachedPlanId) {
+            try {
               const attachedIso = _isoDateIST(attachedPlan.selectedDate || attachedPlan.date);
               const reportIso = reportDate; // already normalized
               const attachedPeriod = String(attachedPlan.selectedPeriod || attachedPlan.period || '').trim();
@@ -2012,47 +2008,95 @@
                     updatedCount++;
                   });
 
-                  substitutePullback = {
+                  cascadeResults.substitutePullback = {
                     attempted: true,
                     success: updatedCount > 0,
                     updatedCount: updatedCount,
                     moves: moves
                   };
+                  appLog('INFO', 'Substitute pullback executed', cascadeResults.substitutePullback);
                 }
               } else {
-                substitutePullback = { attempted: false, reason: 'not_after_report_date' };
+                cascadeResults.substitutePullback = { attempted: false, reason: 'not_after_report_date' };
               }
+            } catch (spErr) {
+              cascadeResults.substitutePullback = { success: false, error: spErr && spErr.message };
+              appLog('ERROR', 'Substitute pullback failed', { message: spErr && spErr.message });
             }
-          } catch (spErr) {
-            substitutePullback = { attempted: true, success: false, error: spErr && spErr.message };
+          }
+          
+          // CHAPTER COMPLETION ACTION (INLINE)
+          // If chapter completed and has remaining sessions action, apply it
+          if (data.chapterCompleted && data.remainingSessionsAction && data.remainingSessions && data.remainingSessions.length > 0) {
+            try {
+              const completionResult = applyChapterCompletionAction({
+                action: data.remainingSessionsAction,
+                lessonPlanIds: data.remainingSessions,
+                requesterEmail: data.teacherEmail,
+                rationale: data.completionRationale || 'Chapter completed early'
+              });
+              appLog('INFO', 'Chapter completion action applied', { success: completionResult.success });
+            } catch (ccErr) {
+              // Don't fail report submission if chapter action fails
+              appLog('ERROR', 'Chapter completion action failed', { message: ccErr.message });
+            }
           }
 
           // CRITICAL: Invalidate caches so UI refreshes immediately
           try {
             const cache = CacheService.getScriptCache();
-            const keys = [
+            
+            // Teacher-specific caches
+            const specificKeys = [
               'teacher_reports_' + teacherEmail + '_' + reportDate,
               'teacher_daily_' + teacherEmail + '_' + reportDate,
               'daily_timetable_' + reportDate,
               'planned_lessons_' + teacherEmail + '_' + reportDate,
               generateCacheKey('getTeacherDailyReportsForDate', { email: teacherEmail, date: reportDate }),
               generateCacheKey('getTeacherDailyData', { email: teacherEmail, date: reportDate }),
-              // Substitution plan picker cache (best-effort)
               generateCacheKey('suggestedPlansForSubstitution', { teacherEmail: teacherEmail, cls: reportClass, subject: reportSubject, date: reportDate, period: String(reportPeriod) })
             ];
-            appLog('INFO', 'Clearing caches', { keys: keys });
-            keys.forEach(k => cache.remove(k));
+            
+            // Clear specific keys
+            specificKeys.forEach(k => {
+              try { cache.remove(k); } catch (e) { /* ignore */ }
+            });
 
-            // Also invalidate broader caches that depend on DailyReports/Chapter completion.
-            // Without this, lesson planning availability (canPrepare/lockReason) can remain stale until TTL expiry.
-            try { invalidateCache('approved_schemes'); } catch (_e1) {}
-            try { if (teacherEmail) invalidateCache('teacher_lessonplans_' + teacherEmail); } catch (_e2) {}
-            appLog('INFO', 'Cache cleared successfully', { count: keys.length });
+            // Invalidate pattern-based caches
+            try { 
+              invalidateCache('approved_schemes');
+              if (teacherEmail) {
+                invalidateCache('teacher_lessonplans_' + teacherEmail);
+                // Clear weekly timetable cache as reporting affects availability
+                invalidateCache('teacher_weekly_' + teacherEmail);
+              }
+              // Clear daily reports query cache for this class/subject
+              if (reportClass && reportSubject) {
+                invalidateCache('daily_reports_' + reportClass + '_' + reportSubject);
+              }
+              // Clear scheme-based lesson plan caches
+              if (reportSchemeId) {
+                invalidateCache('scheme_plans_' + reportSchemeId);
+              }
+              // Clear HM oversight cache for this date
+              invalidateCache('hm_oversight_' + reportDate);
+              invalidateCache('daily_readiness_' + reportDate);
+            } catch (_e1) { 
+              appLog('WARN', 'Pattern cache invalidation partial failure', { error: _e1.message });
+            }
+            
+            appLog('INFO', 'Cache cleared successfully', { specificKeys: specificKeys.length, date: reportDate, teacher: teacherEmail });
           } catch (cacheErr) {
             appLog('ERROR', 'Cache invalidation failed', { error: cacheErr.message });
           }
           
-          return _respond({ ok: true, submitted: true, manualCascade: manualCascade, autoCascade: autoCascade, absentCascade: absentCascade, substitutePullback: substitutePullback, isSubstitution });
+          // Return unified cascade results
+          return _respond({ 
+            ok: true, 
+            submitted: true, 
+            cascade: cascadeResults,
+            isSubstitution 
+          });
         } catch (err) {
           appLog('ERROR', 'submitDailyReport failed', { message: err.message, stack: err.stack });
           return _respond({ error: 'Failed to submit: ' + err.message });
@@ -4196,12 +4240,16 @@
         const clsKey = _normClass(cls);
         const subjectKey = _normSubject(subject);
 
+        // Get all Ready plans for teacher+class+subject
+        // Keep it simple - show all available plans and let teacher choose
+        // Validation will enforce sequential reporting on submission
         let plans = rows.filter(p => {
           if (!p) return false;
           const emailMatch = String(p.teacherEmail || '').toLowerCase().trim() === teacherEmail;
           const classMatch = _normClass(p.class) === clsKey;
           const subjectMatch = _normSubject(p.subject) === subjectKey;
-          return emailMatch && classMatch && subjectMatch && isFetchableStatus(p.status);
+          const statusOk = isFetchableStatus(p.status);  // Ready status only
+          return emailMatch && classMatch && subjectMatch && statusOk;
         });
 
         const toISO = (v) => {
@@ -4287,33 +4335,74 @@
           };
         }).filter(x => x.lpId);
 
-        // Determine the next plan:
-        // 1) Pick a base suggestion (prefer a plan scheduled AFTER the reporting slot).
-        // 2) Enforce sequential reporting by switching to the plan matching the FIRST UNREPORTED session
-        //    for that same chapter (even if that plan was scheduled earlier in the day).
+        // Determine the next plan suggestion:
+        // Priority: Show plan matching first unreported session for each scheme
         let nextPlan = null;
+        let expectedSession = null;
+        
         if (compact.length) {
-          if (hasReportSlot) {
-            nextPlan = compact.find(p => isAfterReportSlot(p.selectedDate, p.selectedPeriod)) || null;
-          }
-          if (!nextPlan) nextPlan = compact[0] || null;
-
-          const nextChapter = nextPlan && String(nextPlan.chapter || '').trim();
-          const nextTotalSessions = nextPlan && Number(nextPlan.totalSessions || 0);
-          if (nextPlan && nextChapter && nextTotalSessions) {
-            const firstUnreportedSessionNo = getFirstUnreportedSession(
+          // First pass: Try to find plans matching first unreported session
+          // Group by schemeId and check each scheme
+          const schemeSessionMap = {};
+          
+          compact.forEach(p => {
+            const sid = String(p.schemeId || '').trim();
+            if (!sid || schemeSessionMap[sid]) return;  // Skip if already processed
+            
+            const scheme = schemeMap[sid] || {};
+            const totalSessions = Number(scheme.noOfSessions || p.totalSessions || 1);
+            const firstUnreported = getFirstUnreportedSession(
               teacherEmail,
               cls,
               subject,
-              nextChapter,
-              nextTotalSessions
+              p.chapter,
+              totalSessions,
+              sid
             );
-            if (firstUnreportedSessionNo) {
-              const matching = compact.find(p => (
-                String(p.chapter || '').trim() === nextChapter &&
-                Number(p.sessionNo || 0) === Number(firstUnreportedSessionNo)
-              ));
-              if (matching) nextPlan = matching;
+            
+            if (firstUnreported) {
+              schemeSessionMap[sid] = {
+                chapter: p.chapter,
+                expectedSession: firstUnreported,
+                totalSessions: totalSessions
+              };
+            }
+          });
+          
+          // Try to find a plan matching first unreported session for any scheme
+          for (const sid in schemeSessionMap) {
+            const info = schemeSessionMap[sid];
+            const matchingPlan = compact.find(p => 
+              String(p.schemeId || '').trim() === sid &&
+              Number(p.sessionNo || 0) === info.expectedSession
+            );
+            
+            if (matchingPlan) {
+              nextPlan = matchingPlan;
+              expectedSession = info.expectedSession;
+              break;
+            }
+          }
+          
+          // Fallback: Pick chronologically next plan if no match found
+          if (!nextPlan) {
+            if (hasReportSlot) {
+              nextPlan = compact.find(p => isAfterReportSlot(p.selectedDate, p.selectedPeriod)) || null;
+            }
+            if (!nextPlan) nextPlan = compact[0] || null;
+            
+            // Calculate expectedSession for warning display
+            if (nextPlan && nextPlan.schemeId) {
+              const scheme = schemeMap[String(nextPlan.schemeId || '').trim()] || {};
+              const totalSessions = Number(scheme.noOfSessions || nextPlan.totalSessions || 1);
+              expectedSession = getFirstUnreportedSession(
+                teacherEmail,
+                cls,
+                subject,
+                nextPlan.chapter,
+                totalSessions,
+                nextPlan.schemeId
+              );
             }
           }
         }
@@ -4363,7 +4452,13 @@
           }
         }
 
-        return { success: true, plans: compact, nextPlan: nextPlan, pullbackPreview: pullbackPreview };
+        return { 
+          success: true, 
+          plans: compact, 
+          nextPlan: nextPlan, 
+          pullbackPreview: pullbackPreview,
+          expectedSession: expectedSession  // First unreported session number for validation
+        };
       }, CACHE_TTL.SHORT);
 
       return _respond(out);
@@ -8860,9 +8955,9 @@ function getAllUsers() {
 }
 
 /**
- * Get first unreported session number for a chapter
+ * Get first unreported session number for a scheme
  * Ensures sequential session reporting (no skipping)
- * OPTIMIZED: Uses ONLY scheme ID for matching (scheme ID already identifies class+subject+chapter)
+ * CRITICAL: Uses schemeId as primary key since chapter names can repeat
  */
 function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions, schemeId) {
   try {
@@ -8871,25 +8966,26 @@ function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, tot
     const reports = _rows(reportsSheet).map(r => _indexByHeader(r, headers));
     const schemeNorm = String(schemeId || '').trim();
     
-    // Get all reported sessions for this teacher+scheme
-    // CHANGED: Match by teacher email + scheme ID only (scheme ID is unique per class+subject+chapter)
-    // FALLBACK: If no scheme ID, use old matching (class+subject+chapter) for backward compatibility
+    // Get all reported sessions for this teacher+class+subject+schemeId
+    // CRITICAL: Use schemeId as primary key, chapter as secondary verification
     const reportedSessions = reports
       .filter(r => {
         const emailMatch = String(r.teacherEmail || '').trim().toLowerCase() === String(teacherEmail || '').trim().toLowerCase();
-        if (!emailMatch) return false;
-        
-        // PRIMARY: If scheme ID provided, use it exclusively (more accurate, avoids chapter name variations)
-        if (schemeNorm) {
-          const schemeIdMatch = String(r.schemeId || '').trim() === schemeNorm;
-          return schemeIdMatch;
-        }
-        
-        // FALLBACK: If no scheme ID, use old matching for backward compatibility
         const classMatch = String(r.class || '').trim() === String(classVal || '').trim();
         const subjectMatch = String(r.subject || '').trim() === String(subject || '').trim();
+        
+        // Primary filter: schemeId (mandatory for accurate matching)
+        if (schemeNorm) {
+          const schemeMatch = String(r.schemeId || '').trim() === schemeNorm;
+          if (!emailMatch || !classMatch || !subjectMatch || !schemeMatch) return false;
+          // Secondary verification: chapter name
+          const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
+          return chapterMatch;  // Warn if mismatch but still use schemeId as truth
+        }
+        
+        // Fallback: if no schemeId provided, use chapter (less reliable)
         const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
-        return classMatch && subjectMatch && chapterMatch;
+        return emailMatch && classMatch && subjectMatch && chapterMatch;
       })
       .map(r => Number(r.sessionNo || 0))
       .filter(n => n > 0)
@@ -8913,6 +9009,9 @@ function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, tot
 /**
  * Validate that teacher is reporting sessions sequentially (no skipping)
  * Extended sessions (sessionNum > totalSessions) are allowed if previous session reported
+ * 
+ * IMPORTANT: This function should be called within a lock context (e.g., during submitDailyReport)
+ * to prevent race conditions when multiple teachers submit reports concurrently.
  */
 function validateSessionSequence(teacherEmail, classVal, subject, chapter, attemptedSession, totalSessions, schemeId) {
   try {
@@ -8924,23 +9023,24 @@ function validateSessionSequence(teacherEmail, classVal, subject, chapter, attem
       const reports = _rows(reportsSheet).map(r => _indexByHeader(r, headers));
       const schemeNorm = String(schemeId || '').trim();
       
-      // CHANGED: Match by teacher email + scheme ID only (with fallback for backward compatibility)
       const reportedSessions = reports
         .filter(r => {
           const emailMatch = String(r.teacherEmail || '').trim().toLowerCase() === String(teacherEmail || '').trim().toLowerCase();
-          if (!emailMatch) return false;
-          
-          // PRIMARY: If scheme ID provided, use it exclusively
-          if (schemeNorm) {
-            const schemeIdMatch = String(r.schemeId || '').trim() === schemeNorm;
-            return schemeIdMatch;
-          }
-          
-          // FALLBACK: If no scheme ID, use old matching
           const classMatch = String(r.class || '').trim() === String(classVal || '').trim();
           const subjectMatch = String(r.subject || '').trim() === String(subject || '').trim();
+          
+          // Primary filter: schemeId (mandatory for accurate matching)
+          if (schemeNorm) {
+            const schemeMatch = String(r.schemeId || '').trim() === schemeNorm;
+            if (!emailMatch || !classMatch || !subjectMatch || !schemeMatch) return false;
+            // Secondary verification: chapter name
+            const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
+            return chapterMatch;
+          }
+          
+          // Fallback: if no schemeId provided, use chapter (less reliable)
           const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
-          return classMatch && subjectMatch && chapterMatch;
+          return emailMatch && classMatch && subjectMatch && chapterMatch;
         })
         .map(r => Number(r.sessionNo || 0))
         .filter(n => n > 0);

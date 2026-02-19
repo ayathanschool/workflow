@@ -416,34 +416,16 @@ function deleteDailyReport(reportId, requesterEmail) {
     const delMinutesSetting = _getCachedSettings()['DAILY_REPORT_DELETE_MINUTES'];
     const minutesWindow = delMinutesSetting != null ? Number(delMinutesSetting) : 30;
 
-    let rowToDelete = -1;
-    let reportObj = null;
-    for (let i = 0; i < data.length; i++) {
-      const row = data[i];
-      // Match by id/reportId if available
-      if (idCol != null && String(row[idCol]) === String(reportId)) {
-        reportObj = _indexByHeader(row, headers);
-        rowToDelete = i + 2;
-        break;
-      }
-      // Fallback: composite key match date|class|subject|period|teacherEmail
-      if (idCol == null) {
-        const dateVal = String(row[idxMap['date']] || '').trim();
-        const classVal = String(row[idxMap['class']] || '').trim();
-        const subjectVal = String(row[idxMap['subject']] || '').trim();
-        const periodVal = String(row[idxMap['period']] || '').trim();
-        const emailVal = String(row[idxMap['teacherEmail']] || '').trim().toLowerCase();
-        const composite = [dateVal, classVal, subjectVal, periodVal, emailVal].join('|');
-        if (composite === String(reportId)) {
-          reportObj = _indexByHeader(row, headers);
-          rowToDelete = i + 2;
-          break;
-        }
-      }
-    }
-    if (rowToDelete < 0 || !reportObj) {
+    // Use standardized report finder
+    const found = _findDailyReportRow(reportId, sh, headers);
+    
+    if (!found) {
+      console.error('[deleteDailyReport] Report not found:', reportId);
       return { success: false, error: 'Report not found' };
     }
+    
+    const rowToDelete = found.rowIndex;
+    const reportObj = found.rowObj;
     // Allow HM/headmaster role to delete any report without time-window/ownership restriction
     var isHM = false;
     try {
@@ -628,6 +610,39 @@ function deleteDailyReport(reportId, requesterEmail) {
       });
     } catch (auditErr) { /* ignore audit failures */ }
 
+    // Invalidate caches after deletion
+    try {
+      const teacherEmail = String(reportObj.teacherEmail || '').toLowerCase().trim();
+      const reportDate = _isoDateString(reportObj.date || '');
+      const reportClass = String(reportObj.class || '').trim();
+      const reportSubject = String(reportObj.subject || '').trim();
+      const reportSchemeId = String(reportObj.schemeId || '').trim();
+      
+      if (teacherEmail && reportDate) {
+        const cache = CacheService.getScriptCache();
+        const keys = [
+          'teacher_reports_' + teacherEmail + '_' + reportDate,
+          'teacher_daily_' + teacherEmail + '_' + reportDate,
+          'daily_timetable_' + reportDate,
+          generateCacheKey('getTeacherDailyReportsForDate', { email: teacherEmail, date: reportDate }),
+          generateCacheKey('getTeacherDailyData', { email: teacherEmail, date: reportDate })
+        ];
+        keys.forEach(k => {
+          try { cache.remove(k); } catch (e) { /* ignore */ }
+        });
+        
+        // Invalidate pattern caches
+        try { 
+          invalidateCache('teacher_lessonplans_' + teacherEmail);
+          if (reportClass && reportSubject) invalidateCache('daily_reports_' + reportClass + '_' + reportSubject);
+          if (reportSchemeId) invalidateCache('scheme_plans_' + reportSchemeId);
+          invalidateCache('hm_oversight_' + reportDate);
+        } catch (e) { /* ignore */ }
+      }
+    } catch (cacheErr) {
+      console.error('Cache invalidation on delete failed:', cacheErr);
+    }
+
     return { success: true, deletedId: reportId, rollback: rollbackInfo };
   } catch (err) {
     console.error('deleteDailyReport error', err);
@@ -641,6 +656,54 @@ function deleteDailyReport(reportId, requesterEmail) {
 function _ensureDailyReportVerificationHeaders(sheet) {
   const required = ['verified', 'verifiedBy', 'verifiedAt', 'reopenReason', 'reopenedBy', 'reopenedAt'];
   _ensureHeadersEnhanced(sheet, required);
+}
+
+/**
+ * Helper function to find a daily report row by ID or composite key
+ * Returns { rowIndex: number (1-based), rowObj: object } or null if not found
+ */
+function _findDailyReportRow(reportId, sheet, headers) {
+  const data = _rows(sheet);
+  const idxMap = {};
+  headers.forEach((h, i) => idxMap[h] = i);
+  const reportIdStr = String(reportId);
+  
+  // Strategy 1: Try UUID match on 'id' column (primary)
+  const idCol = idxMap['id'];
+  if (idCol != null) {
+    for (let i = 0; i < data.length; i++) {
+      if (String(data[i][idCol]) === reportIdStr) {
+        return {
+          rowIndex: i + 2,
+          rowObj: _indexByHeader(data[i], headers),
+          matchType: 'id'
+        };
+      }
+    }
+  }
+  
+  // Strategy 2: Try composite key (date|class|subject|period|email)
+  // This is for legacy compatibility and frontend-generated keys
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    const rowDate = _isoDateString(row[idxMap['date']] || '');
+    const rowClass = String(row[idxMap['class']] || '').trim();
+    const rowSubject = String(row[idxMap['subject']] || '').trim();
+    const rowPeriodRaw = String(row[idxMap['period']] || '').trim();
+    const rowPeriod = rowPeriodRaw.replace(/^Period\s*/i, '');
+    const rowEmail = String(row[idxMap['teacherEmail']] || '').trim().toLowerCase();
+    const composite = [rowDate, rowClass, rowSubject, rowPeriod, rowEmail].join('|');
+    
+    if (composite === reportIdStr) {
+      return {
+        rowIndex: i + 2,
+        rowObj: _indexByHeader(row, headers),
+        matchType: 'composite'
+      };
+    }
+  }
+  
+  return null;
 }
 
 /**
@@ -661,94 +724,17 @@ function verifyDailyReport(reportId, verifierEmail) {
 
     const sh = _getSheet('DailyReports');
     const headers = _headers(sh);
-    const data = _rows(sh);
-    const idxMap = {};
-    headers.forEach((h, i) => idxMap[h] = i);
-    const idCol = idxMap['id'] != null ? idxMap['id'] : idxMap['reportId'];
-
-    console.log('[verifyDailyReport] Headers:', headers.join(', '));
-    console.log('[verifyDailyReport] Total rows:', data.length);
-
-    let rowIndex = -1;
-    let rowObj = null;
     
-    const reportIdStr = String(reportId);
-    console.log('[verifyDailyReport] Looking for:', reportIdStr);
+    // Use standardized report finder
+    const found = _findDailyReportRow(reportId, sh, headers);
     
-    // Try direct ID match first if ID column exists and looks like UUID
-    const hasUuidFormat = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(reportIdStr);
-    if (idCol != null && hasUuidFormat) {
-      console.log('[verifyDailyReport] Attempting direct ID match');
-      for (let i = 0; i < data.length; i++) {
-        if (String(data[i][idCol]) === reportIdStr) {
-          rowObj = _indexByHeader(data[i], headers);
-          rowIndex = i + 2;
-          console.log('[verifyDailyReport] Direct ID match found at row', rowIndex);
-          break;
-        }
-      }
+    if (!found) {
+      console.error('[verifyDailyReport] Report not found:', reportId);
+      return { success: false, error: 'Report not found' };
     }
     
-    // Fall back to composite key matching if no ID match
-    if (rowIndex < 0) {
-      console.log('[verifyDailyReport] Falling back to composite key matching');
-    
-    for (let i = 0; i < data.length; i++) {
-      const row = data[i];
-      
-      // Build composite from row (normalize date to YYYY-MM-DD)
-      const rowDate = _isoDateString(row[idxMap['date']] || '');
-      const rowClass = String(row[idxMap['class']] || '').trim();
-      const rowSubject = String(row[idxMap['subject']] || '').trim();
-      // Strip 'Period ' prefix if present to match numeric-only format from frontend
-      const rowPeriodRaw = String(row[idxMap['period']] || '').trim();
-      const rowPeriod = rowPeriodRaw.replace(/^Period\s*/i, '');
-      const rowEmail = String(row[idxMap['teacherEmail']] || '').trim().toLowerCase();
-      const composite = [rowDate, rowClass, rowSubject, rowPeriod, rowEmail].join('|');
-      
-      if (composite === reportIdStr) {
-        rowObj = _indexByHeader(row, headers);
-        rowIndex = i + 2;
-        console.log('[verifyDailyReport] Composite key match found at row', rowIndex);
-        break;
-      }
-    }
-    } // End composite key matching block
-
-    // Fallback 2: Try match by lessonPlanId when provided
-    if (rowIndex < 0) {
-      const lpCol = idxMap['lessonPlanId'];
-      if (lpCol != null) {
-        console.log('[verifyDailyReport] Trying lessonPlanId match');
-        for (let i = 0; i < data.length; i++) {
-          if (String(data[i][lpCol] || '') === reportIdStr) {
-            rowObj = _indexByHeader(data[i], headers);
-            rowIndex = i + 2;
-            console.log('[verifyDailyReport] lessonPlanId match found at row', rowIndex);
-            break;
-          }
-        }
-      }
-    }
-
-    if (rowIndex < 0) {
-      console.log('[verifyDailyReport] No match found.');
-      console.log('[verifyDailyReport] Searched for:', reportIdStr);
-      console.log('[verifyDailyReport] Total rows in DailyReports:', data.length);
-      if (data.length > 0) {
-        // Log first 3 composites for debugging
-        for (let i = 0; i < Math.min(3, data.length); i++) {
-          const sampleDate = _isoDateString(data[i][idxMap['date']] || '');
-          const sampleClass = String(data[i][idxMap['class']] || '').trim();
-          const sampleSubject = String(data[i][idxMap['subject']] || '').trim();
-          const samplePeriodRaw = String(data[i][idxMap['period']] || '').trim();
-          const samplePeriod = samplePeriodRaw.replace(/^Period\s*/i, '');
-          const sampleEmail = String(data[i][idxMap['teacherEmail']] || '').trim().toLowerCase();
-          console.log(`[verifyDailyReport] Row ${i+1} composite:`, [sampleDate, sampleClass, sampleSubject, samplePeriod, sampleEmail].join('|'));
-        }
-      }
-      return { success: false, error: 'Report not found', debug: { reportId: reportIdStr, rowCount: data.length } };
-    }
+    const rowIndex = found.rowIndex;
+    const rowObj = found.rowObj;
 
     _ensureDailyReportVerificationHeaders(sh);
     const hdrs = _headers(sh);
@@ -777,6 +763,23 @@ function verifyDailyReport(reportId, verifierEmail) {
       });
     } catch (auditErr) { /* ignore audit failures */ }
 
+    // Invalidate caches after verification
+    try {
+      const teacherEmail = rowObj ? String(rowObj.teacherEmail || '').toLowerCase().trim() : '';
+      const reportDate = rowObj ? _isoDateString(rowObj.date || '') : '';
+      if (teacherEmail && reportDate) {
+        const cache = CacheService.getScriptCache();
+        const keys = [
+          'teacher_reports_' + teacherEmail + '_' + reportDate,
+          'teacher_daily_' + teacherEmail + '_' + reportDate,
+          generateCacheKey('getTeacherDailyReportsForDate', { email: teacherEmail, date: reportDate }),
+          generateCacheKey('getTeacherDailyData', { email: teacherEmail, date: reportDate })
+        ];
+        keys.forEach(k => { try { cache.remove(k); } catch (e) {} });
+        try { invalidateCache('hm_oversight_' + reportDate); } catch (e) {}
+      }
+    } catch (cacheErr) { /* ignore cache errors */ }
+
     return { success: true, verifiedId: reportId };
   } catch (err) {
     console.error('verifyDailyReport error', err);
@@ -800,44 +803,17 @@ function reopenDailyReport(reportId, requesterEmail, reason) {
 
     const sh = _getSheet('DailyReports');
     const headers = _headers(sh);
-    const data = _rows(sh);
-    const idxMap = {};
-    headers.forEach((h, i) => idxMap[h] = i);
-    const idCol = idxMap['id'] != null ? idxMap['id'] : idxMap['reportId'];
-
-    let rowIndex = -1;
-    let rowObj = null;
-    const reportIdStr = String(reportId);
-    // Try ID match first (when 'id' column exists)
-    for (let i = 0; i < data.length; i++) {
-      const row = data[i];
-      if (idCol != null && String(row[idCol]) === reportIdStr) { rowIndex = i + 2; rowObj = _indexByHeader(row, headers); break; }
+    
+    // Use standardized report finder
+    const found = _findDailyReportRow(reportId, sh, headers);
+    
+    if (!found) {
+      console.error('[reopenDailyReport] Report not found:', reportId);
+      return { success: false, error: 'Report not found' };
     }
-    // Composite key fallback
-    if (rowIndex < 0) {
-      for (let i = 0; i < data.length; i++) {
-        const row = data[i];
-        const rowDate = _isoDateString(row[idxMap['date']] || '');
-        const rowClass = String(row[idxMap['class']] || '').trim();
-        const rowSubject = String(row[idxMap['subject']] || '').trim();
-        const rowPeriodRaw = String(row[idxMap['period']] || '').trim();
-        const rowPeriod = rowPeriodRaw.replace(/^Period\s*/i, '');
-        const rowEmail = String(row[idxMap['teacherEmail']] || '').trim().toLowerCase();
-        const composite = [rowDate, rowClass, rowSubject, rowPeriod, rowEmail].join('|');
-        if (composite === reportIdStr) { rowIndex = i + 2; rowObj = _indexByHeader(row, headers); break; }
-      }
-    }
-    // lessonPlanId fallback
-    if (rowIndex < 0) {
-      const lpCol = idxMap['lessonPlanId'];
-      if (lpCol != null) {
-        for (let i = 0; i < data.length; i++) {
-          const row = data[i];
-          if (String(row[lpCol] || '') === reportIdStr) { rowIndex = i + 2; rowObj = _indexByHeader(row, headers); break; }
-        }
-      }
-    }
-    if (rowIndex < 0) return { success: false, error: 'Report not found' };
+    
+    const rowIndex = found.rowIndex;
+    const rowObj = found.rowObj;
 
     _ensureDailyReportVerificationHeaders(sh);
     const hdrs = _headers(sh);
@@ -864,6 +840,23 @@ function reopenDailyReport(reportId, requesterEmail, reason) {
         severity: AUDIT_SEVERITY.WARNING
       });
     } catch (auditErr) { /* ignore audit failures */ }
+
+    // Invalidate caches after reopening
+    try {
+      const teacherEmail = rowObj ? String(rowObj.teacherEmail || '').toLowerCase().trim() : '';
+      const reportDate = rowObj ? _isoDateString(rowObj.date || '') : '';
+      if (teacherEmail && reportDate) {
+        const cache = CacheService.getScriptCache();
+        const keys = [
+          'teacher_reports_' + teacherEmail + '_' + reportDate,
+          'teacher_daily_' + teacherEmail + '_' + reportDate,
+          generateCacheKey('getTeacherDailyReportsForDate', { email: teacherEmail, date: reportDate }),
+          generateCacheKey('getTeacherDailyData', { email: teacherEmail, date: reportDate })
+        ];
+        keys.forEach(k => { try { cache.remove(k); } catch (e) {} });
+        try { invalidateCache('hm_oversight_' + reportDate); } catch (e) {}
+      }
+    } catch (cacheErr) { /* ignore cache errors */ }
 
     // Add notification + optional email to teacher
     try {
