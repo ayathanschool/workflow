@@ -8966,8 +8966,8 @@ function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, tot
     const reports = _rows(reportsSheet).map(r => _indexByHeader(r, headers));
     const schemeNorm = String(schemeId || '').trim();
     
-    // Get all reported sessions for this teacher+class+subject+schemeId
-    // CRITICAL: Use schemeId as primary key, chapter as secondary verification
+    // Get all COMPLETED sessions for this teacher+class+subject+schemeId
+    // CRITICAL: Incomplete sessions should be treated as unreported for sequential enforcement
     const reportedSessions = reports
       .filter(r => {
         const emailMatch = String(r.teacherEmail || '').trim().toLowerCase() === String(teacherEmail || '').trim().toLowerCase();
@@ -8980,12 +8980,16 @@ function getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, tot
           if (!emailMatch || !classMatch || !subjectMatch || !schemeMatch) return false;
           // Secondary verification: chapter name
           const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
-          return chapterMatch;  // Warn if mismatch but still use schemeId as truth
+          if (!chapterMatch) return false;
+        } else {
+          // Fallback: if no schemeId provided, use chapter (less reliable)
+          const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
+          if (!emailMatch || !classMatch || !subjectMatch || !chapterMatch) return false;
         }
         
-        // Fallback: if no schemeId provided, use chapter (less reliable)
-        const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
-        return emailMatch && classMatch && subjectMatch && chapterMatch;
+        // Only count sessions marked as complete (completionPercentage = 100)
+        const completionPct = Number(r.completionPercentage || 0);
+        return completionPct === 100;
       })
       .map(r => Number(r.sessionNo || 0))
       .filter(n => n > 0)
@@ -9035,12 +9039,16 @@ function validateSessionSequence(teacherEmail, classVal, subject, chapter, attem
             if (!emailMatch || !classMatch || !subjectMatch || !schemeMatch) return false;
             // Secondary verification: chapter name
             const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
-            return chapterMatch;
+            if (!chapterMatch) return false;
+          } else {
+            // Fallback: if no schemeId provided, use chapter (less reliable)
+            const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
+            if (!emailMatch || !classMatch || !subjectMatch || !chapterMatch) return false;
           }
           
-          // Fallback: if no schemeId provided, use chapter (less reliable)
-          const chapterMatch = String(r.chapter || '').trim() === String(chapter || '').trim();
-          return emailMatch && classMatch && subjectMatch && chapterMatch;
+          // Only count completed sessions (completionPercentage = 100)
+          const completionPct = Number(r.completionPercentage || 0);
+          return completionPct === 100;
         })
         .map(r => Number(r.sessionNo || 0))
         .filter(n => n > 0);
@@ -9061,7 +9069,14 @@ function validateSessionSequence(teacherEmail, classVal, subject, chapter, attem
     const expectedSession = getFirstUnreportedSession(teacherEmail, classVal, subject, chapter, totalSessions, schemeId);
     
     if (expectedSession === null) {
-      // All original sessions reported - this shouldn't happen for normal sessions
+      // All original sessions completed - check if attempting to re-report an incomplete one
+      // This can happen when cascading incomplete sessions
+      if (attemptedSession <= totalSessions) {
+        // Allow re-reporting within original session range (likely cascaded incomplete session)
+        appLog('INFO', 'Allowing re-report of session within original range', { attemptedSession, totalSessions });
+        return { valid: true, isReReport: true };
+      }
+      // Beyond original sessions - should use extended session feature
       return {
         valid: false,
         expectedSession: null,

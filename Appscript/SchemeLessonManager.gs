@@ -404,13 +404,24 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           }
           
           // Check if the LAST SESSION is marked "Chapter Complete"
-          const lastSessionReport = schemeReports.find(report => 
+          // If multiple reports exist for the same session (e.g., cascaded incomplete then completed),
+          // use the LATEST report by createdAt timestamp
+          const lastSessionReports = schemeReports.filter(report => 
             Number(report.sessionNo) === lastSessionNo
           );
           
-          // Determine completion: ONLY explicit "Chapter Complete" marking counts.
+          // Sort by createdAt descending to get most recent first
+          lastSessionReports.sort((a, b) => {
+            const aTime = new Date(a.createdAt || 0).getTime();
+            const bTime = new Date(b.createdAt || 0).getTime();
+            return bTime - aTime;  // Descending order
+          });
+          
+          const lastSessionReport = lastSessionReports[0];  // Most recent report
+          
+          // Determine completion: ONLY the "completed" field should contain "Chapter Complete"
+          // chapterStatus is for session-level status ("Session Complete"), not chapter completion
           const explicitComplete = lastSessionReport && (
-            String(lastSessionReport.chapterStatus || '').toLowerCase().includes('chapter complete') ||
             String(lastSessionReport.completed || '').toLowerCase().includes('chapter complete') ||
             String(lastSessionReport.chapterCompleted || '').toLowerCase() === 'true' ||
             String(lastSessionReport.chapterCompleted || '').toLowerCase() === 'yes' ||
@@ -418,7 +429,7 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           );
           const isMarkedComplete = !!explicitComplete;
 
-          _log(`Scheme "${schemeId}" - Last session ${lastSessionNo} marked complete: ${isMarkedComplete}, chapterStatus: "${lastSessionReport && lastSessionReport.chapterStatus ? lastSessionReport.chapterStatus : ''}", completed: "${lastSessionReport && lastSessionReport.completed ? lastSessionReport.completed : ''}"`);
+          _log(`Scheme "${schemeId}" - Last session ${lastSessionNo} marked complete: ${isMarkedComplete}, completed: "${lastSessionReport && lastSessionReport.completed ? lastSessionReport.completed : ''}"`);
           
           if (!isMarkedComplete) {
             incompletedChapters.push(`${chapterName || 'Unnamed Chapter'} (Last session ${lastSessionNo} not marked "Chapter Complete")`);
@@ -989,12 +1000,12 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
     }
 
     const isChapterMarkedComplete = function(report) {
-      const status = normKey(report && report.chapterStatus);
+      // ONLY check "completed" field for chapter completion marker
+      // chapterStatus is for session-level status, not chapter completion
       const chapterCompleted = report && report.chapterCompleted;
       const chapterCompletedStr = normKey(chapterCompleted);
       const completedLegacy = normKey(report && report.completed);
       return (
-        status.indexOf('chapter complete') !== -1 ||
         completedLegacy.indexOf('chapter complete') !== -1 ||
         chapterCompleted === true ||
         chapterCompletedStr === 'true' ||
@@ -1918,12 +1929,12 @@ function _fetchSchemeDetails(schemeId, teacherEmail) {
   }
   
   const isChapterMarkedComplete = function(report) {
-    const status = normKey(report && report.chapterStatus);
+    // ONLY check "completed" field for chapter completion marker
+    // chapterStatus is for session-level status, not chapter completion
     const chapterCompleted = report && report.chapterCompleted;
     const chapterCompletedStr = normKey(chapterCompleted);
     const completedLegacy = normKey(report && report.completed);
     return (
-      status.indexOf('chapter complete') !== -1 ||
       completedLegacy.indexOf('chapter complete') !== -1 ||
       chapterCompleted === true ||
       chapterCompletedStr === 'true' ||
@@ -2926,12 +2937,12 @@ function _generateSessionsForChapter(chapter, scheme) {
     const _norm = (v) => String(v || '').toLowerCase().trim();
     const _isChapterMarkedCompleteReport = (report) => {
       if (!report || typeof report !== 'object') return false;
-      const chapterStatus = _norm(report.chapterStatus);
+      // ONLY check "completed" field for chapter completion marker
+      // chapterStatus is for session-level status, not chapter completion
       const chapterCompleted = report.chapterCompleted;
       const chapterCompletedStr = _norm(chapterCompleted);
       const completedLegacy = _norm(report.completed);
       return (
-        chapterStatus.includes('chapter complete') ||
         completedLegacy.includes('chapter complete') ||
         chapterCompleted === true ||
         chapterCompletedStr === 'true' ||

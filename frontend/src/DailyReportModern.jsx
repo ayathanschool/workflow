@@ -726,7 +726,6 @@ export default function DailyReportModern({ user }) {
           sessionComplete: sessionComplete,
           sessionNo: isNaN(sessionNo) ? 0 : sessionNo,
           totalSessions: isNaN(totalSessions) ? 0 : totalSessions,
-          chapterStatus: (inPlan && draft.chapterCompleted) ? 'Chapter Complete' : 'Session Complete',
           deviationReason: inPlan ? String(draft.deviationReason || '') : '',
           cascadeOption: inPlan ? (draft.cascadeOption || '') : '',
           difficulties: inPlan ? (draft.difficulties || '') : '',
