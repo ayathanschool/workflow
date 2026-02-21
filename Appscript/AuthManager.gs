@@ -11,9 +11,7 @@
  */
 function isSuperAdmin(userEmail) {
   try {
-    const sh = _getSheet('Users');
-    const headers = _headers(sh);
-    const list = _rows(sh).map(r => _indexByHeader(r, headers));
+    const list = _getCachedSheetData('Users').data;
     const user = list.find(u => String(u.email||'').toLowerCase() === userEmail.toLowerCase());
     
     if (!user) return false;
@@ -37,9 +35,7 @@ function isHMOrSuperAdmin(userEmail) {
     // Super Admin check first (highest privilege)
     if (isSuperAdmin(userEmail)) return true;
     
-    const sh = _getSheet('Users');
-    const headers = _headers(sh);
-    const list = _rows(sh).map(r => _indexByHeader(r, headers));
+    const list = _getCachedSheetData('Users').data;
     const user = list.find(u => String(u.email||'').toLowerCase() === userEmail.toLowerCase());
     
     if (!user) return false;
@@ -60,9 +56,7 @@ function isHMOrSuperAdmin(userEmail) {
  */
 function handleBasicLogin(email, password) {
   email = String(email || '').toLowerCase().trim();
-  const sh = _getSheet('Users');
-  const headers = _headers(sh);
-  const list = _rows(sh).map(r => _indexByHeader(r, headers));
+  const list = _getCachedSheetData('Users').data;
   const found = list.find(u => String(u.email||'').toLowerCase() === email);
 
   if (!found) return { error: 'User not found' };
@@ -139,9 +133,7 @@ function handleGoogleLogin(payload) {
     email = email.toLowerCase().trim();
     
     // Check if user exists in our system
-    const sh = _getSheet('Users');
-    const headers = _headers(sh);
-    const list = _rows(sh).map(r => _indexByHeader(r, headers));
+    const list = _getCachedSheetData('Users').data;
     const found = list.find(u => String(u.email||'').toLowerCase() === email);
     
     if (!found) {
@@ -194,9 +186,7 @@ function handleGoogleLogin(payload) {
  * Legacy role check - kept for backwards compatibility
  */
 function userHasRoleLegacy(userEmail, requiredRole) {
-  const sh = _getSheet('Users');
-  const headers = _headers(sh);
-  const list = _rows(sh).map(r => _indexByHeader(r, headers));
+  const list = _getCachedSheetData('Users').data;
   const user = list.find(u => String(u.email||'').toLowerCase() === userEmail.toLowerCase());
   
   if (!user) return false;
@@ -213,9 +203,7 @@ function userHasRoleLegacy(userEmail, requiredRole) {
  * Check if a user can access a specific class
  */
 function userCanAccessClass(userEmail, className) {
-  const sh = _getSheet('Users');
-  const headers = _headers(sh);
-  const list = _rows(sh).map(r => _indexByHeader(r, headers));
+  const list = _getCachedSheetData('Users').data;
   const user = list.find(u => String(u.email||'').toLowerCase() === userEmail.toLowerCase());
   
   if (!user) return false;
@@ -255,9 +243,7 @@ function userCanAccessClass(userEmail, className) {
  * Check if a user can create exams for a specific class and subject
  */
 function userCanCreateExam(userEmail, className, subject) {
-  const sh = _getSheet('Users');
-  const headers = _headers(sh);
-  const list = _rows(sh).map(r => _indexByHeader(r, headers));
+  const list = _getCachedSheetData('Users').data;
   const user = list.find(u => String(u.email||'').toLowerCase() === userEmail.toLowerCase());
   
   if (!user) {
@@ -313,9 +299,7 @@ function userCanCreateExam(userEmail, className, subject) {
  * Check if a user teaches a specific subject
  */
 function userTeachesSubject(userEmail, subject) {
-  const sh = _getSheet('Users');
-  const headers = _headers(sh);
-  const list = _rows(sh).map(r => _indexByHeader(r, headers));
+  const list = _getCachedSheetData('Users').data;
   const user = list.find(u => String(u.email||'').toLowerCase() === userEmail.toLowerCase());
   
   if (!user) return false;

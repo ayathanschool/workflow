@@ -195,9 +195,7 @@ function getSubstitutionsForDate(date) {
 }
 
 function _fetchSubstitutionsForDate(normalizedDate) {
-  const sh = _getSheet('Substitutions');
-  const headers = _headers(sh);
-  const allRows = _rows(sh).map(r => _indexByHeader(r, headers));
+  const allRows = _getCachedSheetData('Substitutions').data;
   
   const substitutions = allRows.filter(r => {
     const rowDate = _isoDateString(r.date);
@@ -223,9 +221,7 @@ function _fetchSubstitutionsForDate(normalizedDate) {
 function getTeacherSubstitutions(teacherEmail, date) {
   const normalizedDate = _isoDateString(date);
   
-  const sh = _getSheet('Substitutions');
-  const headers = _headers(sh);
-  const allRows = _rows(sh).map(r => _indexByHeader(r, headers));
+  const allRows = _getCachedSheetData('Substitutions').data;
   
   const substitutions = allRows.filter(r => {
     const rowDate = _isoDateString(r.date);
@@ -251,9 +247,7 @@ function getTeacherSubstitutionsRange(teacherEmail, startDate, endDate) {
   const normalizedStart = _isoDateString(startDate);
   const normalizedEnd = _isoDateString(endDate);
   
-  const sh = _getSheet('Substitutions');
-  const headers = _headers(sh);
-  const allRows = _rows(sh).map(r => _indexByHeader(r, headers));
+  const allRows = _getCachedSheetData('Substitutions').data;
   
   const substitutions = allRows.filter(r => {
     const rowDate = _isoDateString(r.date);

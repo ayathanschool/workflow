@@ -177,10 +177,10 @@ function _isoDateString(date) {
     // Try to parse other formats
     const parsed = new Date(date);
     if (!isNaN(parsed.getTime())) {
-      return Utilities.formatDate(parsed, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      return Utilities.formatDate(parsed, _tz_(), 'yyyy-MM-dd');
     }
   } else if (date instanceof Date) {
-    return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    return Utilities.formatDate(date, _tz_(), 'yyyy-MM-dd');
   } else if (typeof date === 'object' && date !== null) {
     // Handle serialized Date objects from Google Sheets API
     // These come as objects with a string representation
@@ -357,9 +357,7 @@ function _updateCell(sheet, rowIndex, columnName, value, headers = null) {
  */
 function getAllTeachers() {
   try {
-    const usersSheet = _getSheet('Users');
-    const usersHeaders = _headers(usersSheet);
-    const users = _rows(usersSheet).map(row => _indexByHeader(row, usersHeaders));
+    const users = _getCachedSheetData('Users').data;
     
     return users.filter(user => {
       const roles = (user.roles || user.role || '').toLowerCase();

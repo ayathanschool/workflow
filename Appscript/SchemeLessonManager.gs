@@ -64,6 +64,24 @@ function _slmNormalizeReportRow_(report) {
   if (!report.chapterCompleted) report.chapterCompleted = report.ChapterCompleted || report['Chapter Completed'] || report['chapterCompleted'] || '';
   return report;
 }
+
+/**
+ * Shared helper: check whether a DailyReport row signals "Chapter Complete".
+ * Extracted from three previously-duplicate inline closures.
+ */
+function _slmIsChapterMarkedComplete_(report) {
+  if (!report || typeof report !== 'object') return false;
+  const v = String(report.chapterCompleted || '').toLowerCase().trim();
+  return (
+    String(report.completed || '').toLowerCase().indexOf('chapter complete') !== -1 ||
+    report.chapterCompleted === true ||
+    v === 'true' ||
+    v === 'yes' ||
+    v === 'y' ||
+    v === '1'
+  );
+}
+
 /**
  * Check if lesson plan preparation is allowed for this session
  * SIMPLIFIED LOGIC: Allow preparation any day if:
@@ -540,10 +558,8 @@ function _isPreparationAllowedForSession(chapter, sessionNumber, scheme) {
           .filter(name => name))];
         const incompletedChapters = [];
         
-        // Get all schemes for reference
-        const schemesSheet = _getSheet('Schemes');
-        const schemesHeaders = _headers(schemesSheet);
-        const allSchemes = _rows(schemesSheet).map(row => _indexByHeader(row, schemesHeaders));
+        // Get all schemes for reference (use request-scoped cache to avoid full sheet reads)
+        const allSchemes = (_getCachedSheetData('Schemes').data || []);
         
         for (const chapterName of startedChapters) {
           const prevChapterReports = teacherReports.filter(report => 
@@ -999,21 +1015,8 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
       }
     }
 
-    const isChapterMarkedComplete = function(report) {
-      // ONLY check "completed" field for chapter completion marker
-      // chapterStatus is for session-level status, not chapter completion
-      const chapterCompleted = report && report.chapterCompleted;
-      const chapterCompletedStr = normKey(chapterCompleted);
-      const completedLegacy = normKey(report && report.completed);
-      return (
-        completedLegacy.indexOf('chapter complete') !== -1 ||
-        chapterCompleted === true ||
-        chapterCompletedStr === 'true' ||
-        chapterCompletedStr === 'yes' ||
-        chapterCompletedStr === 'y' ||
-        chapterCompletedStr === '1'
-      );
-    };
+    // Use shared top-level helper (avoids duplicate inline definitions)
+    const isChapterMarkedComplete = _slmIsChapterMarkedComplete_;
 
     // Pre-group teacher reports by schemeId for accurate per-scheme filtering.
     // Fallback to class|subject+date filtering for reports without schemeId (legacy).
@@ -1037,6 +1040,86 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
       }
     }
     
+    // ── Pre-compute scheme completion & cross-scheme gating ─────────────────────────────────
+    // Done ONCE before the loop using already-fetched data — zero extra sheet reads.
+
+    // Step 1: For each scheme, is the last session marked "Chapter Complete" and all prior
+    // sessions covered by daily reports? (mirrors the same check inside _isPreparationAllowedForSession)
+    const schemeCompletionStatus = new Map(); // schemeId -> boolean
+    for (const _s of approvedSchemes) {
+      const _sid = String(_s.schemeId || '').trim();
+      const _sReports = reportsBySchemeId.get(_sid) || [];
+      if (_sReports.length === 0) { schemeCompletionStatus.set(_sid, false); continue; }
+      const _sessionNums = _sReports.map(r => Number(r.sessionNo || 0)).filter(n => n > 0);
+      if (_sessionNums.length === 0) { schemeCompletionStatus.set(_sid, false); continue; }
+      const _lastSession = Math.max.apply(null, _sessionNums);
+      // All sessions 1..lastSession must have reports
+      let _allPresent = true;
+      for (let _i = 1; _i <= _lastSession; _i++) {
+        if (!_sReports.some(r => Number(r.sessionNo) === _i)) { _allPresent = false; break; }
+      }
+      if (!_allPresent) { schemeCompletionStatus.set(_sid, false); continue; }
+      // Last session must be marked Chapter Complete (latest report wins)
+      const _lastReports = _sReports
+        .filter(r => Number(r.sessionNo) === _lastSession)
+        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+      schemeCompletionStatus.set(_sid, !!(_lastReports[0] && isChapterMarkedComplete(_lastReports[0])));
+    }
+
+    // Step 2: For each scheme, compute whether session-1 of its first chapter is allowed.
+    // A scheme is blocked if OTHER started-but-incomplete schemes exist for the same class/subject/term/year.
+    // If the scheme itself already has reports it's a continuation → always allowed.
+    const schemeFirstChapterGate = new Map(); // schemeId -> { allowed, message }
+    for (const _s of approvedSchemes) {
+      const _sid = String(_s.schemeId || '').trim();
+      const _sReports = reportsBySchemeId.get(_sid) || [];
+      // Continuation: current scheme already started
+      if (_sReports.length > 0) {
+        schemeFirstChapterGate.set(_sid, { allowed: true, reason: 'continuation' });
+        continue;
+      }
+      // New scheme: check if other started schemes for same class/subject/term/year are complete
+      const _cs = csKey(_s.class, _s.subject);
+      const _sTerm = normKey(_s.term || '');
+      const _sYear = normKey(_s.academicYear || '');
+      const _incompleted = [];
+      for (const _other of approvedSchemes) {
+        const _oid = String(_other.schemeId || '').trim();
+        if (_oid === _sid) continue; // skip self
+        if (csKey(_other.class, _other.subject) !== _cs) continue;
+        const _oTerm = normKey(_other.term || '');
+        const _oYear = normKey(_other.academicYear || '');
+        if (_sTerm && _oTerm && _oTerm !== _sTerm) continue;
+        if (_sYear && _oYear && _oYear !== _sYear) continue;
+        const _oReports = reportsBySchemeId.get(_oid) || [];
+        if (_oReports.length === 0) continue; // not started → not blocking
+        if (!schemeCompletionStatus.get(_oid)) {
+          const _oNums = _oReports.map(r => Number(r.sessionNo || 0)).filter(n => n > 0);
+          const _oLast = _oNums.length > 0 ? Math.max.apply(null, _oNums) : 0;
+          const _oAllPresent = _oNums.length > 0 && Array.from({length: _oLast}, (_, i) => i + 1)
+            .every(n => _oReports.some(r => Number(r.sessionNo) === n));
+          const _chName = (_oReports[0] && _oReports[0].chapter) || _oid;
+          if (!_oAllPresent) {
+            const _missing = Array.from({length: _oLast}, (_, i) => i + 1)
+              .filter(n => !_oReports.some(r => Number(r.sessionNo) === n));
+            _incompleted.push(`${_chName} (Missing daily reports for session(s): ${_missing.join(', ')})`);
+          } else {
+            _incompleted.push(`${_chName} (Last session ${_oLast} not marked "Chapter Complete")`);
+          }
+        }
+      }
+      if (_incompleted.length > 0) {
+        schemeFirstChapterGate.set(_sid, {
+          allowed: false,
+          reason: 'previous_chapters_incomplete',
+          message: `Previous chapter must be completed before preparing session 1 of new chapter. Incomplete: ${_incompleted.join(', ')}. Mark "Chapter Complete" in the last session's daily report.`
+        });
+      } else {
+        schemeFirstChapterGate.set(_sid, { allowed: true, reason: 'ok' });
+      }
+    }
+    // ── End pre-computation ───────────────────────────────────────────────────────────────────
+
     // Process each scheme to show chapter/session breakdown
     const schemesWithProgress = approvedSchemes.map(scheme => {
       const schemeChapters = _parseSchemeChapters(scheme);
@@ -1095,17 +1178,26 @@ function _fetchApprovedSchemesForLessonPlanning(teacherEmail, summaryOnly) {
       for (let chapterIndex = 0; chapterIndex < schemeChapters.length; chapterIndex++) {
         const chapter = schemeChapters[chapterIndex];
 
-        // PERFORMANCE: Skip expensive gating check for chapters after incomplete ones
+        // PERFORMANCE: chapter-0 uses pre-computed cross-scheme gate (zero sheet reads);
+        // chapters after an incomplete one are skipped; only chapters 1+ in a fully-started
+        // scheme call _isPreparationAllowedForSession (and hit REQUEST_SHEET_CACHE after 1st).
         let canPrepare = false;
+        let gate = null;
         if (chapterIndex === 0) {
-          // First chapter: always allowed unless explicitly restricted
-          canPrepare = true;
+          // Use pre-computed gate — no sheet reads
+          const preGate = schemeFirstChapterGate.get(String(scheme.schemeId || '').trim());
+          if (preGate) {
+            canPrepare = !!preGate.allowed;
+            gate = preGate.allowed ? null : preGate;
+          } else {
+            canPrepare = true; // fallback: no gate data, allow
+          }
         } else if (!previousChapterComplete) {
-          // Previous chapter incomplete: block this chapter
+          // Previous chapter incomplete: block without an extra sheet read
           canPrepare = false;
         } else {
-          // Previous complete: compute gating for this chapter
-          const gate = _isPreparationAllowedForSession(chapter, 1, scheme);
+          // Chapter 1+, previous complete: run full session-2+ gating
+          gate = _isPreparationAllowedForSession(chapter, 1, scheme);
           canPrepare = !!(gate && gate.allowed);
         }
         
@@ -1928,21 +2020,8 @@ function _fetchSchemeDetails(schemeId, teacherEmail) {
     }
   }
   
-  const isChapterMarkedComplete = function(report) {
-    // ONLY check "completed" field for chapter completion marker
-    // chapterStatus is for session-level status, not chapter completion
-    const chapterCompleted = report && report.chapterCompleted;
-    const chapterCompletedStr = normKey(chapterCompleted);
-    const completedLegacy = normKey(report && report.completed);
-    return (
-      completedLegacy.indexOf('chapter complete') !== -1 ||
-      chapterCompleted === true ||
-      chapterCompletedStr === 'true' ||
-      chapterCompletedStr === 'yes' ||
-      chapterCompletedStr === 'y' ||
-      chapterCompletedStr === '1'
-    );
-  };
+  // Use shared top-level helper (avoids duplicate inline definitions)
+  const isChapterMarkedComplete = _slmIsChapterMarkedComplete_;
   
   // Reports indexed by (class + subject + chapter [+ session]) - much smaller now!
   const hasReportBySession = new Set();
@@ -2142,10 +2221,19 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
     let occupiedSlots = [];
     let totalPlansInSheet = 0;
     if (excludeExistingPlans) {
-      const lessonPlansSheet = _getSheet('LessonPlans');
-      const lessonPlansHeaders = _headers(lessonPlansSheet);
-      const existingPlans = _rows(lessonPlansSheet).map(row => _indexByHeader(row, lessonPlansHeaders));
-      
+      // Fast path: fetch only this teacher's plans via TextFinder
+      let existingPlans = [];
+      try {
+        const fetched = _slmFetchRowsByColumnExact_('LessonPlans', 'teacherEmail', teacherEmail.toLowerCase().trim(),
+          ['lpId', 'teacherEmail', 'class', 'subject', 'status', 'selectedDate', 'selectedPeriod']);
+        if (fetched && Array.isArray(fetched.rows)) existingPlans = fetched.rows;
+      } catch (_lpFetchErr) {}
+      if (existingPlans.length === 0) {
+        const lessonPlansSheet = _getSheet('LessonPlans');
+        const lessonPlansHeaders = _headers(lessonPlansSheet);
+        existingPlans = _rows(lessonPlansSheet).map(row => _indexByHeader(row, lessonPlansHeaders));
+      }
+
       totalPlansInSheet = existingPlans.length;
       
       occupiedSlots = existingPlans
@@ -2935,22 +3023,8 @@ function _generateSessionsForChapter(chapter, scheme) {
     let extendedSessionCount = originalSessionCount;
 
     const _norm = (v) => String(v || '').toLowerCase().trim();
-    const _isChapterMarkedCompleteReport = (report) => {
-      if (!report || typeof report !== 'object') return false;
-      // ONLY check "completed" field for chapter completion marker
-      // chapterStatus is for session-level status, not chapter completion
-      const chapterCompleted = report.chapterCompleted;
-      const chapterCompletedStr = _norm(chapterCompleted);
-      const completedLegacy = _norm(report.completed);
-      return (
-        completedLegacy.includes('chapter complete') ||
-        chapterCompleted === true ||
-        chapterCompletedStr === 'true' ||
-        chapterCompletedStr === 'yes' ||
-        chapterCompletedStr === 'y' ||
-        chapterCompletedStr === '1'
-      );
-    };
+    // Use shared top-level helper (avoids duplicate inline definitions)
+    const _isChapterMarkedCompleteReport = _slmIsChapterMarkedComplete_;
     try {
       const teacherEmailNorm = String(scheme.teacherEmail || '').toLowerCase().trim();
       const classNorm = String(scheme.class || '').trim();
@@ -3224,15 +3298,27 @@ function _generateSessionsForChapter(chapter, scheme) {
  */
 function _checkForDuplicateLessonPlan(schemeId, chapter, session, teacherEmail) {
   try {
-    const lessonPlansSheet = _getSheet('LessonPlans');
-    const headers = _headers(lessonPlansSheet);
-    const existingPlans = _rows(lessonPlansSheet).map(row => _indexByHeader(row, headers));
+    const emailNorm = String(teacherEmail || '').toLowerCase().trim();
+    const sessionNum = parseInt(session || '1');
+
+    // Fast path: fetch only this teacher's plans via TextFinder (avoids full sheet scan)
+    let existingPlans = [];
+    try {
+      const fetched = _slmFetchRowsByColumnExact_('LessonPlans', 'teacherEmail', emailNorm,
+        ['lpId', 'schemeId', 'chapter', 'session', 'selectedDate', 'selectedPeriod', 'status', 'teacherEmail']);
+      if (fetched && Array.isArray(fetched.rows)) existingPlans = fetched.rows;
+    } catch (_e) {}
+    if (!existingPlans || existingPlans.length === 0) {
+      const lessonPlansSheet = _getSheet('LessonPlans');
+      const headers = _headers(lessonPlansSheet);
+      existingPlans = _rows(lessonPlansSheet).map(row => _indexByHeader(row, headers));
+    }
     
     const duplicate = existingPlans.find(plan =>
-      plan.schemeId === schemeId &&
+      String(plan.schemeId || '') === String(schemeId || '') &&
       (plan.chapter || '').toLowerCase() === chapter.toLowerCase() &&
-      parseInt(plan.session || '1') === parseInt(session) &&
-      (plan.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase()
+      parseInt(plan.session || '1') === sessionNum &&
+      (plan.teacherEmail || '').toLowerCase() === emailNorm
     );
     
     if (duplicate) {
@@ -3322,14 +3408,27 @@ function _validatePeriodAvailability(teacherEmail, date, period) {
 
 /**
  * Get scheme details
+ * OPTIMIZED: Uses TextFinder for fast exact-match lookup instead of full sheet scan.
  */
 function _getSchemeDetails(schemeId) {
   try {
-    const schemesSheet = _getSheet('Schemes');
-    const schemesHeaders = _headers(schemesSheet);
-    const allSchemes = _rows(schemesSheet).map(row => _indexByHeader(row, schemesHeaders));
-    const scheme = allSchemes.find(s => s.schemeId === schemeId);
-    return scheme || {};
+    const schemeIdNorm = String(schemeId || '').trim();
+    if (!schemeIdNorm) return {};
+    // Fast path: TextFinder exact match
+    try {
+      const sh = _getSheet('Schemes');
+      const headers = _headers(sh);
+      const col = _slmFindColumnIndex_(headers, 'schemeId');
+      if (col !== -1) {
+        const rowNums = _slmRowNumbersByExactValue_(sh, col, schemeIdNorm);
+        const candidates = _slmReadRowsBatched_(sh, headers, rowNums);
+        const found = (candidates || []).find(s => String(s.schemeId || '').trim() === schemeIdNorm);
+        if (found) return found;
+      }
+    } catch (_e) {}
+    // Fallback: request-scoped full-sheet cache
+    const schemesData = _getCachedSheetData('Schemes').data;
+    return (schemesData || []).find(s => String(s.schemeId || '').trim() === schemeIdNorm) || {};
   } catch (error) {
     return {};
   }
@@ -3340,6 +3439,13 @@ function _getSchemeDetails(schemeId) {
  */
 function _getLessonPlanSettings() {
   try {
+    // Per-request cache: Settings sheet is read-only during a request; avoid repeated reads.
+    try {
+      if (typeof REQUEST_SHEET_CACHE === 'object' && REQUEST_SHEET_CACHE) {
+        if (REQUEST_SHEET_CACHE.__slmLessonPlanSettings) return REQUEST_SHEET_CACHE.__slmLessonPlanSettings;
+      }
+    } catch (e) {}
+
     const settingsSheet = _getSheet('Settings');
     const settingsHeaders = _headers(settingsSheet);
     const settingsData = _rows(settingsSheet).map(row => _indexByHeader(row, settingsHeaders));
@@ -3355,11 +3461,19 @@ function _getLessonPlanSettings() {
     const summaryLoadingFirst = readBool('lessonplan_summary_first', true);
     const useTeacherSchemeProgressIndex = readBool('lessonplan_use_teacher_scheme_progress', true);
 
-    return {
+    const result = {
       bulkOnly: bulkOnly,
       summaryLoadingFirst: summaryLoadingFirst,
       useTeacherSchemeProgressIndex: useTeacherSchemeProgressIndex
     };
+
+    try {
+      if (typeof REQUEST_SHEET_CACHE === 'object' && REQUEST_SHEET_CACHE) {
+        REQUEST_SHEET_CACHE.__slmLessonPlanSettings = result;
+      }
+    } catch (e) {}
+
+    return result;
   } catch (error) {
     return {
       bulkOnly: false,

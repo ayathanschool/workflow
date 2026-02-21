@@ -212,10 +212,7 @@
       var effectiveEmail = (REQUEST_AUTH_CTX && REQUEST_AUTH_CTX.email) ? REQUEST_AUTH_CTX.email : userEmail;
       var email = String(effectiveEmail || '').toLowerCase().trim();
       if (!email) return false;
-      var sh = _getSheet('Users');
-      if (!sh) return false;
-      var headers = _headers(sh);
-      var list = _rows(sh).map(function(r) { return _indexByHeader(r, headers); });
+      var list = _getCachedSheetData('Users').data;
       var user = null;
       for (var i = 0; i < list.length; i++) {
         if (String(list[i].email || '').toLowerCase() === email) { user = list[i]; break; }
@@ -242,10 +239,7 @@
       var effectiveEmail = (REQUEST_AUTH_CTX && REQUEST_AUTH_CTX.email) ? REQUEST_AUTH_CTX.email : userEmail;
       var email = String(effectiveEmail || '').toLowerCase().trim();
       if (!email) return false;
-      var sh = _getSheet('Users');
-      if (!sh) return false;
-      var headers = _headers(sh);
-      var list = _rows(sh).map(function(r) { return _indexByHeader(r, headers); });
+      var list = _getCachedSheetData('Users').data;
       var user = null;
       for (var i = 0; i < list.length; i++) {
         if (String(list[i].email || '').toLowerCase() === email) { user = list[i]; break; }
