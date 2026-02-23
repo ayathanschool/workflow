@@ -999,7 +999,8 @@ export default function DailyReportModern({ user }) {
         setReports(prev => ({ ...prev, [key]: payload }));
         setMessage({ text: "Already submitted", type: "info" });
       } else {
-        setMessage({ text: "Failed to submit report", type: "error" });
+        const errMsg = result?.message || result?.error || 'Failed to submit report';
+        setMessage({ text: `❌ ${errMsg}`, type: "error" });
       }
     } catch (error) {
       console.error("Submit error:", error);
