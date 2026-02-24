@@ -2061,6 +2061,22 @@ function PeriodCard({
             />
           </div>
 
+          {/* Last Session Reminder */}
+          {allowPlanActions && sessionComplete && !data.chapterCompleted && sessionNo && totalSessions && Number(sessionNo) === Number(totalSessions) && (
+            <div className="bg-amber-50 border-2 border-amber-400 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <div className="text-2xl">⚠️</div>
+                <div className="flex-1">
+                  <div className="font-semibold text-amber-900 mb-1">Last Session of the Chapter</div>
+                  <div className="text-sm text-amber-800">
+                    This is session {sessionNo} of {totalSessions} - the final session for this chapter. 
+                    If you have completed all topics in this chapter, please mark the chapter as complete below.
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Chapter Completion with Inline Dropdown */}
           {allowPlanActions && sessionComplete && (
             <div className="space-y-3">
