@@ -404,10 +404,12 @@ function MyRequestsTab({ requests, loading, onRefresh, onSuccess, onError, getSt
       // Force reload deposits and requests with cache busting
       await loadDeposits(requestId, true); // Force refresh with cache busting
       // Force full refresh of requests to get updated totalDeposited
-      await loadRequests(false);
+      await onRefresh();
       setDepositModalRequest(null);
     } catch (err) {
       onError(err.message);
+      // Close modal even on error so user can see the error message
+      setDepositModalRequest(null);
     }
   }
 
@@ -441,7 +443,7 @@ function MyRequestsTab({ requests, loading, onRefresh, onSuccess, onError, getSt
       await api.markStudentPayment(paymentId, amount, user.email, '');
       onSuccess('Student payment marked successfully');
       await loadStudentPayments(requestId, true);
-      await loadRequests(false); // Force full refresh to update totalDeposited
+      await onRefresh(); // Force full refresh to update totalDeposited
     } catch (err) {
       onError(err.message);
     } finally {
@@ -464,7 +466,7 @@ function MyRequestsTab({ requests, loading, onRefresh, onSuccess, onError, getSt
       await api.updateStudentPayment(paymentId, amount, '');
       onSuccess('Payment updated successfully');
       await loadStudentPayments(requestId, true);
-      await loadRequests(false); // Force full refresh to update totalDeposited
+      await onRefresh(); // Force full refresh to update totalDeposited
     } catch (err) {
       onError(err.message);
     } finally {
@@ -500,7 +502,7 @@ function MyRequestsTab({ requests, loading, onRefresh, onSuccess, onError, getSt
       onSuccess(`${payments.length} students marked as paid`);
       setSelectedStudents(new Set());
       await loadStudentPayments(requestId, true);
-      await loadRequests(false); // Force full refresh to update totalDeposited
+      await onRefresh(); // Force full refresh to update totalDeposited
     } catch (err) {
       onError(err.message);
     } finally {
@@ -2336,6 +2338,10 @@ function AddDepositModal({ request, deposits, onClose, onSubmit }) {
         formData.depositDate,
         formData.notes
       );
+      // onSubmit should handle closing the modal, but we wait for completion
+    } catch (err) {
+      // Error handling is done by parent, modal will close there
+      console.error('Error submitting deposit:', err);
     } finally {
       setSubmitting(false);
     }
