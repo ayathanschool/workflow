@@ -313,6 +313,7 @@ function MyRequestsTab({ requests, loading, onRefresh, onSuccess, onError, getSt
   const [selectedStudents, setSelectedStudents] = useState(new Set());
   const [loadingTrackPayments, setLoadingTrackPayments] = useState(null);
   const [bulkMarkingPaid, setBulkMarkingPaid] = useState(false);
+  const [loadingDepositModal, setLoadingDepositModal] = useState(null);
 
   async function handleSubmit(requestId) {
     try {
@@ -401,7 +402,6 @@ function MyRequestsTab({ requests, loading, onRefresh, onSuccess, onError, getSt
       await api.addFundDeposit(requestId, user.email, depositAmount, depositDate, notes);
       onSuccess('Deposit added successfully');
       // Force reload deposits and requests with cache busting
-      setDeposits(prev => ({ ...prev, [requestId]: null })); // Clear cache
       await loadDeposits(requestId, true); // Force refresh with cache busting
       // Force full refresh of requests to get updated totalDeposited
       await loadRequests(false);
@@ -658,11 +658,30 @@ function MyRequestsTab({ requests, loading, onRefresh, onSuccess, onError, getSt
                   )}
                 </button>
                 <button
-                  onClick={() => setDepositModalRequest(request)}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium flex items-center gap-2"
+                  onClick={async () => {
+                    setLoadingDepositModal(request.requestId);
+                    try {
+                      // Load latest deposits before opening modal
+                      await loadDeposits(request.requestId, true);
+                      setDepositModalRequest(request);
+                    } finally {
+                      setLoadingDepositModal(null);
+                    }
+                  }}
+                  disabled={loadingDepositModal === request.requestId}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm font-medium flex items-center gap-2 disabled:cursor-not-allowed transition-colors"
                 >
-                  <Plus className="w-4 h-4" />
-                  Add Batch Deposit
+                  {loadingDepositModal === request.requestId ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Loading...
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-4 h-4" />
+                      Add Batch Deposit
+                    </>
+                  )}
                 </button>
                 <button
                   onClick={async () => {
@@ -794,6 +813,7 @@ function MyRequestsTab({ requests, loading, onRefresh, onSuccess, onError, getSt
       {depositModalRequest && (
         <AddDepositModal
           request={depositModalRequest}
+          deposits={deposits[depositModalRequest.requestId]}
           onClose={() => setDepositModalRequest(null)}
           onSubmit={handleAddDeposit}
         />
@@ -2292,7 +2312,7 @@ function ActionModal({ request, actionType, reason, setReason, processing, onCon
 }
 
 // Add Deposit Modal
-function AddDepositModal({ request, onClose, onSubmit }) {
+function AddDepositModal({ request, deposits, onClose, onSubmit }) {
   const [formData, setFormData] = useState({
     depositAmount: '',
     depositDate: new Date().toISOString().split('T')[0],
@@ -2321,7 +2341,16 @@ function AddDepositModal({ request, onClose, onSubmit }) {
     }
   }
 
-  const currentTotal = Number(request.totalDeposited || 0);
+  // Calculate current total from deposits if available, otherwise use request.totalDeposited
+  let currentTotal = Number(request.totalDeposited || 0);
+  let depositCount = 0;
+  if (deposits && Array.isArray(deposits)) {
+    // Sum up all batch deposits
+    const batchTotal = deposits.reduce((sum, d) => sum + Number(d.depositAmount || 0), 0);
+    currentTotal = batchTotal;
+    depositCount = deposits.length;
+  }
+  
   const remaining = Number(request.expectedAmount) - currentTotal;
 
   return (
@@ -2342,6 +2371,7 @@ function AddDepositModal({ request, onClose, onSubmit }) {
               </p>
               <p className="text-sm text-gray-700 dark:text-gray-300 mb-1">
                 <span className="font-medium">Already Deposited:</span> ₹{currentTotal}
+                {depositCount > 0 && <span className="text-gray-500 ml-1">({depositCount} deposit{depositCount !== 1 ? 's' : ''})</span>}
               </p>
               <p className="text-sm font-semibold text-blue-600 dark:text-blue-400">
                 Remaining: ₹{remaining}
