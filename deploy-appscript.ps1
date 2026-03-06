@@ -12,6 +12,7 @@ $appscriptPath = "d:\www\wwww\Appscript"
 $files = @(
     "MainApp.gs",
     "ExamManager.gs",
+    "HolidayManager.gs",
     "CacheService.gs",
     "Config.gs",
     "SheetHelpers.gs",

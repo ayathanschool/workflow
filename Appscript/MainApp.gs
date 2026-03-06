@@ -198,10 +198,10 @@
    * Some deployments may not include AuthManager helpers yet; these prevent
    * ReferenceError crashes and default to deny if anything is missing.
    */
-  function _isSuperAdminSafe(userEmail) {
+  function _isAdminSafe(userEmail) {
     try {
-      if (typeof isSuperAdmin === 'function') {
-        return !!isSuperAdmin(userEmail);
+      if (typeof isAdmin === 'function') {
+        return !!isAdmin(userEmail);
       }
     } catch (e) {
       // ignore and fall back
@@ -219,23 +219,23 @@
       }
       if (!user) return false;
       var roles = String(user.roles || '').toLowerCase();
-      return roles.indexOf('super admin') !== -1 || roles.indexOf('superadmin') !== -1 || roles.indexOf('super_admin') !== -1;
+      return roles.indexOf('admin') !== -1;
     } catch (err) {
-      try { appLog('ERROR', '_isSuperAdminSafe', String(err && err.message ? err.message : err)); } catch (ee) {}
+      try { appLog('ERROR', '_isAdminSafe', String(err && err.message ? err.message : err)); } catch (ee) {}
       return false;
     }
   }
 
-  function _isHMOrSuperAdminSafe(userEmail) {
+  function _isHMOrAdminSafe(userEmail) {
     try {
-      if (typeof isHMOrSuperAdmin === 'function') {
-        return !!isHMOrSuperAdmin(userEmail);
+      if (typeof isHMOrAdmin === 'function') {
+        return !!isHMOrAdmin(userEmail);
       }
     } catch (e) {
       // ignore and fall back
     }
     try {
-      if (_isSuperAdminSafe(userEmail)) return true;
+      if (_isAdminSafe(userEmail)) return true;
       var effectiveEmail = (REQUEST_AUTH_CTX && REQUEST_AUTH_CTX.email) ? REQUEST_AUTH_CTX.email : userEmail;
       var email = String(effectiveEmail || '').toLowerCase().trim();
       if (!email) return false;
@@ -246,9 +246,9 @@
       }
       if (!user) return false;
       var roles = String(user.roles || '').toLowerCase();
-      return roles.indexOf('hm') !== -1 || roles.indexOf('headmaster') !== -1 || roles.indexOf('h m') !== -1 || roles.indexOf('principal') !== -1 || roles.indexOf('admin') !== -1;
+      return roles.indexOf('hm') !== -1 || roles.indexOf('headmaster') !== -1 || roles.indexOf('h m') !== -1 || roles.indexOf('principal') !== -1;
     } catch (err) {
-      try { appLog('ERROR', '_isHMOrSuperAdminSafe', String(err && err.message ? err.message : err)); } catch (ee) {}
+      try { appLog('ERROR', '_isHMOrAdminSafe', String(err && err.message ? err.message : err)); } catch (ee) {}
       return false;
     }
   }
@@ -281,8 +281,8 @@
       // DEBUG: Get execution logs
       if (action === 'debug.logs') {
         const email = (e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         try {
           const logs = Logger.getLog();
@@ -295,8 +295,8 @@
       // BACKFILL: Populate schemeId for existing DailyReports
       if (action === 'admin.backfillSchemeIds') {
         const email = (e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         try {
           const result = backfillDailyReportSchemeIds();
@@ -313,8 +313,8 @@
       // Run bootstrap ONLY when explicitly requested (bootstrap is expensive)
       if (action === 'admin.bootstrap') {
         const email = (e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         _bootstrapSheets();
         return _respond({ success: true, message: 'Bootstrap completed' });
@@ -338,8 +338,8 @@
       // Debug: Check current date/time in IST
       if (action === 'checkDate') {
         const email = (e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         const now = new Date();
         const todayISO = _todayISO();
@@ -360,8 +360,8 @@
       // Debug: Check cache status
       if (action === 'debugCache') {
         const email = (e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         try {
           const cache = CacheService.getScriptCache();
@@ -471,10 +471,10 @@
       }
 
       if (action === 'getSubstitutionsRange') {
-        // HM / Super Admin only
+        // HM / Admin only
         const requesterEmail = (e.parameter.email || e.parameter.requesterEmail || '').toLowerCase().trim();
-        if (!_isHMOrSuperAdminSafe(requesterEmail)) {
-          return _respond({ success: false, error: 'Permission denied. HM or Super Admin access required.' });
+        if (!_isHMOrAdminSafe(requesterEmail)) {
+          return _respond({ success: false, error: 'Permission denied. HM or Admin access required.' });
         }
         const startDate = (e.parameter.startDate || '').trim();
         const endDate = (e.parameter.endDate || '').trim();
@@ -484,25 +484,25 @@
       }
 
       if (action === 'getAllSubstitutions') {
-        // HM / Super Admin only (debug)
+        // HM / Admin only (debug)
         const requesterEmail = (e.parameter.email || e.parameter.requesterEmail || '').toLowerCase().trim();
-        if (!_isHMOrSuperAdminSafe(requesterEmail)) {
-          return _respond({ success: false, error: 'Permission denied. HM or Super Admin access required.' });
+        if (!_isHMOrAdminSafe(requesterEmail)) {
+          return _respond({ success: false, error: 'Permission denied. HM or Admin access required.' });
         }
         return _respond(getAllSubstitutions());
       }
 
       if (action === 'getSubstitutionEffectiveness') {
-        // Teacher can access their own analytics; HM/Super Admin can access any.
+        // Teacher can access their own analytics; HM/Admin can access any.
         const requesterEmail = (e.parameter.email || e.parameter.requesterEmail || '').toLowerCase().trim();
         const teacherEmail = (e.parameter.teacherEmail || '').toLowerCase().trim();
 
-        const isAdmin = _isHMOrSuperAdminSafe(requesterEmail);
+        const isAdmin = _isHMOrAdminSafe(requesterEmail);
         // If teacherEmail is omitted, treat as self scope for teachers.
         const isSelfOrImplicitSelf = requesterEmail && (!teacherEmail || requesterEmail === teacherEmail);
 
         if (!isAdmin && !isSelfOrImplicitSelf) {
-          return _respond({ success: false, error: 'Permission denied. HM/Super Admin or self access required.' });
+          return _respond({ success: false, error: 'Permission denied. HM/Admin or self access required.' });
         }
 
         // Teachers must scope to themselves; HM/Admin can query any teacher or all.
@@ -602,8 +602,8 @@
       
       if (action === 'debugExamsSheet') {
         const email = (e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         // Debug endpoint to check Exams sheet state
         try {
@@ -626,8 +626,8 @@
       
       if (action === 'warmCache') {
         const email = (e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         // Warm up caches to improve initial load performance
         try {
@@ -645,10 +645,10 @@
       }
       
       if (action === 'clearCache') {
-        // Super Admin only
+        // Admin only
         const email = (e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ error: 'Permission denied. Admin access required.' });
         }
         return _respond(clearAllCache());
       }
@@ -714,8 +714,8 @@
       // DEBUG: Test endpoint for ClassSubjects
       if (action === 'testGetClassSubjects') {
         const email = (e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         return _respond(testGetClassSubjectsAPI());
       }
@@ -805,6 +805,77 @@
       if (action === 'feeDefaulters') {
         const className = e.parameter.class || '';
         return _respond({ ok: true, data: getFeeDefaulters(className) });
+      }
+      
+      // === FUND COLLECTION & EXPENSE MANAGEMENT ROUTES ===
+      if (action === 'getStudentsForClass') {
+        const className = e.parameter.class || '';
+        return _respond(getStudentsForClass(className));
+      }
+      
+      if (action === 'getTeacherFundRequests') {
+        const email = e.parameter.email || '';
+        return _respond(getTeacherFundRequests(email));
+      }
+      
+      if (action === 'getAllFundRequests') {
+        const email = e.parameter.email || '';
+        return _respond(getAllFundRequests(email));
+      }
+      
+      if (action === 'getFundDeposits') {
+        const requestId = e.parameter.requestId || '';
+        return _respond(getFundDeposits(requestId));
+      }
+      
+      if (action === 'getStudentPayments') {
+        const requestId = e.parameter.requestId || '';
+        return _respond(getStudentPayments(requestId));
+      }
+      
+      if (action === 'getTeacherExpenseRequests') {
+        const email = e.parameter.email || '';
+        return _respond(getTeacherExpenseRequests(email));
+      }
+      
+      if (action === 'getAllExpenseRequests') {
+        const email = e.parameter.email || '';
+        return _respond(getAllExpenseRequests(email));
+      }
+      
+      if (action === 'getExpenseCategories') {
+        return _respond(getExpenseCategories());
+      }
+      
+      if (action === 'getExpenseSummary') {
+        const startDate = e.parameter.startDate || '';
+        const endDate = e.parameter.endDate || '';
+        const category = e.parameter.category || '';
+        return _respond(getExpenseSummary(startDate, endDate, category));
+      }
+      
+      if (action === 'getAdminFinancialDashboard') {
+        return _respond(getAdminFinancialDashboard());
+      }
+      
+      if (action === 'getAccountsFinancialDashboard') {
+        return _respond(getAccountsFinancialDashboard());
+      }
+      
+      if (action === 'getTeacherFinancialDashboard') {
+        const email = e.parameter.email || '';
+        return _respond(getTeacherFinancialDashboard(email));
+      }
+      
+      if (action === 'getFinancialReport') {
+        const startDate = e.parameter.startDate || '';
+        const endDate = e.parameter.endDate || '';
+        return _respond(getFinancialReport(startDate, endDate));
+      }
+      
+      if (action === 'getPendingFinancialCount') {
+        const email = e.parameter.email || '';
+        return _respond(getPendingFinancialCount(email));
       }
       
       // === HM DASHBOARD ===
@@ -1069,8 +1140,8 @@
       // === DEBUG ROUTES ===
       if (action === 'debugSubstitutions') {
         const email = (e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         const sh = _getSheet('Substitutions');
         const headers = _headers(sh);
@@ -1087,8 +1158,8 @@
       // Lightweight storage diagnostics to verify bound spreadsheet and sheet status
       if (action === 'diagnoseStorage') {
         const email = (e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         try {
           const ss = _ss();
@@ -1114,8 +1185,8 @@
       
       if (action === 'debugSubstitutionsForDate') {
         const email = (e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         const date = e.parameter.date || new Date().toISOString().split('T')[0];
         const normalizedQueryDate = _isoDateString(date);
@@ -1186,8 +1257,8 @@
       // === USER MANAGEMENT ROUTES ===
       if (action === 'getAllUsers') {
         const email = (e.parameter.email || '').toLowerCase().trim();
-        if (!_isHMOrSuperAdminSafe(email)) {
-          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        if (!_isHMOrAdminSafe(email)) {
+          return _respond({ error: 'Permission denied. HM or Admin access required.' });
         }
         return _respond(getAllUsers());
       }
@@ -1221,8 +1292,8 @@
       // Run bootstrap ONLY when explicitly requested (bootstrap is expensive)
       if (action === 'admin.bootstrap') {
         const email = (data.email || e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         _bootstrapSheets();
         return _respond({ success: true, message: 'Bootstrap completed' });
@@ -1251,50 +1322,50 @@
         return _respond(verifyGoogleLogin(token));
       }
 
-      // === ADMIN DATA ROUTES (Super Admin only) ===
+      // === ADMIN DATA ROUTES (Admin only) ===
       // Additive endpoints to manage sheet data from the frontend.
       // Existing functions/routes are not modified.
       if (action === 'admin.listSheets') {
         const email = (data.email || e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         return _respond(_adminListSheets());
       }
 
       if (action === 'admin.getSheet') {
         const email = (data.email || e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         return _respond(_adminGetSheet(data.sheetName));
       }
 
       if (action === 'admin.appendRow') {
         const email = (data.email || e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         return _respond(_adminAppendRow(data.sheetName, data.row || {}, email, data.name || ''));
       }
 
       if (action === 'admin.updateRow') {
         const email = (data.email || e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         return _respond(_adminUpdateRow(data.sheetName, data.rowNumber, data.row || {}, email, data.name || ''));
       }
 
       if (action === 'admin.deleteRow') {
         const email = (data.email || e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         return _respond(_adminDeleteRow(data.sheetName, data.rowNumber, email, data.name || ''));
       }
 
-      // === SETTINGS ROUTES (HM or Super Admin) ===
+      // === SETTINGS ROUTES (HM or Admin) ===
       if (action === 'updateAppSettings') {
         return _handleUpdateAppSettings(data);
       }
@@ -1306,8 +1377,8 @@
       
       if (action === 'debugExamsSheet') {
         const email = (data.email || e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         // Debug endpoint to check Exams sheet state
         try {
@@ -1337,9 +1408,9 @@
       }
       
       if (action === 'deleteExam') {
-        // Super Admin only
-        if (!_isSuperAdminSafe(data.email)) {
-          return _respond({ error: 'Permission denied. Super Admin access required to delete exams.' });
+        // Admin only
+        if (!_isAdminSafe(data.email)) {
+          return _respond({ error: 'Permission denied. Admin access required to delete exams.' });
         }
         return _respond(deleteExam(data.examId));
       }
@@ -1348,54 +1419,54 @@
         return _respond(submitExamMarks(data));
       }
       
-      // === SUPER ADMIN MANAGEMENT ROUTES ===
+      // === Admin MANAGEMENT ROUTES ===
       if (action === 'deleteLessonPlan') {
-        // Back-compat: allow Super Admin hard-delete; non-admin flows are handled later
+        // Back-compat: allow Admin hard-delete; non-admin flows are handled later
         // via `_handleDeleteLessonPlan(data)` which enforces teacher ownership/status.
-        if (_isSuperAdminSafe(data.email)) {
+        if (_isAdminSafe(data.email)) {
           return _respond(deleteLessonPlan(data.lessonPlanId));
         }
       }
       
       if (action === 'deleteScheme') {
-        // Back-compat: allow Super Admin hard-delete; non-admin flows are handled later
+        // Back-compat: allow Admin hard-delete; non-admin flows are handled later
         // via `_handleDeleteScheme(data)` which enforces teacher ownership/status.
-        if (_isSuperAdminSafe(data.email)) {
+        if (_isAdminSafe(data.email)) {
           return _respond(deleteScheme(data.schemeId));
         }
       }
       
       if (action === 'deleteReport') {
-        if (!_isSuperAdminSafe(data.email)) {
-          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(data.email)) {
+          return _respond({ error: 'Permission denied. Admin access required.' });
         }
         return _respond(deleteReport(data.reportId));
       }
       
       if (action === 'addUser') {
-        if (!_isSuperAdminSafe(data.email)) {
-          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(data.email)) {
+          return _respond({ error: 'Permission denied. Admin access required.' });
         }
         return _respond(addUser(data));
       }
       
       if (action === 'updateUser') {
-        if (!_isSuperAdminSafe(data.email)) {
-          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(data.email)) {
+          return _respond({ error: 'Permission denied. Admin access required.' });
         }
         return _respond(updateUser(data));
       }
       
       if (action === 'deleteUser') {
-        if (!_isSuperAdminSafe(data.email)) {
-          return _respond({ error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(data.email)) {
+          return _respond({ error: 'Permission denied. Admin access required.' });
         }
         return _respond(deleteUser(data.userEmail));
       }
       
       if (action === 'getAllUsers') {
-        if (!_isHMOrSuperAdminSafe(data.email || e.parameter.email)) {
-          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        if (!_isHMOrAdminSafe(data.email || e.parameter.email)) {
+          return _respond({ error: 'Permission denied. HM or Admin access required.' });
         }
         return _respond(getAllUsers());
       }
@@ -1403,55 +1474,66 @@
       // === AUDIT LOG ROUTES ===
       if (action === 'getAuditLogs') {
         const requesterEmail = (data.email || e.parameter.email || '').toLowerCase().trim();
-        if (!_isHMOrSuperAdminSafe(requesterEmail)) {
-          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        if (!_isHMOrAdminSafe(requesterEmail)) {
+          return _respond({ error: 'Permission denied. HM or Admin access required.' });
         }
         return _respond(getAuditLogsForRequester(data.filters || {}, requesterEmail));
       }
       
       if (action === 'getEntityAuditTrail') {
-        if (!_isHMOrSuperAdminSafe(data.email || e.parameter.email)) {
-          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        if (!_isHMOrAdminSafe(data.email || e.parameter.email)) {
+          return _respond({ error: 'Permission denied. HM or Admin access required.' });
         }
         return _respond(getEntityAuditTrail(data.entityType, data.entityId));
       }
       
       if (action === 'getAuditSummary') {
         const requesterEmail = (data.email || e.parameter.email || '').toLowerCase().trim();
-        if (!_isHMOrSuperAdminSafe(requesterEmail)) {
-          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        if (!_isHMOrAdminSafe(requesterEmail)) {
+          return _respond({ error: 'Permission denied. HM or Admin access required.' });
         }
         return _respond(getAuditSummaryForRequester(data.filters || {}, requesterEmail));
       }
       
       if (action === 'exportAuditLogs') {
         const requesterEmail = (data.email || e.parameter.email || '').toLowerCase().trim();
-        if (!_isHMOrSuperAdminSafe(requesterEmail)) {
-          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        if (!_isHMOrAdminSafe(requesterEmail)) {
+          return _respond({ error: 'Permission denied. HM or Admin access required.' });
         }
         return _respond(exportAuditLogsForRequester(data.filters || {}, requesterEmail));
       }
 
-
-      if (action === 'getAffectedLessonPlans') {
-        if (!_isHMOrSuperAdminSafe(data.email || e.parameter.email)) {
-          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+      // === LESSON CASCADING ===
+      if (action === 'getLessonsByDateRange') {
+        const requesterEmail = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!_isAdminSafe(requesterEmail)) {
+          return _respond({ error: 'Permission denied. Admin access required.' });
         }
-        return _respond(getAffectedLessonPlans(data.startDate));
+        return _respond({ lessons: getLessonsByDateRange(data.startDate, data.endDate, data.filters || {}) });
+      }
+
+      if (action === 'cascadeSelectedLessons') {
+        const requesterEmail = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!_isAdminSafe(requesterEmail)) {
+          return _respond({ error: 'Permission denied. Admin access required.' });
+        }
+        return _respond(cascadeSelectedLessons(data.lessonIds, data.mode, requesterEmail, data.name));
       }
 
       if (action === 'getRecentCascades') {
-        if (!_isHMOrSuperAdminSafe(data.email || e.parameter.email)) {
-          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        const requesterEmail = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!_isAdminSafe(requesterEmail)) {
+          return _respond({ error: 'Permission denied. Admin access required.' });
         }
         return _respond({ cascades: getRecentCascades(data.limit || 10) });
       }
 
       if (action === 'undoCascade') {
-        if (!_isHMOrSuperAdminSafe(data.email || e.parameter.email)) {
-          return _respond({ error: 'Permission denied. HM or Super Admin access required.' });
+        const requesterEmail = (data.email || e.parameter.email || '').toLowerCase().trim();
+        if (!_isAdminSafe(requesterEmail)) {
+          return _respond({ error: 'Permission denied. Admin access required.' });
         }
-        return _respond(undoCascade(data.cascadeId, data.email, data.name));
+        return _respond(undoCascade(data.cascadeId, requesterEmail, data.name));
       }
       
       // === SUBSTITUTION ROUTES ===
@@ -1459,6 +1541,107 @@
         return _respond(assignSubstitutionsBatch(data));
       }
 
+      // === FUND COLLECTION & EXPENSE MANAGEMENT POST ROUTES ===
+      if (action === 'createFundCollectionRequest') {
+        return _respond(createFundCollectionRequest(data));
+      }
+      
+      if (action === 'submitFundCollectionRequest') {
+        return _respond(submitFundCollectionRequest(data.requestId));
+      }
+      
+      if (action === 'updateFundCollectionRequest') {
+        return _respond(updateFundCollectionRequest(data.requestId, data.updates));
+      }
+      
+      if (action === 'approveFundRequest') {
+        return _respond(approveFundRequest(data.requestId, data.approverEmail, data.approverNotes));
+      }
+      
+      if (action === 'rejectFundRequest') {
+        return _respond(rejectFundRequest(data.requestId, data.rejectorEmail, data.reason));
+      }
+      
+      if (action === 'requestFundRevision') {
+        return _respond(requestFundRevision(data.requestId, data.reviewerEmail, data.notes));
+      }
+      
+      if (action === 'startFundCollection') {
+        return _respond(startFundCollection(data.requestId, data.teacherEmail));
+      }
+      
+      if (action === 'completeFundCollection') {
+        return _respond(completeFundCollection(data.requestId, data.teacherEmail, data.collectedAmount, data.completionDate));
+      }
+      
+      if (action === 'acknowledgeFundCollection') {
+        return _respond(acknowledgeFundCollection(data.requestId, data.accountsEmail));
+      }
+      
+      if (action === 'addFundDeposit') {
+        return _respond(addFundDeposit(data.requestId, data.teacherEmail, data.depositAmount, data.depositDate, data.notes));
+      }
+      
+      if (action === 'getFundDeposits') {
+        return _respond(getFundDeposits(data.requestId));
+      }
+      
+      if (action === 'acknowledgeFundDeposit') {
+        return _respond(acknowledgeFundDeposit(data.depositId, data.accountsEmail));
+      }
+      
+      if (action === 'markStudentPayment') {
+        return _respond(markStudentPayment(data.paymentId, data.paidAmount, data.teacherEmail, data.notes || ''));
+      }
+      
+      if (action === 'updateStudentPayment') {
+        return _respond(updateStudentPayment(data.paymentId, data.paidAmount, data.notes || ''));
+      }
+      
+      if (action === 'bulkMarkStudentPayments') {
+        return _respond(bulkMarkStudentPayments(data.requestId, data.payments, data.teacherEmail));
+      }
+      
+      if (action === 'deleteFundCollectionRequest') {
+        return _respond(deleteFundCollectionRequest(data.requestId, data.teacherEmail));
+      }
+      
+      if (action === 'adminDeleteFundCollectionRequest') {
+        return _respond(adminDeleteFundCollectionRequest(data.requestId, data.adminEmail));
+      }
+      
+      if (action === 'createExpenseRequest') {
+        return _respond(createExpenseRequest(data));
+      }
+      
+      if (action === 'submitExpenseRequest') {
+        return _respond(submitExpenseRequest(data.requestId));
+      }
+      
+      if (action === 'updateExpenseRequest') {
+        return _respond(updateExpenseRequest(data.requestId, data.updates));
+      }
+      
+      if (action === 'approveExpenseRequest') {
+        return _respond(approveExpenseRequest(data.requestId, data.approverEmail, data.approverNotes));
+      }
+      
+      if (action === 'rejectExpenseRequest') {
+        return _respond(rejectExpenseRequest(data.requestId, data.rejectorEmail, data.reason));
+      }
+      
+      if (action === 'disburseExpense') {
+        return _respond(disburseExpense(data.requestId, data.accountsEmail, data.disbursementMode, data.disbursementReference));
+      }
+      
+      if (action === 'deleteExpenseRequest') {
+        return _respond(deleteExpenseRequest(data.requestId, data.teacherEmail));
+      }
+      
+      if (action === 'adminDeleteExpenseRequest') {
+        return _respond(adminDeleteExpenseRequest(data.requestId, data.adminEmail));
+      }
+      
       if (action === 'assignSubstitution') {
         return _respond(assignSubstitution(data));
       }
@@ -1489,6 +1672,11 @@
       }
       
       // === SCHEME MANAGEMENT ROUTES ===
+      if (action === 'canSubmitNewScheme') {
+        const gate = canSubmitNewScheme(data.email || data.teacherEmail, data.class, data.subject);
+        return _respond({ success: true, allowed: gate.allowed, message: gate.message || '', reason: gate.reason || '' });
+      }
+
       if (action === 'submitPlan') {
         return _handleSubmitScheme(data);
       }
@@ -1533,6 +1721,66 @@
           const reportSubject = String(data.subject || '').trim();
           const reportPeriod = Number(data.period || 0);
           appLog('DEBUG', 'duplicateCheck params', { date: reportDate, email: teacherEmail, class: reportClass, subject: reportSubject, period: reportPeriod });
+
+          // === DATE VALIDATION: Check backward and forward date limits ===
+          try {
+            const settings = _getCachedSettings();
+            const today = _todayISO();
+            const reportDateObj = _coerceToDate(reportDate);
+            const todayObj = _coerceToDate(today);
+            
+            if (reportDateObj && todayObj) {
+              // Calculate date difference in days
+              const timeDiff = reportDateObj.getTime() - todayObj.getTime();
+              const daysDiff = Math.round(timeDiff / (1000 * 60 * 60 * 24));
+              
+              appLog('DEBUG', 'Date validation', { reportDate, today, daysDiff });
+              
+              // Check backward date limit (negative daysDiff means past date)
+              if (daysDiff < 0) {
+                const allowBackfill = String(settings.allow_backfill_reporting || '').toUpperCase() === 'TRUE';
+                const backwardLimit = parseInt(settings.dailyReportBackwardDaysLimit || '0');
+                
+                if (!allowBackfill) {
+                  appLog('WARN', 'Backward date rejected: backfill disabled', { reportDate, today });
+                  return _respond({ 
+                    ok: false, 
+                    error: 'backfill_disabled',
+                    message: 'Backfill reporting is disabled. You can only submit reports for today. Please contact admin if you need to report past dates.' 
+                  });
+                }
+                
+                if (Math.abs(daysDiff) > backwardLimit) {
+                  appLog('WARN', 'Backward date rejected: exceeds limit', { reportDate, today, daysDiff, limit: backwardLimit });
+                  return _respond({ 
+                    ok: false, 
+                    error: 'date_too_old',
+                    message: `Cannot submit reports more than ${backwardLimit} day(s) in the past. Report date: ${reportDate}, Today: ${today}` 
+                  });
+                }
+              }
+              
+              // Check forward date limit (positive daysDiff means future date)
+              if (daysDiff > 0) {
+                const forwardLimit = parseInt(settings.dailyReportForwardDaysLimit || '0');
+                
+                if (daysDiff > forwardLimit) {
+                  appLog('WARN', 'Forward date rejected: exceeds limit', { reportDate, today, daysDiff, limit: forwardLimit });
+                  return _respond({ 
+                    ok: false, 
+                    error: 'date_too_far',
+                    message: `Cannot submit reports more than ${forwardLimit} day(s) in the future. Report date: ${reportDate}, Today: ${today}` 
+                  });
+                }
+              }
+              
+              appLog('INFO', 'Date validation passed', { reportDate, today, daysDiff });
+            }
+          } catch (dateErr) {
+            appLog('ERROR', 'Date validation error', { error: dateErr.message });
+            // Don't block submission if validation fails - log and continue
+          }
+          // === END DATE VALIDATION ===
 
           SpreadsheetApp.flush();
           const existingReports = _rows(sh).map(row => _indexByHeader(row, headers));
@@ -2129,10 +2377,6 @@
         return _handleCreateBulkSchemeLessonPlans(data);
       }
       
-      if (action === 'verifyChapterPreparation') {
-        return _handleVerifyChapterPreparation(data);
-      }
-      
       // === AI LESSON PLAN SUGGESTIONS ===
       if (action === 'getAILessonSuggestions') {
         return _respond(getAILessonSuggestions(data.context || data));
@@ -2227,8 +2471,8 @@
       // Simple diagnostic: reveals LessonPlans sheet headers and detects status column
       if (action === 'diagnoseLessonPlanHeaders') {
         const email = (data.email || e.parameter.email || '').toLowerCase().trim();
-        if (!_isSuperAdminSafe(email)) {
-          return _respond({ success: false, error: 'Permission denied. Super Admin access required.' });
+        if (!_isAdminSafe(email)) {
+          return _respond({ success: false, error: 'Permission denied. Admin access required.' });
         }
         return _respond(_handleDiagnoseLessonPlanHeaders());
       }
@@ -2451,6 +2695,10 @@
       `<strong>Scheme ID:</strong> ${safe(context.schemeId || '')}`,
       '</p>',
       '<p style="color:#555;">Reply to this email to contact the teacher (Reply-To is set).</p>',
+      '<p style="margin:20px 0;">',
+      '<a href="https://workflow-wine.vercel.app/" style="display:inline-block;padding:12px 24px;background-color:#2563eb;color:white;text-decoration:none;border-radius:6px;font-weight:600;">📋 Review & Approve Lesson Plan</a>',
+      '</p>',
+      '<p style="color:#666;font-size:12px;">Navigate to Lesson Plans → Approve Lesson Plans tab</p>',
       '<table style="border-collapse:collapse;width:100%;">',
       '<thead>',
       '<tr>',
@@ -2881,6 +3129,44 @@
       }
 
       if (!teacherName) teacherName = teacherEmail;
+
+      // DUPLICATE CHAPTER CHECK: Prevent duplicate chapter names for same class/subject
+      try {
+        const allSchemes = _rows(sh).map(row => _indexByHeader(row, headers));
+        const norm = (v) => String(v || '').toLowerCase().trim();
+        const duplicateScheme = allSchemes.find(s => {
+          return norm(s.class) === norm(data.class) &&
+                 norm(s.subject) === norm(data.subject) &&
+                 norm(s.chapter) === norm(data.chapter) &&
+                 norm(s.teacherEmail) === norm(teacherEmail);
+        });
+        
+        if (duplicateScheme) {
+          const statusInfo = duplicateScheme.status ? ` (Status: ${duplicateScheme.status})` : '';
+          return _respond({ 
+            ok: false, 
+            blocked: true,
+            reason: 'duplicate_chapter',
+            message: `Chapter "${data.chapter}" already exists for ${data.class} ${data.subject}${statusInfo}. Please use a different chapter name.`,
+            error: `Duplicate chapter name not allowed`
+          });
+        }
+      } catch (dupErr) {
+        console.error('Duplicate chapter check error:', dupErr);
+      }
+
+      // GATE: block new scheme if previous scheme for same class/subject is incomplete
+      if (!data.forceSubmit && !data.skipPreviousSchemeCheck) {
+        try {
+          const gate = canSubmitNewScheme(teacherEmail, data.class, data.subject);
+          if (!gate.allowed) {
+            return _respond({ ok: false, blocked: true, reason: gate.reason, message: gate.message, error: gate.message });
+          }
+        } catch (gateErr) {
+          // fail-open: unexpected errors must not permanently block teachers
+          console.error('canSubmitNewScheme gate error:', gateErr);
+        }
+      }
       
       // Match the order of headers: schemeId, teacherEmail, teacherName, class, subject, term, unit, chapter, month, noOfSessions, status, createdAt, approvedAt, academicYear, content
       const line = [
@@ -2999,7 +3285,7 @@
         const actorEmail = String(data.requesterEmail || data.email || '').toLowerCase().trim();
         let actorRole = 'HM';
         try {
-          if (actorEmail && isSuperAdmin(actorEmail)) actorRole = 'Super Admin';
+          if (actorEmail && isSuperAdmin(actorEmail)) actorRole = 'Admin';
         } catch (e) {}
 
         logAudit({
@@ -3161,15 +3447,15 @@
         return _respond({ error: 'Lesson plan ID and status are required' });
       }
       
-      // ROLE CHECK: Only HM or Super Admin can approve lesson plans (status='Ready')
+      // ROLE CHECK: Only HM or Admin can approve lesson plans (status='Ready')
       if (status === 'Ready') {
         if (!requesterEmail) {
           return _respond({ error: 'Authorization required: User email must be provided for approval' });
         }
         
-        const isAuthorized = _isHMOrSuperAdminSafe(requesterEmail);
+        const isAuthorized = _isHMOrAdminSafe(requesterEmail);
         if (!isAuthorized) {
-          return _respond({ error: 'Unauthorized: Only Headmaster or Super Admin can approve lesson plans' });
+          return _respond({ error: 'Unauthorized: Only Headmaster or Admin can approve lesson plans' });
         }
       }
       
@@ -3267,7 +3553,7 @@
         const actorEmail = String(requesterEmail || lessonPlan.teacherEmail || '').toLowerCase().trim();
         let actorRole = 'Teacher';
         try {
-          if (actorEmail && _isHMOrSuperAdminSafe(actorEmail)) actorRole = 'HM';
+          if (actorEmail && _isHMOrAdminSafe(actorEmail)) actorRole = 'HM';
         } catch (e) {}
 
         logAudit({
@@ -3325,7 +3611,7 @@
       }
 
       // Permission check: only HM or Admin can reschedule
-      if (requesterEmail && !_isHMOrSuperAdminSafe(requesterEmail)) {
+      if (requesterEmail && !_isHMOrAdminSafe(requesterEmail)) {
         return _respond({ success: false, error: 'Permission denied. Only HM/Admin can reschedule lesson plans.' });
       }
 
@@ -3839,24 +4125,6 @@
       return _respond(result);
     } catch (error) {
       console.error('Error handling create bulk scheme lesson plans:', error);
-      return _respond({ success: false, error: error.message || 'Unknown error occurred' });
-    }
-  }
-
-  /**
-  * Handle POST verify chapter preparation (real-time check before opening form)
-  * This prevents teachers from wasting time filling forms that will be blocked at submission
-  */
-  function _handleVerifyChapterPreparation(data) {
-    try {
-      if (!data.verificationData) {
-        return _respond({ success: false, error: 'No verification data provided' });
-      }
-      
-      const result = verifyChapterPreparation(data.verificationData);
-      return _respond(result);
-    } catch (error) {
-      console.error('Error handling verify chapter preparation:', error);
       return _respond({ success: false, error: error.message || 'Unknown error occurred' });
     }
   }
@@ -5292,8 +5560,8 @@
   function _handleUpdateAppSettings(data) {
     try {
       const email = String((data && data.email) || '').toLowerCase().trim();
-      if (!_isHMOrSuperAdminSafe(email)) {
-        return _respond({ success: false, error: 'Permission denied. HM or Super Admin access required.' });
+      if (!_isHMOrAdminSafe(email)) {
+        return _respond({ success: false, error: 'Permission denied. HM or Admin access required.' });
       }
 
       let updates = [];
@@ -5363,7 +5631,7 @@
           entityId: 'Settings',
           userEmail: email,
           userName: data.name || email || '',
-          userRole: _isSuperAdminSafe(email) ? 'Super Admin' : 'HM',
+          userRole: _isAdminSafe(email) ? 'Admin' : 'HM',
           afterData: { updated: updated, added: added },
           description: `Updated ${updated.length + added.length} setting(s)`,
           severity: AUDIT_SEVERITY.WARNING
@@ -5376,7 +5644,7 @@
     }
   }
 
-  // === ADMIN DATA HELPERS (Super Admin only) ===
+  // === ADMIN DATA HELPERS (Admin only) ===
   // NOTE: These helpers are used by additive routes (admin.*) and do not change existing behavior.
   function _adminAllowedSheets() {
     try {
@@ -5463,7 +5731,7 @@
           entityId: `${name}#${newRowNumber}`,
           userEmail: userEmail || '',
           userName: userName || userEmail || '',
-          userRole: 'Super Admin',
+          userRole: 'Admin',
           afterData: row || {},
           description: `Admin appended row to ${name}`,
           severity: AUDIT_SEVERITY.WARNING
@@ -5512,7 +5780,7 @@
           entityId: `${name}#${rn}`,
           userEmail: userEmail || '',
           userName: userName || userEmail || '',
-          userRole: 'Super Admin',
+          userRole: 'Admin',
           beforeData: beforeObj,
           afterData: afterObj,
           description: `Admin updated row ${rn} in ${name}`,
@@ -5548,7 +5816,7 @@
           entityId: `${name}#${rn}`,
           userEmail: userEmail || '',
           userName: userName || userEmail || '',
-          userRole: 'Super Admin',
+          userRole: 'Admin',
           beforeData: beforeObj,
           description: `Admin deleted row ${rn} from ${name}`,
           severity: AUDIT_SEVERITY.CRITICAL
@@ -5656,7 +5924,7 @@
   }
 
   /**
-  * Handle batch sync of session dependencies (Admin/HM only)
+  * Handle batch sync of session dependencies (HM/Admin only)
   */
   function _handleSyncSessionDependencies(data) {
     try {
@@ -7549,8 +7817,8 @@
     try {
       const date = (params.date || _todayISO()).trim();
       const requesterEmail = String(params.email || params.requesterEmail || '').toLowerCase().trim();
-      if (!_isHMOrSuperAdminSafe(requesterEmail)) {
-        return _respond({ success: false, error: 'Permission denied. HM or Super Admin access required.' });
+      if (!_isHMOrAdminSafe(requesterEmail)) {
+        return _respond({ success: false, error: 'Permission denied. HM or Admin access required.' });
       }
       return _respond(_computeMissingSubmissionsForDate(date));
     } catch (err) {
@@ -7729,8 +7997,8 @@
       const fromDate = String(params.fromDate || params.date || _todayISO()).trim();
       const toDate = String(params.toDate || params.date || fromDate).trim();
       const requesterEmail = String(params.email || params.requesterEmail || '').toLowerCase().trim();
-      if (!_isHMOrSuperAdminSafe(requesterEmail)) {
-        return _respond({ success: false, error: 'Permission denied. HM, Admin, or Super Admin access required.' });
+      if (!_isHMOrAdminSafe(requesterEmail)) {
+        return _respond({ success: false, error: 'Permission denied. HM, Admin, or Admin access required.' });
       }
       const teacher = String(params.teacher || '').trim();
       const cls = String(params.class || '').trim();
@@ -7981,15 +8249,15 @@
         return _respond({ success: false, error: 'Invalid target status' });
       }
 
-      // ROLE CHECK: Only HM or Super Admin can perform bulk approvals
+      // ROLE CHECK: Only HM or Admin can perform bulk approvals
       if (targetStatus === 'Ready') {
         if (!requesterEmail) {
           return _respond({ success: false, error: 'Authorization required: User email must be provided for approval' });
         }
         
-        const isAuthorized = _isHMOrSuperAdminSafe(requesterEmail);
+        const isAuthorized = _isHMOrAdminSafe(requesterEmail);
         if (!isAuthorized) {
-          return _respond({ success: false, error: 'Unauthorized: Only Headmaster or Super Admin can approve lesson plans' });
+          return _respond({ success: false, error: 'Unauthorized: Only Headmaster or Admin can approve lesson plans' });
         }
       }
 
@@ -8653,8 +8921,8 @@
   }
 
 /**
- * ====== SUPER ADMIN MANAGEMENT FUNCTIONS ======
- * These functions allow Super Admins to manage all system data
+ * ====== Admin MANAGEMENT FUNCTIONS ======
+ * These functions allow Admins to manage all system data
  */
 
 /**
@@ -8678,8 +8946,8 @@ function deleteLessonPlan(lessonPlanId, requesterEmail, requesterName) {
             entityId: String(lessonPlanId || ''),
             userEmail: String(requesterEmail || '').toLowerCase().trim(),
             userName: String(requesterName || requesterEmail || '').trim(),
-            userRole: 'Super Admin',
-            description: `Lesson plan deleted by super admin (${rowObj.class || ''} ${rowObj.subject || ''})`,
+            userRole: 'Admin',
+            description: `Lesson plan deleted by Admin (${rowObj.class || ''} ${rowObj.subject || ''})`,
             severity: AUDIT_SEVERITY.CRITICAL
           });
         } catch (auditErr) { /* ignore audit failures */ }
@@ -8715,8 +8983,8 @@ function deleteScheme(schemeId, requesterEmail, requesterName) {
             entityId: String(schemeId || ''),
             userEmail: String(requesterEmail || '').toLowerCase().trim(),
             userName: String(requesterName || requesterEmail || '').trim(),
-            userRole: 'Super Admin',
-            description: `Scheme deleted by super admin (${rowObj.class || ''} ${rowObj.subject || ''})`,
+            userRole: 'Admin',
+            description: `Scheme deleted by Admin (${rowObj.class || ''} ${rowObj.subject || ''})`,
             severity: AUDIT_SEVERITY.CRITICAL
           });
         } catch (auditErr) { /* ignore audit failures */ }
@@ -8752,8 +9020,8 @@ function deleteReport(reportId, requesterEmail, requesterName) {
             entityId: String(reportId || ''),
             userEmail: String(requesterEmail || '').toLowerCase().trim(),
             userName: String(requesterName || requesterEmail || '').trim(),
-            userRole: 'Super Admin',
-            description: `Daily report deleted by super admin (${rowObj.class || ''} ${rowObj.subject || ''} Period ${rowObj.period || ''})`,
+            userRole: 'Admin',
+            description: `Daily report deleted by Admin (${rowObj.class || ''} ${rowObj.subject || ''} Period ${rowObj.period || ''})`,
             severity: AUDIT_SEVERITY.CRITICAL
           });
         } catch (auditErr) { /* ignore audit failures */ }
@@ -8931,10 +9199,14 @@ function getAllUsers() {
   try {
     const sh = _getSheet('Users');
     const headers = _headers(sh);
-    const users = _rows(sh).map(r => _indexByHeader(r, headers));
+    const rows = _rows(sh);
+    
+    appLog('INFO', 'getAllUsers', 'Found ' + rows.length + ' user rows');
+    
+    const users = rows.map(r => _indexByHeader(r, headers));
     
     // Don't return passwords in the response
-    return users.map(u => ({
+    const cleanUsers = users.map(u => ({
       email: u.email,
       name: u.name,
       roles: u.roles,
@@ -8942,9 +9214,11 @@ function getAllUsers() {
       subjects: u.subjects,
       classTeacherFor: u.classTeacherFor
     }));
+    
+    return { success: true, users: cleanUsers };
   } catch (err) {
     appLog('ERROR', 'getAllUsers', err.message);
-    return { error: 'Failed to get users: ' + err.message };
+    return { success: false, error: 'Failed to get users: ' + err.message };
   }
 }
 

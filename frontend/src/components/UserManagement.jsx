@@ -186,7 +186,10 @@ const UserManagement = ({ user }) => {
     }
     try {
       setLoading(true);
+      console.log('Loading users for:', user.email, 'roles:', user.roles);
       const response = await api.getAllUsers(user.email);
+      console.log('getAllUsers response:', response);
+      
       // Handle different response formats
       let userData = [];
       if (Array.isArray(response)) {
@@ -195,6 +198,11 @@ const UserManagement = ({ user }) => {
         userData = response.data;
       } else if (response?.users && Array.isArray(response.users)) {
         userData = response.users;
+      } else if (response?.error) {
+        console.error('Backend returned error:', response.error);
+        showError(response.error);
+        setUsers([]);
+        return;
       }
       console.log('Loaded users:', userData);
       setUsers(userData);

@@ -11,7 +11,7 @@ export async function warmupCache(user) {
   const promises = [];
   
   // Warm up based on user role
-  if (user.roles?.includes('HM') || user.roles?.includes('Super Admin')) {
+  if (user.roles?.includes('HM') || user.roles?.includes('Admin')) {
     // HM/Admin: Pre-load dashboard data
     promises.push(
       api.getFullTimetable().catch(() => null),

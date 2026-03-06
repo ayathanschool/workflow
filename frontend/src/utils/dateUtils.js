@@ -408,3 +408,113 @@ export function createISTTimestamp() {
   const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
   return istTime.toISOString();
 }
+
+/**
+ * Format ISO timestamp to IST date only (YYYY-MM-DD → DD MMM YYYY)
+ * @param {string} timestamp - ISO timestamp or date string
+ * @returns {string} Formatted date in IST (e.g., "25 Feb 2026")
+ */
+export function formatISTDate(timestamp) {
+  if (!timestamp) return '';
+  
+  try {
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return '';
+    
+    return date.toLocaleDateString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return '';
+  }
+}
+
+/**
+ * Format ISO timestamp to IST date and time
+ * @param {string} timestamp - ISO timestamp
+ * @returns {string} Formatted date and time in IST (e.g., "25 Feb 2026, 10:30 AM")
+ */
+export function formatISTDateTime(timestamp) {
+  if (!timestamp) return '';
+  
+  try {
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return '';
+    
+    return date.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+  } catch (error) {
+    console.error('Error formatting datetime:', error);
+    return '';
+  }
+}
+
+/**
+ * Format ISO timestamp to display period range (e.g., "25-26 Feb 2026")
+ * @param {string} startDate - Start date in YYYY-MM-DD format
+ * @param {string} endDate - End date in YYYY-MM-DD format
+ * @returns {string} Formatted date range
+ */
+export function formatDateRange(startDate, endDate) {
+  if (!startDate || !endDate) return '';
+  
+  try {
+    // Normalize date strings - handle both YYYY-MM-DD and ISO 8601 formats
+    let startStr = String(startDate);
+    let endStr = String(endDate);
+    
+    // Extract just the date part if it's an ISO string (e.g., "2026-02-26T00:00:00.000Z" -> "2026-02-26")
+    if (startStr.includes('T')) {
+      startStr = startStr.split('T')[0];
+    }
+    if (endStr.includes('T')) {
+      endStr = endStr.split('T')[0];
+    }
+    
+    const start = new Date(startStr + 'T00:00:00');
+    const end = new Date(endStr + 'T00:00:00');
+    
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      console.warn('Invalid dates in formatDateRange:', { startDate, endDate, startStr, endStr });
+      return '';
+    }
+    
+    // If same month and year, show compact format
+    if (start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear()) {
+      const startDay = start.getDate();
+      const endFormatted = end.toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+      });
+      return `${startDay}-${endFormatted}`;
+    }
+    
+    // Different months, show full format
+    const startFormatted = start.toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
+    const endFormatted = end.toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
+    return `${startFormatted} to ${endFormatted}`;
+  } catch (error) {
+    console.error('Error formatting date range:', error, { startDate, endDate });
+    return '';
+  }
+}

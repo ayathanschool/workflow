@@ -8,11 +8,11 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
   const [filters, setFilters] = useState({
     class: '',
     groupByStudent: true,
-    onlyOverdue: false
+    onlyOverdue: true
   });
   const [expandedStudent, setExpandedStudent] = useState(null);
   const [messageTemplate, setMessageTemplate] = useState(
-    `Dear Parent,\n\nThis is a gentle reminder regarding the pending fee payment for {name} (Adm No: {admNo}), Class {class}.\n\nPending Fee Details:\n{lines}\n\nTotal Outstanding: ₹{total}\n\nKindly make the payment at the earliest to avoid any inconvenience.\n\nThank you,\nAyathan Central School`
+    `Dear Parent,\n\nThis is a gentle reminder regarding the pending fee payment for {name} (Adm No: {admNo}), Class {class}.\n\nPending Fee Details:\n{lines}\n\nTotal Outstanding: ₹{total}\n\nKindly make the payment at the earliest to avoid any inconvenience.\n\nThank you,\nAyathan School`
   );
 
   // Helper to strip "STD " prefix from class names

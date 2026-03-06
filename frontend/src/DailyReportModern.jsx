@@ -11,7 +11,8 @@ import {
   getTeacherWeeklyTimetable,
   getSuggestedPlansForSubstitution,
   getFirstUnreportedSession,
-  deleteDailyReport
+  deleteDailyReport,
+  getAppSettings
 } from "./api";
 import { todayIST } from "./utils/dateUtils";
 import { confirmDestructive } from "./utils/confirm";
@@ -35,6 +36,7 @@ export default function DailyReportModern({ user }) {
   const [expandedPeriod, setExpandedPeriod] = useState(null);
   const [reports, setReports] = useState({});
   const [drafts, setDrafts] = useState({});
+  const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState({});
   const [message, setMessage] = useState({ text: "", type: "" });
@@ -71,6 +73,67 @@ export default function DailyReportModern({ user }) {
   const teacherName = user?.name || "";
 
   const debug = typeof window !== 'undefined' && !!window.__DEBUG_DAILY_REPORT__;
+
+  // Load settings on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const appSettings = await getAppSettings();
+        setSettings(appSettings || {});
+      } catch (err) {
+        console.error('Failed to load app settings:', err);
+        setSettings({});
+      }
+    };
+    loadSettings();
+  }, []);
+
+  // Calculate date restrictions based on settings
+  const dateRestrictions = useMemo(() => {
+    if (!settings) return { minDate: null, maxDate: null, isDisabled: false, helpText: '' };
+
+    const today = todayIST();
+    const allowBackfill = String(settings.allow_backfill_reporting || '').toUpperCase() === 'TRUE';
+    const backwardLimit = parseInt(settings.dailyReportBackwardDaysLimit || '0');
+    const forwardLimit = parseInt(settings.dailyReportForwardDaysLimit || '0');
+
+    // Calculate min date (past limit)
+    let minDate = null;
+    if (!allowBackfill) {
+      minDate = today; // Only today
+    } else if (backwardLimit > 0) {
+      const minDateObj = new Date(today);
+      minDateObj.setDate(minDateObj.getDate() - backwardLimit);
+      minDate = minDateObj.toISOString().split('T')[0];
+    }
+
+    // Calculate max date (future limit)
+    let maxDate = null;
+    if (forwardLimit === 0) {
+      maxDate = today; // Only up to today
+    } else if (forwardLimit > 0) {
+      const maxDateObj = new Date(today);
+      maxDateObj.setDate(maxDateObj.getDate() + forwardLimit);
+      maxDate = maxDateObj.toISOString().split('T')[0];
+    }
+
+    // Generate help text
+    let helpText = '';
+    if (!allowBackfill && forwardLimit === 0) {
+      helpText = 'Only today\'s reports allowed';
+    } else if (!allowBackfill) {
+      helpText = `Today + next ${forwardLimit} day(s)`;
+    } else if (backwardLimit > 0 && forwardLimit === 0) {
+      helpText = `Last ${backwardLimit} day(s) + today`;
+    } else if (backwardLimit > 0 && forwardLimit > 0) {
+      helpText = `Last ${backwardLimit} day(s) to next ${forwardLimit} day(s)`;
+    }
+
+    // Disable field if only today is allowed
+    const isDisabled = !allowBackfill && forwardLimit === 0;
+
+    return { minDate, maxDate, isDisabled, helpText };
+  }, [settings]);
 
   const normalizeText = useCallback((v) => {
     return String(v || '')
@@ -1115,14 +1178,22 @@ export default function DailyReportModern({ user }) {
             </div>
 
             <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-gray-700">Date:</label>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700">Date:</label>
+                  <input
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    min={dateRestrictions.minDate || undefined}
+                    max={dateRestrictions.maxDate || undefined}
+                    disabled={dateRestrictions.isDisabled}
+                    className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  />
+                </div>
+                {dateRestrictions.helpText && (
+                  <p className="text-xs text-gray-500 ml-12">{dateRestrictions.helpText}</p>
+                )}
               </div>
 
               {totalPeriods > 0 && (

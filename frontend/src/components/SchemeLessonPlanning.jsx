@@ -180,7 +180,18 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
     const existing = schemes.find(s => s.schemeId === schemeId);
     const hasChapters = existing && Array.isArray(existing.chapters) && existing.chapters.length > 0;
-    if (hasChapters) return;
+    
+    // Auto-expand relevant chapter when scheme is expanded
+    if (hasChapters) {
+      const chapters = existing.chapters;
+      // Find first incomplete chapter, or last chapter if all complete
+      const targetChapter = chapters.find(ch => !_isChapterFullyReported(ch)) || chapters[chapters.length - 1];
+      if (targetChapter) {
+        const chapterKey = `${schemeId}::${targetChapter.chapterNumber}`;
+        setExpandedChapters(prev => ({ ...prev, [chapterKey]: true }));
+      }
+      return;
+    }
 
     try {
       setLoadingSchemeDetails(prev => ({ ...prev, [schemeId]: true }));
@@ -190,6 +201,14 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
       if (data && data.success) {
         const normalized = normalizeSchemePayload(data);
         setSchemes(prev => prev.map(s => (s.schemeId === schemeId ? { ...s, ...normalized, chaptersLoaded: true } : s)));
+        
+        // Auto-expand relevant chapter after loading
+        const chapters = Array.isArray(normalized.chapters) ? normalized.chapters : [];
+        const targetChapter = chapters.find(ch => !_isChapterFullyReported(ch)) || chapters[chapters.length - 1];
+        if (targetChapter) {
+          const chapterKey = `${schemeId}::${targetChapter.chapterNumber}`;
+          setExpandedChapters(prev => ({ ...prev, [chapterKey]: true }));
+        }
       } else {
         const errorMsg = data?.error || data?.message || 'Failed to load scheme details';
         console.warn('Scheme details load failed:', errorMsg);
@@ -298,6 +317,63 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
       loadApprovedSchemes();
     }
   }, [userEmail, loadApprovedSchemes]);
+
+  // Auto-expand schemes with current/incomplete chapters and load their details
+  useEffect(() => {
+    if (schemes.length === 0) return;
+
+    const schemesWithCurrentWork = schemes.filter(scheme => {
+      const chapters = Array.isArray(scheme.chapters) ? scheme.chapters : [];
+      // Has current chapter (at least one not fully reported)
+      return chapters.length > 0 && chapters.some(ch => !_isChapterFullyReported(ch));
+    });
+
+    // Auto-expand and load details for schemes with current work
+    const toExpand = {};
+    const toLoadDetails = [];
+    
+    schemesWithCurrentWork.forEach(scheme => {
+      toExpand[scheme.schemeId] = true;
+      
+      // Only load details if not already loaded
+      if (!scheme.chaptersLoaded && !loadingSchemeDetails[scheme.schemeId]) {
+        toLoadDetails.push(scheme.schemeId);
+      }
+    });
+
+    // Set expansion state
+    if (Object.keys(toExpand).length > 0) {
+      setExpandedSchemes(prev => ({ ...prev, ...toExpand }));
+    }
+
+    // Load details for schemes that need it
+    toLoadDetails.forEach(async (schemeId) => {
+      if (loadingSchemeDetails[schemeId]) return;
+
+      try {
+        setLoadingSchemeDetails(prev => ({ ...prev, [schemeId]: true }));
+        const response = await api.getSchemeDetails(schemeId, userEmail);
+        const data = response?.data || response;
+
+        if (data && data.success) {
+          const normalized = normalizeSchemePayload(data);
+          setSchemes(prev => prev.map(s => (s.schemeId === schemeId ? { ...s, ...normalized, chaptersLoaded: true } : s)));
+          
+          // Auto-expand first incomplete chapter only
+          const chapters = Array.isArray(normalized.chapters) ? normalized.chapters : [];
+          const firstIncompleteChapter = chapters.find(ch => !_isChapterFullyReported(ch));
+          if (firstIncompleteChapter) {
+            const chapterKey = `${schemeId}::${firstIncompleteChapter.chapterNumber}`;
+            setExpandedChapters(prev => ({ ...prev, [chapterKey]: true }));
+          }
+        }
+      } catch (err) {
+        console.warn('Auto-load scheme details failed:', err);
+      } finally {
+        setLoadingSchemeDetails(prev => ({ ...prev, [schemeId]: false }));
+      }
+    });
+  }, [schemes.length]); // Only run when schemes count changes (after initial load)
 
   // Memoize available classes to prevent recalculation on every render
   const availableClasses = useMemo(() => {
@@ -641,60 +717,13 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
   const handleBulkPrepareClick = async (scheme, chapter) => {
     console.log('Bulk prepare clicked:', { scheme, chapter });
 
-    // First check: Use cached canPrepare flag for quick feedback
-    if (chapter && chapter.canPrepare === false) {
-      alert(chapter.lockReason || 'Previous chapter should be completed');
-      return;
-    }
-
-    // Second check: Verify with fresh data from backend BEFORE opening modal
-    // This prevents teachers from wasting time filling forms only to be blocked at submission
-    try {
-      setLoading(true);
-      const verificationPayload = {
-        schemeId: scheme.schemeId,
-        chapter: chapter.chapterName,
-        teacherEmail: userEmail
-      };
-      
-      console.log('Verifying preparation allowance...', verificationPayload);
-      const verifyResponse = await api.verifyChapterPreparation(verificationPayload);
-      const verifyData = verifyResponse?.data || verifyResponse;
-      
-      if (!verifyData.success || !verifyData.allowed) {
-        const blockMessage = verifyData.message || verifyData.lockReason || 'Previous chapter should be completed';
-        alert(`❌ Cannot prepare lesson plans:\n\n${blockMessage}`);
-        console.warn('Preparation blocked:', verifyData);
-        return;
-      }
-      
-      console.log('✅ Preparation verified, opening modal');
-      // Verification passed - open the modal
-      setBulkPrepData({
-        scheme,
-        chapter,
-        sessionCount: chapter.totalSessions
-      });
-      setShowBulkModal(true);
-      
-    } catch (error) {
-      console.error('Error verifying preparation:', error);
-      // If verification fails, show error but don't block (fail-open for better UX)
-      const userChoice = confirm(
-        `⚠️ Could not verify preparation status:\n${error.message}\n\n` +
-        `Do you want to proceed anyway? (Submission may still be blocked if restrictions apply)`
-      );
-      if (userChoice) {
-        setBulkPrepData({
-          scheme,
-          chapter,
-          sessionCount: chapter.totalSessions
-        });
-        setShowBulkModal(true);
-      }
-    } finally {
-      setLoading(false);
-    }
+    // Open the bulk preparation modal
+    setBulkPrepData({
+      scheme,
+      chapter,
+      sessionCount: chapter.totalSessions
+    });
+    setShowBulkModal(true);
   };
 
   const getProgressColor = (percentage) => {
@@ -949,12 +978,12 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                 const headerChapterNode = (() => {
                   const chapters = Array.isArray(scheme.chapters) ? scheme.chapters : [];
                   if (chapters.length > 0) {
-                    const current = chapters.find(ch => ch && ch.canPrepare !== false && !_isChapterFullyReported(ch));
+                    const current = chapters.find(ch => ch && !_isChapterFullyReported(ch));
                     if (current) {
                       const isCurrentComplete = !!(current && current.chapterCompleted);
                       return (
                         <span className="ml-1 text-indigo-600 font-semibold">
-                          Current: Ch {current.chapterNumber}: {current.chapterName}
+                          {current.chapterName}
                           {isCurrentComplete && (
                             <span className="ml-2 text-xs bg-green-100 text-green-700 border border-green-200 px-2 py-0.5 rounded-full font-semibold">
                               Chapter Complete
@@ -966,11 +995,10 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                     const allReported = chapters.every(_isChapterFullyReported);
                     if (allReported) {
                       const last = chapters[chapters.length - 1];
-                      const lastLabel = last && last.chapterName ? `Ch ${last.chapterNumber}: ${last.chapterName}` : 'Last chapter';
                       const isComplete = !!(last && last.chapterCompleted);
                       return (
                         <span className={"ml-1 " + (isComplete ? 'text-green-700 font-semibold' : 'text-amber-800 font-semibold')}>
-                          {isComplete ? 'Chapter Complete: ' : 'All sessions reported: '}{lastLabel}
+                          {isComplete ? 'Chapter Complete: ' : 'All sessions reported: '}{last.chapterName || 'Last chapter'}
                         </span>
                       );
                     }
@@ -978,7 +1006,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                     if (first && first.chapterName) {
                       return (
                         <span className="ml-1 text-gray-600">
-                          Ch {first.chapterNumber}: {first.chapterName}
+                          {first.chapterName}
                         </span>
                       );
                     }
@@ -986,10 +1014,9 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
                   const n = String(scheme.firstChapterName || '').trim();
                   if (!n) return null;
-                  const num = String(scheme.firstChapterNumber || '').trim();
                   return (
                     <span className="ml-1 text-gray-600">
-                      {num ? `Ch ${num}: ${n}` : n}
+                      {n}
                     </span>
                   );
                 })();
@@ -1057,21 +1084,30 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                     )}
 
                     {isExpanded && hasChapters && (
-                      <div className="space-y-3 sm:space-y-4">{scheme.chapters.map((chapter, chapterIdx) => {
+                      <div className="space-y-3 sm:space-y-4">{scheme.chapters.slice().reverse().map((chapter, reversedIdx) => {
+                        const chapterIdx = scheme.chapters.length - 1 - reversedIdx;
                         const chapterKey = `${scheme.schemeId}::${chapter.chapterNumber}`;
-                        // Default to expanded (so no chapter-wise clicking is required).
-                        const chapterExpanded = expandedChapters[chapterKey] !== false;
-
                         const chapterFullyReported = _isChapterFullyReported(chapter);
                         const chapterMarkedComplete = !!(chapter && chapter.chapterCompleted);
+                        
+                        // Smart default: expand incomplete chapters, collapse completed ones
+                        const isChapterComplete = chapterFullyReported || chapterMarkedComplete;
+                        const chapterExpanded = expandedChapters[chapterKey] !== undefined 
+                          ? expandedChapters[chapterKey] 
+                          : !isChapterComplete; // Auto-expand only incomplete chapters
+
+
                         const nextChapter = (Array.isArray(scheme.chapters) ? scheme.chapters[chapterIdx + 1] : null);
-                        const nextChapterUnlocked = !!(nextChapter && nextChapter.canPrepare !== false);
+                        const nextChapterUnlocked = !!nextChapter;
                         const showCompletedBadge = chapterFullyReported && nextChapterUnlocked;
                         const showChapterCompleteBadge = chapterMarkedComplete;
                         const showAllReportedBadge = chapterFullyReported && !chapterMarkedComplete;
 
                         return (
-                        <div key={`${scheme.schemeId}-${chapter.chapterNumber}`} className="border-l-4 border-blue-200 pl-2 sm:pl-4">
+                        <div key={`${scheme.schemeId}-${chapter.chapterNumber}`} 
+                             className={`border-l-4 pl-2 sm:pl-4 ${
+                               !isChapterComplete ? 'border-blue-500 bg-blue-50/30' : 'border-blue-200'
+                             }`}>
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
                             <div className="flex items-center gap-2 sm:gap-3">
                               <button
@@ -1080,16 +1116,12 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                 className="text-left"
                                 title={chapterExpanded ? 'Hide chapter sessions' : 'Show chapter sessions'}
                               >
-                                <h4 className="text-sm sm:text-base font-medium text-gray-800">
-                                  Ch {chapter.chapterNumber}: {chapter.chapterName} {chapterExpanded ? '▲' : '▼'}
+                                <h4 className={`text-sm sm:text-base font-medium ${
+                                  !isChapterComplete ? 'text-blue-900' : 'text-gray-800'
+                                }`}>
+                                  {!isChapterComplete && '📍 '}{chapter.chapterName} {chapterExpanded ? '▲' : '▼'}
                                 </h4>
                               </button>
-                              {chapter.canPrepare === false && (
-                                <span className="text-xs text-red-600 font-semibold">
-                                  Previous chapter should be completed
-                                </span>
-                              )}
-
                               {showChapterCompleteBadge && (
                                 <span className="text-xs bg-green-100 text-green-700 border border-green-200 px-2 py-1 rounded-full font-semibold">
                                   Chapter Complete
@@ -1118,12 +1150,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                     e.stopPropagation();
                                     handleBulkPrepareClick(scheme, chapter);
                                   }}
-                                  disabled={chapter.canPrepare === false}
-                                  className={`px-4 py-2 text-sm bg-blue-600 text-white rounded-lg font-semibold transition-colors inline-flex items-center gap-2 shadow-sm ${
-                                    chapter.canPrepare === false
-                                      ? 'opacity-50 cursor-not-allowed'
-                                      : 'hover:bg-blue-700 hover:shadow-md'
-                                  }`}
+                                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg font-semibold transition-colors inline-flex items-center gap-2 shadow-sm hover:bg-blue-700 hover:shadow-md"
                                   title="Prepare all sessions at once (bulk preparation)"
                                 >
                                   <Plus className="w-4 h-4" />
@@ -1198,12 +1225,6 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                     return;
                                   }
 
-                                  // Enforce: previous chapter must be completed before preparing this chapter
-                                  if (chapter && chapter.canPrepare === false) {
-                                    alert(chapter.lockReason || 'Previous chapter should be completed');
-                                    return;
-                                  }
-                                  
                                   // For not-planned sessions, check if extended
                                   const isExtendedSession = session.sessionName?.includes('Extended') || 
                                                            session.isExtended === true ||

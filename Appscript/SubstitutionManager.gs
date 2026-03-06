@@ -2,7 +2,91 @@
  * ====== SUBSTITUTION MANAGEMENT SYSTEM ======
  * This file handles teacher substitutions and notifications
  * Think of this as your "Substitute Teacher Coordinator"
+ * 
+ * Key Features:
+ * - Batch substitution assignments with automatic email notifications
+ * - Subject dropdown based on teacher's timetable (via getTeacherSubjectsForClass)
+ * - Automatic lesson plan cascading for absent teachers
+ * - Substitution effectiveness analytics
+ * - Single acknowledgment system (no duplicate notifications)
  */
+
+/**
+ * Get subjects that a substitute teacher teaches in a specific class
+ * Used to populate dropdown when assigning substitutions
+ * 
+ * @param {string} teacherEmail - Email of the substitute teacher
+ * @param {string} className - Class name (e.g., "5", "Class 5")
+ * @returns {Object} { success: true, subjects: ['English', 'English Grammar'], hasSubjects: true }
+ * 
+ * Frontend workflow example:
+ * 1. User selects substitute teacher (e.g., "rema@school.com") and class (e.g., "5")
+ * 2. Call: getTeacherSubjectsForClass("rema@school.com", "5")
+ * 3. Response: { subjects: ["English", "English Grammar", "Other"] }
+ * 4. Display these subjects in a dropdown for user to select
+ * 5. If user selects "Other", show a text input for custom subject entry
+ * 6. Submit substitution with selected/entered subject
+ */
+function getTeacherSubjectsForClass(teacherEmail, className) {
+  try {
+    if (!teacherEmail || !className) {
+      return { success: false, error: 'teacherEmail and className are required', subjects: [] };
+    }
+
+    const email = String(teacherEmail || '').toLowerCase().trim();
+    const cls = String(className || '').trim();
+
+    // Query Timetable to get subjects this teacher teaches in this class
+    const timetableData = _getCachedSheetData('Timetable').data;
+    
+    const subjectsSet = new Set();
+    const matchedClasses = new Set(); // For debugging
+    
+    timetableData.forEach(row => {
+      const rowTeacher = String(row.teacherEmail || '').toLowerCase().trim();
+      const rowClass = String(row.class || '').trim();
+      const rowSubject = String(row.subject || '').trim();
+      
+      // Flexible class matching: handle "8A", "Class 8A", "8 A", "Std 8A", etc.
+      const normalizedRowClass = rowClass.toLowerCase().replace(/^(std|class)\s*/i, '').replace(/\s+/g, '');
+      const normalizedInputClass = cls.toLowerCase().replace(/^(std|class)\s*/i, '').replace(/\s+/g, '');
+      
+      // Match teacher and class (case-insensitive, space-insensitive)
+      if (rowTeacher === email && normalizedRowClass === normalizedInputClass && rowSubject) {
+        subjectsSet.add(rowSubject);
+        matchedClasses.add(rowClass); // Track what we matched
+      }
+    });
+
+    const subjects = Array.from(subjectsSet).sort();
+    
+    // Always include "Other" as the last option
+    subjects.push('Other');
+
+    return {
+      success: true,
+      teacherEmail: teacherEmail,
+      class: className,
+      subjects: subjects,
+      hasSubjects: subjects.length > 1, // More than just "Other"
+      count: subjects.length,
+      matchedClasses: Array.from(matchedClasses), // For debugging
+      debug: {
+        inputClass: cls,
+        normalizedInput: cls.toLowerCase().replace(/^(std|class)\s*/i, '').replace(/\s+/g, ''),
+        totalTimetableRows: timetableData.length
+      }
+    };
+
+  } catch (error) {
+    console.error('Error getting teacher subjects for class:', error);
+    return {
+      success: false,
+      error: error.message,
+      subjects: ['Other']
+    };
+  }
+}
 
 /**
  * Assign a substitute teacher for an absent teacher
@@ -116,7 +200,7 @@ function assignSubstitutionsBatch(payload) {
       s.substituteTeacher || '',
       s.substituteSubject || s.regularSubject || '',
       s.note || '',
-      'FALSE', // acknowledged
+      false, // acknowledged
       '', // acknowledgedBy
       '', // acknowledgedAt
       now // createdAt
@@ -146,14 +230,15 @@ function assignSubstitutionsBatch(payload) {
   // Store date column as text
   sh.getRange(startRow, 1, rowsToAppend.length, 1).setNumberFormat('@STRING@');
 
-  // Best-effort: notifications + cascades
+  // Best-effort: email notifications + cascades
   const cascadeResults = [];
   for (let i = 0; i < createdItems.length; i++) {
     const item = createdItems[i];
     try {
-      if (item.substituteTeacher) _sendSubstitutionNotification(item);
+      if (item.substituteTeacher) _sendSubstitutionEmail(item);
     } catch (notifyErr) {
       // Don't fail batch on notification errors
+      console.error('Failed to send substitution email:', notifyErr);
     }
 
     let cascadeResult = null;
@@ -544,6 +629,11 @@ function deleteSubstitution(data) {
         String(row.absentTeacher || '').toLowerCase() === String(data.absentTeacher || '').toLowerCase()) {
       
       sh.deleteRow(i + 1);
+      
+      // Invalidate caches after deletion
+      invalidateCache('substitutions');
+      invalidateCache('timetable');
+      
       return { success: true };
     }
   }
@@ -552,44 +642,15 @@ function deleteSubstitution(data) {
 }
 
 /**
- * Send notification to substitute teacher
+ * Get teacher's name from Users sheet for personalized emails
  */
-function _sendSubstitutionNotification(substitutionData) {
+function _getTeacherName(email) {
   try {
-    const notificationSh = _getSheet('SubstitutionNotifications');
-    _ensureHeaders(notificationSh, SHEETS.SubstitutionNotifications);
-    
-    const notificationId = _uuid();
-    const now = new Date().toISOString();
-    
-    const title = `Substitution Assignment - ${substitutionData.class}`;
-    const message = `You have been assigned to substitute for ${substitutionData.absentTeacher} on ${substitutionData.date} during Period ${substitutionData.period} for Class ${substitutionData.class}. Subject: ${substitutionData.substituteSubject || substitutionData.regularSubject}`;
-    
-    const notificationData = [
-      notificationId,
-      substitutionData.substituteTeacher,
-      title,
-      message,
-      'substitution',
-      JSON.stringify({
-        date: substitutionData.date,
-        period: substitutionData.period,
-        class: substitutionData.class,
-        absentTeacher: substitutionData.absentTeacher,
-        subject: substitutionData.substituteSubject || substitutionData.regularSubject
-      }),
-      'FALSE', // acknowledged
-      '', // acknowledgedAt
-      now
-    ];
-    
-    notificationSh.appendRow(notificationData);
-    
-    // Also send email notification
-    _sendSubstitutionEmail(substitutionData);
-    
-  } catch (error) {
-    console.error('Error sending substitution notification:', error);
+    const usersData = _getCachedSheetData('Users').data;
+    const user = usersData.find(u => String(u.email || '').toLowerCase() === email.toLowerCase());
+    return user && user.name ? user.name : email.split('@')[0];
+  } catch (e) {
+    return email.split('@')[0];
   }
 }
 
@@ -598,9 +659,10 @@ function _sendSubstitutionNotification(substitutionData) {
  */
 function _sendSubstitutionEmail(substitutionData) {
   try {
+    const teacherName = _getTeacherName(substitutionData.substituteTeacher);
     const subject = `Substitution Assignment - ${substitutionData.class} (${substitutionData.date})`;
     const body = `
-Dear ${substitutionData.substituteTeacher},
+Dear ${teacherName},
 
 You have been assigned to substitute for ${substitutionData.absentTeacher} with the following details:
 
@@ -618,7 +680,6 @@ Best regards,
 School Administration
     `;
     
-    // Send email using the basic email function
     sendEmailNotification(substitutionData.substituteTeacher, subject, body);
     
   } catch (error) {
@@ -627,92 +688,34 @@ School Administration
 }
 
 /**
- * Get unacknowledged substitution notifications for a teacher
+ * Get unacknowledged substitutions for a teacher
+ * Reads from Substitutions sheet (single source of truth)
  */
 function getUnacknowledgedSubstitutions(teacherEmail) {
-  const sh = _getSheet('SubstitutionNotifications');
-  const headers = _headers(sh);
-  const notifications = _rows(sh)
-    .map(r => _indexByHeader(r, headers))
-    .filter(r => 
-      String(r.recipient || '').toLowerCase() === teacherEmail.toLowerCase() &&
-      String(r.acknowledged || '').toLowerCase() !== 'true'
-    );
+  const allRows = _getCachedSheetData('Substitutions').data;
+  const email = String(teacherEmail || '').toLowerCase();
   
-  return notifications;
-}
-
-/**
- * Acknowledge a substitution notification
- */
-function acknowledgeSubstitution(notificationId, teacherEmail) {
-  const sh = _getSheet('SubstitutionNotifications');
-  const headers = _headers(sh);
-  const rows = sh.getDataRange().getValues();
+  const unacknowledged = allRows.filter(r => {
+    const rowTeacher = String(r.substituteTeacher || '').toLowerCase();
+    const isAcknowledged = r.acknowledged === true || String(r.acknowledged || '').toLowerCase() === 'true';
+    return rowTeacher === email && !isAcknowledged;
+  });
   
-  // Find and update the notification
-  for (let i = 1; i < rows.length; i++) {
-    const row = _indexByHeader(rows[i], headers);
-    if (row.id === notificationId && 
-        String(row.recipient || '').toLowerCase() === teacherEmail.toLowerCase()) {
-      
-      // Update acknowledged status
-      const acknowledgedColIndex = headers.indexOf('acknowledged') + 1;
-      const acknowledgedAtColIndex = headers.indexOf('acknowledgedAt') + 1;
-      
-      sh.getRange(i + 1, acknowledgedColIndex).setValue('TRUE');
-      sh.getRange(i + 1, acknowledgedAtColIndex).setValue(new Date().toISOString());
-      
-      return { success: true };
-    }
-  }
+  // Sort by date descending (newest first), then by period
+  unacknowledged.sort((a, b) => {
+    const dateCompare = _isoDateString(b.date).localeCompare(_isoDateString(a.date));
+    if (dateCompare !== 0) return dateCompare;
+    return (parseInt(a.period) || 0) - (parseInt(b.period) || 0);
+  });
   
-  return { error: 'Notification not found' };
+  return unacknowledged;
 }
 
 /**
- * Get all substitution notifications for a teacher (acknowledged and unacknowledged)
- * Alias for getTeacherSubstitutionNotifications for frontend compatibility
+ * Acknowledge a substitution assignment
+ * Single function for acknowledgment (replaces both old functions)
  */
-function getSubstitutionNotifications(teacherEmail) {
-  const cacheKey = generateCacheKey('sub_notifications', { email: teacherEmail });
-  return getCachedData(cacheKey, function() {
-    return getTeacherSubstitutionNotifications(teacherEmail);
-  }, CACHE_TTL.SHORT);
-}
-
-/**
- * Get all substitution notifications for a teacher (acknowledged and unacknowledged)
- */
-function getTeacherSubstitutionNotifications(teacherEmail) {
-  try {
-    const sh = _getSheet('SubstitutionNotifications');
-    const headers = _headers(sh);
-    const notifications = _rows(sh)
-      .map(r => _indexByHeader(r, headers))
-      .filter(r => String(r.recipient || '').toLowerCase() === teacherEmail.toLowerCase());
-    
-    // Sort by creation date (newest first)
-    notifications.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-    // Return in expected format with notifications array
-    return {
-      success: true,
-      notifications: notifications,
-      count: notifications.length
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error.message,
-      notifications: []
-    };
-  }
-}
-
-/**
- * Acknowledge a substitution assignment (in Substitutions sheet)
- */
-function acknowledgeSubstitutionAssignment(data) {
+function acknowledgeSubstitution(data) {
   try {
     const sh = _getSheet('Substitutions');
     const headers = _headers(sh);
@@ -731,17 +734,20 @@ function acknowledgeSubstitutionAssignment(data) {
           String(row.period) === String(data.period) &&
           String(row.class || '').toLowerCase() === String(data.class || '').toLowerCase() &&
           rowSubstitute === teacherEmail) {
+        
         // Update acknowledgment fields
         const acknowledgedColIndex = headers.indexOf('acknowledged') + 1;
         const acknowledgedByColIndex = headers.indexOf('acknowledgedBy') + 1;
         const acknowledgedAtColIndex = headers.indexOf('acknowledgedAt') + 1;
         
-        sh.getRange(i + 1, acknowledgedColIndex).setValue('TRUE');
+        sh.getRange(i + 1, acknowledgedColIndex).setValue(true);
         sh.getRange(i + 1, acknowledgedByColIndex).setValue(data.teacherEmail);
         sh.getRange(i + 1, acknowledgedAtColIndex).setValue(new Date().toISOString());
         
-        // Invalidate cache for this teacher
-        invalidateCache('sub_notifications_email:' + teacherEmail);
+        // Invalidate caches
+        invalidateCache('substitutions');
+        invalidateCache('sub_notifications');
+        
         return { success: true, message: 'Substitution acknowledged successfully' };
       }
     }
@@ -750,6 +756,84 @@ function acknowledgeSubstitutionAssignment(data) {
   } catch (error) {
     return { error: 'Failed to acknowledge substitution: ' + error.toString() };
   }
+}
+
+/**
+ * Get all substitution assignments for a teacher (acknowledged and unacknowledged)
+ * Reads from Substitutions sheet (single source of truth)
+ */
+function getSubstitutionNotifications(teacherEmail) {
+  const cacheKey = generateCacheKey('sub_notifications', { email: teacherEmail });
+  return getCachedData(cacheKey, function() {
+    return _fetchTeacherSubstitutionNotifications(teacherEmail);
+  }, CACHE_TTL.SHORT);
+}
+
+/**
+ * Alias for backwards compatibility
+ */
+function getTeacherSubstitutionNotifications(teacherEmail) {
+  return getSubstitutionNotifications(teacherEmail);
+}
+
+/**
+ * Internal: Fetch teacher's substitution assignments from Substitutions sheet
+ */
+function _fetchTeacherSubstitutionNotifications(teacherEmail) {
+  try {
+    const allRows = _getCachedSheetData('Substitutions').data;
+    const email = String(teacherEmail || '').toLowerCase();
+    
+    const substitutions = allRows.filter(r => {
+      const rowTeacher = String(r.substituteTeacher || '').toLowerCase();
+      return rowTeacher === email;
+    });
+    
+    // Sort by date descending (newest first), then by period
+    substitutions.sort((a, b) => {
+      const dateCompare = _isoDateString(b.date).localeCompare(_isoDateString(a.date));
+      if (dateCompare !== 0) return dateCompare;
+      return (parseInt(a.period) || 0) - (parseInt(b.period) || 0);
+    });
+    
+    // Transform to notification-like format for frontend compatibility
+    const notifications = substitutions.map(s => ({
+      id: `${s.date}_${s.period}_${s.class}`, // Composite key for identification
+      date: s.date,
+      period: s.period,
+      class: s.class,
+      absentTeacher: s.absentTeacher,
+      regularSubject: s.regularSubject,
+      substituteSubject: s.substituteSubject,
+      note: s.note,
+      acknowledged: s.acknowledged === true || String(s.acknowledged || '').toLowerCase() === 'true',
+      acknowledgedBy: s.acknowledgedBy,
+      acknowledgedAt: s.acknowledgedAt,
+      createdAt: s.createdAt,
+      // Legacy fields for compatibility
+      title: `Substitution Assignment - ${s.class}`,
+      message: `Period ${s.period} for ${s.class} - ${s.substituteSubject || s.regularSubject}`
+    }));
+    
+    return {
+      success: true,
+      notifications: notifications,
+      count: notifications.length
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      notifications: []
+    };
+  }
+}
+
+/**
+ * Legacy alias for acknowledgeSubstitution (backwards compatibility)
+ */
+function acknowledgeSubstitutionAssignment(data) {
+  return acknowledgeSubstitution(data);
 }
 
 /**

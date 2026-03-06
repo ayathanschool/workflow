@@ -55,7 +55,7 @@ export const ToastProvider = ({ children }) => {
       type: 'error',
       title,
       message,
-      duration: 7000,
+      duration: 10000, // 10 seconds for errors so users have time to read
       ...options
     });
   }, [addToast]);
@@ -65,7 +65,7 @@ export const ToastProvider = ({ children }) => {
       type: 'warning',
       title,
       message,
-      duration: 5000,
+      duration: 8000, // 8 seconds for warnings
       ...options
     });
   }, [addToast]);
@@ -111,19 +111,19 @@ const ToastContainer = ({ toasts, removeToast }) => {
 
   const getBackgroundColor = (type) => {
     switch (type) {
-      case 'success': return 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800';
-      case 'error': return 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
-      case 'warning': return 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800';
-      default: return 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800';
+      case 'success': return 'bg-green-50 dark:bg-green-900/90 border-green-200 dark:border-green-700';
+      case 'error': return 'bg-red-50 dark:bg-red-900/90 border-red-200 dark:border-red-700';
+      case 'warning': return 'bg-yellow-50 dark:bg-yellow-900/90 border-yellow-200 dark:border-yellow-700';
+      default: return 'bg-blue-50 dark:bg-blue-900/90 border-blue-200 dark:border-blue-700';
     }
   };
 
   const getTextColor = (type) => {
     switch (type) {
-      case 'success': return 'text-gray-900 dark:text-green-100';
-      case 'error': return 'text-gray-900 dark:text-red-100';
-      case 'warning': return 'text-gray-900 dark:text-yellow-100';
-      default: return 'text-gray-900 dark:text-blue-100';
+      case 'success': return 'text-gray-900 dark:text-green-50';
+      case 'error': return 'text-gray-900 dark:text-red-50';
+      case 'warning': return 'text-gray-900 dark:text-yellow-50';
+      default: return 'text-gray-900 dark:text-blue-50';
     }
   };
 
@@ -146,13 +146,13 @@ const ToastContainer = ({ toasts, removeToast }) => {
                   {toast.title}
                 </p>
               )}
-              <p className={`text-sm ${getTextColor(toast.type)} opacity-90 mt-1`}>
+              <p className={`text-sm ${getTextColor(toast.type)} mt-1`}>
                 {toast.message}
               </p>
             </div>
             <button
               onClick={() => removeToast(toast.id)}
-              className="ml-3 flex-shrink-0 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+              className="ml-3 flex-shrink-0 text-gray-500 hover:text-gray-700 dark:text-gray-300 dark:hover:text-gray-100"
             >
               <X className="w-4 h-4" />
             </button>

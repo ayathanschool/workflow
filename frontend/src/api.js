@@ -224,7 +224,7 @@ async function postJSON(url, payload) {
     payload.action = action;
   }
 
-  if (action.includes('submit') || action.includes('create') || action.includes('update') || action.includes('delete')) {
+  if (action.includes('submit') || action.includes('create') || action.includes('update') || action.includes('delete') || action.includes('approve') || action.includes('disburse') || action.includes('acknowledge') || action.includes('add')) {
     // Central invalidation rules from EnhancedApiCache
     try { enhancedCache.invalidateRelated(action); } catch {}
 
@@ -268,6 +268,18 @@ async function postJSON(url, payload) {
       enhancedCache.clearPattern('getAllApprovedSchemes');
       enhancedCache.clearPattern('getTeacherSchemes');
       enhancedCache.clearPattern('getAllSchemes');
+    }
+    if (action.includes('Fund') || action.includes('Expense') || action.includes('Financial')) {
+      enhancedCache.clearPattern('Fund');
+      enhancedCache.clearPattern('Expense');
+      enhancedCache.clearPattern('Financial');
+      enhancedCache.clearPattern('getTeacherFundRequests');
+      enhancedCache.clearPattern('getAllFundRequests');
+      enhancedCache.clearPattern('getTeacherExpenseRequests');
+      enhancedCache.clearPattern('getAllExpenseRequests');
+      enhancedCache.clearPattern('getAdminFinancialDashboard');
+      enhancedCache.clearPattern('getAccountsFinancialDashboard');
+      enhancedCache.clearPattern('getTeacherFinancialDashboard');
     }
   }
 
@@ -396,6 +408,21 @@ export async function getTeacherLessonPlans(email, subject = '', cls = '', statu
 
 export async function submitPlan(email, planData) {
   return postJSON(`${BASE_URL}?action=submitPlan`, { email, ...planData })
+}
+
+/**
+ * Check if teacher is allowed to submit a new scheme for a given class/subject.
+ * Returns { allowed: boolean, message?: string }
+ */
+export async function checkCanSubmitScheme(email, classValue, subject) {
+  try {
+    const q = new URLSearchParams({ action: 'canSubmitNewScheme', email, class: classValue, subject });
+    const res = await getJSON(`${BASE_URL}?${q}`);
+    const data = res?.data || res;
+    return { allowed: data?.allowed !== false, message: data?.message || '' };
+  } catch (e) {
+    return { allowed: true }; // fail-open
+  }
 }
 
 export async function deleteScheme(schemeId, teacherEmail) {
@@ -655,7 +682,7 @@ export async function getMissingSubmissions(date) {
   return res?.data || res || { success: false };
 }
 
-// HM/SuperAdmin: Teacherwise missing daily report view
+// HM/admin: Teacherwise missing daily report view
 export async function getMissingSubmissionsTeacherwise(date, requesterEmail) {
   const q = new URLSearchParams({ action: 'getMissingSubmissionsTeacherwise', date, email: requesterEmail })
   const res = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE)
@@ -664,8 +691,21 @@ export async function getMissingSubmissionsTeacherwise(date, requesterEmail) {
 
 export async function getAllClasses() {
   const response = await getJSON(`${BASE_URL}?action=getAllClasses`);
-  // Unwrap the response: backend returns { status, data, timestamp }
-  return response?.data || response || [];
+  // Backend returns array directly or in wrapper
+  if (Array.isArray(response)) {
+    return { classes: response };
+  }
+  // Check if wrapped in data property
+  if (response?.data) {
+    if (Array.isArray(response.data)) {
+      return { classes: response.data };
+    }
+    if (response.data.classes) {
+      return { classes: response.data.classes };
+    }
+  }
+  // Fallback
+  return { classes: response?.classes || [] };
 }
 
 export async function getAllSubjects() {
@@ -804,6 +844,23 @@ export async function getAvailableTeachers(date, period, options = {}) {
   // Backend returns { status, data: [...teachers], timestamp }
   // Unwrap and return the teachers array
   return response?.data || response || [];
+}
+
+/**
+ * Get subjects that a teacher teaches in a specific class
+ * Used for populating substitute subject dropdown
+ */
+export async function getTeacherSubjectsForClass(teacherEmail, className, options = {}) {
+  const { noCache = false } = options || {};
+  const q = new URLSearchParams({ 
+    action: 'getTeacherSubjectsForClass', 
+    teacherEmail: teacherEmail || '',
+    className: className || ''
+  });
+  if (noCache) q.append('_', String(Date.now()));
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`);
+  // Returns { success: true, subjects: ['English', 'Math', 'Other'], ... }
+  return response;
 }
 
 export async function addSubstitution(data) {
@@ -958,7 +1015,7 @@ export async function updateAppSettings(email, settingsUpdates = [], name = '') 
   return result?.data || result || {};
 }
 
-// === Admin Data Editor (Super Admin only) ===
+// === Admin Data Editor (admin only) ===
 export async function adminListSheets(email) {
   const payload = { action: 'admin.listSheets', email: email || '' };
   const result = await postJSON(`${BASE_URL}?action=admin.listSheets`, payload);
@@ -1053,7 +1110,7 @@ export async function createBulkExams(email, bulkExamData) {
   return postJSON(`${BASE_URL}?action=createBulkExams`, { email, ...normalized })
 }
 
-// Delete an exam (Super Admin only)
+// Delete an exam (admin only)
 export async function deleteExam(email, examId) {
   const result = await postJSON(`${BASE_URL}?action=deleteExam`, { email, examId });
   return result?.data || result;
@@ -1109,13 +1166,13 @@ export async function getExamMarksEntryPending(options = {}) {
   return result?.data || result || { success: false, pending: [] };
 }
 
-// Delete a daily report (Super Admin only)
+// Delete a daily report (admin only)
 export async function deleteReport(email, reportId) {
   const result = await postJSON(`${BASE_URL}?action=deleteReport`, { email, reportId });
   return result?.data || result;
 }
 
-// === USER MANAGEMENT (Super Admin only) ===
+// === USER MANAGEMENT (admin only) ===
 export async function getAllUsers(email) {
   const result = await getJSON(`${BASE_URL}?action=getAllUsers&email=${encodeURIComponent(email)}`);
   return result?.data || result || [];
@@ -1255,12 +1312,12 @@ export async function exportAuditLogs(filters = {}) {
   return result?.data || result || [];
 }
 
-// === HOLIDAY MANAGEMENT FUNCTIONS ===
+// === LESSON CASCADING FUNCTIONS ===
 
-
-// Get all undeclared holidays
-export async function getUndeclaredHolidays(activeOnly = true) {
+// Get lessons by date range with optional filters
+export async function getLessonsByDateRange(startDate, endDate, filters = {}) {
   let userEmail = null;
+  
   const basicUser = localStorage.getItem('user');
   if (basicUser) {
     try { userEmail = JSON.parse(basicUser).email; } catch (e) {}
@@ -1272,15 +1329,23 @@ export async function getUndeclaredHolidays(activeOnly = true) {
     }
   }
   
-  const result = await postJSON(`${BASE_URL}?action=getUndeclaredHolidays`, {
-    email: userEmail,
-    activeOnly
+  const result = await postJSON(`${BASE_URL}?action=getLessonsByDateRange`, {
+    startDate,
+    endDate,
+    filters,
+    email: userEmail
   });
-  return result?.data || result || [];
+  
+  // Extract lessons array from various possible response structures
+  if (Array.isArray(result)) return result;
+  if (result?.lessons && Array.isArray(result.lessons)) return result.lessons;
+  if (result?.data?.lessons && Array.isArray(result.data.lessons)) return result.data.lessons;
+  if (result?.data && Array.isArray(result.data)) return result.data;
+  return [];
 }
 
-// Cascade lesson plans from a start date, skipping undeclared holidays
-export async function cascadeLessonPlans(startDate) {
+// Cascade selected lesson plans
+export async function cascadeSelectedLessons(lessonIds, mode) {
   let userEmail = null;
   let userName = null;
   
@@ -1303,36 +1368,11 @@ export async function cascadeLessonPlans(startDate) {
     }
   }
   
-  const result = await postJSON(`${BASE_URL}?action=cascadeLessonPlans`, {
-    startDate,
+  const result = await postJSON(`${BASE_URL}?action=cascadeSelectedLessons`, {
+    lessonIds,
+    mode,
     email: userEmail,
     name: userName
-  });
-  return result?.data || result;
-}
-
-// Get affected lesson plans for a start date (preview before cascading)
-export async function getAffectedLessonPlans(startDate) {
-  let userEmail = null;
-  
-  const basicUser = localStorage.getItem('user');
-  if (basicUser) {
-    try { 
-      userEmail = JSON.parse(basicUser).email;
-    } catch (e) {}
-  }
-  if (!userEmail) {
-    const googleSession = localStorage.getItem('sf_google_session');
-    if (googleSession) {
-      try { 
-        userEmail = JSON.parse(googleSession).user?.email;
-      } catch (e) {}
-    }
-  }
-  
-  const result = await postJSON(`${BASE_URL}?action=getAffectedLessonPlans`, {
-    startDate,
-    email: userEmail
   });
   return result?.data || result;
 }
@@ -1360,7 +1400,7 @@ export async function getRecentCascades(limit = 10) {
     limit,
     email: userEmail
   });
-  return result?.data || result;
+  return result?.cascades || result?.data || result || [];
 }
 
 // Undo a cascade operation
@@ -1962,5 +2002,212 @@ export async function getAllMissingLessonPlans(daysAhead = 7) {
   });
   const result = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
   return result?.data || result;
+}
+
+// ====== FUND COLLECTION MODULE ======
+export async function createFundCollectionRequest(data) {
+  return postJSON(`${BASE_URL}?action=createFundCollectionRequest`, data);
+}
+
+export async function submitFundCollectionRequest(requestId, teacherEmail) {
+  return postJSON(`${BASE_URL}?action=submitFundCollectionRequest`, { requestId, teacherEmail });
+}
+
+export async function getTeacherFundRequests(teacherEmail, cacheBuster) {
+  const q = new URLSearchParams({ action: 'getTeacherFundRequests', email: teacherEmail });
+  if (cacheBuster) {
+    q.append('_t', cacheBuster); // Cache busting
+  }
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, cacheBuster ? 0 : SHORT_CACHE_DURATION);
+  return response?.data || response;
+}
+
+export async function getAllFundRequests(email, cacheBuster) {
+  const q = new URLSearchParams({ action: 'getAllFundRequests', email });
+  if (cacheBuster) {
+    q.append('_t', cacheBuster); // Cache busting
+  }
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, cacheBuster ? 0 : SHORT_CACHE_DURATION);
+  return response?.data || response;
+}
+
+export async function getStudentsForClass(className) {
+  const q = new URLSearchParams({ action: 'getStudentsForClass', class: className });
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, CACHE_DURATION);
+  // Backend wraps response in { status, data, timestamp }
+  return response?.data || response;
+}
+
+export async function approveFundRequest(requestId, approverEmail, remarks = '') {
+  return postJSON(`${BASE_URL}?action=approveFundRequest`, { requestId, approverEmail, remarks });
+}
+
+export async function rejectFundRequest(requestId, approverEmail, reason = '') {
+  return postJSON(`${BASE_URL}?action=rejectFundRequest`, { requestId, approverEmail, reason });
+}
+
+export async function requestFundRevision(requestId, approverEmail, reason = '') {
+  return postJSON(`${BASE_URL}?action=requestFundRevision`, { requestId, approverEmail, reason });
+}
+
+export async function updateFundCollectionRequest(requestId, teacherEmail, updates) {
+  return postJSON(`${BASE_URL}?action=updateFundCollectionRequest`, { requestId, teacherEmail, ...updates });
+}
+
+export async function startFundCollection(requestId, teacherEmail) {
+  return postJSON(`${BASE_URL}?action=startFundCollection`, { requestId, teacherEmail });
+}
+
+export async function completeFundCollection(requestId, teacherEmail, collectedAmount, collectionDate, remarks = '') {
+  return postJSON(`${BASE_URL}?action=completeFundCollection`, { 
+    requestId, teacherEmail, collectedAmount, collectionDate, remarks 
+  });
+}
+
+export async function acknowledgeFundCollection(requestId, accountsEmail, remarks = '') {
+  return postJSON(`${BASE_URL}?action=acknowledgeFundCollection`, { requestId, accountsEmail, remarks });
+}
+
+export async function addFundDeposit(requestId, teacherEmail, depositAmount, depositDate, notes = '') {
+  return postJSON(`${BASE_URL}?action=addFundDeposit`, { 
+    requestId, teacherEmail, depositAmount, depositDate, notes 
+  });
+}
+
+export async function getFundDeposits(requestId) {
+  const q = new URLSearchParams({ action: 'getFundDeposits', requestId });
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, 0); // No cache
+  const data = response?.data || response;
+  return data?.deposits || [];
+}
+
+export async function acknowledgeFundDeposit(depositId, accountsEmail) {
+  return postJSON(`${BASE_URL}?action=acknowledgeFundDeposit`, { depositId, accountsEmail });
+}
+
+export async function getStudentPayments(requestId) {
+  const q = new URLSearchParams({ action: 'getStudentPayments', requestId });
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, 0); // No cache for real-time payment status
+  const data = response?.data || response;
+  return {
+    students: data?.students || [],
+    summary: data?.summary || {}
+  };
+}
+
+export async function markStudentPayment(paymentId, paidAmount, teacherEmail, notes = '') {
+  return postJSON(`${BASE_URL}?action=markStudentPayment`, { 
+    paymentId, paidAmount, teacherEmail, notes 
+  });
+}
+
+export async function updateStudentPayment(paymentId, paidAmount, notes = '') {
+  return postJSON(`${BASE_URL}?action=updateStudentPayment`, { 
+    paymentId, paidAmount, notes 
+  });
+}
+
+export async function bulkMarkStudentPayments(requestId, payments, teacherEmail) {
+  return postJSON(`${BASE_URL}?action=bulkMarkStudentPayments`, { 
+    requestId, payments, teacherEmail 
+  });
+}
+
+export async function deleteFundCollectionRequest(requestId, teacherEmail) {
+  return postJSON(`${BASE_URL}?action=deleteFundCollectionRequest`, { requestId, teacherEmail });
+}
+
+export async function adminDeleteFundCollectionRequest(requestId, adminEmail) {
+  return postJSON(`${BASE_URL}?action=adminDeleteFundCollectionRequest`, { requestId, adminEmail });
+}
+
+// ====== EXPENSE MANAGEMENT MODULE ======
+export async function createExpenseRequest(data) {
+  return postJSON(`${BASE_URL}?action=createExpenseRequest`, data);
+}
+
+export async function submitExpenseRequest(requestId, teacherEmail) {
+  return postJSON(`${BASE_URL}?action=submitExpenseRequest`, { requestId, teacherEmail });
+}
+
+export async function getTeacherExpenseRequests(teacherEmail) {
+  const q = new URLSearchParams({ action: 'getTeacherExpenseRequests', email: teacherEmail });
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  return response?.data || response;
+}
+
+export async function getAllExpenseRequests(email) {
+  const q = new URLSearchParams({ action: 'getAllExpenseRequests', email });
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  return response?.data || response;
+}
+
+export async function getExpenseCategories() {
+  const q = new URLSearchParams({ action: 'getExpenseCategories' });
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, CACHE_DURATION);
+  return response?.data || response;
+}
+
+export async function approveExpenseRequest(requestId, approverEmail, remarks = '') {
+  return postJSON(`${BASE_URL}?action=approveExpenseRequest`, { requestId, approverEmail, remarks });
+}
+
+export async function rejectExpenseRequest(requestId, approverEmail, reason = '') {
+  return postJSON(`${BASE_URL}?action=rejectExpenseRequest`, { requestId, approverEmail, reason });
+}
+
+export async function updateExpenseRequest(requestId, teacherEmail, updates) {
+  return postJSON(`${BASE_URL}?action=updateExpenseRequest`, { requestId, teacherEmail, ...updates });
+}
+
+export async function disburseExpense(requestId, accountsEmail, disbursementMode, disbursementReference = '') {
+  return postJSON(`${BASE_URL}?action=disburseExpense`, { 
+    requestId, accountsEmail, disbursementMode, disbursementReference
+  });
+}
+
+export async function deleteExpenseRequest(requestId, teacherEmail) {
+  return postJSON(`${BASE_URL}?action=deleteExpenseRequest`, { requestId, teacherEmail });
+}
+
+export async function adminDeleteExpenseRequest(requestId, adminEmail) {
+  return postJSON(`${BASE_URL}?action=adminDeleteExpenseRequest`, { requestId, adminEmail });
+}
+
+export async function getExpenseSummary(filters = {}) {
+  const q = new URLSearchParams({ action: 'getExpenseSummary', ...filters });
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  return response?.data || response;
+}
+
+// ====== FINANCIAL DASHBOARD ======
+export async function getAdminFinancialDashboard(email) {
+  const q = new URLSearchParams({ action: 'getAdminFinancialDashboard', email });
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  return response?.data || response;
+}
+
+export async function getAccountsFinancialDashboard(email) {
+  const q = new URLSearchParams({ action: 'getAccountsFinancialDashboard', email });
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  return response?.data || response;
+}
+
+export async function getTeacherFinancialDashboard(email) {
+  const q = new URLSearchParams({ action: 'getTeacherFinancialDashboard', email });
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  return response?.data || response;
+}
+
+export async function getFinancialReport(filters = {}) {
+  const q = new URLSearchParams({ action: 'getFinancialReport', ...filters });
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  return response?.data || response;
+}
+
+export async function getPendingFinancialCount(email) {
+  const q = new URLSearchParams({ action: 'getPendingFinancialCount', email });
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  return response?.data || response;
 }
 

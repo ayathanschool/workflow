@@ -32,7 +32,7 @@ const AuditLog = ({ user }) => {
   });
   const hasAnyRole = (tokens) => Array.isArray(tokens) && tokens.some(tok => hasRole(tok));
   const isSuperAdmin = hasAnyRole(['super admin', 'superadmin', 'super_admin']);
-  const isHM = hasAnyRole(['hm', 'headmaster', 'h m', 'principal', 'admin']);
+  const isHM = hasAnyRole(['hm', 'headmaster', 'h m', 'principal']);
   const canAccess = isSuperAdmin || isHM;
 
   // Entity types

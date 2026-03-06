@@ -1,4 +1,4 @@
-﻿/* eslint-disable no-unused-vars */
+/* eslint-disable no-unused-vars */
 /* eslint-disable react/no-unescaped-entities */
 /* eslint-disable import/order */
 import { 
@@ -14,6 +14,7 @@ import {
   X, 
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Home,
   Users,
   Book,
@@ -77,7 +78,7 @@ const Marklist = lazy(() => import('./components/Marklist'));
 const SchemeLessonPlanning = lazy(() => import('./components/SchemeLessonPlanning'));
 const SessionCompletionTracker = lazy(() => import('./components/SessionCompletionTracker'));
 const HMDailyOversight = lazy(() => import('./components/HMDailyOversightEnhanced'));
-const SuperAdminDashboard = lazy(() => import('./components/SuperAdminDashboard'));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
 const UserManagement = lazy(() => import('./components/UserManagement'));
 const AuditLog = lazy(() => import('./components/AuditLog'));
 const AdminDataEditor = lazy(() => import('./components/AdminDataEditor'));
@@ -85,6 +86,10 @@ const SettingsPanel = lazy(() => import('./components/SettingsPanel'));
 const SchemeApprovalsView = lazy(() => import('./views/SchemeApprovalsView'));
 const SubstitutionAnalyticsView = lazy(() => import('./components/SubstitutionAnalyticsView'));
 const MissingDailyReportsTeacherwiseView = lazy(() => import('./components/MissingDailyReportsTeacherwiseView'));
+const FundCollectionModule = lazy(() => import('./components/FundCollectionModule'));
+const ExpenseManagementModule = lazy(() => import('./components/ExpenseManagementModule'));
+const FinancialDashboard = lazy(() => import('./components/FinancialDashboard'));
+const LessonCascading = lazy(() => import('./components/LessonCascading'));
 
 // Keep lightweight components as regular imports
 import { periodToTimeString, todayIST, formatDateForInput, formatLocalDate } from './utils/dateUtils';
@@ -592,31 +597,120 @@ const App = () => {
       return items;
     }
 
-    // Super Admin gets access to everything (monitoring & management, not teacher workflows)
-    if (hasAnyRole(['super admin', 'superadmin', 'super_admin'])) {
+    // Admin gets access to everything (monitoring & management, not teacher workflows)
+    if (hasAnyRole(['admin'])) {
       items.push(
+        // User Management
         { id: 'users', label: 'User Management', icon: Users },
-        { id: 'audit-log', label: 'Audit Log', icon: Shield },
-        { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
-        { id: 'substitution-analytics', label: 'Substitution Analytics', icon: BarChart2 },
-        { id: 'missing-daily-reports', label: 'Missing Daily Reports', icon: AlertTriangle },
+        // Academic Oversight Group
+        { 
+          id: 'academic-oversight-group', 
+          label: 'Academic Oversight', 
+          icon: BookCheck, 
+          isGroup: true,
+          children: [
+            { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
+            { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
+            { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
+            { id: 'missing-daily-reports', label: 'Missing Reports', icon: AlertTriangle }
+          ]
+        },
+        // Substitutions Group
+        { 
+          id: 'substitutions-group', 
+          label: 'Substitutions', 
+          icon: UserPlus, 
+          isGroup: true,
+          children: [
+            { id: 'substitutions', label: 'Manage Substitutions', icon: UserPlus },
+            { id: 'substitution-analytics', label: 'Analytics', icon: BarChart2 }
+          ]
+        },
+        // Timetable Group
+        { 
+          id: 'timetable-group', 
+          label: 'Timetable', 
+          icon: CalendarDays, 
+          isGroup: true,
+          children: [
+            { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
+            { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays }
+          ]
+        },
+        // Standalone Items
+        { id: 'assessments', label: 'Assessments', icon: Award },
         { id: 'class-data', label: 'School Data', icon: UserCheck },
         { id: 'admin-data', label: 'Admin Data', icon: Edit2 },
-        { id: 'settings', label: 'Settings', icon: Settings },
-        { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
-        { id: 'assessments', label: 'Assessments', icon: Award },
-        { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
-        { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
-        { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
-        { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
-        { id: 'fee-collection', label: 'Fee Collection', icon: DollarSign }
+        // Financial Group
+        { 
+          id: 'financial-group', 
+          label: 'Financial', 
+          icon: DollarSign, 
+          isGroup: true,
+          children: [
+            { id: 'fee-collection', label: 'Fee Collection', icon: DollarSign },
+            { id: 'fund-collection', label: 'Fund Collection', icon: DollarSign },
+            { id: 'expense-management', label: 'Expense Management', icon: DollarSign },
+            { id: 'financial-dashboard', label: 'Dashboard', icon: Target }
+          ]
+        },
+        // System Group
+        { 
+          id: 'system-group', 
+          label: 'System', 
+          icon: Settings, 
+          isGroup: true,
+          children: [
+            { id: 'lesson-cascading', label: 'Lesson Cascading', icon: Calendar },
+            { id: 'audit-log', label: 'Audit Log', icon: Shield },
+            { id: 'settings', label: 'Settings', icon: Settings }
+          ]
+        }
       );
       return items;
     }
 
-    // Accounts role: Only Fee Collection module (plus dashboard)
+    // Accounts role: Fee Collection + Financial
     if (hasAnyRole(['accounts', 'accountant', 'account'])) {
-      items.push({ id: 'fee-collection', label: 'Fee Collection', icon: DollarSign });
+      items.push(
+        { id: 'fee-collection', label: 'Fee Collection', icon: DollarSign },
+        { id: 'fund-collection', label: 'Fund Collection', icon: DollarSign },
+        { id: 'expense-management', label: 'Expense Management', icon: DollarSign },
+        { id: 'financial-dashboard', label: 'Financial Dashboard', icon: Target }
+      );
+      return items;
+    }
+
+    // HR role: Substitutions, Timetable, Financial
+    if (hasAnyRole(['hr', 'h r'])) {
+      items.push(
+        // Substitutions Group
+        { 
+          id: 'substitutions-group', 
+          label: 'Substitutions', 
+          icon: UserPlus, 
+          isGroup: true,
+          children: [
+            { id: 'substitutions', label: 'Manage Substitutions', icon: UserPlus },
+            { id: 'substitution-analytics', label: 'Analytics', icon: BarChart2 }
+          ]
+        },
+        // Timetable Group
+        { 
+          id: 'timetable-group', 
+          label: 'Timetable', 
+          icon: CalendarDays, 
+          isGroup: true,
+          children: [
+            { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
+            { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays }
+          ]
+        },
+        // Financial
+        { id: 'fee-collection', label: 'Fee Defaulters', icon: DollarSign },
+        { id: 'fund-collection', label: 'Fund Collection', icon: DollarSign },
+        { id: 'expense-management', label: 'Expense Management', icon: DollarSign }
+      );
       return items;
     }
 
@@ -627,59 +721,89 @@ const App = () => {
         { id: 'timetable', label: 'Timetable', icon: Calendar },
         { id: 'my-substitutions', label: 'My Substitutions', icon: UserPlus },
         { id: 'reports', label: 'Daily Reports (Enhanced)', icon: FileText },
-        { id: 'my-daily-reports', label: 'My Reports History', icon: FileClock }
+        { id: 'my-daily-reports', label: 'My Reports History', icon: FileClock },
+        { id: 'fund-collection', label: 'Fund Collection', icon: DollarSign },
+        { id: 'expense-management', label: 'Expense Claims', icon: DollarSign }
       );
       // Teachers and class teachers can also manage exams: view available exams,
       // enter marks for their classes and subjects, and view marks.
       items.push({ id: 'assessments', label: 'Assessments', icon: Award });
     }
 
-    // Daily reporting teachers should have access to daily reports functionality
-    if (hasAnyRole(['daily reporting teachers'])) {
-      items.push(
-        { id: 'timetable', label: 'Timetable', icon: Calendar },
-        { id: 'reports', label: 'Daily Reports (Enhanced)', icon: FileText }
-      );
-    }
-
     if (hasRole('class teacher')) {
       items.push(
         { id: 'class-data', label: 'Class Data', icon: UserCheck },
         { id: 'class-students', label: 'Students', icon: Users },
-        { id: 'fee-collection', label: 'Fee Collection', icon: DollarSign }
+        { id: 'fee-collection', label: 'Fee Defaulters', icon: DollarSign }
       );
     }
 
     if (hasRole('h m')) {
       items.push(
-        { id: 'audit-log', label: 'Audit Log', icon: Shield },
-        { id: 'settings', label: 'Settings', icon: Settings },
-        { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
-        { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
-        { id: 'daily-oversight', label: 'Daily Oversight (Enhanced)', icon: ClipboardCheck },
-        { id: 'substitutions', label: 'Substitutions', icon: UserPlus },
-        { id: 'substitution-analytics', label: 'Substitution Analytics', icon: BarChart2 },
-        { id: 'missing-daily-reports', label: 'Missing Daily Reports', icon: AlertTriangle },
-        { id: 'class-data', label: 'School Data', icon: UserCheck },
-        { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
-        { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays },
+        // Academic Oversight Group
+        { 
+          id: 'academic-oversight-group', 
+          label: 'Academic Oversight', 
+          icon: BookCheck, 
+          isGroup: true,
+          children: [
+            { id: 'scheme-approvals', label: 'Scheme Approvals', icon: FileCheck },
+            { id: 'lesson-approvals', label: 'Lesson Approvals', icon: BookCheck },
+            { id: 'daily-oversight', label: 'Daily Oversight', icon: ClipboardCheck },
+            { id: 'missing-daily-reports', label: 'Missing Reports', icon: AlertTriangle },
+            { id: 'daily-reports-management', label: 'All Reports', icon: FileText }
+          ]
+        },
+        // Substitutions Group
+        { 
+          id: 'substitutions-group', 
+          label: 'Substitutions', 
+          icon: UserPlus, 
+          isGroup: true,
+          children: [
+            { id: 'substitutions', label: 'Manage Substitutions', icon: UserPlus },
+            { id: 'substitution-analytics', label: 'Analytics', icon: BarChart2 }
+          ]
+        },
+        // Timetable Group
+        { 
+          id: 'timetable-group', 
+          label: 'Timetable', 
+          icon: CalendarDays, 
+          isGroup: true,
+          children: [
+            { id: 'class-period-timetable', label: 'Class-Period View', icon: LayoutGrid },
+            { id: 'full-timetable', label: 'Full Timetable', icon: CalendarDays }
+          ]
+        },
+        // Standalone Items
         { id: 'assessments', label: 'Assessments', icon: Award },
-        { id: 'fee-collection', label: 'Fee Collection', icon: DollarSign }
-      );
-      // Additional management views for the headmaster
-      items.push(
-        { id: 'daily-reports-management', label: 'All Reports', icon: FileText }
-      );
-    }
-
-    // Admin role should also be able to access reporting dashboards.
-    // Keep this scoped (reports-only) unless explicitly expanded.
-    if (!hasRole('h m') && hasAnyRole(['admin', 'administrator'])) {
-      items.push(
-        { id: 'audit-log', label: 'Audit Log', icon: Shield },
-        { id: 'settings', label: 'Settings', icon: Settings },
-        { id: 'daily-reports-management', label: 'All Reports', icon: FileText },
-        { id: 'missing-daily-reports', label: 'Missing Daily Reports', icon: AlertTriangle }
+        { id: 'class-data', label: 'School Data', icon: UserCheck },
+        { id: 'fee-collection', label: 'Fee Defaulters', icon: DollarSign },
+        // Financial Group
+        { 
+          id: 'financial-group', 
+          label: 'Financial', 
+          icon: DollarSign, 
+          isGroup: true,
+          children: [
+            { id: 'fund-collection', label: 'Fund Collection', icon: DollarSign },
+            { id: 'expense-management', label: 'Expense Management', icon: DollarSign },
+            { id: 'financial-dashboard', label: 'Dashboard', icon: Target }
+          ]
+        },
+        // System Group
+        { 
+          id: 'system-group', 
+          label: 'System', 
+          icon: Settings, 
+          isGroup: true,
+          children: [
+            { id: 'lesson-cascading', label: 'Lesson Cascading', icon: Calendar },
+            { id: 'audit-log', label: 'Audit Log', icon: Shield },
+            { id: 'settings', label: 'Settings', icon: Settings }
+          ]
+        }
       );
     }
 
@@ -837,7 +961,7 @@ const App = () => {
               pendingReports: 0
             };
             setInsights(newInsights);
-          } else if (hasAnyRole(['teacher','class teacher','daily reporting teachers'])) {
+          } else if (hasAnyRole(['teacher','class teacher'])) {
             // Teacher view: compute classes and subjects from user object
             // Some users (notably class teachers) may not have `user.classes` populated; fall back to classTeacherFor.
             const teachingClassesFromUser = Array.isArray(currentUser?.classes)
@@ -1098,8 +1222,8 @@ const App = () => {
     // Teacher dashboard: load today's timetable + plans in a single call.
     useEffect(() => {
       if (!currentUser?.email) return;
-      if (!hasAnyRole(['teacher', 'class teacher', 'daily reporting teachers'])) return;
-      if (hasAnyRole(['h m', 'super admin', 'superadmin', 'super_admin'])) return;
+      if (!hasAnyRole(['teacher', 'class teacher'])) return;
+      if (hasAnyRole(['h m', 'admin', 'admin', 'admin'])) return;
 
       let cancelled = false;
 
@@ -1210,8 +1334,8 @@ const App = () => {
 
     useEffect(() => {
       if (!currentUser?.email) return;
-      if (!hasAnyRole(['teacher', 'class teacher', 'daily reporting teachers'])) return;
-      if (hasAnyRole(['h m', 'super admin', 'superadmin', 'super_admin'])) return;
+      if (!hasAnyRole(['teacher', 'class teacher'])) return;
+      if (hasAnyRole(['h m', 'admin', 'admin', 'admin'])) return;
 
       const t = setInterval(() => setNowTick(Date.now()), 30_000);
       return () => clearInterval(t);
@@ -1361,16 +1485,16 @@ const App = () => {
           </div>
         </div>
 
-  {/* Check Super Admin FIRST - highest priority */}
-  {user?.roles && (user.roles.includes('super admin') || user.roles.includes('superadmin') || user.roles.includes('super_admin')) ? (
+  {/* Check admin FIRST - highest priority */}
+  {user?.roles && user.roles.includes('admin') ? (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6">
             <Suspense fallback={<div className="flex items-center justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>}>
-              <SuperAdminDashboard user={user} onNavigate={setActiveView} />
+              <AdminDashboard user={user} onNavigate={setActiveView} />
             </Suspense>
           </div>
     ) : user && hasRole('h m') ? (
       <HMDashboardView insights={insights} />
-    ) : user && hasAnyRole(['teacher','class teacher','daily reporting teachers']) ? (
+    ) : user && hasAnyRole(['teacher','class teacher']) ? (
       <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4">
               <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
@@ -1679,6 +1803,14 @@ const App = () => {
   // Sidebar component
   const Sidebar = () => {
     const navigationItems = getNavigationItems();
+    const [expandedGroups, setExpandedGroups] = useState({});
+    
+    const toggleGroup = (groupId) => {
+      setExpandedGroups(prev => ({
+        ...prev,
+        [groupId]: !prev[groupId]
+      }));
+    };
     
     // Debug: Log navigation items
     if (navigationItems.length === 0) {
@@ -1725,6 +1857,58 @@ const App = () => {
                 <nav className="px-2 space-y-1">
                   {navigationItems.map((item) => {
                     const Icon = item.icon;
+                    
+                    // Render group with children
+                    if (item.isGroup && item.children) {
+                      const isExpanded = expandedGroups[item.id];
+                      return (
+                        <div key={item.id} className="space-y-1">
+                          <button
+                            onClick={() => toggleGroup(item.id)}
+                            className="text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-200 dark:hover:bg-gray-700 dark:hover:text-white group flex items-center justify-between px-3 py-2 text-sm font-medium rounded-md w-full text-left transition-colors duration-200"
+                          >
+                            <div className="flex items-center">
+                              <Icon className="mr-3 h-5 w-5" />
+                              {item.label}
+                            </div>
+                            <ChevronDown 
+                              className={`h-4 w-4 transition-transform duration-200 ${
+                                isExpanded ? 'transform rotate-180' : ''
+                              }`}
+                            />
+                          </button>
+                          
+                          {isExpanded && (
+                            <div className="ml-4 space-y-1">
+                              {item.children.map((child) => {
+                                const ChildIcon = child.icon;
+                                return (
+                                  <button
+                                    key={child.id}
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      setActiveView(child.id);
+                                      setSidebarOpen(false);
+                                    }}
+                                    className={`${
+                                      activeView === child.id
+                                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200'
+                                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white'
+                                    } group flex items-center px-3 py-2 text-sm rounded-md w-full text-left transition-colors duration-200`}
+                                  >
+                                    <ChildIcon className="mr-3 h-4 w-4" />
+                                    {child.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                    
+                    // Render regular item
                     return (
                       <button
                         key={item.id}
@@ -1945,6 +2129,14 @@ const App = () => {
                 return <ClassPeriodSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
               case 'fee-collection':
                 return <ModernFeeCollection user={user} apiBaseUrl={api.getBaseUrl()} />;
+              case 'fund-collection':
+                return <FundCollectionModule user={user} />;
+              case 'expense-management':
+                return <ExpenseManagementModule user={user} />;
+              case 'financial-dashboard':
+                return <FinancialDashboard user={user} />;
+              case 'lesson-cascading':
+                return <LessonCascading user={user} />;
               default:
                 return <Dashboard />;
             }
@@ -1959,7 +2151,7 @@ const App = () => {
     const [schemes, setSchemes] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
-    const [editingScheme, setEditingScheme] = useState(null);
+
     const [deletingScheme, setDeletingScheme] = useState(null);
     const [formData, setFormData] = useState({
       class: '',
@@ -1972,6 +2164,7 @@ const App = () => {
     });
     const [planningHelper, setPlanningHelper] = useState(null);
     const [loadingHelper, setLoadingHelper] = useState(false);
+    const [schemeGateCheck, setSchemeGateCheck] = useState(null); // null | { allowed, message }
     
     // Filter states for submitted schemes
     const [schemeFilters, setSchemeFilters] = useState({
@@ -2027,24 +2220,8 @@ const App = () => {
       }
     };
 
-    // Handle edit scheme - open form with existing data
-    const handleEditScheme = (scheme) => {
-      setEditingScheme(scheme);
-      setFormData({
-        class: scheme.class || '',
-        subject: scheme.subject || '',
-        term: scheme.term || '',
-        unit: scheme.unit || '',
-        chapter: scheme.chapter || '',
-        month: scheme.month || '',
-        noOfSessions: scheme.noOfSessions || ''
-      });
-      setShowForm(true);
-    };
-
-    // Cancel edit
-    const cancelEdit = () => {
-      setEditingScheme(null);
+    // Cancel form
+    const cancelForm = () => {
       setShowForm(false);
       setFormData({
         class: '',
@@ -2090,6 +2267,17 @@ const App = () => {
       loadPlanningHelper();
     }, [formData.class, formData.subject, formData.term, user?.email]);
 
+    // Check if teacher can submit a new scheme whenever class+subject change
+    useEffect(() => {
+
+      if (!formData.class || !formData.subject || !user?.email) { setSchemeGateCheck(null); return; }
+      let cancelled = false;
+      api.checkCanSubmitScheme(user.email, formData.class, formData.subject)
+        .then(result => { if (!cancelled) setSchemeGateCheck(result); })
+        .catch(() => { if (!cancelled) setSchemeGateCheck(null); });
+      return () => { cancelled = true; };
+    }, [formData.class, formData.subject, user?.email]);
+
     const handleSubmit = async (e) => {
       e.preventDefault();
       if (!user) return;
@@ -2097,7 +2285,12 @@ const App = () => {
       let shouldCloseForm = true;
 
       try {
-        setSubmitting({ active: true, message: editingScheme ? 'Updating scheme...' : 'Submitting scheme...' });
+        setSubmitting({ active: true, message: 'Submitting scheme...' });
+
+        // GATE: block new scheme if previous is incomplete
+        if (schemeGateCheck && !schemeGateCheck.allowed) {
+          throw new Error(schemeGateCheck.message || 'Complete the previous chapter before submitting a new scheme.');
+        }
         
         // Submit the scheme with timetable validation
         const schemeData = {
@@ -2111,25 +2304,12 @@ const App = () => {
           noOfSessions: formData.noOfSessions
         };
         
-        let result;
+        // Submit new scheme
+        const response = await api.submitPlan(user.email, schemeData);
+        const result = response?.data || response; // Unwrap {status,data,timestamp}
         
-        if (editingScheme) {
-          // Update existing scheme
-          const response = await api.updateScheme(editingScheme.schemeId, user.email, schemeData);
-          result = response?.data || response;
-          if (result?.success) {
-            success('Updated', 'Scheme updated successfully');
-          } else {
-            throw new Error(result?.error || 'Update failed');
-          }
-        } else {
-          // Submit new scheme
-          const response = await api.submitPlan(user.email, schemeData);
-          result = response?.data || response; // Unwrap {status,data,timestamp}
-        }
-        
-        // Check if validation failed (only for new submissions)
-        if (!editingScheme && result && !result.ok && result.error === 'Session count mismatch') {
+        // Check if validation failed
+        if (result && !result.ok && result.error === 'Session count mismatch') {
           const validation = result.validation;
           
           let confirmMessage = `${validation.message}\n\n`;
@@ -2181,9 +2361,13 @@ const App = () => {
           // Success - normal submission
           const message = result.validation?.message || 'Scheme submitted successfully!';
           success('Scheme Submitted', message);
-        } else {
-          // Other error
-          throw new Error(result?.error || 'Submission failed');
+        } else if (result?.blocked) {
+          // Blocked by previous scheme gate - show detailed error from backend
+          const errorMessage = result?.message || result?.error || 'Cannot submit new scheme. Complete the previous chapter first.';
+          throw new Error(errorMessage);
+        } else if (!result?.ok) {
+          // Any other submission failure
+          throw new Error(result?.error || result?.message || 'Scheme submission failed');
         }
         
         // Refresh schemes list
@@ -2206,7 +2390,6 @@ const App = () => {
       } finally {
         setSubmitting({ active: false, message: '' });
         if (shouldCloseForm) {
-          setEditingScheme(null);
           setShowForm(false);
           setFormData({
             class: '',
@@ -2269,12 +2452,26 @@ const App = () => {
         {showForm && (
           <div className="bg-white rounded-xl shadow-sm p-6">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold">{editingScheme ? 'Edit Scheme of Work' : 'Submit New Scheme of Work'}</h2>
-              <button onClick={cancelEdit} className="text-gray-500 hover:text-gray-700">
+              <h2 className="text-lg font-semibold">Submit New Scheme of Work</h2>
+              <button onClick={() => setShowForm(false)} className="text-gray-500 hover:text-gray-700">
                 <X className="h-5 w-5" />
               </button>
             </div>
             
+            {/* Previous scheme gate warning */}
+            {schemeGateCheck && !schemeGateCheck.allowed && (
+              <div className="mb-4 p-4 bg-red-50 border border-red-300 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <span className="text-red-600 font-bold text-lg leading-none mt-0.5">⛔</span>
+                  <div>
+                    <p className="font-semibold text-red-700 text-sm mb-1">Cannot submit new scheme</p>
+                    <p className="text-red-600 text-sm whitespace-pre-line">{schemeGateCheck.message}</p>
+                    <p className="text-red-500 text-xs mt-2">Please complete the daily report for the last session and mark it "Chapter Complete" before submitting a new scheme.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Planning Assistant Panel */}
             {planningHelper && planningHelper.success && (
               <div className={`mb-6 p-4 rounded-lg border-2 ${
@@ -2499,7 +2696,8 @@ const App = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  disabled={schemeGateCheck !== null && !schemeGateCheck.allowed}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Submit Scheme
                 </button>
@@ -2597,23 +2795,14 @@ const App = () => {
                         View
                       </button>
                       {scheme.status === 'Pending' && (
-                        <>
-                          <button
-                            onClick={() => handleEditScheme(scheme)}
-                            className="bg-yellow-100 hover:bg-yellow-200 dark:bg-yellow-900 dark:hover:bg-yellow-800 text-yellow-700 dark:text-yellow-200 px-3 py-2 rounded-lg"
-                            title="Edit scheme"
-                          >
-                            <Edit2 className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteScheme(scheme)}
-                            disabled={deletingScheme === scheme.schemeId}
-                            className="bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-600 dark:text-red-200 px-3 py-2 rounded-lg disabled:opacity-50"
-                            title="Delete scheme"
-                          >
-                            {deletingScheme === scheme.schemeId ? '...' : <Trash2 className="h-4 w-4" />}
-                          </button>
-                        </>
+                        <button
+                          onClick={() => handleDeleteScheme(scheme)}
+                          disabled={deletingScheme === scheme.schemeId}
+                          className="bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-600 dark:text-red-200 px-3 py-2 rounded-lg disabled:opacity-50"
+                          title="Delete scheme"
+                        >
+                          {deletingScheme === scheme.schemeId ? '...' : <Trash2 className="h-4 w-4" />}
+                        </button>
                       )}
                     </div>
                   </div>
@@ -2659,23 +2848,14 @@ const App = () => {
                         <Eye className="h-4 w-4" />
                       </button>
                       {scheme.status === 'Pending' && (
-                        <>
-                          <button
-                            onClick={() => handleEditScheme(scheme)}
-                            className="text-yellow-600 dark:text-yellow-400 hover:text-yellow-900 dark:hover:text-yellow-300 mr-3"
-                            title="Edit scheme"
-                          >
-                            <Edit2 className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteScheme(scheme)}
-                            disabled={deletingScheme === scheme.schemeId}
-                            className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 disabled:opacity-50"
-                            title="Delete scheme"
-                          >
-                            {deletingScheme === scheme.schemeId ? '...' : <Trash2 className="h-4 w-4" />}
-                          </button>
-                        </>
+                        <button
+                          onClick={() => handleDeleteScheme(scheme)}
+                          disabled={deletingScheme === scheme.schemeId}
+                          className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 disabled:opacity-50"
+                          title="Delete scheme"
+                        >
+                          {deletingScheme === scheme.schemeId ? '...' : <Trash2 className="h-4 w-4" />}
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -3602,8 +3782,8 @@ const App = () => {
         try {
           if (!user) return;
           
-          // For HM/Admin role, don't fetch teacher timetable (they won't have entries)
-          if (user.role === 'hm' || user.role === 'admin') {
+          // For HM role, don't fetch teacher timetable (they won't have entries)
+          if (user.role === 'hm') {
             setTimetable([]);
             return;
           }
@@ -3644,8 +3824,8 @@ const App = () => {
           </div>
         </div>
 
-        {/* Show appropriate view for HM/Admin */}
-        {(user?.role === 'hm' || user?.role === 'admin') ? (
+        {/* Show appropriate view for HM */}
+        {user?.role === 'hm' ? (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden p-8">
             <div className="text-center">
               <Calendar className="h-16 w-16 text-gray-400 dark:text-gray-600 mx-auto mb-4" />
@@ -3653,7 +3833,7 @@ const App = () => {
                 View School Timetables
               </h3>
               <p className="text-gray-600 dark:text-gray-400 mb-6">
-                As an administrator, you can view the full school timetable or daily schedules.
+                As the head master, you can view the full school timetable or daily schedules.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <button
@@ -7609,6 +7789,11 @@ const App = () => {
     const [availableSubstitutes, setAvailableSubstitutes] = useState([]);
     const [loadingTeacherTimetable, setLoadingTeacherTimetable] = useState(false);
     
+    // Subject dropdown state for substitute teacher
+    const [availableSubjects, setAvailableSubjects] = useState([]);
+    const [customSubject, setCustomSubject] = useState('');
+    const [loadingSubjects, setLoadingSubjects] = useState(false);
+    
     // Data fetched from the API; initially empty
     const [absentTeachers, setAbsentTeachers] = useState([]);
     const [freeTeachers, setFreeTeachers] = useState([]);
@@ -7852,12 +8037,82 @@ const App = () => {
       }
     }, [formData.date, formData.period, formData.absentTeacher]);
 
+    // Fetch subjects that the substitute teacher teaches in the selected class
+    useEffect(() => {
+      const fetchSubjects = async () => {
+        if (formData.substituteTeacher && formData.class) {
+          setLoadingSubjects(true);
+          try {
+            console.log('🔍 Fetching subjects for:', {
+              teacher: formData.substituteTeacher,
+              class: formData.class
+            });
+            
+            const response = await api.getTeacherSubjectsForClass(
+              formData.substituteTeacher, 
+              formData.class,
+              { noCache: true }
+            );
+            
+            console.log('📚 Subjects response:', response);
+            
+            if (response && response.success && Array.isArray(response.subjects)) {
+              setAvailableSubjects(response.subjects);
+              
+              // Auto-select subject intelligently
+              if (!formData.substituteSubject) {
+                // Priority 1: Use regularSubject if it's in the list
+                if (formData.regularSubject && response.subjects.includes(formData.regularSubject)) {
+                  setFormData(prev => ({ ...prev, substituteSubject: formData.regularSubject }));
+                  console.log('✅ Auto-selected regular subject:', formData.regularSubject);
+                } else {
+                  // Priority 2: Use first non-Other subject
+                  const firstNonOther = response.subjects.find(s => s !== 'Other');
+                  if (firstNonOther) {
+                    setFormData(prev => ({ ...prev, substituteSubject: firstNonOther }));
+                    console.log('✅ Auto-selected first subject:', firstNonOther);
+                  } else {
+                    // Priority 3: Only "Other" available, select it
+                    setFormData(prev => ({ ...prev, substituteSubject: 'Other' }));
+                    console.log('✅ Auto-selected Other (no subjects in timetable)');
+                  }
+                }
+              }
+            } else {
+              console.warn('⚠️ No subjects found, using Other only');
+              setAvailableSubjects(['Other']);
+              setFormData(prev => ({ ...prev, substituteSubject: 'Other' }));
+            }
+          } catch (err) {
+            console.error('❌ Error fetching teacher subjects:', err);
+            setAvailableSubjects(['Other']);
+            setFormData(prev => ({ ...prev, substituteSubject: 'Other' }));
+          } finally {
+            setLoadingSubjects(false);
+          }
+        } else {
+          setAvailableSubjects([]);
+          setCustomSubject('');
+        }
+      };
+      
+      fetchSubjects();
+    }, [formData.substituteTeacher, formData.class]);
+
     const handleSubmitSubstitution = async (e) => {
       e.preventDefault();
       try {
+        // If "Other" is selected, use the custom subject value
+        const finalFormData = {
+          ...formData,
+          substituteSubject: formData.substituteSubject === 'Other' && customSubject 
+            ? customSubject 
+            : formData.substituteSubject
+        };
+        
         // Persist the substitution using the global submit helper for
         // consistent UX.
-        await withSubmit('Assigning substitution...', () => api.assignSubstitution(formData));
+        await withSubmit('Assigning substitution...', () => api.assignSubstitution(finalFormData));
         
         // Immediately refresh the substitution list for the selected date
         await refreshSubstitutions(formData.date);
@@ -7876,6 +8131,8 @@ const App = () => {
           substituteTeacher: '',
           substituteSubject: ''
         });
+        setAvailableSubjects([]);
+        setCustomSubject('');
       } catch (err) {
         console.error('Failed to assign substitution:', err);
       }
@@ -8204,14 +8461,20 @@ const App = () => {
                               ? 'bg-green-200 border-green-400' 
                               : 'bg-white border-gray-200 hover:bg-green-100'
                           }`}
-                          onClick={() => setFormData({
-                            ...formData, 
-                            substituteTeacher: teacher.email || teacher.name,
-                            substituteSubject: formData.regularSubject // Default to same subject
-                          })}
+                          onClick={() => {
+                            // Set teacher and clear subject - let useEffect fetch and set subjects
+                            setFormData({
+                              ...formData, 
+                              substituteTeacher: teacher.email || teacher.name,
+                              substituteSubject: '' // Clear subject, will be auto-filled after fetch
+                            });
+                            setCustomSubject(''); // Clear custom subject
+                          }}
                         >
                           <div className="text-sm font-medium">{teacher.name}</div>
-                          <div className="text-xs text-gray-600">Available</div>
+                          <div className="text-xs text-gray-600">
+                            {teacher.email ? teacher.email : 'Available'}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -8236,14 +8499,66 @@ const App = () => {
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Substitute Subject</label>
-                    <input
-                      type="text"
-                      value={formData.substituteSubject}
-                      onChange={(e) => setFormData({...formData, substituteSubject: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                      required
-                    />
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Substitute Subject
+                      {loadingSubjects && <span className="text-xs text-gray-500 ml-2">(Loading...)</span>}
+                    </label>
+                    {availableSubjects.length > 0 ? (
+                      <>
+                        {availableSubjects.length > 1 && availableSubjects[0] !== 'Other' && (
+                          <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs">
+                            <span className="font-medium text-blue-900">📚 Subjects this teacher teaches in {formData.class}:</span>
+                            <span className="text-blue-700 ml-1">
+                              {availableSubjects.filter(s => s !== 'Other').join(', ')}
+                            </span>
+                          </div>
+                        )}
+                        <select
+                          value={formData.substituteSubject}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setFormData({...formData, substituteSubject: value});
+                            if (value !== 'Other') {
+                              setCustomSubject(''); // Clear custom input if not "Other"
+                            }
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          required
+                          disabled={loadingSubjects}
+                        >
+                          <option value="">Select Subject</option>
+                          {availableSubjects.map((subject, idx) => (
+                            <option key={`subject-${idx}`} value={subject}>
+                              {subject === 'Other' ? '➕ Other (Custom Subject)' : subject}
+                            </option>
+                          ))}
+                        </select>
+                        {availableSubjects.length === 1 && availableSubjects[0] === 'Other' && (
+                          <p className="text-xs text-amber-600 mt-1">
+                            💡 This teacher doesn't teach any subjects in this class. Enter a custom subject below.
+                          </p>
+                        )}
+                        {formData.substituteSubject === 'Other' && (
+                          <input
+                            type="text"
+                            value={customSubject}
+                            onChange={(e) => setCustomSubject(e.target.value)}
+                            placeholder="Enter custom subject (e.g., Activity, Library)"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg mt-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            required
+                          />
+                        )}
+                      </>
+                    ) : (
+                      <input
+                        type="text"
+                        value={formData.substituteSubject}
+                        onChange={(e) => setFormData({...formData, substituteSubject: e.target.value})}
+                        placeholder="Enter subject"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        required
+                      />
+                    )}
                   </div>
                 </div>
               )}
@@ -9292,11 +9607,11 @@ const App = () => {
   // Class Data View (Class Teacher only)
   const ClassDataView = () => {
     // IMPORTANT: use the effective logged-in user (Google login / local login / restored state)
-    // Otherwise HM/Super Admin may be treated as a class teacher with no assigned class.
+    // Otherwise HM/admin may be treated as a class teacher with no assigned class.
     const currentUser = effectiveUser || user;
 
-    // Check if user is Super Admin or HM - they can access all classes
-    const isSuperAdminOrHM = hasAnyRole(['super admin', 'superadmin', 'super_admin', 'h m']);
+    // Check if user is admin or HM - they can access all classes
+    const isadminOrHM = hasAnyRole(['admin', 'admin', 'admin', 'h m']);
     
     // Fix: Ensure className is a string, not an array
     const rawClassName = currentUser?.classTeacherFor || '';
@@ -9311,9 +9626,9 @@ const App = () => {
     const [error, setError] = useState(null);
     const [expandedStudents, setExpandedStudents] = useState({});
 
-    // Fetch available classes for Super Admin/HM
+    // Fetch available classes for admin/HM
     useEffect(() => {
-      if (isSuperAdminOrHM) {
+      if (isadminOrHM) {
         const fetchClasses = async () => {
           try {
             setLoading(true);
@@ -9337,14 +9652,14 @@ const App = () => {
           setLoading(false);
         }
       }
-    }, [isSuperAdminOrHM, defaultClassName, selectedClass]);
+    }, [isadminOrHM, defaultClassName, selectedClass]);
 
     // If class teacher class arrives after login state hydration, sync it once.
     useEffect(() => {
-      if (!isSuperAdminOrHM && defaultClassName && !selectedClass) {
+      if (!isadminOrHM && defaultClassName && !selectedClass) {
         setSelectedClass(defaultClassName);
       }
-    }, [isSuperAdminOrHM, defaultClassName, selectedClass]);
+    }, [isadminOrHM, defaultClassName, selectedClass]);
 
     useEffect(() => {
       const fetchClassData = async () => {
@@ -9389,8 +9704,8 @@ const App = () => {
       }));
     };
 
-    // For HM/Super Admin: Show loading state while fetching classes (check this FIRST)
-    if (isSuperAdminOrHM && loading && !selectedClass) {
+    // For HM/admin: Show loading state while fetching classes (check this FIRST)
+    if (isadminOrHM && loading && !selectedClass) {
       return (
         <div className="space-y-6">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">School Data</h1>
@@ -9405,7 +9720,7 @@ const App = () => {
     }
 
     // Show error only for regular class teachers without assigned class
-    if (!isSuperAdminOrHM && !defaultClassName) {
+    if (!isadminOrHM && !defaultClassName) {
       return (
         <div className="space-y-6">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Class Data</h1>
@@ -9420,7 +9735,7 @@ const App = () => {
       return (
         <div className="space-y-6">
           <h1 className="text-2xl font-bold text-gray-900">
-            {isSuperAdminOrHM ? 'School Data' : 'Class Data'} – {stripStdPrefix(selectedClass)}
+            {isadminOrHM ? 'School Data' : 'Class Data'} – {stripStdPrefix(selectedClass)}
           </h1>
           <div className="bg-white rounded-xl shadow-sm p-6">
             <p className="text-gray-600">Loading class data...</p>
@@ -9436,11 +9751,11 @@ const App = () => {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">
-            {isSuperAdminOrHM ? 'School Data' : 'Class Data'} {selectedClass && `– ${stripStdPrefix(selectedClass)}`}
+            {isadminOrHM ? 'School Data' : 'Class Data'} {selectedClass && `– ${stripStdPrefix(selectedClass)}`}
           </h1>
           
-          {/* Class Selector for Super Admin/HM */}
-          {isSuperAdminOrHM && availableClasses.length > 0 && (
+          {/* Class Selector for admin/HM */}
+          {isadminOrHM && availableClasses.length > 0 && (
             <select
               value={selectedClass}
               onChange={(e) => setSelectedClass(e.target.value)}
@@ -10681,8 +10996,8 @@ const App = () => {
 
     useEffect(() => {
       if (!email) return;
-      if (!hasAnyRole(['teacher', 'class teacher', 'daily reporting teachers'])) return;
-      if (hasAnyRole(['h m', 'super admin', 'superadmin', 'super_admin'])) return;
+      if (!hasAnyRole(['teacher', 'class teacher'])) return;
+      if (hasAnyRole(['h m', 'admin', 'admin', 'admin'])) return;
 
       let cancelled = false;
 

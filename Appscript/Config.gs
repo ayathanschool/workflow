@@ -88,7 +88,16 @@ const SHEETS = {
   Notifications: ['email','type','message','payload','createdAt','readAt'],
   
   // === LESSON RESCHEDULING TRACKING (1 sheet) ===
-  CascadeHistory: ['cascadeId','cascadeDate','startDate','performedBy','performedAt','lessonPlanId','oldDate','newDate','teacherEmail','class','subject','status']
+  CascadeHistory: ['cascadeId','cascadeDate','startDate','performedBy','performedAt','lessonPlanId','oldDate','newDate','oldPeriod','newPeriod','teacherEmail','class','subject','status'],
+  
+  // === HOLIDAY MANAGEMENT (1 sheet) ===
+  UndeclaredHolidays: ['id','date','reason','markedBy','markedAt','status'],
+  
+  // === FUND COLLECTION & EXPENSE MANAGEMENT (4 sheets) ===
+  FundCollectionRequests: ['requestId','teacherEmail','teacherName','class','purpose','amountPerStudent','totalStudents','expectedAmount','startDate','endDate','selectedStudents','status','notes','createdAt','submittedAt','approvedBy','approvedAt','rejectedBy','rejectedAt','rejectionReason','revisedBy','revisedAt','revisionNotes','collectedAmount','totalDeposited','acknowledgedBy','acknowledgedAt','completedAt'],
+  FundDeposits: ['depositId','requestId','depositDate','depositAmount','depositedBy','depositedByName','notes','acknowledgedBy','acknowledgedAt','createdAt'],
+  FundStudentPayments: ['paymentId','requestId','studentAdmNo','studentName','expectedAmount','paidAmount','paymentStatus','paidDate','markedBy','notes','createdAt','updatedAt'],
+  ExpenseRequests: ['requestId','teacherEmail','teacherName','amount','reason','category','expenseDate','receiptUrl','notes','status','createdAt','submittedAt','approvedBy','approvedAt','rejectedBy','rejectedAt','rejectionReason','disbursedBy','disbursedAt','disbursementMode','disbursementReference']
 };
 
 /**

@@ -56,6 +56,7 @@ const Marklist = ({ user }) => {
     const roleNoSpaces = roleLower.replace(/\s+/g, "");
     if (roleLower.includes("teacher")) return true;
     if (roleLower.includes("admin")) return true;
+    if (roleLower.includes("hm")) return true;
     if (roleNoSpaces === "hm") return true;
     return false;
   });

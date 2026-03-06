@@ -18,7 +18,8 @@ export default function ExamMarksEntryStatusDetails({ user }) {
   const roleLower = useMemo(() => String(roleString || '').toLowerCase(), [roleString]);
   const isPrivilegedUser = useMemo(() => {
     if (roleLower.includes('super')) return true;
-    if (roleLower.includes('admin')) return true;
+    if (roleLower.includes('super admin')) return true;
+    if (roleLower.includes('hm')) return true;
     if (roleLower.includes('hm') || roleLower.includes('h m') || roleLower.includes('headmaster') || roleLower.includes('head master')) return true;
     return false;
   }, [roleLower]);

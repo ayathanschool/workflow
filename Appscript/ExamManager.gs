@@ -320,7 +320,7 @@ function updateExam(data) {
       entityId: examId,
       userEmail: userEmail,
       userName: userName,
-      userRole: isSuperAdmin ? 'Super Admin' : 'Teacher/HM',
+      userRole: isSuperAdmin ? 'admin' : 'Teacher/HM',
       beforeData: {
         class: currentExam.class,
         subject: currentExam.subject,
@@ -504,7 +504,7 @@ function submitExamMarks(data) {
   __mark('examLookup');
 
   // Permission check for marks submission:
-  // 1. Super Admin - allowed for all
+  // 1. admin - allowed for all
   // 2. HM - allowed for all
   // 3. Class Teacher for this class - allowed for ALL subjects in their class
   // 4. Subject Teacher - allowed if they teach this subject in this class
@@ -893,7 +893,6 @@ function getExamMarksEntryStatusBatch(examIds, params) {
     const roleLower = String(p.role || '').toLowerCase();
     const isPrivilegedRole = (
       roleLower.includes('super') ||
-      roleLower.includes('admin') ||
       roleLower.includes('hm') ||
       roleLower.includes('h m') ||
       roleLower.includes('headmaster') ||
@@ -1144,7 +1143,6 @@ function getExamMarksEntryStatusAll(params) {
     const roleLower = String(p.role || '').toLowerCase();
     const isPrivilegedRole = (
       roleLower.includes('super') ||
-      roleLower.includes('admin') ||
       roleLower.includes('hm') ||
       roleLower.includes('h m') ||
       roleLower.includes('headmaster') ||
@@ -2085,7 +2083,7 @@ function recalculateAllGrades() {
 }
 
 /**
- * Delete an exam (Super Admin only)
+ * Delete an exam (admin only)
  * This will also delete all associated exam marks
  */
 function deleteExam(examId) {

@@ -5,11 +5,11 @@
  */
 
 /**
- * Check if a user is a Super Admin
- * Super Admins have unrestricted access to everything in the system
- * To make a user Super Admin, add "Super Admin" to their roles in the Users sheet
+ * Check if a user is an Admin
+ * Admins have unrestricted access to everything in the system
+ * To make a user Admin, add "admin" to their roles in the Users sheet
  */
-function isSuperAdmin(userEmail) {
+function isAdmin(userEmail) {
   try {
     const list = _getCachedSheetData('Users').data;
     const user = list.find(u => String(u.email||'').toLowerCase() === userEmail.toLowerCase());
@@ -17,23 +17,21 @@ function isSuperAdmin(userEmail) {
     if (!user) return false;
     
     const roles = String(user.roles || '').toLowerCase();
-    return roles.includes('super admin') || 
-           roles.includes('superadmin') || 
-           roles.includes('super_admin');
+    return roles.includes('admin');
   } catch (err) {
-    appLog('ERROR', 'isSuperAdmin', err.message);
+    appLog('ERROR', 'isAdmin', err.message);
     return false;
   }
 }
 
 /**
- * Check if a user is HM or Super Admin
+ * Check if a user is HM or Admin
  * Returns true if user has elevated privileges (HM level or above)
  */
-function isHMOrSuperAdmin(userEmail) {
+function isHMOrAdmin(userEmail) {
   try {
-    // Super Admin check first (highest privilege)
-    if (isSuperAdmin(userEmail)) return true;
+    // Admin check first (highest privilege)
+    if (isAdmin(userEmail)) return true;
     
     const list = _getCachedSheetData('Users').data;
     const user = list.find(u => String(u.email||'').toLowerCase() === userEmail.toLowerCase());
@@ -46,7 +44,7 @@ function isHMOrSuperAdmin(userEmail) {
            roles.includes('h m') ||
            roles.includes('principal');
   } catch (err) {
-    appLog('ERROR', 'isHMOrSuperAdmin', err.message);
+    appLog('ERROR', 'isHMOrAdmin', err.message);
     return false;
   }
 }

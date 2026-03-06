@@ -17,7 +17,7 @@ import {
 import * as api from '../api';
 import { useToast } from '../hooks/useToast';
 
-const SuperAdminDashboard = ({ user, onNavigate }) => {
+const AdminDashboard = ({ user, onNavigate }) => {
   const { success, error: showError } = useToast();
   const [stats, setStats] = useState({
     totalUsers: 0,
@@ -26,9 +26,9 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
   });
   const [loading, setLoading] = useState(false);
 
-  const isSuperAdmin = useMemo(() => {
+  const isAdmin = useMemo(() => {
     const roles = user?.roles || [];
-    return roles.includes('super admin') || roles.includes('superadmin') || roles.includes('super_admin');
+    return roles.includes('admin');
   }, [user]);
 
   useEffect(() => {
@@ -38,14 +38,35 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
   const loadStats = async () => {
     try {
       setLoading(true);
+      console.log('Loading stats for user:', user.email, 'roles:', user.roles);
+      
       // Load system statistics
-      const [users, exams] = await Promise.all([
-        api.getAllUsers(user.email).catch(() => []),
-        api.getAllExams().catch(() => [])
+      const [usersResponse, exams] = await Promise.all([
+        api.getAllUsers(user.email).catch(err => {
+          console.error('getAllUsers error:', err);
+          return { users: [] };
+        }),
+        api.getAllExams().catch(err => {
+          console.error('getAllExams error:', err);
+          return [];
+        })
       ]);
       
+      console.log('Loaded users response:', usersResponse);
+      console.log('Loaded exams:', exams);
+      
+      // Extract users array from response
+      let users = [];
+      if (Array.isArray(usersResponse)) {
+        users = usersResponse;
+      } else if (usersResponse?.data && Array.isArray(usersResponse.data)) {
+        users = usersResponse.data;
+      } else if (usersResponse?.users && Array.isArray(usersResponse.users)) {
+        users = usersResponse.users;
+      }
+      
       setStats({
-        totalUsers: users?.length || 0,
+        totalUsers: users.length,
         totalExams: exams?.length || 0,
         totalSchemes: 0
       });
@@ -243,7 +264,7 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
       </div>
 
       {/* Warning Banner */}
-      {isSuperAdmin && (
+      {isAdmin && (
         <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/40 rounded-xl p-4 flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
           <div>
@@ -258,4 +279,4 @@ const SuperAdminDashboard = ({ user, onNavigate }) => {
   );
 };
 
-export default SuperAdminDashboard;
+export default AdminDashboard;

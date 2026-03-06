@@ -18,9 +18,9 @@ export default function AdminDataEditor({ user }) {
   const [draftNewRow, setDraftNewRow] = useState({});
   const [rowEdits, setRowEdits] = useState({}); // rowNumber -> { col: value }
 
-  const isSuperAdmin = useMemo(() => {
+  const isadmin = useMemo(() => {
     const roles = user?.roles || [];
-    return roles.includes('super admin') || roles.includes('superadmin') || roles.includes('super_admin');
+    return roles.includes('admin') || roles.includes('admin') || roles.includes('admin');
   }, [user]);
 
   useEffect(() => {
@@ -43,9 +43,9 @@ export default function AdminDataEditor({ user }) {
         if (mounted) setLoading(false);
       }
     };
-    if (isSuperAdmin) load();
+    if (isadmin) load();
     return () => { mounted = false; };
-  }, [email, isSuperAdmin]);
+  }, [email, isadmin]);
 
   const refreshSheet = async (sheetName) => {
     setLoading(true);
@@ -67,11 +67,11 @@ export default function AdminDataEditor({ user }) {
   };
 
   useEffect(() => {
-    if (!isSuperAdmin) return;
+    if (!isadmin) return;
     if (!selectedSheet) return;
     refreshSheet(selectedSheet);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSheet, isSuperAdmin]);
+  }, [selectedSheet, isadmin]);
 
   const onEditCell = (rowNumber, key, value) => {
     setRowEdits(prev => ({
@@ -142,11 +142,11 @@ export default function AdminDataEditor({ user }) {
     }
   };
 
-  if (!isSuperAdmin) {
+  if (!isadmin) {
     return (
       <div className="space-y-6">
         <div className="bg-white rounded-xl shadow-sm p-6">
-          <p className="text-gray-600">Permission denied. Super Admin access required.</p>
+          <p className="text-gray-600">Permission denied. admin access required.</p>
         </div>
       </div>
     );

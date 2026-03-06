@@ -138,36 +138,7 @@ function _fetchTeacherDailyTimetable(identifier, date) {
   // Sort by period number
   finalPeriods.sort((a, b) => (parseInt(a.period) || 0) - (parseInt(b.period) || 0));
   
-  // Enrich with session progress (chapter name and session number)
-  try {
-    const allSessionProgress = _getCachedSheetData('SessionProgress').data;
-
-    // Build a single-pass index of latest progress per class+subject.
-    const latestByKey = new Map();
-    const toKey = (cls, subj) => `${String(cls || '').trim().toLowerCase()}|${String(subj || '').trim().toLowerCase()}`;
-
-    allSessionProgress.forEach(sp => {
-      const key = toKey(sp.class, sp.subject);
-      if (key === '|') return;
-      const d = new Date(sp.sessionDate || 0);
-      const t = isNaN(d.getTime()) ? 0 : d.getTime();
-      const prev = latestByKey.get(key);
-      if (!prev || t >= prev._t) {
-        latestByKey.set(key, { _t: t, chapterName: sp.chapterName || '', sessionNumber: sp.sessionNumber || '' });
-      }
-    });
-
-    finalPeriods.forEach(period => {
-      const key = toKey(period.class, period.subject);
-      const latest = latestByKey.get(key);
-      if (latest) {
-        period.chapterName = latest.chapterName || '';
-        period.sessionNumber = latest.sessionNumber || '';
-      }
-    });
-  } catch (error) {
-    try { appLog('WARN', `[getTeacherDailyTimetable] Could not enrich with session progress`, { error: error && error.message ? error.message : String(error) }); } catch (e) {}
-  }
+  // Session progress enrichment removed (SessionProgress sheet deleted)
   
   try { appLog('DEBUG', `[getTeacherDailyTimetable] Returning ${finalPeriods.length} periods (${allSubstitutions.filter(s => String(s.substituteTeacher || '').toLowerCase() === idLower).length} substitutions)`); } catch (e) {}
   

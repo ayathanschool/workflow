@@ -8,6 +8,11 @@ const HolidayManagement = ({ user }) => {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   
+  // Mark Holiday Form states
+  const [newHolidayDate, setNewHolidayDate] = useState('');
+  const [newHolidayReason, setNewHolidayReason] = useState('');
+  const [markingHoliday, setMarkingHoliday] = useState(false);
+  
   // Form states
   const [cascadeDate, setCascadeDate] = useState('');
   const [showCascadeConfirm, setShowCascadeConfirm] = useState(false);
@@ -48,6 +53,39 @@ const HolidayManagement = ({ user }) => {
       setError('Failed to load holidays: ' + (err.message || 'Unknown error'));
     } finally {
       setLoading(false);
+    }
+  };
+  
+  const handleMarkHoliday = async () => {
+    if (!newHolidayDate) {
+      setError('Please select a date');
+      return;
+    }
+    if (!newHolidayReason || newHolidayReason.trim() === '') {
+      setError('Please enter a reason for the holiday');
+      return;
+    }
+    
+    try {
+      setMarkingHoliday(true);
+      setError(null);
+      setSuccess(null);
+      
+      const result = await api.markUndeclaredHoliday(newHolidayDate, newHolidayReason.trim());
+      
+      if (result.error || result.success === false) {
+        setError(result.error || 'Failed to mark holiday');
+      } else {
+        setSuccess(`Holiday marked successfully for ${newHolidayDate}`);
+        setNewHolidayDate('');
+        setNewHolidayReason('');
+        await loadHolidays(); // Reload the list
+      }
+    } catch (err) {
+      console.error('Error marking holiday:', err);
+      setError('Failed to mark holiday: ' + (err.message || 'Unknown error'));
+    } finally {
+      setMarkingHoliday(false);
     }
   };
   
@@ -189,6 +227,43 @@ const HolidayManagement = ({ user }) => {
           <span className="text-red-800">{error}</span>
         </div>
       )}
+      
+      {/* Mark Holiday Section */}
+      <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">Mark New Holiday</h2>
+        <p className="text-sm text-gray-600 mb-4">
+          Add an undeclared holiday to the system. After marking holidays, use the cascade feature below to adjust lesson plans.
+        </p>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Holiday Date</label>
+            <input
+              type="date"
+              value={newHolidayDate}
+              onChange={(e) => setNewHolidayDate(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Reason</label>
+            <input
+              type="text"
+              value={newHolidayReason}
+              onChange={(e) => setNewHolidayReason(e.target.value)}
+              placeholder="e.g., Public Holiday, School Event"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <button
+            onClick={handleMarkHoliday}
+            disabled={markingHoliday || !newHolidayDate || !newHolidayReason.trim()}
+            className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {markingHoliday ? 'Marking...' : 'Mark Holiday'}
+          </button>
+        </div>
+      </div>
       
       {/* Cascade Section */}
       <div className="bg-white rounded-lg shadow-md p-6 mb-6">
@@ -364,9 +439,9 @@ const HolidayManagement = ({ user }) => {
           </div>
         ) : (
           <div className="space-y-3">
-            {holidays.map((holiday) => (
+            {holidays.map((holiday, index) => (
               <div
-                key={holiday.id}
+                key={holiday.id || `holiday-${index}`}
                 className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50"
               >
                 <div className="flex-1">
@@ -418,9 +493,9 @@ const HolidayManagement = ({ user }) => {
             {cascadeHistory.length === 0 ? (
               <p className="text-center py-4 text-gray-500">No cascade operations yet</p>
             ) : (
-              cascadeHistory.map((cascade) => (
+              cascadeHistory.map((cascade, index) => (
                 <div
-                  key={cascade.cascadeId}
+                  key={cascade.cascadeId || `cascade-${index}`}
                   className="border border-gray-200 rounded-lg p-4"
                 >
                   <div className="flex items-start justify-between">
@@ -444,7 +519,20 @@ const HolidayManagement = ({ user }) => {
                         </span>
                       </div>
                       <p className="text-sm text-gray-600">
-                        Affected {cascade.lessons.length} lesson plans from {cascade.startDate}
+                        Affected {cascade.lessons.length} lesson plans from {
+                          (() => {
+                            try {
+                              const date = new Date(cascade.startDate);
+                              return date.toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric'
+                              });
+                            } catch (e) {
+                              return cascade.startDate;
+                            }
+                          })()
+                        }
                       </p>
                       <p className="text-xs text-gray-500 mt-1">
                         By {cascade.performedBy}
