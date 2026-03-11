@@ -29,10 +29,10 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
   const [filters, setFilters] = useState({
     search: '',
     class: '',
-    feeHead: '',
+    feeHeads: [],   // multiselect array
     route: '',
-    mode: '',
-    status: 'valid', // valid, voided, all
+    modes: [],      // multiselect array
+    status: 'valid',
     dateFrom: '',
     dateTo: '',
     minAmount: '',
@@ -81,14 +81,14 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
       // Class filter
       if (filters.class && tClass !== filters.class) return false;
 
-      // Fee head filter
-      if (filters.feeHead && tFeeHead !== filters.feeHead) return false;
+      // Fee head multiselect filter
+      if (filters.feeHeads.length > 0 && !filters.feeHeads.includes(tFeeHead)) return false;
 
-      // Route filter — case-insensitive so "Route 1" matches "route 1" etc.
+      // Route filter — case-insensitive
       if (filters.route && normalizeText(t.routeNo).toLowerCase() !== filters.route.toLowerCase()) return false;
 
-      // Mode filter
-      if (filters.mode && tMode !== filters.mode) return false;
+      // Mode multiselect filter
+      if (filters.modes.length > 0 && !filters.modes.includes(tMode)) return false;
 
       // Status filter
       const isVoid = String(t.void || '').toUpperCase().startsWith('Y');
@@ -140,9 +140,9 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
     setFilters({
       search: '',
       class: '',
-      feeHead: '',
+      feeHeads: [],
       route: '',
-      mode: '',
+      modes: [],
       status: 'valid',
       dateFrom: '',
       dateTo: '',
@@ -153,19 +153,15 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
 
   const filterToday = () => {
     const today = toYMDInTimeZone(new Date());
-    setFilters(prev => ({
-      ...prev,
-      dateFrom: today,
-      dateTo: today
-    }));
-    setShowFilters(false); // Close filters panel
+    setFilters(prev => ({ ...prev, dateFrom: today, dateTo: today }));
+    setShowFilters(false);
   };
 
   const filterTransport = () => {
     setFilters(prev => ({
       ...prev,
-      feeHead: '',        // clear specific fee head so all Transport* months show
-      search: 'transport' // search covers all "Transport June", "Transport July" etc.
+      search: prev.search === 'transport' ? '' : 'transport',
+      feeHeads: []
     }));
     setShowFilters(false);
   };
@@ -203,23 +199,21 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
   };
 
   // Calculate summary
+  const nonVoidFiltered = filteredTransactions.filter(t => !String(t.void || '').toUpperCase().startsWith('Y'));
+  const nonWaiverFiltered = nonVoidFiltered.filter(t => String(t.mode || '').toLowerCase() !== 'waiver');
   const summary = {
     total: filteredTransactions.length,
-    totalAmount: filteredTransactions.reduce((sum, t) => {
-      if (String(t.void || '').toUpperCase().startsWith('Y')) return sum;
-      if (String(t.mode || '').toLowerCase() === 'waiver') return sum;
-      return sum + (Number(t.amount) || 0) + (Number(t.fine) || 0);
-    }, 0),
-    totalFine: filteredTransactions.reduce((sum, t) => {
-      if (String(t.void || '').toUpperCase().startsWith('Y')) return sum;
-      if (String(t.mode || '').toLowerCase() === 'waiver') return sum;
-      return sum + (Number(t.fine) || 0);
-    }, 0),
-    totalWaived: filteredTransactions.reduce((sum, t) => {
-      if (String(t.void || '').toUpperCase().startsWith('Y')) return sum;
-      if (String(t.mode || '').toLowerCase() !== 'waiver') return sum;
-      return sum + (Number(t.amount) || 0);
-    }, 0),
+    totalAmount: nonWaiverFiltered.reduce((sum, t) => sum + (Number(t.amount) || 0) + (Number(t.fine) || 0), 0),
+    totalFine: nonWaiverFiltered.reduce((sum, t) => sum + (Number(t.fine) || 0), 0),
+    schoolCollected: nonWaiverFiltered
+      .filter(t => !String(t.feeHead || '').toLowerCase().startsWith('transport '))
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0),
+    transportCollected: nonWaiverFiltered
+      .filter(t => String(t.feeHead || '').toLowerCase().startsWith('transport '))
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0),
+    totalWaived: nonVoidFiltered
+      .filter(t => String(t.mode || '').toLowerCase() === 'waiver')
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0),
     voided: filteredTransactions.filter(t => String(t.void || '').toUpperCase().startsWith('Y')).length
   };
 
@@ -255,10 +249,14 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
           )}
           <button
             onClick={filterTransport}
-            className="px-4 py-2 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 transition-colors flex items-center gap-2"
-            title="Show transport fee transactions only"
+            className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
+              filters.search === 'transport'
+                ? 'bg-amber-600 text-white ring-2 ring-amber-400'
+                : 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-800/50'
+            }`}
+            title={filters.search === 'transport' ? 'Clear transport filter' : 'Show transport fee transactions only'}
           >
-            🚌 Transport
+            🚌 Transport{filters.search === 'transport' && ' ✕'}
           </button>
           <button
             onClick={() => setShowFilters(!showFilters)}
@@ -285,34 +283,32 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-          <p className="text-xs text-gray-500 dark:text-gray-400">Total Transactions</p>
-          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">{summary.total}</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-3 border border-gray-200 dark:border-gray-700">
+          <p className="text-xs text-gray-500 dark:text-gray-400">Transactions</p>
+          <p className="text-xl font-bold text-gray-900 dark:text-gray-100 mt-1">{summary.total}</p>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-          <p className="text-xs text-gray-500 dark:text-gray-400">Amount Collected</p>
-          <p className="text-xl font-bold text-green-600 dark:text-green-400 mt-1">
-            ₹{summary.totalAmount.toLocaleString('en-IN')}
-          </p>
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-3 border border-gray-200 dark:border-gray-700">
+          <p className="text-xs text-gray-500 dark:text-gray-400">Total Collected</p>
+          <p className="text-lg font-bold text-green-600 dark:text-green-400 mt-1">₹{summary.totalAmount.toLocaleString('en-IN')}</p>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-          <p className="text-xs text-gray-500 dark:text-gray-400">Fine Collected</p>
-          <p className="text-xl font-bold text-orange-600 dark:text-orange-400 mt-1">
-            ₹{summary.totalFine.toLocaleString('en-IN')}
-          </p>
+        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 border border-blue-200 dark:border-blue-800">
+          <p className="text-xs text-blue-600 dark:text-blue-400">🏫 School Fee</p>
+          <p className="text-lg font-bold text-blue-700 dark:text-blue-300 mt-1">₹{summary.schoolCollected.toLocaleString('en-IN')}</p>
+        </div>
+        <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3 border border-amber-200 dark:border-amber-800">
+          <p className="text-xs text-amber-600 dark:text-amber-400">🚌 Transport Fee</p>
+          <p className="text-lg font-bold text-amber-700 dark:text-amber-300 mt-1">₹{summary.transportCollected.toLocaleString('en-IN')}</p>
         </div>
         {summary.totalWaived > 0 && (
-          <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 border border-amber-200 dark:border-amber-700">
-            <p className="text-xs text-amber-600 dark:text-amber-400">Waived / Write-off</p>
-            <p className="text-xl font-bold text-amber-700 dark:text-amber-300 mt-1">
-              ₹{summary.totalWaived.toLocaleString('en-IN')}
-            </p>
+          <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3 border border-amber-200 dark:border-amber-700">
+            <p className="text-xs text-amber-600 dark:text-amber-400">Waived</p>
+            <p className="text-lg font-bold text-amber-700 dark:text-amber-300 mt-1">₹{summary.totalWaived.toLocaleString('en-IN')}</p>
           </div>
         )}
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-          <p className="text-xs text-gray-500 dark:text-gray-400">Voided</p>
-          <p className="text-2xl font-bold text-red-600 dark:text-red-400 mt-1">{summary.voided}</p>
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-3 border border-gray-200 dark:border-gray-700">
+          <p className="text-xs text-gray-500 dark:text-gray-400">Fine / Voided</p>
+          <p className="text-lg font-bold text-gray-700 dark:text-gray-300 mt-1">₹{summary.totalFine.toLocaleString('en-IN')} / {summary.voided}</p>
         </div>
       </div>
 
@@ -352,16 +348,33 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Fee Head
+                Fee Head <span className="text-xs text-gray-400 font-normal">(multi-select)</span>
               </label>
-              <select
-                value={filters.feeHead}
-                onChange={(e) => setFilters(prev => ({ ...prev, feeHead: e.target.value }))}
-                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"
-              >
-                <option value="">All Fee Heads</option>
-                {feeHeads.map(f => <option key={f} value={f}>{f}</option>)}
-              </select>
+              <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg">
+                {feeHeads.map(f => {
+                  const selected = filters.feeHeads.includes(f);
+                  return (
+                    <button
+                      key={f}
+                      type="button"
+                      onClick={() => setFilters(prev => ({
+                        ...prev,
+                        feeHeads: selected ? prev.feeHeads.filter(x => x !== f) : [...prev.feeHeads, f]
+                      }))}
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                        selected
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-500 hover:bg-gray-100 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      {f}
+                    </button>
+                  );
+                })}
+              </div>
+              {filters.feeHeads.length > 0 && (
+                <button onClick={() => setFilters(prev => ({ ...prev, feeHeads: [] }))} className="mt-1 text-xs text-blue-600 dark:text-blue-400 hover:underline">Clear</button>
+              )}
             </div>
 
             {routes.length > 0 && (
@@ -382,16 +395,33 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Payment Mode
+                Payment Mode <span className="text-xs text-gray-400 font-normal">(multi-select)</span>
               </label>
-              <select
-                value={filters.mode}
-                onChange={(e) => setFilters(prev => ({ ...prev, mode: e.target.value }))}
-                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"
-              >
-                <option value="">All Modes</option>
-                {modes.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
+              <div className="flex flex-wrap gap-1.5 p-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg">
+                {modes.map(m => {
+                  const selected = filters.modes.includes(m);
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setFilters(prev => ({
+                        ...prev,
+                        modes: selected ? prev.modes.filter(x => x !== m) : [...prev.modes, m]
+                      }))}
+                      className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                        selected
+                          ? 'bg-green-600 text-white'
+                          : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-500 hover:bg-gray-100 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      {m}
+                    </button>
+                  );
+                })}
+              </div>
+              {filters.modes.length > 0 && (
+                <button onClick={() => setFilters(prev => ({ ...prev, modes: [] }))} className="mt-1 text-xs text-green-600 dark:text-green-400 hover:underline">Clear</button>
+              )}
             </div>
 
             <div>
