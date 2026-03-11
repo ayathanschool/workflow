@@ -78,7 +78,48 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
         .filter(tx => String(tx.admNo) === String(student.admNo))
         .filter(tx => !String(tx.void || '').toUpperCase().startsWith('Y'));
 
-      const feesForClass = (feeHeads || []).filter(f => f.class === student.class);
+      // Build fee list: class-wide fee heads + per-student monthly transport installments
+      const transportFeeAmt = Number(student.transportFee) || 0;
+      const buildTransportFeeHeads = () => {
+        if (!transportFeeAmt) return [];
+        const now = new Date();
+        const ayStart = (now.getMonth() + 1 >= 6) ? now.getFullYear() : now.getFullYear() - 1;
+        const ayIdx = (m) => m >= 6 ? m - 6 : m + 6;
+        const startM = Number(student.transportStartMonth) || 6;
+        const endM   = Number(student.transportEndMonth)   || 3;
+        // Skip months already covered by class-level fee heads (avoids duplicates)
+        const existingFeeHeadNames = new Set(
+          (feeHeads || [])
+            .filter(f => String(f.class || '').toLowerCase() === String(student.class || '').toLowerCase())
+            .map(f => String(f.feeHead || '').toLowerCase())
+        );
+        return [
+          { name: 'June',      m: 6,  y: ayStart },
+          { name: 'July',      m: 7,  y: ayStart },
+          { name: 'August',    m: 8,  y: ayStart },
+          { name: 'September', m: 9,  y: ayStart },
+          { name: 'October',   m: 10, y: ayStart },
+          { name: 'November',  m: 11, y: ayStart },
+          { name: 'December',  m: 12, y: ayStart },
+          { name: 'January',   m: 1,  y: ayStart + 1 },
+          { name: 'February',  m: 2,  y: ayStart + 1 },
+          { name: 'March',     m: 3,  y: ayStart + 1 }
+        ]
+        .filter(mo => { const i = ayIdx(mo.m); return i >= ayIdx(startM) && i <= ayIdx(endM); })
+        .filter(mo => !existingFeeHeadNames.has(`transport ${mo.name.toLowerCase()}`))
+        .map(mo => ({
+          feeHead: `Transport ${mo.name}`,
+          class: student.class,
+          amount: transportFeeAmt,
+          dueDate: `${mo.y}-${String(mo.m).padStart(2, '0')}-15`,
+          _transportRoute: student.transportRoute || '',
+          _transportPlace: student.transportPlace || ''
+        }));
+      };
+      const feesForClass = [
+        ...(feeHeads || []).filter(f => f.class === student.class),
+        ...buildTransportFeeHeads()
+      ];
       const computedPaidFees = [];
       const computedUnpaidFees = feesForClass.map(f => {
         const txForHead = studentTx.filter(tx => String(tx.feeHead || '').toLowerCase() === String(f.feeHead || '').toLowerCase());
@@ -108,7 +149,9 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
           selected: false,
           isPaid,
           amountPaid: totalPaid,
-          balance
+          balance,
+          transportRoute: f._transportRoute || '',
+          transportPlace: f._transportPlace || ''
         };
       }).filter(f => !f.isPaid); // Remove fully paid fees from payable list
 
@@ -159,12 +202,13 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
     .reduce((sum, f) => sum + (Number(f.amount) || 0) + (Number(f.fine) || 0), 0);
 
   const handlePayment = async () => {
+    const isWaiver = paymentForm.mode === 'Waiver';
     const items = selectedFees
-      .filter(f => f.selected && f.amount > 0)
+      .filter(f => f.selected && (isWaiver ? f.balance > 0 : f.amount > 0))
       .map(f => ({
         feeHead: f.feeHead,
-        amount: f.amount,
-        fine: f.fine
+        amount: isWaiver ? f.balance : f.amount,
+        fine: isWaiver ? 0 : f.fine
       }));
 
     if (!items.length) {
@@ -207,6 +251,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
           name: selectedStudent.name,
           cls: selectedStudent.class,
           mode: paymentForm.mode,
+          routeNo: selectedStudent.transportRoute || '',
           items,
           ...(token ? { token } : {})
         })
@@ -254,7 +299,9 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
       `Date: ${receipt.date}%0A%0A` +
       `Student: ${selectedStudent.name}%0A` +
       `Admission No: ${selectedStudent.admNo}%0A` +
-      `Class: ${selectedStudent.class}%0A%0A` +
+      `Class: ${selectedStudent.class}%0A` +
+      (selectedStudent.transportRoute ? `Transport: ${selectedStudent.transportRoute}${selectedStudent.transportPlace ? ` (${selectedStudent.transportPlace})` : ''}%0A` : '') +
+      `%0A`+
       `*Fee Details:*%0A` +
       receipt.items.map(item => 
         `• ${item.feeHead}: ₹${item.amount}${item.fine > 0 ? ` (Fine: ₹${item.fine})` : ''}`
@@ -428,8 +475,13 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
                 </div>
                 <div>
                   <p className="font-semibold text-gray-900 dark:text-gray-100">{selectedStudent.name}</p>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{selectedStudent.admNo} • {selectedStudent.class}</p>
-                </div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">{selectedStudent.admNo} • {selectedStudent.class}</p>                  {selectedStudent.transportRoute && (
+                    <p className="text-xs mt-0.5">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium">
+                        🚌 {selectedStudent.transportRoute}{selectedStudent.transportPlace ? ` — ${selectedStudent.transportPlace}` : ''}
+                      </span>
+                    </p>
+                  )}                </div>
               </div>
               <button
                 onClick={() => setStep(1)}
@@ -497,6 +549,11 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
                       <div>
                         <p className="font-semibold text-gray-900 dark:text-gray-100">
                           {fee.feeHead}
+                          {fee.transportRoute && (
+                            <span className="ml-2 text-xs font-normal px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                              🚌 {fee.transportRoute}{fee.transportPlace ? ` — ${fee.transportPlace}` : ''}
+                            </span>
+                          )}
                           {fee.amountPaid > 0 && (
                             <span className="ml-2 text-xs px-2 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded">
                               Partial: ₹{fee.amountPaid.toLocaleString('en-IN')} paid
@@ -618,9 +675,20 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
                   <option value="Cheque">Cheque</option>
                   <option value="Card">Card</option>
                   <option value="UPI">UPI</option>
+                  <option value="Waiver">Waiver / Write-off</option>
                 </select>
               </div>
             </div>
+
+            {/* Waiver warning */}
+            {paymentForm.mode === 'Waiver' && (
+              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-600 rounded-xl">
+                <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-1">⚠️ Waiver / Write-off Mode</p>
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Selected fees will be marked as cleared without collecting any money. The full outstanding balance will be recorded as waived and no fine will be charged. Use Void Receipt later if you need to reverse this.
+                </p>
+              </div>
+            )}
 
             {/* Summary */}
             <div className="p-6 bg-gray-50 dark:bg-gray-900 rounded-xl space-y-3">
@@ -755,6 +823,14 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
                 <span className="text-gray-600 dark:text-gray-400">Payment Mode:</span>
                 <span className="font-medium text-gray-900 dark:text-gray-100">{receipt.mode}</span>
               </div>
+              {receipt.student?.transportRoute && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-400">Transport Route:</span>
+                  <span className="font-medium text-amber-700 dark:text-amber-300">
+                    🚌 {receipt.student.transportRoute}{receipt.student.transportPlace ? ` — ${receipt.student.transportPlace}` : ''}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="border-t border-b border-gray-300 dark:border-gray-700 py-4 mb-4">

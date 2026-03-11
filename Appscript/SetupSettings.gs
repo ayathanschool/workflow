@@ -197,3 +197,41 @@ function setupMissingDailyReportSettings() {
     return { success: false, error: error.message };
   }
 }
+
+/**
+ * Ensure a transport fee head (default: TransportB) exists for each class.
+ * Call with: setupTransportFeeCollection(defaultAmount, feeHeadName, dueDate)
+ * Example: setupTransportFeeCollection(1200, 'TransportB', '2026-04-01')
+ */
+function setupTransportFeeCollection(defaultAmount, feeHeadName, dueDate) {
+  try {
+    feeHeadName = String(feeHeadName || 'TransportB').trim();
+    defaultAmount = Number(defaultAmount) || 0;
+
+    const feeSh = _getSheet('FeeHeads');
+    const expectedHeaders = ['feeHead','class','amount','dueDate'];
+    _ensureHeaders(feeSh, expectedHeaders);
+
+    const feeHeaders = _headers(feeSh);
+    const feeRows = _rows(feeSh).map(r => _indexByHeader(r, feeHeaders));
+
+    // Get distinct classes from Students sheet
+    const studentsSh = _getSheet('Students');
+    const studentsHeaders = _headers(studentsSh);
+    const students = _rows(studentsSh).map(r => _indexByHeader(r, studentsHeaders));
+    const classes = Array.from(new Set(students.map(s => (s.class || '').toString().trim()).filter(Boolean)));
+
+    let added = 0;
+    classes.forEach(cls => {
+      const exists = feeRows.find(r => String(r.class || '').trim() === String(cls).trim() && String(r.feeHead || '').trim().toLowerCase() === feeHeadName.toLowerCase());
+      if (!exists) {
+        feeSh.appendRow([feeHeadName, cls, defaultAmount, dueDate || '']);
+        added++;
+      }
+    });
+
+    return { success: true, added: added };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}

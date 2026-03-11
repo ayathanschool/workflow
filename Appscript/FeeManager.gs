@@ -5,6 +5,55 @@
  */
 
 /**
+ * Build synthetic monthly transport fee heads (June–March) for a student.
+ * Each installment is due on the 15th of its month.
+ * Academic year starts June: months ≥6 belong to ayStart, months <6 to ayStart+1.
+ * Returns [] when student has no transportFee.
+ */
+function _getTransportFeeHeads(student) {
+  const transportFee = Number(student.transportFee) || 0;
+  if (!transportFee) return [];
+
+  // Determine academic year start (June = beginning of school year)
+  const now = new Date();
+  const ayStart = (now.getMonth() + 1 >= 6) ? now.getFullYear() : now.getFullYear() - 1;
+
+  // Academic-year index: June=0, July=1 ... Dec=6, Jan=7, Feb=8, Mar=9
+  const ayIdx = function(m) { return m >= 6 ? m - 6 : m + 6; };
+  const startM = Number(student.transportStartMonth) || 6; // default: June
+  const endM   = Number(student.transportEndMonth)   || 3; // default: March
+  const startIdx = ayIdx(startM);
+  const endIdx   = ayIdx(endM);
+
+  const months = [
+    { name: 'June',      m: 6,  y: ayStart },
+    { name: 'July',      m: 7,  y: ayStart },
+    { name: 'August',    m: 8,  y: ayStart },
+    { name: 'September', m: 9,  y: ayStart },
+    { name: 'October',   m: 10, y: ayStart },
+    { name: 'November',  m: 11, y: ayStart },
+    { name: 'December',  m: 12, y: ayStart },
+    { name: 'January',   m: 1,  y: ayStart + 1 },
+    { name: 'February',  m: 2,  y: ayStart + 1 },
+    { name: 'March',     m: 3,  y: ayStart + 1 }
+  ].filter(function(mo) {
+    const idx = ayIdx(mo.m);
+    return idx >= startIdx && idx <= endIdx;
+  });
+
+  return months.map(function(mo) {
+    return {
+      class: student.class,
+      feeHead: 'Transport ' + mo.name,
+      amount: transportFee,
+      dueDate: mo.y + '-' + String(mo.m).padStart(2, '0') + '-15',
+      transportRoute: student.transportRoute || '',
+      transportPlace: student.transportPlace || ''
+    };
+  });
+}
+
+/**
  * Get all fee heads for a specific class
  */
 function getFeeHeads(className) {
@@ -66,7 +115,8 @@ function getTransactions(filters) {
     amount: Number(r.amount) || 0,
     fine: Number(r.fine) || 0,
     mode: r.mode || '',
-    void: r.void || ''
+    void: r.void || '',
+    routeNo: r.routeNo || ''
   }));
 }
 
@@ -145,6 +195,8 @@ function addPayment(paymentData) {
     console.log('[addPayment] Lock acquired for:', paymentData.admNo);
     
     const sh = _getSheet('Transactions');
+    // Ensure routeNo column exists (appended safely at end on existing sheets)
+    _ensureHeaders(sh, SHEETS.Transactions);
     
     const date = paymentData.date || _isoDateString(new Date());
     const items = Array.isArray(paymentData.items) ? paymentData.items : [];
@@ -172,6 +224,33 @@ function addPayment(paymentData) {
     feeHeads.forEach(f => {
       feeHeadMap[String(f.feeHead).trim().toLowerCase()] = f.amount;
     });
+
+    // Augment feeHeadMap with per-student transport fee (if any)
+    let student = null;
+    if (paymentData.admNo) {
+      try {
+        const studentsSh = _getSheet('Students');
+        const stHeaders = _headers(studentsSh);
+        const stRows = _rows(studentsSh).map(r => _indexByHeader(r, stHeaders));
+        student = stRows.find(s => String(s.admNo || '').trim().toLowerCase() === String(paymentData.admNo).trim().toLowerCase());
+        if (student) {
+          const tf = Number(student.transportFee) || 0;
+          if (tf > 0) {
+            // Register transport installments only for months NOT already in class fee heads
+            ['june','july','august','september','october','november','december',
+             'january','february','march'].forEach(function(m) {
+              const key = 'transport ' + m;
+              if (!feeHeadMap[key]) {
+                feeHeadMap[key] = tf;
+              }
+            });
+          }
+        }
+      } catch (e) {
+        // ignore student lookup errors and continue
+        console.warn('[addPayment] student lookup failed', e.message);
+      }
+    }
     
     // Get all existing payments for this student at once
     const existingTransactions = getTransactions({ admNo: paymentData.admNo });
@@ -225,7 +304,9 @@ function addPayment(paymentData) {
     
     console.log('[addPayment] All validation passed. Writing to sheet...');
     
-    // Create rows with fine support
+    // Create rows - routeNo goes LAST to match SHEETS.Transactions column order
+    // (date,receiptNo,admNo,name,class,feeHead,amount,fine,mode,void,routeNo)
+    const routeNo = paymentData.routeNo || (student && (student.transportRoute || '')) || '';
     const rows = items.map(item => [
       date,
       receiptNo,
@@ -236,7 +317,8 @@ function addPayment(paymentData) {
       Number(item.amount) || 0,
       Number(item.fine) || 0,
       paymentData.mode || 'Cash',
-      '' // void column
+      '', // void column
+      routeNo  // appended last - matches _ensureHeaders position
     ]);
     
     // Append rows
@@ -403,6 +485,17 @@ function getStudentFeeStatus(admNo) {
   
   // Get fee structure for student's class
   const feeHeads = getFeeHeads(student.class);
+
+  // Inject per-student monthly transport installments ONLY for months not already
+  // covered by class-wide fee heads (avoids duplicates when both are configured)
+  const existingFeeHeadNames = {};
+  feeHeads.forEach(function(fh) {
+    existingFeeHeadNames[String(fh.feeHead || '').toLowerCase()] = true;
+  });
+  const studentTransportFee = Number(student.transportFee) || 0;
+  _getTransportFeeHeads(student)
+    .filter(function(h) { return !existingFeeHeadNames[String(h.feeHead || '').toLowerCase()]; })
+    .forEach(function(h) { feeHeads.push(h); });
   
   // Get transactions for this student
   const transactions = getTransactions({ admNo: admNo });
@@ -434,7 +527,10 @@ function getStudentFeeStatus(admNo) {
     student: {
       admNo: student.admNo,
       name: student.name,
-      class: student.class
+      class: student.class,
+      transportRoute: student.transportRoute || '',
+      transportPlace: student.transportPlace || '',
+      transportFee: studentTransportFee
     },
     feeStatus: feeStatus,
     summary: {
@@ -467,9 +563,18 @@ function getFeeDefaulters(className) {
   const defaulters = [];
   
   students.forEach(student => {
-    const feeHeads = getFeeHeads(student.class);
+    // Include class fee heads + per-student monthly transport installments
+    // (dedup: skip synthetic months already covered by class fee heads)
+    const classFeeHeads = getFeeHeads(student.class);
+    const existingFhNames = {};
+    classFeeHeads.forEach(function(fh) { existingFhNames[String(fh.feeHead || '').toLowerCase()] = true; });
+    const allFeeHeads = classFeeHeads.concat(
+      _getTransportFeeHeads(student).filter(function(h) {
+        return !existingFhNames[String(h.feeHead || '').toLowerCase()];
+      })
+    );
     
-    feeHeads.forEach(fee => {
+    allFeeHeads.forEach(fee => {
       const paymentStatus = getPaymentStatus(student.admNo, fee.feeHead, fee.amount);
       
       if (!paymentStatus.isFullyPaid) {

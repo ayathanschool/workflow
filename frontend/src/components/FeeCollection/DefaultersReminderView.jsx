@@ -1,14 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { 
   AlertTriangle, Download, MessageCircle, Copy, Filter, X,
-  ChevronDown, ChevronUp, Users, DollarSign, Calendar, Phone
+  ChevronDown, ChevronUp, Users, DollarSign, Calendar, Phone, Bus
 } from 'lucide-react';
 
 const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
   const [filters, setFilters] = useState({
     class: '',
+    route: '',
     groupByStudent: true,
-    onlyOverdue: true
+    onlyOverdue: true,
+    includeSchoolFee: true,
+    includeTransport: true
   });
   const [expandedStudent, setExpandedStudent] = useState(null);
   const [messageTemplate, setMessageTemplate] = useState(
@@ -26,6 +29,7 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
 
   // Determine user's access level
   const normalizedRoles = (user?.roles || []).map(r => String(r).toLowerCase());
+  const isSuperAdmin = normalizedRoles.some(r => r === 'super admin' || r === 'superadmin' || r === 'super_admin');
   const isHM = normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('head'));
   const isAccounts = normalizedRoles.some(r => r.includes('accounts') || r === 'accountant' || r === 'account');
   const classTeacherFor = user?.classTeacherFor || user?.class || '';
@@ -50,14 +54,45 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
     }
   };
 
+  // Helper: generate transport fee heads respecting per-student start/end month
+  const buildTransportFeeHeads = (student) => {
+    const fee = Number(student.transportFee) || 0;
+    if (!fee || !student.transportRoute) return [];
+    const now = new Date();
+    const ayStart = now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1;
+    const ayIdx = (m) => m >= 6 ? m - 6 : m + 6;
+    const startM = Number(student.transportStartMonth) || 6;
+    const endM   = Number(student.transportEndMonth)   || 3;
+    // Skip months already covered by class-level fee heads (avoids duplicates)
+    const existingFeeHeadNames = new Set(
+      (feeHeads || [])
+        .filter(f => String(f.class || '').toLowerCase() === String(student.class || '').toLowerCase())
+        .map(f => String(f.feeHead || '').toLowerCase())
+    );
+    return [
+      { name: 'June',      m: 6,  dueDate: `${ayStart}-06-15` },
+      { name: 'July',      m: 7,  dueDate: `${ayStart}-07-15` },
+      { name: 'August',    m: 8,  dueDate: `${ayStart}-08-15` },
+      { name: 'September', m: 9,  dueDate: `${ayStart}-09-15` },
+      { name: 'October',   m: 10, dueDate: `${ayStart}-10-15` },
+      { name: 'November',  m: 11, dueDate: `${ayStart}-11-15` },
+      { name: 'December',  m: 12, dueDate: `${ayStart}-12-15` },
+      { name: 'January',   m: 1,  dueDate: `${ayStart + 1}-01-15` },
+      { name: 'February',  m: 2,  dueDate: `${ayStart + 1}-02-15` },
+      { name: 'March',     m: 3,  dueDate: `${ayStart + 1}-03-15` },
+    ]
+    .filter(mo => { const i = ayIdx(mo.m); return i >= ayIdx(startM) && i <= ayIdx(endM); })
+    .filter(mo => !existingFeeHeadNames.has(`transport ${mo.name.toLowerCase()}`))
+    .map(mo => ({ feeHead: `Transport ${mo.name}`, amount: fee, dueDate: mo.dueDate }));
+  };
+
   // Calculate itemized defaulters (one row per unpaid fee head)
   const itemizedDefaulters = useMemo(() => {
     const rows = [];
     
     // Filter students based on role
     let filteredStudents = students || [];
-    if (!isHM && !isAccounts && classTeacherFor) {
-      // Class teacher sees only their class
+    if (!isSuperAdmin && !isHM && !isAccounts && classTeacherFor) {
       filteredStudents = filteredStudents.filter(s => 
         normalizeClass(s.class) === normalizeClass(classTeacherFor)
       );
@@ -70,17 +105,30 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
       );
     }
 
-    filteredStudents.forEach(student => {
-      const studentFeeHeads = (feeHeads || []).filter(fh => 
-        String(fh.class || '').toLowerCase() === String(student.class || '').toLowerCase()
+    // Apply route filter if selected
+    if (filters.route) {
+      filteredStudents = filteredStudents.filter(s =>
+        String(s.transportRoute || '').toLowerCase() === filters.route.toLowerCase()
       );
+    }
+
+    filteredStudents.forEach(student => {
+      const allFeeHeads = [
+        ...(filters.includeSchoolFee
+          ? (feeHeads || []).filter(fh =>
+              String(fh.class || '').toLowerCase() === String(student.class || '').toLowerCase()
+            )
+          : []
+        ),
+        ...(filters.includeTransport ? buildTransportFeeHeads(student) : [])
+      ];
 
       const studentTransactions = (transactions || []).filter(t => 
         String(t.admNo) === String(student.admNo) && 
         !String(t.void || '').toUpperCase().startsWith('Y')
       );
 
-      studentFeeHeads.forEach(fh => {
+      allFeeHeads.forEach(fh => {
         const fhTransactions = studentTransactions.filter(t => 
           String(t.feeHead || '').toLowerCase() === String(fh.feeHead || '').toLowerCase()
         );
@@ -89,12 +137,10 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
         const balance = (Number(fh.amount) || 0) - paid;
 
         if (balance > 0) {
-          // Check if overdue
           const dueDate = fh.dueDate ? new Date(fh.dueDate) : null;
           const today = new Date();
           const isOverdue = dueDate && today > dueDate;
 
-          // Skip if onlyOverdue filter is on and not overdue
           if (filters.onlyOverdue && !isOverdue) return;
 
           rows.push({
@@ -102,6 +148,7 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
             name: student.name,
             class: student.class,
             phone: student.parentContact || student.phone || '',
+            transportRoute: student.transportRoute || '',
             feeHead: fh.feeHead,
             amount: balance,
             dueDate: fh.dueDate,
@@ -111,13 +158,12 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
       });
     });
 
-    // Sort by class, then name, then fee head
     return rows.sort((a, b) =>
       String(a.class).localeCompare(String(b.class)) ||
       String(a.name).localeCompare(String(b.name)) ||
       String(a.feeHead).localeCompare(String(b.feeHead))
     );
-  }, [students, feeHeads, transactions, filters, isHM, classTeacherFor]);
+  }, [students, feeHeads, transactions, filters, isSuperAdmin, isHM, isAccounts, classTeacherFor]);
 
   // Group by student
   const groupedDefaulters = useMemo(() => {
@@ -133,6 +179,7 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
           name: row.name,
           class: row.class,
           phone: row.phone,
+          transportRoute: row.transportRoute || '',
           items: [],
           total: 0,
           earliestDue: row.dueDate || ''
@@ -171,51 +218,76 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
     let classList = [...new Set((students || []).map(s => s.class))].filter(Boolean);
     
     // Filter by role
-    if (!isHM && !isAccounts && classTeacherFor) {
+    if (!isSuperAdmin && !isHM && !isAccounts && classTeacherFor) {
       classList = classList.filter(c => 
         normalizeClass(c) === normalizeClass(classTeacherFor)
       );
     }
     
     return classList.sort();
-  }, [students, isHM, classTeacherFor]);
+  }, [students, isSuperAdmin, isHM, isAccounts, classTeacherFor]);
+
+  // Routes list for filter
+  const routes = useMemo(() => {
+    const seen = {};
+    return (students || [])
+      .map(s => (s.transportRoute || '').trim())
+      .filter(r => r)
+      .reduce((acc, r) => {
+        const key = r.toLowerCase();
+        if (!seen[key]) { seen[key] = true; acc.push(r); }
+        return acc;
+      }, [])
+      .sort();
+  }, [students]);
 
   // Render WhatsApp message for a student group
   const renderGroupedMessage = (group) => {
     const lines = group.items.map(it =>
       `${it.feeHead}: ₹${Number(it.amount || 0).toLocaleString('en-IN')} (Due: ${fmtDate(it.dueDate)})`
     ).join('\n');
+
+    const routeLine = filters.includeTransport && group.transportRoute
+      ? `\nTransport Route: ${group.transportRoute}`
+      : '';
     
     return messageTemplate
       .replace('{name}', group.name)
       .replace('{admNo}', group.admNo)
       .replace('{class}', group.class)
       .replace('{lines}', lines)
-      .replace('{total}', Number(group.total || 0).toLocaleString('en-IN'));
+      .replace('{total}', Number(group.total || 0).toLocaleString('en-IN'))
+      + routeLine;
   };
 
   // Render WhatsApp message for single item
   const renderItemMessage = (item) => {
     const line = `${item.feeHead}: ₹${Number(item.amount || 0).toLocaleString('en-IN')} (Due: ${fmtDate(item.dueDate)})`;
+
+    const routeLine = filters.includeTransport && item.transportRoute
+      ? `\nTransport Route: ${item.transportRoute}`
+      : '';
     
     return messageTemplate
       .replace('{name}', item.name)
       .replace('{admNo}', item.admNo)
       .replace('{class}', item.class)
       .replace('{lines}', line)
-      .replace('{total}', Number(item.amount || 0).toLocaleString('en-IN'));
+      .replace('{total}', Number(item.amount || 0).toLocaleString('en-IN'))
+      + routeLine;
   };
 
   // Download CSV
   const downloadCSV = () => {
     if (filters.groupByStudent && groupedDefaulters) {
-      const header = ['AdmNo', 'Name', 'Class', 'Phone', 'Fee Heads', 'Total', 'Earliest Due'];
+      const header = ['AdmNo', 'Name', 'Class', 'Route', 'Phone', 'Fee Heads', 'Total', 'Earliest Due'];
       const lines = [header.join(',')].concat(
         groupedDefaulters.map(g =>
           [
             g.admNo,
             `"${(g.name || '').replace(/"/g, '""')}"`,
             g.class,
+            `"${g.transportRoute || ''}"`,
             `"${g.phone || ''}"`,
             `"${g.items.map(i => `${i.feeHead} (₹${i.amount})`).join('; ')}"`,
             g.total,
@@ -231,13 +303,14 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
       a.click();
       URL.revokeObjectURL(url);
     } else {
-      const header = ['AdmNo', 'Name', 'Class', 'Phone', 'Fee Head', 'Amount', 'Due Date'];
+      const header = ['AdmNo', 'Name', 'Class', 'Route', 'Phone', 'Fee Head', 'Amount', 'Due Date'];
       const lines = [header.join(',')].concat(
         itemizedDefaulters.map(r =>
           [
             r.admNo,
             `"${r.name}"`,
             r.class,
+            `"${r.transportRoute || ''}"`,
             `"${r.phone || ''}"`,
             `"${r.feeHead}"`,
             r.amount,
@@ -274,7 +347,7 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
           <div>
             <h2 className="text-xl sm:text-2xl font-bold">Fee Defaulters & Reminders</h2>
             <p className="text-orange-100 text-sm">
-              {isHM ? 'All Classes' : (isAccounts ? 'Accounts - All Classes' : `Class Teacher - ${stripStdPrefix(classTeacherFor)}`)}
+              {isSuperAdmin || isHM ? 'All Classes' : isAccounts ? 'Accounts — All Classes' : classTeacherFor ? `Class Teacher — ${stripStdPrefix(classTeacherFor)}` : 'All Classes'}
             </p>
           </div>
         </div>
@@ -313,12 +386,12 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Class</label>
             <select
               value={filters.class}
-              onChange={(e) => setFilters(prev => ({ ...prev, class: e.target.value }))}
+              onChange={(e) => setFilters(prev => ({ ...prev, class: e.target.value, route: '' }))}
               className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"
             >
               <option value="">All Classes</option>
@@ -327,6 +400,22 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
               ))}
             </select>
           </div>
+
+          {routes.length > 0 && (
+            <div>
+              <label className="block text-xs text-amber-600 dark:text-amber-400 mb-1">Transport Route</label>
+              <select
+                value={filters.route}
+                onChange={(e) => setFilters(prev => ({ ...prev, route: e.target.value, class: '' }))}
+                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-amber-400 dark:border-amber-600 rounded-lg text-sm"
+              >
+                <option value="">All Routes</option>
+                {routes.map(r => (
+                  <option key={r} value={r}>🚌 {r}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="flex flex-col gap-2">
             <label className="inline-flex items-center gap-2 cursor-pointer text-sm">
@@ -347,6 +436,29 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
               />
               <span className="text-gray-700 dark:text-gray-300">Only Overdue</span>
             </label>
+            <label className="inline-flex items-center gap-2 cursor-pointer text-sm">
+              <input
+                type="checkbox"
+                checked={filters.includeSchoolFee}
+                onChange={(e) => setFilters(prev => ({ ...prev, includeSchoolFee: e.target.checked }))}
+                className="w-4 h-4 rounded text-blue-600"
+              />
+              <span className="text-gray-700 dark:text-gray-300">School Fee</span>
+            </label>
+            {routes.length > 0 && (
+              <label className="inline-flex items-center gap-2 cursor-pointer text-sm">
+                <input
+                  type="checkbox"
+                  checked={filters.includeTransport}
+                  onChange={(e) => setFilters(prev => ({ ...prev, includeTransport: e.target.checked }))}
+                  className="w-4 h-4 rounded text-amber-500"
+                />
+                <span className="flex items-center gap-1 text-amber-700 dark:text-amber-400 font-medium">
+                  <Bus className="h-3.5 w-3.5" />
+                  Transport Fee
+                </span>
+              </label>
+            )}
           </div>
         </div>
 
@@ -398,8 +510,14 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
                         <p className="text-sm text-gray-600 dark:text-gray-400">
                           {group.admNo} • {stripStdPrefix(group.class)}
                         </p>
+                        {group.transportRoute && (
+                          <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-0.5">
+                            <Bus className="h-3 w-3" />
+                            {group.transportRoute}
+                          </p>
+                        )}
                         {group.phone && (
-                          <p className="text-xs text-gray-500 dark:text-gray-500 flex items-center gap-1 mt-1">
+                          <p className="text-xs text-gray-500 dark:text-gray-500 flex items-center gap-1 mt-0.5">
                             <Phone className="h-3 w-3" />
                             {group.phone}
                           </p>
@@ -533,6 +651,11 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
                           <div>
                             <p className="font-medium text-gray-900 dark:text-gray-100">{row.name}</p>
                             <p className="text-xs text-gray-500 dark:text-gray-400">{row.admNo}</p>
+                            {row.transportRoute && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded text-xs mt-0.5">
+                                🚌 {row.transportRoute}
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="px-3 py-3 text-sm text-gray-900 dark:text-gray-100">

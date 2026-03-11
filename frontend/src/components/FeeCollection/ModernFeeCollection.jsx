@@ -133,6 +133,13 @@ const ModernFeeCollection = ({ user, apiBaseUrl }) => {
     }
   }, [apiBaseUrl]);
 
+  // Refresh transactions whenever Outstanding tab becomes active so waived/paid fees disappear
+  useEffect(() => {
+    if (activeView === 'outstanding') {
+      refreshTransactionsOnly();
+    }
+  }, [activeView, refreshTransactionsOnly]);
+
   // Filter menu items based on user role
   const allMenuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, color: 'text-blue-600 dark:text-blue-400' },

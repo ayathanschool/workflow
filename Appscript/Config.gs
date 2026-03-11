@@ -44,12 +44,12 @@ const SPREADSHEET_ID = (function () {
 const SHEETS = {
   // === CORE SYSTEM (3 sheets) ===
   Users: ['email','name','password','roles','classes','subjects','classTeacherFor'],
-  Students: ['admNo','name','class','email','parentContact'], 
+  Students: ['admNo','name','class','parentName','parentContact','transportRoute','transportPlace','transportFee','transportStartMonth','transportEndMonth'], 
   Settings: ['key','value','description'],
   
   // === FEE COLLECTION SYSTEM (2 sheets) ===
   FeeHeads: ['feeHead','class','amount','dueDate'],
-  Transactions: ['date','receiptNo','admNo','name','class','feeHead','amount','fine','mode','void'],
+  Transactions: ['date','receiptNo','admNo','name','class','feeHead','amount','fine','mode','void','routeNo'],
   
   // === ACADEMIC WORKFLOW (4 sheets) ===
   Timetable: ['class','dayOfWeek','period','subject','teacherEmail','teacherName'],

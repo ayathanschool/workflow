@@ -30,6 +30,7 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
     search: '',
     class: '',
     feeHead: '',
+    route: '',
     mode: '',
     status: 'valid', // valid, voided, all
     dateFrom: '',
@@ -46,6 +47,16 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
   const classes = [...new Set((transactions || []).map(t => normalizeText(t.class)))].filter(Boolean).sort();
   const feeHeads = [...new Set((transactions || []).map(t => normalizeText(t.feeHead)))].filter(Boolean).sort();
   const modes = [...new Set((transactions || []).map(t => normalizeText(t.mode)))].filter(Boolean).sort();
+  // Deduplicate routes case-insensitively; preserve original casing from first occurrence
+  const routes = Object.values(
+    (transactions || []).reduce((acc, t) => {
+      const raw = normalizeText(t.routeNo);
+      if (!raw) return acc;
+      const key = raw.toLowerCase();
+      if (!acc[key]) acc[key] = raw; // keep first-seen casing for display
+      return acc;
+    }, {})
+  ).sort();
 
   // Apply filters
   const filteredTransactions = (transactions || [])
@@ -54,14 +65,16 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
       const tFeeHead = normalizeText(t.feeHead);
       const tMode = normalizeText(t.mode);
 
-      // Search filter
+      // Search filter — also matches route number
       if (filters.search) {
         const term = filters.search.toLowerCase();
         if (!(
           String(t.admNo).toLowerCase().includes(term) ||
           t.name?.toLowerCase().includes(term) ||
           t.receiptNo?.toLowerCase().includes(term) ||
-          tClass.toLowerCase().includes(term)
+          tClass.toLowerCase().includes(term) ||
+          normalizeText(t.routeNo).toLowerCase().includes(term) ||
+          normalizeText(t.feeHead).toLowerCase().includes(term)
         )) return false;
       }
 
@@ -70,6 +83,9 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
 
       // Fee head filter
       if (filters.feeHead && tFeeHead !== filters.feeHead) return false;
+
+      // Route filter — case-insensitive so "Route 1" matches "route 1" etc.
+      if (filters.route && normalizeText(t.routeNo).toLowerCase() !== filters.route.toLowerCase()) return false;
 
       // Mode filter
       if (filters.mode && tMode !== filters.mode) return false;
@@ -125,6 +141,7 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
       search: '',
       class: '',
       feeHead: '',
+      route: '',
       mode: '',
       status: 'valid',
       dateFrom: '',
@@ -144,14 +161,29 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
     setShowFilters(false); // Close filters panel
   };
 
+  const filterTransport = () => {
+    setFilters(prev => ({
+      ...prev,
+      feeHead: '',        // clear specific fee head so all Transport* months show
+      search: 'transport' // search covers all "Transport June", "Transport July" etc.
+    }));
+    setShowFilters(false);
+  };
+
+  const filterRoute = (routeNo) => {
+    setFilters(prev => ({ ...prev, route: routeNo }));
+    setShowFilters(false);
+  };
+
   const exportToCSV = () => {
-    const headers = ['Date', 'Receipt No', 'Adm No', 'Student Name', 'Class', 'Fee Head', 'Amount', 'Fine', 'Total', 'Mode', 'Status'];
+    const headers = ['Date', 'Receipt No', 'Adm No', 'Student Name', 'Class', 'Route', 'Fee Head', 'Amount', 'Fine', 'Total', 'Mode', 'Status'];
     const rows = filteredTransactions.map(t => [
       toYMDInTimeZone(t.date),
       t.receiptNo,
       t.admNo,
       t.name,
       normalizeText(t.class),
+      normalizeText(t.routeNo),
       normalizeText(t.feeHead),
       t.amount,
       t.fine,
@@ -202,6 +234,24 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
           >
             <Calendar className="h-4 w-4" />
             Today
+          </button>
+          {routes.length > 0 && (
+            <select
+              value={filters.route}
+              onChange={(e) => filterRoute(e.target.value)}
+              className="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 rounded-lg text-sm font-medium"
+              title="Filter by transport route"
+            >
+              <option value="">🚌 All Routes</option>
+              {routes.map(r => <option key={r} value={r}>🚌 {r}</option>)}
+            </select>
+          )}
+          <button
+            onClick={filterTransport}
+            className="px-4 py-2 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 transition-colors flex items-center gap-2"
+            title="Show transport fee transactions only"
+          >
+            🚌 Transport
           </button>
           <button
             onClick={() => setShowFilters(!showFilters)}
@@ -298,6 +348,22 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
                 {feeHeads.map(f => <option key={f} value={f}>{f}</option>)}
               </select>
             </div>
+
+            {routes.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Transport Route
+                </label>
+                <select
+                  value={filters.route}
+                  onChange={(e) => setFilters(prev => ({ ...prev, route: e.target.value }))}
+                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-amber-300 dark:border-amber-600 rounded-lg text-sm"
+                >
+                  <option value="">All Routes</option>
+                  {routes.map(r => <option key={r} value={r}>🚌 {r}</option>)}
+                </select>
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -453,6 +519,13 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
                         <div>
                           <p className="font-medium">{t.name}</p>
                           <p className="text-xs text-gray-500 dark:text-gray-400">{t.admNo} • {t.class}</p>
+                          {t.routeNo && (
+                            <p className="text-xs mt-0.5">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium">
+                                🚌 {t.routeNo}
+                              </span>
+                            </p>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
@@ -555,6 +628,12 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
                   <p className="text-sm text-gray-500 dark:text-gray-400">Payment Mode</p>
                   <p className="font-medium text-gray-900 dark:text-gray-100">{selectedReceipt.mode}</p>
                 </div>
+                {selectedReceipt.routeNo && (
+                  <div className="col-span-2">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Transport Route</p>
+                    <p className="font-medium text-amber-700 dark:text-amber-300">🚌 {selectedReceipt.routeNo}</p>
+                  </div>
+                )}
               </div>
 
               <div className="border-t border-gray-200 dark:border-gray-700 pt-4">

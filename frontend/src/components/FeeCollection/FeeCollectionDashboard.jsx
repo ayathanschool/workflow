@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   DollarSign, TrendingUp, Users, AlertCircle, Calendar,
-  ArrowUp, ArrowDown, Clock, CheckCircle, XCircle
+  ArrowUp, ArrowDown, Clock, CheckCircle, XCircle, Bus
 } from 'lucide-react';
 
 const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }) => {
@@ -38,6 +38,37 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
         startDate.setMonth(today.getMonth() - 1);
     }
 
+    // Helper: generate transport fee heads for a student respecting their start/end month
+    const buildTransportFeeHeads = (student) => {
+      const fee = Number(student.transportFee) || 0;
+      if (!fee || !student.transportRoute) return [];
+      const ayStart = now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1;
+      const ayIdx = (m) => m >= 6 ? m - 6 : m + 6;
+      const startM = Number(student.transportStartMonth) || 6;
+      const endM   = Number(student.transportEndMonth)   || 3;
+      // Skip months already covered by class-level fee heads (avoids duplicates)
+      const existingFeeHeadNames = new Set(
+        (feeHeads || [])
+          .filter(f => String(f.class || '').toLowerCase() === String(student.class || '').toLowerCase())
+          .map(f => String(f.feeHead || '').toLowerCase())
+      );
+      return [
+        { name: 'June',      m: 6,  dueDate: `${ayStart}-06-15` },
+        { name: 'July',      m: 7,  dueDate: `${ayStart}-07-15` },
+        { name: 'August',    m: 8,  dueDate: `${ayStart}-08-15` },
+        { name: 'September', m: 9,  dueDate: `${ayStart}-09-15` },
+        { name: 'October',   m: 10, dueDate: `${ayStart}-10-15` },
+        { name: 'November',  m: 11, dueDate: `${ayStart}-11-15` },
+        { name: 'December',  m: 12, dueDate: `${ayStart}-12-15` },
+        { name: 'January',   m: 1,  dueDate: `${ayStart + 1}-01-15` },
+        { name: 'February',  m: 2,  dueDate: `${ayStart + 1}-02-15` },
+        { name: 'March',     m: 3,  dueDate: `${ayStart + 1}-03-15` },
+      ]
+      .filter(mo => { const i = ayIdx(mo.m); return i >= ayIdx(startM) && i <= ayIdx(endM); })
+      .filter(mo => !existingFeeHeadNames.has(`transport ${mo.name.toLowerCase()}`))
+      .map(mo => ({ feeHead: `Transport ${mo.name}`, amount: fee, dueDate: mo.dueDate }));
+    };
+
     const validTransactions = (transactions || []).filter(t => !t.void && t.date);
     const rangeTransactions = validTransactions.filter(t => {
       const txDate = new Date(t.date);
@@ -51,25 +82,36 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
     });
     const todayTotal = todayCollections.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
     
-    // Calculate expected vs collected
+    // Calculate expected vs collected (including due transport installments)
     const totalExpected = (students || []).reduce((sum, student) => {
-      const studentFees = (feeHeads || []).filter(f => f.class === student.class);
-      return sum + studentFees.reduce((fSum, f) => fSum + (Number(f.amount) || 0), 0);
+      const classFeeTotal = (feeHeads || [])
+        .filter(f => f.class === student.class)
+        .reduce((fSum, f) => fSum + (Number(f.amount) || 0), 0);
+      const transportTotal = buildTransportFeeHeads(student)
+        .filter(tf => new Date(tf.dueDate) <= today)
+        .reduce((s, tf) => s + tf.amount, 0);
+      return sum + classFeeTotal + transportTotal;
     }, 0);
 
     const totalActuallyCollected = validTransactions.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
     const collectionRate = totalExpected > 0 ? (totalActuallyCollected / totalExpected * 100) : 0;
 
-    // Outstanding calculations
+    // Build payment lookup
     const studentPayments = new Map();
     validTransactions.forEach(t => {
       const key = `${t.admNo}-${t.feeHead}`;
       studentPayments.set(key, (studentPayments.get(key) || 0) + (Number(t.amount) || 0));
     });
 
+    // Outstanding calculations (class fees + transport fees)
     let totalOutstanding = 0;
+    let schoolOutstanding = 0;
+    let transportOutstanding = 0;
     let studentsWithOutstanding = new Set();
+    const routeMap = {};
+
     (students || []).forEach(student => {
+      // Class fees
       const studentFees = (feeHeads || []).filter(f => f.class === student.class);
       studentFees.forEach(fee => {
         const key = `${student.admNo}-${fee.feeHead}`;
@@ -77,10 +119,53 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
         const balance = Math.max(0, (Number(fee.amount) || 0) - paid);
         if (balance > 0) {
           totalOutstanding += balance;
+          schoolOutstanding += balance;
           studentsWithOutstanding.add(student.admNo);
         }
       });
+
+      // Transport fees
+      const route = (student.transportRoute || '').trim();
+      if (route) {
+        if (!routeMap[route]) routeMap[route] = { studentCount: 0, outstanding: 0 };
+        routeMap[route].studentCount++;
+        buildTransportFeeHeads(student).forEach(tf => {
+          if (new Date(tf.dueDate) > today) return;
+          const key = `${student.admNo}-${tf.feeHead}`;
+          const paid = studentPayments.get(key) || 0;
+          const balance = Math.max(0, tf.amount - paid);
+          if (balance > 0) {
+            transportOutstanding += balance;
+            totalOutstanding += balance;
+            studentsWithOutstanding.add(student.admNo);
+            routeMap[route].outstanding += balance;
+          }
+        });
+      }
     });
+
+    // Transport collected (from actual transactions)
+    const transportCollected = validTransactions
+      .filter(t => (t.feeHead || '').toLowerCase().startsWith('transport '))
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+    // Route collected amounts (from transactions with routeNo)
+    const routeCollectedMap = {};
+    validTransactions
+      .filter(t => (t.feeHead || '').toLowerCase().startsWith('transport ') && t.routeNo)
+      .forEach(t => {
+        const r = (t.routeNo || '').trim();
+        if (r) routeCollectedMap[r] = (routeCollectedMap[r] || 0) + (Number(t.amount) || 0);
+      });
+
+    const routeStats = Object.entries(routeMap)
+      .map(([route, data]) => ({
+        route,
+        studentCount: data.studentCount,
+        outstanding: data.outstanding,
+        collected: routeCollectedMap[route] || 0,
+      }))
+      .sort((a, b) => a.route.localeCompare(b.route));
 
     // Payment modes breakdown
     const modeBreakdown = {};
@@ -108,10 +193,15 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
       totalTransactions: rangeTransactions.length,
       collectionRate: collectionRate.toFixed(1),
       totalOutstanding,
+      schoolOutstanding,
       studentsWithOutstanding: studentsWithOutstanding.size,
       modeBreakdown,
       dailyTrend,
-      avgDailyCollection: dailyTrend.length > 0 ? dailyTrend.reduce((s, d) => s + d.amount, 0) / dailyTrend.length : 0
+      avgDailyCollection: dailyTrend.length > 0 ? dailyTrend.reduce((s, d) => s + d.amount, 0) / dailyTrend.length : 0,
+      transportCollected,
+      transportOutstanding,
+      transportStudents: Object.values(routeMap).reduce((s, r) => s + r.studentCount, 0),
+      routeStats,
     });
   };
 
@@ -218,6 +308,16 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
             <p className="text-sm font-medium opacity-90">Outstanding</p>
             <p className="text-3xl font-bold">₹{stats.totalOutstanding.toLocaleString('en-IN')}</p>
             <p className="text-xs opacity-75">{stats.studentsWithOutstanding} students pending</p>
+            <div className="mt-3 pt-3 border-t border-white/25 grid grid-cols-2 gap-2">
+              <div className="bg-white/15 rounded-lg px-2 py-1.5">
+                <p className="text-xs opacity-80">🏫 School</p>
+                <p className="text-sm font-bold">₹{stats.schoolOutstanding.toLocaleString('en-IN')}</p>
+              </div>
+              <div className="bg-white/15 rounded-lg px-2 py-1.5">
+                <p className="text-xs opacity-80">🚌 Transport</p>
+                <p className="text-sm font-bold">₹{stats.transportOutstanding.toLocaleString('en-IN')}</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -287,6 +387,66 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
           </div>
         </div>
       </div>
+
+      {/* Transport Fee Summary */}
+      {stats.transportStudents > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-amber-200 dark:border-amber-800">
+          <div className="flex items-center gap-3 mb-5">
+            <div className="p-2 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
+              <Bus className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Transport Fee Summary</h3>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+            <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 text-center">
+              <p className="text-xs font-medium text-amber-600 dark:text-amber-400 mb-1">Students</p>
+              <p className="text-2xl font-bold text-amber-700 dark:text-amber-300">{stats.transportStudents}</p>
+            </div>
+            <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 text-center">
+              <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">Collected</p>
+              <p className="text-2xl font-bold text-green-700 dark:text-green-300">₹{stats.transportCollected.toLocaleString('en-IN')}</p>
+            </div>
+            <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-4 text-center">
+              <p className="text-xs font-medium text-red-600 dark:text-red-400 mb-1">Outstanding</p>
+              <p className="text-2xl font-bold text-red-700 dark:text-red-300">₹{stats.transportOutstanding.toLocaleString('en-IN')}</p>
+            </div>
+          </div>
+
+          {stats.routeStats.length > 0 && (
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Route-wise Breakdown</h4>
+              <div className="space-y-3">
+                {stats.routeStats.map(r => {
+                  const total = r.collected + r.outstanding;
+                  const pct = total > 0 ? (r.collected / total * 100) : 0;
+                  return (
+                    <div key={r.route} className="flex items-center gap-4">
+                      <div className="w-28 shrink-0">
+                        <p className="text-xs font-medium text-gray-700 dark:text-gray-300">🚌 {r.route}</p>
+                        <p className="text-xs text-gray-400">{r.studentCount} student{r.studentCount !== 1 ? 's' : ''}</p>
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="text-green-600 dark:text-green-400 font-medium">₹{r.collected.toLocaleString('en-IN')}</span>
+                          <span className="text-red-500 font-medium">₹{r.outstanding.toLocaleString('en-IN')} due</span>
+                        </div>
+                        <div className="bg-gray-100 dark:bg-gray-700 rounded-full h-2">
+                          <div
+                            className="bg-amber-500 rounded-full h-2 transition-all duration-500"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 w-9 text-right">{pct.toFixed(0)}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Quick Actions */}
       <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">

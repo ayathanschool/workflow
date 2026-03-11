@@ -9,8 +9,12 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
   const [filters, setFilters] = useState({
     search: '',
     class: '',
+    route: '',
     minAmount: '',
-    sortBy: 'amount' // amount, dueDate, name
+    sortBy: 'amount', // amount, dueDate, name
+    onlyOverdue: false,
+    includeSchoolFee: true,
+    includeTransport: true
   });
   const [selectedStudents, setSelectedStudents] = useState([]);
   const [showReminderModal, setShowReminderModal] = useState(false);
@@ -25,9 +29,44 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
           !String(t.void || '').toUpperCase().startsWith('Y')
         );
 
-        const studentFeeHeads = (feeHeads || []).filter(fh => 
-          fh.class === student.class
+        // Class-wide fee heads + per-student monthly transport installments (start–end month)
+        const now = new Date();
+        const ayStart = (now.getMonth() + 1 >= 6) ? now.getFullYear() : now.getFullYear() - 1;
+        const transportFeeAmt = Number(student.transportFee) || 0;
+        const ayIdx = (m) => m >= 6 ? m - 6 : m + 6;
+        const startM = Number(student.transportStartMonth) || 6;
+        const endM   = Number(student.transportEndMonth)   || 3;
+        // Skip months already covered by class-level fee heads (avoids duplicates)
+        const existingFeeHeadNames = new Set(
+          (feeHeads || [])
+            .filter(fh => String(fh.class || '').toLowerCase() === String(student.class || '').toLowerCase())
+            .map(fh => String(fh.feeHead || '').toLowerCase())
         );
+        const transportFeeHeads = transportFeeAmt > 0 ? [
+          { name: 'June',      m: 6,  y: ayStart },
+          { name: 'July',      m: 7,  y: ayStart },
+          { name: 'August',    m: 8,  y: ayStart },
+          { name: 'September', m: 9,  y: ayStart },
+          { name: 'October',   m: 10, y: ayStart },
+          { name: 'November',  m: 11, y: ayStart },
+          { name: 'December',  m: 12, y: ayStart },
+          { name: 'January',   m: 1,  y: ayStart + 1 },
+          { name: 'February',  m: 2,  y: ayStart + 1 },
+          { name: 'March',     m: 3,  y: ayStart + 1 }
+        ]
+        .filter(mo => { const i = ayIdx(mo.m); return i >= ayIdx(startM) && i <= ayIdx(endM); })
+        .filter(mo => !existingFeeHeadNames.has(`transport ${mo.name.toLowerCase()}`))
+        .map(mo => ({
+          feeHead: `Transport ${mo.name}`,
+          class: student.class,
+          amount: transportFeeAmt,
+          dueDate: `${mo.y}-${String(mo.m).padStart(2, '0')}-15`
+        })) : [];
+
+        const studentFeeHeads = [
+          ...(feeHeads || []).filter(fh => fh.class === student.class),
+          ...transportFeeHeads
+        ];
 
         const totalRequired = studentFeeHeads.reduce((sum, fh) => 
           sum + (Number(fh.amount) || 0), 0
@@ -42,7 +81,8 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
         // Outstanding fee heads
         const outstandingFees = studentFeeHeads
           .map(fh => {
-            const fhTransactions = studentTransactions.filter(t => t.feeHead === fh.feeHead);
+            const fhKey = String(fh.feeHead || '').trim().toLowerCase();
+            const fhTransactions = studentTransactions.filter(t => String(t.feeHead || '').trim().toLowerCase() === fhKey);
             const fhPaid = fhTransactions.reduce((sum, t) => 
               sum + (Number(t.amount) || 0) + (Number(t.fine) || 0), 0
             );
@@ -88,40 +128,78 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
 
   // Apply filters and sorting
   const filteredDefaulters = defaulters
+    .map(d => {
+      const today = new Date();
+      today.setHours(23, 59, 59, 999); // end of today
+
+      // Narrow fee list by fee-type checkboxes first
+      let visibleFees = (d.outstandingFees || []).filter(f => {
+        const isTransport = String(f.feeHead || '').toLowerCase().startsWith('transport ');
+        if (isTransport && !filters.includeTransport) return false;
+        if (!isTransport && !filters.includeSchoolFee) return false;
+        return true;
+      });
+      // When "Only Due" is on, further restrict to fees whose due date has passed
+      if (filters.onlyOverdue) {
+        visibleFees = visibleFees.filter(f => f.dueDate && new Date(f.dueDate) <= today);
+      }
+      const visibleBalance = visibleFees.reduce((sum, f) => sum + f.balance, 0);
+      // Overdue days from earliest overdue due date among visible fees
+      const overdueDueDates = visibleFees
+        .filter(f => f.dueDate && new Date(f.dueDate) <= today)
+        .map(f => new Date(f.dueDate));
+      const visibleOverdueDays = overdueDueDates.length > 0
+        ? Math.max(0, Math.floor((today - new Date(Math.min(...overdueDueDates))) / 86400000))
+        : 0;
+      return { ...d, visibleBalance, visibleFees, visibleOverdueDays };
+    })
     .filter(d => {
+      if (d.visibleBalance <= 0) return false;
+
       if (filters.search) {
         const term = filters.search.toLowerCase();
         if (!(
           String(d.admNo).toLowerCase().includes(term) ||
           d.name?.toLowerCase().includes(term) ||
-          d.class?.toLowerCase().includes(term)
+          d.class?.toLowerCase().includes(term) ||
+          String(d.transportRoute || '').toLowerCase().includes(term)
         )) return false;
       }
 
       if (filters.class && d.class !== filters.class) return false;
 
-      if (filters.minAmount && d.balance < Number(filters.minAmount)) return false;
+      if (filters.route && String(d.transportRoute || '').toLowerCase() !== filters.route.toLowerCase()) return false;
+
+      if (filters.minAmount && d.visibleBalance < Number(filters.minAmount)) return false;
+
+      // Only overdue: must have at least one visible fee past its due date
+      if (filters.onlyOverdue && d.visibleOverdueDays <= 0) return false;
 
       return true;
     })
     .sort((a, b) => {
-      if (filters.sortBy === 'amount') {
-        return b.balance - a.balance;
-      } else if (filters.sortBy === 'dueDate') {
-        return b.overdueDays - a.overdueDays;
-      } else if (filters.sortBy === 'name') {
-        return (a.name || '').localeCompare(b.name || '');
-      }
+      if (filters.sortBy === 'amount') return b.visibleBalance - a.visibleBalance;
+      if (filters.sortBy === 'dueDate') return b.visibleOverdueDays - a.visibleOverdueDays;
+      if (filters.sortBy === 'name') return (a.name || '').localeCompare(b.name || '');
       return 0;
     });
 
   const classes = [...new Set((students || []).map(s => s.class))].filter(Boolean).sort();
+  const routes = Object.values(
+    (students || []).reduce((acc, s) => {
+      const raw = String(s.transportRoute || '').trim();
+      if (!raw) return acc;
+      const key = raw.toLowerCase();
+      if (!acc[key]) acc[key] = raw;
+      return acc;
+    }, {})
+  ).sort();
 
   const summary = {
     totalDefaulters: filteredDefaulters.length,
-    totalOutstanding: filteredDefaulters.reduce((sum, d) => sum + d.balance, 0),
-    criticalCount: filteredDefaulters.filter(d => d.overdueDays > 30).length,
-    warningCount: filteredDefaulters.filter(d => d.overdueDays > 7 && d.overdueDays <= 30).length
+    totalOutstanding: filteredDefaulters.reduce((sum, d) => sum + d.visibleBalance, 0),
+    criticalCount: filteredDefaulters.filter(d => d.visibleOverdueDays > 30).length,
+    warningCount: filteredDefaulters.filter(d => d.visibleOverdueDays > 7 && d.visibleOverdueDays <= 30).length
   };
 
   const toggleSelectStudent = (admNo) => {
@@ -156,13 +234,14 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
   };
 
   const exportToCSV = () => {
-    const headers = ['Adm No', 'Name', 'Class', 'Outstanding Amount', 'Overdue Days', 'Email', 'Contact', 'Last Payment'];
+    const headers = ['Adm No', 'Name', 'Class', 'Route', 'Outstanding Amount', 'Overdue Days', 'Email', 'Contact', 'Last Payment'];
     const rows = filteredDefaulters.map(d => [
       d.admNo,
       d.name,
       d.class,
-      d.balance,
-      d.overdueDays,
+      d.transportRoute || '',
+      d.visibleBalance,
+      d.visibleOverdueDays,
       d.email || '',
       d.parentContact || '',
       d.lastPayment || ''
@@ -199,7 +278,29 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
   const classStats = Object.entries(byClass).map(([className, students]) => ({
     class: className,
     count: students.length,
-    total: students.reduce((sum, s) => sum + s.balance, 0)
+    total: students.reduce((sum, s) => sum + s.visibleBalance, 0)
+  })).sort((a, b) => b.total - a.total);
+
+  const byRoute = useMemo(() => {
+    const grouped = {};
+    filteredDefaulters.filter(d => d.transportRoute).forEach(d => {
+      const route = String(d.transportRoute).trim();
+      if (!grouped[route]) grouped[route] = [];
+      grouped[route].push(d);
+    });
+    return grouped;
+  }, [filteredDefaulters]);
+
+  const routeStats = Object.entries(byRoute).map(([route, routeStudents]) => ({
+    route,
+    count: routeStudents.length,
+    total: routeStudents.reduce((sum, s) => sum + s.visibleBalance, 0),
+    transportBalance: routeStudents.reduce((sum, s) => {
+      const transportOut = (s.visibleFees || []).filter(f =>
+        String(f.feeHead || '').toLowerCase().startsWith('transport')
+      );
+      return sum + transportOut.reduce((s2, f) => s2 + f.balance, 0);
+    }, 0)
   })).sort((a, b) => b.total - a.total);
 
   return (
@@ -284,9 +385,12 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Class-wise Outstanding</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {classStats.map(stat => (
-              <div
+              <button
                 key={stat.class}
-                className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 hover:shadow-md transition-shadow"
+                onClick={() => setFilters(prev => ({ ...prev, class: prev.class === stat.class ? '' : stat.class }))}
+                className={`text-left bg-gray-50 dark:bg-gray-900 rounded-lg p-4 hover:shadow-md transition-all border-2 ${
+                  filters.class === stat.class ? 'border-blue-500' : 'border-transparent'
+                }`}
               >
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-semibold text-gray-900 dark:text-gray-100">{stat.class}</span>
@@ -297,19 +401,53 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
                 <p className="text-2xl font-bold text-red-600 dark:text-red-400">
                   ₹{stat.total.toLocaleString('en-IN')}
                 </p>
-              </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Route-wise Breakdown */}
+      {routeStats.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-amber-200 dark:border-amber-800">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+            🚌 Route-wise Outstanding Transport Fees
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {routeStats.map(stat => (
+              <button
+                key={stat.route}
+                onClick={() => setFilters(prev => ({ ...prev, route: prev.route === stat.route ? '' : stat.route }))}
+                className={`text-left bg-amber-50 dark:bg-amber-900/20 rounded-lg p-4 hover:shadow-md transition-all border-2 ${
+                  filters.route === stat.route ? 'border-amber-500' : 'border-transparent'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-semibold text-amber-900 dark:text-amber-200">🚌 {stat.route}</span>
+                  <span className="px-2 py-1 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 rounded-full text-xs font-medium">
+                    {stat.count} students
+                  </span>
+                </div>
+                <p className="text-2xl font-bold text-red-600 dark:text-red-400">
+                  ₹{stat.total.toLocaleString('en-IN')}
+                </p>
+                {stat.transportBalance > 0 && stat.transportBalance !== stat.total && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                    Transport due: ₹{stat.transportBalance.toLocaleString('en-IN')}
+                  </p>
+                )}
+              </button>
             ))}
           </div>
         </div>
       )}
 
       {/* Filters */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Search
-            </label>
+      <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+        <div className="flex flex-wrap items-end gap-3">
+          {/* Search */}
+          <div className="flex-1 min-w-[160px]">
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Search</label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
@@ -317,15 +455,14 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
                 value={filters.search}
                 onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
                 placeholder="Name or adm no..."
-                className="w-full pl-10 pr-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"
+                className="w-full pl-9 pr-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"
               />
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Class
-            </label>
+          {/* Class */}
+          <div className="min-w-[120px]">
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Class</label>
             <select
               value={filters.class}
               onChange={(e) => setFilters(prev => ({ ...prev, class: e.target.value }))}
@@ -336,32 +473,66 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
             </select>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Min Amount
-            </label>
-            <input
-              type="number"
-              value={filters.minAmount}
-              onChange={(e) => setFilters(prev => ({ ...prev, minAmount: e.target.value }))}
-              placeholder="0"
-              className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"
-            />
-          </div>
+          {/* Route */}
+          {routes.length > 0 && (
+            <div className="min-w-[130px]">
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Route</label>
+              <select
+                value={filters.route}
+                onChange={(e) => setFilters(prev => ({ ...prev, route: e.target.value }))}
+                className="w-full px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-600 rounded-lg text-sm"
+              >
+                <option value="">🚌 All Routes</option>
+                {routes.map(r => <option key={r} value={r}>🚌 {r}</option>)}
+              </select>
+            </div>
+          )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Sort By
-            </label>
+          {/* Sort */}
+          <div className="min-w-[150px]">
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Sort By</label>
             <select
               value={filters.sortBy}
               onChange={(e) => setFilters(prev => ({ ...prev, sortBy: e.target.value }))}
               className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"
             >
               <option value="amount">Amount (High to Low)</option>
-              <option value="dueDate">Overdue Days (High to Low)</option>
-              <option value="name">Name (A to Z)</option>
+              <option value="dueDate">Overdue Days</option>
+              <option value="name">Name (A–Z)</option>
             </select>
+          </div>
+
+          {/* Checkboxes */}
+          <div className="flex items-center gap-4 pb-0.5">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={filters.onlyOverdue}
+                onChange={(e) => setFilters(prev => ({ ...prev, onlyOverdue: e.target.checked }))}
+                className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+              />
+              <span className="text-sm font-medium text-red-700 dark:text-red-400">Only Due</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={filters.includeSchoolFee}
+                onChange={(e) => setFilters(prev => ({ ...prev, includeSchoolFee: e.target.checked }))}
+                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium text-blue-700 dark:text-blue-400">🏫 School Fee</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={filters.includeTransport}
+                onChange={(e) => setFilters(prev => ({ ...prev, includeTransport: e.target.checked }))}
+                className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+              />
+              <span className="text-sm font-medium text-amber-700 dark:text-amber-400">🚌 Transport</span>
+            </label>
           </div>
         </div>
       </div>
@@ -431,6 +602,13 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
                         <p className="text-xs text-gray-500 dark:text-gray-400">
                           {defaulter.admNo} • {defaulter.class}
                         </p>
+                        {defaulter.transportRoute && (
+                          <p className="text-xs mt-0.5">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium">
+                              🚌 {defaulter.transportRoute}
+                            </span>
+                          </p>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
@@ -451,18 +629,18 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
                     </td>
                     <td className="px-4 py-3 text-right">
                       <span className="text-lg font-bold text-red-600 dark:text-red-400">
-                        ₹{defaulter.balance.toLocaleString('en-IN')}
+                        ₹{defaulter.visibleBalance.toLocaleString('en-IN')}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getSeverityColor(defaulter.overdueDays)}`}>
+                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getSeverityColor(defaulter.visibleOverdueDays)}`}>
                         <Calendar className="h-3 w-3" />
-                        {defaulter.overdueDays} days
+                        {defaulter.visibleOverdueDays} days
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex flex-wrap gap-1">
-                        {defaulter.outstandingFees.slice(0, 3).map((fee, fIdx) => (
+                        {defaulter.visibleFees.slice(0, 3).map((fee, fIdx) => (
                           <span
                             key={fIdx}
                             className="inline-block px-2 py-0.5 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded text-xs"
@@ -470,9 +648,9 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
                             {fee.feeHead}
                           </span>
                         ))}
-                        {defaulter.outstandingFees.length > 3 && (
+                        {defaulter.visibleFees.length > 3 && (
                           <span className="inline-block px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded text-xs">
-                            +{defaulter.outstandingFees.length - 3}
+                            +{defaulter.visibleFees.length - 3}
                           </span>
                         )}
                       </div>
