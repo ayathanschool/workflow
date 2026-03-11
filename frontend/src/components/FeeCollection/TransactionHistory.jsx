@@ -207,11 +207,18 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
     total: filteredTransactions.length,
     totalAmount: filteredTransactions.reduce((sum, t) => {
       if (String(t.void || '').toUpperCase().startsWith('Y')) return sum;
+      if (String(t.mode || '').toLowerCase() === 'waiver') return sum;
       return sum + (Number(t.amount) || 0) + (Number(t.fine) || 0);
     }, 0),
     totalFine: filteredTransactions.reduce((sum, t) => {
       if (String(t.void || '').toUpperCase().startsWith('Y')) return sum;
+      if (String(t.mode || '').toLowerCase() === 'waiver') return sum;
       return sum + (Number(t.fine) || 0);
+    }, 0),
+    totalWaived: filteredTransactions.reduce((sum, t) => {
+      if (String(t.void || '').toUpperCase().startsWith('Y')) return sum;
+      if (String(t.mode || '').toLowerCase() !== 'waiver') return sum;
+      return sum + (Number(t.amount) || 0);
     }, 0),
     voided: filteredTransactions.filter(t => String(t.void || '').toUpperCase().startsWith('Y')).length
   };
@@ -223,7 +230,7 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Transaction History</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {summary.total} transactions • ₹{summary.totalAmount.toLocaleString('en-IN')} total
+            {summary.total} transactions • ₹{summary.totalAmount.toLocaleString('en-IN')} collected{summary.totalWaived > 0 ? ` • ₹${summary.totalWaived.toLocaleString('en-IN')} waived` : ''}
           </p>
         </div>
         <div className="flex gap-2">
@@ -278,25 +285,33 @@ const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Total Transactions</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Total Transactions</p>
           <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">{summary.total}</p>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Amount Collected</p>
-          <p className="text-2xl font-bold text-green-600 dark:text-green-400 mt-1">
+          <p className="text-xs text-gray-500 dark:text-gray-400">Amount Collected</p>
+          <p className="text-xl font-bold text-green-600 dark:text-green-400 mt-1">
             ₹{summary.totalAmount.toLocaleString('en-IN')}
           </p>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Fine Collected</p>
-          <p className="text-2xl font-bold text-orange-600 dark:text-orange-400 mt-1">
+          <p className="text-xs text-gray-500 dark:text-gray-400">Fine Collected</p>
+          <p className="text-xl font-bold text-orange-600 dark:text-orange-400 mt-1">
             ₹{summary.totalFine.toLocaleString('en-IN')}
           </p>
         </div>
+        {summary.totalWaived > 0 && (
+          <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 border border-amber-200 dark:border-amber-700">
+            <p className="text-xs text-amber-600 dark:text-amber-400">Waived / Write-off</p>
+            <p className="text-xl font-bold text-amber-700 dark:text-amber-300 mt-1">
+              ₹{summary.totalWaived.toLocaleString('en-IN')}
+            </p>
+          </div>
+        )}
         <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-          <p className="text-sm text-gray-500 dark:text-gray-400">Voided</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Voided</p>
           <p className="text-2xl font-bold text-red-600 dark:text-red-400 mt-1">{summary.voided}</p>
         </div>
       </div>

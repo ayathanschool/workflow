@@ -70,13 +70,14 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
     };
 
     const validTransactions = (transactions || []).filter(t => !t.void && t.date);
-    const rangeTransactions = validTransactions.filter(t => {
+    const nonWaiverValid = validTransactions.filter(t => String(t.mode || '').toLowerCase() !== 'waiver');
+    const rangeTransactions = nonWaiverValid.filter(t => {
       const txDate = new Date(t.date);
       return txDate >= startDate;
     });
 
     const totalCollected = rangeTransactions.reduce((sum, t) => sum + (Number(t.amount) || 0) + (Number(t.fine) || 0), 0);
-    const todayCollections = validTransactions.filter(t => {
+    const todayCollections = nonWaiverValid.filter(t => {
       const txDate = new Date(t.date);
       return txDate.toDateString() === today.toDateString();
     });
@@ -93,10 +94,10 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
       return sum + classFeeTotal + transportTotal;
     }, 0);
 
-    const totalActuallyCollected = validTransactions.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    const totalActuallyCollected = nonWaiverValid.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
     const collectionRate = totalExpected > 0 ? (totalActuallyCollected / totalExpected * 100) : 0;
 
-    // Build payment lookup
+    // Build payment lookup (include waivers so outstanding calculates correctly)
     const studentPayments = new Map();
     validTransactions.forEach(t => {
       const key = `${t.admNo}-${t.feeHead}`;
@@ -109,20 +110,27 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
     let transportOutstanding = 0;
     let studentsWithOutstanding = new Set();
     const routeMap = {};
+    const classMap = {};
 
     (students || []).forEach(student => {
       // Class fees
       const studentFees = (feeHeads || []).filter(f => f.class === student.class);
-      studentFees.forEach(fee => {
-        const key = `${student.admNo}-${fee.feeHead}`;
-        const paid = studentPayments.get(key) || 0;
-        const balance = Math.max(0, (Number(fee.amount) || 0) - paid);
-        if (balance > 0) {
-          totalOutstanding += balance;
-          schoolOutstanding += balance;
-          studentsWithOutstanding.add(student.admNo);
-        }
-      });
+      if (studentFees.length > 0) {
+        const cls = student.class || 'Unknown';
+        if (!classMap[cls]) classMap[cls] = { studentCount: 0, outstanding: 0 };
+        classMap[cls].studentCount++;
+        studentFees.forEach(fee => {
+          const key = `${student.admNo}-${fee.feeHead}`;
+          const paid = studentPayments.get(key) || 0;
+          const balance = Math.max(0, (Number(fee.amount) || 0) - paid);
+          if (balance > 0) {
+            totalOutstanding += balance;
+            schoolOutstanding += balance;
+            studentsWithOutstanding.add(student.admNo);
+            classMap[cls].outstanding += balance;
+          }
+        });
+      }
 
       // Transport fees
       const route = (student.transportRoute || '').trim();
@@ -144,14 +152,14 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
       }
     });
 
-    // Transport collected (from actual transactions)
-    const transportCollected = validTransactions
+    // Transport collected (from actual non-waiver transactions)
+    const transportCollected = nonWaiverValid
       .filter(t => (t.feeHead || '').toLowerCase().startsWith('transport '))
       .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
 
-    // Route collected amounts (from transactions with routeNo)
+    // Route collected amounts (from non-waiver transactions with routeNo)
     const routeCollectedMap = {};
-    validTransactions
+    nonWaiverValid
       .filter(t => (t.feeHead || '').toLowerCase().startsWith('transport ') && t.routeNo)
       .forEach(t => {
         const r = (t.routeNo || '').trim();
@@ -166,6 +174,27 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
         collected: routeCollectedMap[route] || 0,
       }))
       .sort((a, b) => a.route.localeCompare(b.route));
+
+    const schoolCollected = nonWaiverValid
+      .filter(t => !(t.feeHead || '').toLowerCase().startsWith('transport '))
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+    const classCollectedMap = {};
+    nonWaiverValid
+      .filter(t => !(t.feeHead || '').toLowerCase().startsWith('transport '))
+      .forEach(t => {
+        const cls = (t.class || '').trim();
+        if (cls) classCollectedMap[cls] = (classCollectedMap[cls] || 0) + (Number(t.amount) || 0);
+      });
+
+    const classStats = Object.entries(classMap)
+      .map(([cls, data]) => ({
+        cls,
+        studentCount: data.studentCount,
+        outstanding: data.outstanding,
+        collected: classCollectedMap[cls] || 0,
+      }))
+      .sort((a, b) => a.cls.localeCompare(b.cls));
 
     // Payment modes breakdown
     const modeBreakdown = {};
@@ -202,6 +231,9 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
       transportOutstanding,
       transportStudents: Object.values(routeMap).reduce((s, r) => s + r.studentCount, 0),
       routeStats,
+      schoolCollected,
+      schoolStudents: Object.values(classMap).reduce((s, c) => s + c.studentCount, 0),
+      classStats,
     });
   };
 
@@ -322,71 +354,65 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
         </div>
       </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Daily Trend Chart */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">7-Day Trend</h3>
-          <div className="space-y-3">
-            {stats.dailyTrend.map((day, idx) => {
-              const maxAmount = Math.max(...stats.dailyTrend.map(d => d.amount));
-              const percentage = maxAmount > 0 ? (day.amount / maxAmount * 100) : 0;
-              const date = new Date(day.date);
-              const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-              
-              return (
-                <div key={idx} className="flex items-center gap-3">
-                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400 w-8">{dayName}</span>
-                  <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-8 relative overflow-hidden">
-                    <div 
-                      className="absolute inset-y-0 left-0 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-500"
-                      style={{ width: `${percentage}%` }}
-                    />
-                    <span className="absolute inset-0 flex items-center px-3 text-xs font-medium text-gray-900 dark:text-gray-100">
-                      ₹{day.amount.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+      {/* School Fee Summary */}
+      {stats.schoolStudents > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-blue-200 dark:border-blue-800">
+          <div className="flex items-center gap-3 mb-5">
+            <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+              <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">School Fee Summary</h3>
           </div>
-        </div>
 
-        {/* Payment Mode Distribution */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Payment Methods</h3>
-          <div className="space-y-4">
-            {Object.entries(stats.modeBreakdown).map(([mode, amount], idx) => {
-              const total = Object.values(stats.modeBreakdown).reduce((s, a) => s + a, 0);
-              const percentage = total > 0 ? (amount / total * 100) : 0;
-              const colors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-pink-500'];
-              
-              return (
-                <div key={mode}>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-3 h-3 rounded-full ${colors[idx % colors.length]}`} />
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{mode}</span>
-                    </div>
-                    <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                      ₹{amount.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-                  <div className="bg-gray-100 dark:bg-gray-700 rounded-full h-2">
-                    <div 
-                      className={`${colors[idx % colors.length]} rounded-full h-2 transition-all duration-500`}
-                      style={{ width: `${percentage}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    {percentage.toFixed(1)}% of total
-                  </span>
-                </div>
-              );
-            })}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 text-center">
+              <p className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-1">Students</p>
+              <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">{stats.schoolStudents}</p>
+            </div>
+            <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 text-center">
+              <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">Collected</p>
+              <p className="text-2xl font-bold text-green-700 dark:text-green-300">₹{stats.schoolCollected.toLocaleString('en-IN')}</p>
+            </div>
+            <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-4 text-center">
+              <p className="text-xs font-medium text-red-600 dark:text-red-400 mb-1">Outstanding</p>
+              <p className="text-2xl font-bold text-red-700 dark:text-red-300">₹{stats.schoolOutstanding.toLocaleString('en-IN')}</p>
+            </div>
           </div>
+
+          {stats.classStats.length > 0 && (
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Class-wise Breakdown</h4>
+              <div className="space-y-3">
+                {stats.classStats.map(c => {
+                  const total = c.collected + c.outstanding;
+                  const pct = total > 0 ? (c.collected / total * 100) : 0;
+                  return (
+                    <div key={c.cls} className="flex items-center gap-4">
+                      <div className="w-28 shrink-0">
+                        <p className="text-xs font-medium text-gray-700 dark:text-gray-300">🏫 {c.cls}</p>
+                        <p className="text-xs text-gray-400">{c.studentCount} student{c.studentCount !== 1 ? 's' : ''}</p>
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="text-green-600 dark:text-green-400 font-medium">₹{c.collected.toLocaleString('en-IN')}</span>
+                          <span className="text-red-500 font-medium">₹{c.outstanding.toLocaleString('en-IN')} due</span>
+                        </div>
+                        <div className="bg-gray-100 dark:bg-gray-700 rounded-full h-2">
+                          <div
+                            className="bg-blue-500 rounded-full h-2 transition-all duration-500"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 w-9 text-right">{pct.toFixed(0)}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* Transport Fee Summary */}
       {stats.transportStudents > 0 && (
@@ -448,63 +474,6 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
         </div>
       )}
 
-      {/* Quick Actions */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Quick Actions</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <button
-            onClick={() => onNavigate && onNavigate('payment')}
-            className="flex items-center gap-3 p-4 rounded-xl bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors group"
-          >
-            <div className="p-2 bg-blue-600 rounded-lg group-hover:scale-110 transition-transform">
-              <DollarSign className="h-5 w-5 text-white" />
-            </div>
-            <div className="text-left">
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">New Payment</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Collect fee</p>
-            </div>
-          </button>
-
-          <button
-            onClick={() => onNavigate && onNavigate('transactions')}
-            className="flex items-center gap-3 p-4 rounded-xl bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors group"
-          >
-            <div className="p-2 bg-green-600 rounded-lg group-hover:scale-110 transition-transform">
-              <Clock className="h-5 w-5 text-white" />
-            </div>
-            <div className="text-left">
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">View History</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">All transactions</p>
-            </div>
-          </button>
-
-          <button
-            onClick={() => onNavigate && onNavigate('outstanding')}
-            className="flex items-center gap-3 p-4 rounded-xl bg-orange-50 dark:bg-orange-900/20 hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors group"
-          >
-            <div className="p-2 bg-orange-600 rounded-lg group-hover:scale-110 transition-transform">
-              <AlertCircle className="h-5 w-5 text-white" />
-            </div>
-            <div className="text-left">
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Outstanding</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">{stats.studentsWithOutstanding} pending</p>
-            </div>
-          </button>
-
-          <button
-            onClick={() => onNavigate && onNavigate('students')}
-            className="flex items-center gap-3 p-4 rounded-xl bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors group"
-          >
-            <div className="p-2 bg-purple-600 rounded-lg group-hover:scale-110 transition-transform">
-              <Users className="h-5 w-5 text-white" />
-            </div>
-            <div className="text-left">
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Students</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Fee status</p>
-            </div>
-          </button>
-        </div>
-      </div>
     </div>
   );
 };

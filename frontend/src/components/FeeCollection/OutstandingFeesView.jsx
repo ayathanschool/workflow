@@ -337,107 +337,112 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl p-4 text-white">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-red-100 text-sm">Total Defaulters</p>
-              <p className="text-3xl font-bold mt-1">{summary.totalDefaulters}</p>
+              <p className="text-red-100 text-xs">Total Defaulters</p>
+              <p className="text-2xl font-bold mt-0.5">{summary.totalDefaulters}</p>
             </div>
-            <Users className="h-12 w-12 text-red-200" />
+            <Users className="h-8 w-8 text-red-200" />
           </div>
         </div>
 
         <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl p-4 text-white">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-orange-100 text-sm">Total Outstanding</p>
-              <p className="text-2xl font-bold mt-1">₹{summary.totalOutstanding.toLocaleString('en-IN')}</p>
+              <p className="text-orange-100 text-xs">Total Outstanding</p>
+              <p className="text-lg font-bold mt-0.5">₹{summary.totalOutstanding.toLocaleString('en-IN')}</p>
             </div>
-            <DollarSign className="h-12 w-12 text-orange-200" />
+            <DollarSign className="h-8 w-8 text-orange-200" />
           </div>
         </div>
 
         <div className="bg-gradient-to-br from-red-600 to-red-700 rounded-xl p-4 text-white">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-red-100 text-sm">Critical (30+ days)</p>
-              <p className="text-3xl font-bold mt-1">{summary.criticalCount}</p>
+              <p className="text-red-100 text-xs">Critical (30+ days)</p>
+              <p className="text-2xl font-bold mt-0.5">{summary.criticalCount}</p>
             </div>
-            <AlertTriangle className="h-12 w-12 text-red-200" />
+            <AlertTriangle className="h-8 w-8 text-red-200" />
           </div>
         </div>
 
         <div className="bg-gradient-to-br from-yellow-500 to-yellow-600 rounded-xl p-4 text-white">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-yellow-100 text-sm">Warning (7-30 days)</p>
-              <p className="text-3xl font-bold mt-1">{summary.warningCount}</p>
+              <p className="text-yellow-100 text-xs">Warning (7-30 days)</p>
+              <p className="text-2xl font-bold mt-0.5">{summary.warningCount}</p>
             </div>
-            <Calendar className="h-12 w-12 text-yellow-200" />
+            <Calendar className="h-8 w-8 text-yellow-200" />
           </div>
         </div>
       </div>
 
       {/* Class-wise Breakdown */}
       {classStats.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Class-wise Outstanding</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {classStats.map(stat => (
-              <button
-                key={stat.class}
-                onClick={() => setFilters(prev => ({ ...prev, class: prev.class === stat.class ? '' : stat.class }))}
-                className={`text-left bg-gray-50 dark:bg-gray-900 rounded-lg p-4 hover:shadow-md transition-all border-2 ${
-                  filters.class === stat.class ? 'border-blue-500' : 'border-transparent'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-semibold text-gray-900 dark:text-gray-100">{stat.class}</span>
-                  <span className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400 rounded-full text-xs font-medium">
-                    {stat.count} students
-                  </span>
-                </div>
-                <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-                  ₹{stat.total.toLocaleString('en-IN')}
-                </p>
-              </button>
-            ))}
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Class-wise Outstanding</h3>
+            <span className="text-xs text-gray-500 dark:text-gray-400">{classStats.length} classes</span>
+          </div>
+          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            {classStats.map(stat => {
+              const maxTotal = Math.max(...classStats.map(s => s.total));
+              const pct = maxTotal > 0 ? (stat.total / maxTotal * 100) : 0;
+              return (
+                <button
+                  key={stat.class}
+                  onClick={() => setFilters(prev => ({ ...prev, class: prev.class === stat.class ? '' : stat.class }))}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors text-left ${
+                    filters.class === stat.class ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                  }`}
+                >
+                  <span className={`text-xs font-semibold w-10 shrink-0 ${
+                    filters.class === stat.class ? 'text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-300'
+                  }`}>{stat.class}</span>
+                  <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-1.5">
+                    <div className="bg-red-400 rounded-full h-1.5 transition-all duration-300" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-xs text-gray-500 dark:text-gray-400 w-16 text-right shrink-0">{stat.count} stu.</span>
+                  <span className="text-xs font-semibold text-red-600 dark:text-red-400 w-20 text-right shrink-0">₹{stat.total.toLocaleString('en-IN')}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
 
       {/* Route-wise Breakdown */}
       {routeStats.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-amber-200 dark:border-amber-800">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-            🚌 Route-wise Outstanding Transport Fees
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {routeStats.map(stat => (
-              <button
-                key={stat.route}
-                onClick={() => setFilters(prev => ({ ...prev, route: prev.route === stat.route ? '' : stat.route }))}
-                className={`text-left bg-amber-50 dark:bg-amber-900/20 rounded-lg p-4 hover:shadow-md transition-all border-2 ${
-                  filters.route === stat.route ? 'border-amber-500' : 'border-transparent'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-semibold text-amber-900 dark:text-amber-200">🚌 {stat.route}</span>
-                  <span className="px-2 py-1 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 rounded-full text-xs font-medium">
-                    {stat.count} students
-                  </span>
-                </div>
-                <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-                  ₹{stat.total.toLocaleString('en-IN')}
-                </p>
-                {stat.transportBalance > 0 && stat.transportBalance !== stat.total && (
-                  <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
-                    Transport due: ₹{stat.transportBalance.toLocaleString('en-IN')}
-                  </p>
-                )}
-              </button>
-            ))}
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-amber-200 dark:border-amber-800 overflow-hidden">
+          <div className="px-4 py-3 border-b border-amber-100 dark:border-amber-800 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">🚌 Route-wise Transport Outstanding</h3>
+            <span className="text-xs text-gray-500 dark:text-gray-400">{routeStats.length} routes</span>
+          </div>
+          <div className="divide-y divide-amber-50 dark:divide-gray-700">
+            {routeStats.map(stat => {
+              const maxTotal = Math.max(...routeStats.map(s => s.total));
+              const pct = maxTotal > 0 ? (stat.total / maxTotal * 100) : 0;
+              return (
+                <button
+                  key={stat.route}
+                  onClick={() => setFilters(prev => ({ ...prev, route: prev.route === stat.route ? '' : stat.route }))}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 hover:bg-amber-50 dark:hover:bg-amber-900/10 transition-colors text-left ${
+                    filters.route === stat.route ? 'bg-amber-50 dark:bg-amber-900/20' : ''
+                  }`}
+                >
+                  <span className={`text-xs font-semibold w-16 shrink-0 ${
+                    filters.route === stat.route ? 'text-amber-600 dark:text-amber-400' : 'text-gray-700 dark:text-gray-300'
+                  }`}>🚌 {stat.route}</span>
+                  <div className="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-1.5">
+                    <div className="bg-amber-400 rounded-full h-1.5 transition-all duration-300" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-xs text-gray-500 dark:text-gray-400 w-16 text-right shrink-0">{stat.count} stu.</span>
+                  <span className="text-xs font-semibold text-red-600 dark:text-red-400 w-20 text-right shrink-0">₹{stat.total.toLocaleString('en-IN')}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
