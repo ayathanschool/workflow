@@ -218,23 +218,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
 
     setLoading(true);
     setError('');
-    
-    // OPTIMISTIC UI: Show receipt immediately with "Processing..." status
-    const optimisticReceipt = {
-      receiptNo: 'Processing...',
-      date: paymentForm.date,
-      student: selectedStudent,
-      items,
-      total: selectedFeesTotal,
-      totalAmount: items.reduce((sum, i) => sum + (Number(i.amount) || 0), 0),
-      totalFine: items.reduce((sum, i) => sum + (Number(i.fine) || 0), 0),
-      mode: paymentForm.mode,
-      processing: true
-    };
-    
-    setReceipt(optimisticReceipt);
-    setStep(4); // Move to receipt step immediately
-    
+
     try {
       let token = '';
       try {
@@ -259,32 +243,32 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
 
       const result = await response.json();
       const payload = result.data || result; // unwrap _respond wrapper if present
-      
+
       if (payload.ok || payload.status === 200 || result.status === 200) {
-        // Update receipt with real receipt number
         const finalReceipt = {
-          ...optimisticReceipt,
           receiptNo: payload.receiptNo,
           date: payload.date || paymentForm.date,
+          student: selectedStudent,
+          items,
+          total: selectedFeesTotal,
+          totalAmount: items.reduce((sum, i) => sum + (Number(i.amount) || 0), 0),
+          totalFine: items.reduce((sum, i) => sum + (Number(i.fine) || 0), 0),
+          mode: paymentForm.mode,
           processing: false,
           partialPayments: payload.partialPayments
         };
-        
+
         setReceipt(finalReceipt);
-        
-        // Call success callback if provided
+        setStep(4);
+
         if (onPaymentSuccess) {
           onPaymentSuccess(finalReceipt);
         }
       } else {
         setError(payload.error || payload.message || 'Payment failed');
-        setStep(3); // Go back to payment step on error
-        setReceipt(null);
       }
     } catch (err) {
       setError('Failed to process payment: ' + err.message);
-      setStep(3); // Go back to payment step on error
-      setReceipt(null);
     } finally {
       setLoading(false);
     }
@@ -643,80 +627,107 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
         </div>
       )}
 
-      {/* Step 3: Confirm Payment */}
+      {/* Step 3: Receipt Preview + Confirm */}
       {step === 3 && (
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-4 sm:p-8">
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6">Confirm Payment</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">Receipt Preview</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 sm:mb-6">Review the details below before confirming payment.</p>
 
-          {/* Payment Details */}
-          <div className="space-y-4 mb-6">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Payment Date
-                </label>
-                <input
-                  type="date"
-                  value={paymentForm.date}
-                  onChange={(e) => setPaymentForm(prev => ({ ...prev, date: e.target.value }))}
-                  className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl"
-                />
+          {/* Date & Mode inputs */}
+          <div className="grid grid-cols-2 gap-4 mb-5">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Payment Date</label>
+              <input
+                type="date"
+                value={paymentForm.date}
+                onChange={(e) => setPaymentForm(prev => ({ ...prev, date: e.target.value }))}
+                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Payment Mode</label>
+              <select
+                value={paymentForm.mode}
+                onChange={(e) => setPaymentForm(prev => ({ ...prev, mode: e.target.value }))}
+                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"
+              >
+                <option value="Cash">Cash</option>
+                <option value="Online">Online Transfer</option>
+                <option value="Cheque">Cheque</option>
+                <option value="Card">Card</option>
+                <option value="UPI">UPI</option>
+                <option value="Waiver">Waiver / Write-off</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Waiver warning */}
+          {paymentForm.mode === 'Waiver' && (
+            <div className="mb-4 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-600 rounded-xl">
+              <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-1">⚠️ Waiver / Write-off Mode</p>
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                Selected fees will be marked as cleared without collecting any money. The full outstanding balance will be recorded as waived and no fine will be charged.
+              </p>
+            </div>
+          )}
+
+          {/* Receipt Preview Card */}
+          <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-4 mb-5">
+            {/* School header */}
+            <div className="text-center mb-4 pb-3 border-b border-gray-200 dark:border-gray-700">
+              <img src="/icons/logoAyathan.JPG" alt="Ayathan School Logo" className="h-12 mx-auto mb-1 object-contain" />
+              <p className="text-xs text-gray-500 dark:text-gray-400">Fee Payment Receipt — Preview</p>
+            </div>
+
+            {/* Details */}
+            <div className="space-y-2 mb-4 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Date:</span>
+                <span className="font-medium text-gray-900 dark:text-gray-100">{new Date(paymentForm.date).toLocaleDateString()}</span>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Payment Mode
-                </label>
-                <select
-                  value={paymentForm.mode}
-                  onChange={(e) => setPaymentForm(prev => ({ ...prev, mode: e.target.value }))}
-                  className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl"
-                >
-                  <option value="Cash">Cash</option>
-                  <option value="Online">Online Transfer</option>
-                  <option value="Cheque">Cheque</option>
-                  <option value="Card">Card</option>
-                  <option value="UPI">UPI</option>
-                  <option value="Waiver">Waiver / Write-off</option>
-                </select>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Student:</span>
+                <span className="font-medium text-gray-900 dark:text-gray-100">{selectedStudent.name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Adm No:</span>
+                <span className="font-medium text-gray-900 dark:text-gray-100">{selectedStudent.admNo}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Class:</span>
+                <span className="font-medium text-gray-900 dark:text-gray-100">{selectedStudent.class}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500 dark:text-gray-400">Mode:</span>
+                <span className="font-medium text-gray-900 dark:text-gray-100">{paymentForm.mode}</span>
               </div>
             </div>
 
-            {/* Waiver warning */}
-            {paymentForm.mode === 'Waiver' && (
-              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-600 rounded-xl">
-                <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-1">⚠️ Waiver / Write-off Mode</p>
-                <p className="text-xs text-amber-700 dark:text-amber-400">
-                  Selected fees will be marked as cleared without collecting any money. The full outstanding balance will be recorded as waived and no fine will be charged. Use Void Receipt later if you need to reverse this.
-                </p>
-              </div>
-            )}
+            {/* Fee items table */}
+            <div className="border-t border-b border-gray-200 dark:border-gray-700 py-3 mb-3">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 dark:border-gray-700">
+                    <th className="text-left py-1.5 text-gray-600 dark:text-gray-400 font-medium">Fee Head</th>
+                    <th className="text-right py-1.5 text-gray-600 dark:text-gray-400 font-medium">Amount</th>
+                    <th className="text-right py-1.5 text-gray-600 dark:text-gray-400 font-medium">Fine</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedFees.filter(f => f.selected).map((fee, idx) => (
+                    <tr key={idx} className="border-b border-gray-100 dark:border-gray-800">
+                      <td className="py-1.5 text-gray-900 dark:text-gray-100">{fee.feeHead}</td>
+                      <td className="text-right text-gray-900 dark:text-gray-100">₹{(paymentForm.mode === 'Waiver' ? fee.balance : fee.amount).toLocaleString('en-IN')}</td>
+                      <td className="text-right text-gray-900 dark:text-gray-100">₹{(paymentForm.mode === 'Waiver' ? 0 : fee.fine).toLocaleString('en-IN')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-            {/* Summary */}
-            <div className="p-6 bg-gray-50 dark:bg-gray-900 rounded-xl space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-600 dark:text-gray-400">Student:</span>
-                <span className="font-medium text-gray-900 dark:text-gray-100">
-                  {selectedStudent.name} ({selectedStudent.admNo})
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-600 dark:text-gray-400">Class:</span>
-                <span className="font-medium text-gray-900 dark:text-gray-100">{selectedStudent.class}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-600 dark:text-gray-400">Fee Heads:</span>
-                <span className="font-medium text-gray-900 dark:text-gray-100">
-                  {selectedFees.filter(f => f.selected).length} selected
-                </span>
-              </div>
-              <div className="pt-3 border-t border-gray-300 dark:border-gray-700">
-                <div className="flex items-center justify-between">
-                  <span className="text-lg font-semibold text-gray-900 dark:text-gray-100">Total Amount:</span>
-                  <span className="text-xl sm:text-2xl font-bold text-green-600 dark:text-green-400">
-                    ₹{selectedFeesTotal.toLocaleString('en-IN')}
-                  </span>
-                </div>
-              </div>
+            <div className="flex justify-between items-center">
+              <span className="font-semibold text-gray-900 dark:text-gray-100">Total:</span>
+              <span className="text-xl font-bold text-green-600 dark:text-green-400">₹{selectedFeesTotal.toLocaleString('en-IN')}</span>
             </div>
           </div>
 
@@ -724,13 +735,14 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
           <div className="flex gap-3">
             <button
               onClick={() => setStep(2)}
-              className="flex-1 px-6 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              disabled={loading}
+              className="flex-1 px-6 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
             >
               Back
             </button>
             <button
               onClick={handlePayment}
-              disabled={loading || receipt !== null}
+              disabled={loading}
               className="flex-1 px-6 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
             >
               {loading ? (
@@ -741,7 +753,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
               ) : (
                 <>
                   <CheckCircle className="h-5 w-5" />
-                  Process Payment
+                  Confirm &amp; Pay
                 </>
               )}
             </button>
@@ -752,27 +764,18 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
       {/* Step 4: Receipt */}
       {step === 4 && receipt && (
         <div className="space-y-6">
-          {/* Success/Processing Banner */}
-          <div className={`bg-gradient-to-r ${receipt.processing ? 'from-blue-500 to-blue-600' : 'from-green-500 to-green-600'} rounded-2xl shadow-xl p-6 text-white`}>
+          {/* Success Banner */}
+          <div className="bg-gradient-to-r from-green-500 to-green-600 rounded-2xl shadow-xl p-6 text-white">
             <div className="flex items-center gap-4">
               <div className="flex-shrink-0">
                 <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
-                  {receipt.processing ? (
-                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-white"></div>
-                  ) : (
-                    <CheckCircle className="h-10 w-10 text-white" />
-                  )}
+                  <CheckCircle className="h-10 w-10 text-white" />
                 </div>
               </div>
               <div className="flex-1">
-                <h2 className="text-xl sm:text-2xl font-bold mb-1">
-                  {receipt.processing ? 'Processing Payment...' : 'Payment Successful!'}
-                </h2>
-                <p className={receipt.processing ? 'text-blue-100' : 'text-green-100'}>
-                  {receipt.processing 
-                    ? 'Please wait while we generate your receipt...' 
-                    : `Receipt ${receipt.receiptNo} has been generated successfully.`
-                  }
+                <h2 className="text-xl sm:text-2xl font-bold mb-1">Payment Successful!</h2>
+                <p className="text-green-100">
+                  Receipt {receipt.receiptNo} has been generated successfully.
                 </p>
               </div>
             </div>
@@ -802,7 +805,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
             <div className="space-y-3 mb-6">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600 dark:text-gray-400">Receipt No:</span>
-                <span className={`font-mono font-bold ${receipt.processing ? 'text-blue-600 animate-pulse' : 'text-gray-900 dark:text-gray-100'}`}>
+                <span className="font-mono font-bold text-gray-900 dark:text-gray-100">
                   {receipt.receiptNo}
                 </span>
               </div>
