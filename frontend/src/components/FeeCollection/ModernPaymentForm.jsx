@@ -675,7 +675,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
           <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-4 mb-5">
             {/* School header */}
             <div className="text-center mb-4 pb-3 border-b border-gray-200 dark:border-gray-700">
-              <img src="/icons/logoAyathan.JPG" alt="Ayathan School Logo" className="h-12 mx-auto mb-1 object-contain" />
+              <img src="/icons/logoAyathan.png" alt="Ayathan School Logo" className="h-12 mx-auto mb-1 object-contain" />
               <p className="text-xs text-gray-500 dark:text-gray-400">Fee Payment Receipt — Preview</p>
             </div>
 
@@ -795,7 +795,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
             <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-3 sm:p-6 mb-4 sm:mb-6 print:border-solid">
             <div className="text-center mb-6 pb-4 border-b border-gray-300 dark:border-gray-700">
               <img
-                src="/icons/logoAyathan.JPG"
+                src="/icons/logoAyathan.png"
                 alt="Ayathan School Logo"
                 className="h-16 mx-auto mb-2 object-contain"
               />
