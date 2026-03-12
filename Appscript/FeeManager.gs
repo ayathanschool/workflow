@@ -595,3 +595,194 @@ function getFeeDefaulters(className) {
   
   return defaulters;
 }
+
+// ============================================================
+// DAILY FEE COLLECTION EMAIL REPORT
+// ============================================================
+
+/**
+ * Send a daily summary email of all fee transactions for today to all admin users.
+ * Run this automatically via a time-based trigger (see createDailyFeeReportTrigger below).
+ * Can also be run manually from the Apps Script editor.
+ */
+function sendDailyFeeReport() {
+  const tz = (function() {
+    try { return String(PropertiesService.getScriptProperties().getProperty('TIMEZONE') || 'Asia/Kolkata').trim() || 'Asia/Kolkata'; } catch(e) { return 'Asia/Kolkata'; }
+  })();
+
+  const today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  const displayDate = Utilities.formatDate(new Date(), tz, 'dd MMM yyyy (EEEE)');
+
+  // ---- get today's non-void transactions ----
+  const txns = getTransactions({ fromDate: today, toDate: today })
+    .filter(function(t) { return !t.void || String(t.void).toLowerCase() !== 'true'; });
+
+  // ---- get admin email addresses ----
+  const adminEmails = (function() {
+    try {
+      const sh = _getSheet('Users');
+      const headers = _headers(sh);
+      return _rows(sh)
+        .map(function(r) { return _indexByHeader(r, headers); })
+        .filter(function(u) { return String(u.roles || '').toLowerCase().indexOf('admin') !== -1; })
+        .map(function(u) { return String(u.email || '').trim(); })
+        .filter(function(e) { return e; });
+    } catch(err) { return []; }
+  })();
+
+  if (!adminEmails.length) {
+    Logger.log('sendDailyFeeReport: no admin users found, skipping email.');
+    return;
+  }
+
+  // ---- build summary by mode ----
+  const byMode = {};
+  var grandTotal = 0;
+  txns.forEach(function(t) {
+    const mode = t.mode || 'Unknown';
+    if (!byMode[mode]) byMode[mode] = { count: 0, amount: 0 };
+    const rowTotal = (Number(t.amount) || 0) + (Number(t.fine) || 0);
+    byMode[mode].count += 1;
+    byMode[mode].amount += rowTotal;
+    grandTotal += rowTotal;
+  });
+
+  // ---- build HTML email ----
+  const fmtINR = function(n) { return '\u20b9' + Number(n).toLocaleString('en-IN'); };
+
+  // Transaction rows
+  var txnRows = '';
+  if (txns.length === 0) {
+    txnRows = '<tr><td colspan="7" style="text-align:center;color:#888;padding:16px;">No transactions recorded today.</td></tr>';
+  } else {
+    txns.forEach(function(t, i) {
+      const bg = i % 2 === 0 ? '#ffffff' : '#f9f9f9';
+      const rowTotal = (Number(t.amount) || 0) + (Number(t.fine) || 0);
+      txnRows += '<tr style="background:' + bg + ';">' +
+        '<td style="' + tdStyle + '">' + (t.receiptNo || '') + '</td>' +
+        '<td style="' + tdStyle + '">' + (t.admNo || '') + '</td>' +
+        '<td style="' + tdStyle + '">' + (t.name || '') + '</td>' +
+        '<td style="' + tdStyle + '">' + (t.class || '') + '</td>' +
+        '<td style="' + tdStyle + '">' + (t.feeHead || '') + '</td>' +
+        '<td style="' + tdStyle + 'text-align:right;">' + fmtINR(t.amount) + '</td>' +
+        '<td style="' + tdStyle + 'text-align:right;">' + fmtINR(t.fine) + '</td>' +
+        '<td style="' + tdStyle + 'text-align:right;font-weight:600;">' + fmtINR(rowTotal) + '</td>' +
+        '<td style="' + tdStyle + '">' + (t.mode || '') + '</td>' +
+        '</tr>';
+    });
+  }
+
+  // Mode summary rows
+  var modeRows = '';
+  Object.keys(byMode).sort().forEach(function(mode) {
+    modeRows += '<tr>' +
+      '<td style="padding:6px 12px;border:1px solid #ddd;">' + mode + '</td>' +
+      '<td style="padding:6px 12px;border:1px solid #ddd;text-align:center;">' + byMode[mode].count + '</td>' +
+      '<td style="padding:6px 12px;border:1px solid #ddd;text-align:right;font-weight:600;">' + fmtINR(byMode[mode].amount) + '</td>' +
+      '</tr>';
+  });
+
+  const tdStyle = 'padding:7px 10px;border:1px solid #ddd;font-size:13px;';
+  const thStyle = 'padding:8px 10px;border:1px solid #ccc;background:#1a6b3c;color:#fff;font-size:13px;text-align:left;';
+
+  const html =
+    '<div style="font-family:Arial,sans-serif;max-width:900px;margin:auto;">' +
+    '<div style="background:#1a6b3c;color:#fff;padding:18px 24px;border-radius:8px 8px 0 0;">' +
+    '<h2 style="margin:0;font-size:20px;">Daily Fee Collection Report</h2>' +
+    '<p style="margin:4px 0 0;font-size:14px;">' + displayDate + '</p>' +
+    '</div>' +
+
+    // Summary box
+    '<div style="background:#f0faf4;border:1px solid #b2dfcc;padding:14px 24px;display:flex;gap:32px;">' +
+    '<div><div style="font-size:13px;color:#555;">Total Receipts</div><div style="font-size:22px;font-weight:700;color:#1a6b3c;">' + txns.length + '</div></div>' +
+    '<div><div style="font-size:13px;color:#555;">Total Collected</div><div style="font-size:22px;font-weight:700;color:#1a6b3c;">' + fmtINR(grandTotal) + '</div></div>' +
+    '</div>' +
+
+    // Mode breakdown
+    (Object.keys(byMode).length > 0 ?
+      '<div style="padding:16px 24px 0;">' +
+      '<h3 style="margin:0 0 8px;font-size:15px;color:#333;">Collection by Mode</h3>' +
+      '<table style="border-collapse:collapse;font-size:13px;">' +
+      '<thead><tr>' +
+      '<th style="padding:7px 12px;border:1px solid #ccc;background:#eee;">Mode</th>' +
+      '<th style="padding:7px 12px;border:1px solid #ccc;background:#eee;">Receipts</th>' +
+      '<th style="padding:7px 12px;border:1px solid #ccc;background:#eee;">Amount</th>' +
+      '</tr></thead><tbody>' + modeRows + '</tbody></table></div>'
+      : '') +
+
+    // Transactions table
+    '<div style="padding:16px 24px;">' +
+    '<h3 style="margin:0 0 8px;font-size:15px;color:#333;">Transaction Details</h3>' +
+    '<div style="overflow-x:auto;">' +
+    '<table style="border-collapse:collapse;width:100%;font-size:13px;">' +
+    '<thead><tr>' +
+    '<th style="' + thStyle + '">Receipt No</th>' +
+    '<th style="' + thStyle + '">Adm No</th>' +
+    '<th style="' + thStyle + '">Student</th>' +
+    '<th style="' + thStyle + '">Class</th>' +
+    '<th style="' + thStyle + '">Fee Head</th>' +
+    '<th style="' + thStyle + 'text-align:right;">Amount</th>' +
+    '<th style="' + thStyle + 'text-align:right;">Fine</th>' +
+    '<th style="' + thStyle + 'text-align:right;">Total</th>' +
+    '<th style="' + thStyle + '">Mode</th>' +
+    '</tr></thead><tbody>' + txnRows + '</tbody>' +
+    (txns.length > 0 ? '<tfoot><tr style="background:#f0faf4;"><td colspan="7" style="' + tdStyle + 'font-weight:700;text-align:right;">Grand Total</td><td style="' + tdStyle + 'font-weight:700;text-align:right;color:#1a6b3c;">' + fmtINR(grandTotal) + '</td><td style="' + tdStyle + '"></td></tr></tfoot>' : '') +
+    '</table></div></div>' +
+
+    '<div style="padding:12px 24px;font-size:11px;color:#999;border-top:1px solid #eee;">This is an automated report generated by the school management system.</div>' +
+    '</div>';
+
+  const subject = 'Fee Collection Report — ' + displayDate + ' — ' + fmtINR(grandTotal);
+
+  adminEmails.forEach(function(email) {
+    try {
+      MailApp.sendEmail({
+        to: email,
+        subject: subject,
+        htmlBody: html
+      });
+      Logger.log('sendDailyFeeReport: sent to ' + email);
+    } catch(err) {
+      Logger.log('sendDailyFeeReport: failed to send to ' + email + ' — ' + err.message);
+    }
+  });
+}
+
+/**
+ * Creates a daily time-based trigger that runs sendDailyFeeReport at 8:00 PM IST.
+ *
+ * HOW TO USE:
+ *   1. Open Apps Script editor (Extensions → Apps Script).
+ *   2. Select this function from the "Run" dropdown and click ▶ Run.
+ *   3. Approve the permissions prompt (needs MailApp scope).
+ *   4. The trigger is created — you only need to do this ONCE.
+ *
+ * To delete: go to Triggers (alarm-clock icon) and remove it manually, or call
+ * deleteDailyFeeReportTrigger().
+ */
+function createDailyFeeReportTrigger() {
+  // Remove any existing triggers for the same function to avoid duplicates
+  ScriptApp.getProjectTriggers()
+    .filter(function(t) { return t.getHandlerFunction() === 'sendDailyFeeReport'; })
+    .forEach(function(t) { ScriptApp.deleteTrigger(t); });
+
+  // Schedule at 20:00–21:00 IST (Apps Script uses the script's timezone)
+  ScriptApp.newTrigger('sendDailyFeeReport')
+    .timeBased()
+    .everyDays(1)
+    .atHour(20)   // 8 PM
+    .create();
+
+  Logger.log('Daily fee report trigger created — will run at 8 PM every day.');
+}
+
+/**
+ * Removes the daily fee report trigger.
+ */
+function deleteDailyFeeReportTrigger() {
+  var removed = 0;
+  ScriptApp.getProjectTriggers()
+    .filter(function(t) { return t.getHandlerFunction() === 'sendDailyFeeReport'; })
+    .forEach(function(t) { ScriptApp.deleteTrigger(t); removed++; });
+  Logger.log('Removed ' + removed + ' trigger(s) for sendDailyFeeReport.');
+}
