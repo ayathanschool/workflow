@@ -250,10 +250,10 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
       {/* Header with Time Range Selector */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Real-time fee collection overview</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {['today', 'week', 'month', 'year'].map(range => (
             <button
               key={range}
@@ -271,7 +271,7 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
       </div>
 
       {/* Main Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         {/* Total Collected */}
         <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-6 text-white shadow-lg hover:shadow-xl transition-shadow">
           <div className="flex items-center justify-between mb-4">
@@ -282,7 +282,7 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
           </div>
           <div className="space-y-1">
             <p className="text-sm font-medium opacity-90">Total Collected</p>
-            <p className="text-3xl font-bold">₹{stats.totalCollected.toLocaleString('en-IN')}</p>
+            <p className="text-2xl sm:text-3xl font-bold">₹{stats.totalCollected.toLocaleString('en-IN')}</p>
             <p className="text-xs opacity-75">{stats.totalTransactions} transactions</p>
           </div>
         </div>
@@ -297,7 +297,7 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
           </div>
           <div className="space-y-1">
             <p className="text-sm font-medium opacity-90">Today's Collection</p>
-            <p className="text-3xl font-bold">₹{stats.todayTotal.toLocaleString('en-IN')}</p>
+            <p className="text-2xl sm:text-3xl font-bold">₹{stats.todayTotal.toLocaleString('en-IN')}</p>
             <p className="text-xs opacity-75">{stats.todayTransactions} payments today</p>
           </div>
         </div>
@@ -338,7 +338,7 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
           </div>
           <div className="space-y-1">
             <p className="text-sm font-medium opacity-90">Outstanding</p>
-            <p className="text-3xl font-bold">₹{stats.totalOutstanding.toLocaleString('en-IN')}</p>
+            <p className="text-2xl sm:text-3xl font-bold">₹{stats.totalOutstanding.toLocaleString('en-IN')}</p>
             <p className="text-xs opacity-75">{stats.studentsWithOutstanding} students pending</p>
             <div className="mt-3 pt-3 border-t border-white/25 grid grid-cols-2 gap-2">
               <div className="bg-white/15 rounded-lg px-2 py-1.5">
@@ -367,15 +367,15 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
             <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 text-center">
               <p className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-1">Students</p>
-              <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">{stats.schoolStudents}</p>
+              <p className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-300">{stats.schoolStudents}</p>
             </div>
             <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 text-center">
               <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">Collected</p>
-              <p className="text-2xl font-bold text-green-700 dark:text-green-300">₹{stats.schoolCollected.toLocaleString('en-IN')}</p>
+              <p className="text-xl sm:text-2xl font-bold text-green-700 dark:text-green-300">₹{stats.schoolCollected.toLocaleString('en-IN')}</p>
             </div>
             <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-4 text-center">
               <p className="text-xs font-medium text-red-600 dark:text-red-400 mb-1">Outstanding</p>
-              <p className="text-2xl font-bold text-red-700 dark:text-red-300">₹{stats.schoolOutstanding.toLocaleString('en-IN')}</p>
+              <p className="text-xl sm:text-2xl font-bold text-red-700 dark:text-red-300">₹{stats.schoolOutstanding.toLocaleString('en-IN')}</p>
             </div>
           </div>
 
@@ -427,15 +427,15 @@ const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
             <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 text-center">
               <p className="text-xs font-medium text-amber-600 dark:text-amber-400 mb-1">Students</p>
-              <p className="text-2xl font-bold text-amber-700 dark:text-amber-300">{stats.transportStudents}</p>
+              <p className="text-xl sm:text-2xl font-bold text-amber-700 dark:text-amber-300">{stats.transportStudents}</p>
             </div>
             <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 text-center">
               <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">Collected</p>
-              <p className="text-2xl font-bold text-green-700 dark:text-green-300">₹{stats.transportCollected.toLocaleString('en-IN')}</p>
+              <p className="text-xl sm:text-2xl font-bold text-green-700 dark:text-green-300">₹{stats.transportCollected.toLocaleString('en-IN')}</p>
             </div>
             <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-4 text-center">
               <p className="text-xs font-medium text-red-600 dark:text-red-400 mb-1">Outstanding</p>
-              <p className="text-2xl font-bold text-red-700 dark:text-red-300">₹{stats.transportOutstanding.toLocaleString('en-IN')}</p>
+              <p className="text-xl sm:text-2xl font-bold text-red-700 dark:text-red-300">₹{stats.transportOutstanding.toLocaleString('en-IN')}</p>
             </div>
           </div>
 

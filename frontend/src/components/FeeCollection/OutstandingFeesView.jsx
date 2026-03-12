@@ -308,15 +308,15 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-red-600 dark:text-red-400 flex items-center gap-2">
-            <AlertTriangle className="h-7 w-7" />
+          <h2 className="text-xl sm:text-2xl font-bold text-red-600 dark:text-red-400 flex items-center gap-2">
+            <AlertTriangle className="h-6 w-6 sm:h-7 sm:w-7" />
             Outstanding Fees
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {summary.totalDefaulters} students with ₹{summary.totalOutstanding.toLocaleString('en-IN')} pending
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {selectedStudents.length > 0 && (
             <button
               onClick={handleSendReminders}
@@ -342,7 +342,7 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
           <div className="flex items-center justify-between">
             <div>
               <p className="text-red-100 text-xs">Total Defaulters</p>
-              <p className="text-2xl font-bold mt-0.5">{summary.totalDefaulters}</p>
+              <p className="text-xl sm:text-2xl font-bold mt-0.5">{summary.totalDefaulters}</p>
             </div>
             <Users className="h-8 w-8 text-red-200" />
           </div>
@@ -362,7 +362,7 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
           <div className="flex items-center justify-between">
             <div>
               <p className="text-red-100 text-xs">Critical (30+ days)</p>
-              <p className="text-2xl font-bold mt-0.5">{summary.criticalCount}</p>
+              <p className="text-xl sm:text-2xl font-bold mt-0.5">{summary.criticalCount}</p>
             </div>
             <AlertTriangle className="h-8 w-8 text-red-200" />
           </div>
@@ -372,7 +372,7 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
           <div className="flex items-center justify-between">
             <div>
               <p className="text-yellow-100 text-xs">Warning (7-30 days)</p>
-              <p className="text-2xl font-bold mt-0.5">{summary.warningCount}</p>
+              <p className="text-xl sm:text-2xl font-bold mt-0.5">{summary.warningCount}</p>
             </div>
             <Calendar className="h-8 w-8 text-yellow-200" />
           </div>

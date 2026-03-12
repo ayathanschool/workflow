@@ -155,12 +155,12 @@ const StudentsView = ({ students, feeHeads, transactions, onNavigateToPayment })
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Students Fee Status</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Students Fee Status</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {summary.total} students • {summary.paid} fully paid • {summary.pending} pending
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <div className="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
             <button
               onClick={() => setViewMode('grid')}
@@ -206,9 +206,9 @@ const StudentsView = ({ students, feeHeads, transactions, onNavigateToPayment })
           <div className="flex items-center justify-between">
             <div>
               <p className="text-green-100 text-sm">Fully Paid</p>
-              <p className="text-3xl font-bold mt-1">{summary.paid}</p>
+              <p className="text-2xl sm:text-3xl font-bold mt-1">{summary.paid}</p>
             </div>
-            <CheckCircle className="h-12 w-12 text-green-200" />
+            <CheckCircle className="h-8 w-8 sm:h-12 sm:w-12 text-green-200" />
           </div>
           <p className="text-xs text-green-100 mt-2">
             {summary.total > 0 ? Math.round((summary.paid / summary.total) * 100) : 0}% of students
@@ -219,9 +219,9 @@ const StudentsView = ({ students, feeHeads, transactions, onNavigateToPayment })
           <div className="flex items-center justify-between">
             <div>
               <p className="text-yellow-100 text-sm">Partial Payment</p>
-              <p className="text-3xl font-bold mt-1">{summary.partial}</p>
+              <p className="text-2xl sm:text-3xl font-bold mt-1">{summary.partial}</p>
             </div>
-            <Clock className="h-12 w-12 text-yellow-200" />
+            <Clock className="h-8 w-8 sm:h-12 sm:w-12 text-yellow-200" />
           </div>
           <p className="text-xs text-yellow-100 mt-2">
             {summary.total > 0 ? Math.round((summary.partial / summary.total) * 100) : 0}% of students
@@ -232,9 +232,9 @@ const StudentsView = ({ students, feeHeads, transactions, onNavigateToPayment })
           <div className="flex items-center justify-between">
             <div>
               <p className="text-red-100 text-sm">Pending</p>
-              <p className="text-3xl font-bold mt-1">{summary.pending}</p>
+              <p className="text-2xl sm:text-3xl font-bold mt-1">{summary.pending}</p>
             </div>
-            <AlertCircle className="h-12 w-12 text-red-200" />
+            <AlertCircle className="h-8 w-8 sm:h-12 sm:w-12 text-red-200" />
           </div>
           <p className="text-xs text-red-100 mt-2">
             {summary.total > 0 ? Math.round((summary.pending / summary.total) * 100) : 0}% of students
@@ -245,9 +245,9 @@ const StudentsView = ({ students, feeHeads, transactions, onNavigateToPayment })
           <div className="flex items-center justify-between">
             <div>
               <p className="text-blue-100 text-sm">Outstanding</p>
-              <p className="text-2xl font-bold mt-1">₹{summary.totalOutstanding.toLocaleString('en-IN')}</p>
+              <p className="text-xl sm:text-2xl font-bold mt-1">₹{summary.totalOutstanding.toLocaleString('en-IN')}</p>
             </div>
-            <TrendingDown className="h-12 w-12 text-blue-200" />
+            <TrendingDown className="h-8 w-8 sm:h-12 sm:w-12 text-blue-200" />
           </div>
           <p className="text-xs text-blue-100 mt-2">
             Total amount pending
@@ -258,7 +258,7 @@ const StudentsView = ({ students, feeHeads, transactions, onNavigateToPayment })
       {/* Filters */}
       {showFilters && (
         <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Search
@@ -319,7 +319,7 @@ const StudentsView = ({ students, feeHeads, transactions, onNavigateToPayment })
 
       {/* Students Display */}
       {viewMode === 'grid' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredStudents.length === 0 ? (
             <div className="col-span-full text-center py-12 text-gray-500 dark:text-gray-400">
               No students found

@@ -307,8 +307,8 @@ const ModernFeeCollection = ({ user, apiBaseUrl }) => {
 
           {activeView === 'payment' && (
             <div>
-              <div className="mb-6">
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">New Payment</h2>
+              <div className="mb-4 sm:mb-6">
+                <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">New Payment</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                   Process fee payments for students
                 </p>

@@ -258,15 +258,16 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
       });
 
       const result = await response.json();
+      const payload = result.data || result; // unwrap _respond wrapper if present
       
-      if (result.ok || result.status === 200) {
+      if (payload.ok || payload.status === 200 || result.status === 200) {
         // Update receipt with real receipt number
         const finalReceipt = {
           ...optimisticReceipt,
-          receiptNo: result.receiptNo,
-          date: result.date || paymentForm.date,
+          receiptNo: payload.receiptNo,
+          date: payload.date || paymentForm.date,
           processing: false,
-          partialPayments: result.partialPayments
+          partialPayments: payload.partialPayments
         };
         
         setReceipt(finalReceipt);
@@ -276,7 +277,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
           onPaymentSuccess(finalReceipt);
         }
       } else {
-        setError(result.error || result.message || 'Payment failed');
+        setError(payload.error || payload.message || 'Payment failed');
         setStep(3); // Go back to payment step on error
         setReceipt(null);
       }
@@ -293,7 +294,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
     if (!receipt || !selectedStudent) return;
     
     const message = `*FEE PAYMENT RECEIPT*%0A%0A` +
-      `*AYATHAN CENTRAL SCHOOL*%0A` +
+      `*AYATHAN SCHOOL*%0A` +
       `----------------------------%0A` +
       `Receipt No: ${receipt.receiptNo}%0A` +
       `Date: ${receipt.date}%0A%0A` +
@@ -405,8 +406,8 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
 
       {/* Step 1: Select Student */}
       {step === 1 && (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Select Student</h2>
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-4 sm:p-8">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6">Select Student</h2>
           
           {/* Search Bar */}
           <div className="relative mb-6">
@@ -465,7 +466,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
 
       {/* Step 2: Select Fees */}
       {step === 2 && (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-4 sm:p-8">
           {/* Student Info Header */}
           <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
             <div className="flex items-center justify-between">
@@ -502,15 +503,15 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
                 {paidFees.map((pf, i) => (
                   <div key={i} className="flex items-center justify-between text-sm">
                     <span className="text-gray-700 dark:text-gray-300">{pf.feeHead}</span>
-                    <span className="text-gray-600 dark:text-gray-400">Paid: ₹{pf.amountPaid.toLocaleString('en-IN')} {pf.lastPaidOn && `on ${new Date(pf.lastPaidOn).toLocaleDateString()}`}</span>
+                    <span className="text-gray-600 dark:text-gray-400">Paid: ₹{pf.amountPaid.toLocaleString('en-IN')}{pf.lastPaidOn ? ' on ' + new Date(pf.lastPaidOn).toLocaleDateString() : ''}</span>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Select Fee Heads</h2>
+          <div className="flex items-center justify-between mb-4 sm:mb-6">
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Select Fee Heads</h2>
             
             {/* Select All Checkbox */}
             <label className="flex items-center gap-2 cursor-pointer group">
@@ -613,10 +614,10 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
           </div>
 
           {/* Total */}
-          <div className="p-6 bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 rounded-xl border border-green-200 dark:border-green-800 mb-6">
+          <div className="p-4 sm:p-6 bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 rounded-xl border border-green-200 dark:border-green-800 mb-4 sm:mb-6">
             <div className="flex items-center justify-between">
-              <span className="text-lg font-semibold text-gray-700 dark:text-gray-300">Total Amount:</span>
-              <span className="text-3xl font-bold text-green-600 dark:text-green-400">
+              <span className="text-base sm:text-lg font-semibold text-gray-700 dark:text-gray-300">Total Amount:</span>
+              <span className="text-2xl sm:text-3xl font-bold text-green-600 dark:text-green-400">
                 ₹{selectedFeesTotal.toLocaleString('en-IN')}
               </span>
             </div>
@@ -644,8 +645,8 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
 
       {/* Step 3: Confirm Payment */}
       {step === 3 && (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Confirm Payment</h2>
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-4 sm:p-8">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6">Confirm Payment</h2>
 
           {/* Payment Details */}
           <div className="space-y-4 mb-6">
@@ -711,7 +712,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
               <div className="pt-3 border-t border-gray-300 dark:border-gray-700">
                 <div className="flex items-center justify-between">
                   <span className="text-lg font-semibold text-gray-900 dark:text-gray-100">Total Amount:</span>
-                  <span className="text-2xl font-bold text-green-600 dark:text-green-400">
+                  <span className="text-xl sm:text-2xl font-bold text-green-600 dark:text-green-400">
                     ₹{selectedFeesTotal.toLocaleString('en-IN')}
                   </span>
                 </div>
@@ -764,7 +765,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
                 </div>
               </div>
               <div className="flex-1">
-                <h2 className="text-2xl font-bold mb-1">
+                <h2 className="text-xl sm:text-2xl font-bold mb-1">
                   {receipt.processing ? 'Processing Payment...' : 'Payment Successful!'}
                 </h2>
                 <p className={receipt.processing ? 'text-blue-100' : 'text-green-100'}>
@@ -778,7 +779,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
           </div>
 
           {/* Receipt Card */}
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-4 sm:p-8">
             <div className="text-center mb-6 border-b border-gray-300 dark:border-gray-700 pb-6">
               <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 dark:bg-green-900/20 rounded-full mb-4">
                 <Receipt className="h-10 w-10 text-green-600" />
@@ -788,9 +789,13 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
             </div>
 
             {/* Receipt Content */}
-            <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-6 mb-6 print:border-solid">
+            <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-3 sm:p-6 mb-4 sm:mb-6 print:border-solid">
             <div className="text-center mb-6 pb-4 border-b border-gray-300 dark:border-gray-700">
-              <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">AYATHAN CENTRAL SCHOOL</h3>
+              <img
+                src="/icons/logoAyathan.JPG"
+                alt="Ayathan School Logo"
+                className="h-16 mx-auto mb-2 object-contain"
+              />
               <p className="text-sm text-gray-600 dark:text-gray-400">Fee Payment Receipt</p>
             </div>
 
@@ -855,8 +860,8 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
             </div>
 
             <div className="flex justify-between items-center">
-              <span className="text-lg font-semibold text-gray-900 dark:text-gray-100">Total Paid:</span>
-              <span className="text-2xl font-bold text-green-600 dark:text-green-400">
+              <span className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100">Total Paid:</span>
+              <span className="text-xl sm:text-2xl font-bold text-green-600 dark:text-green-400">
                 ₹{receipt.total.toLocaleString('en-IN')}
               </span>
             </div>
