@@ -1,9 +1,7 @@
-import React, { useState, useMemo } from 'react';
-import { 
-  Users, Grid, List, Search, Filter, Download, Mail, 
-  Phone, CreditCard, CheckCircle, AlertCircle, Clock,
-  ChevronDown, X, Eye, TrendingUp, TrendingDown
+import { Grid, List, Search, Filter, Download, Mail, 
+  Phone, CreditCard, CheckCircle, AlertCircle, Clock, X, Eye, TrendingDown
 } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
 
 const StudentsView = ({ students, feeHeads, transactions, onNavigateToPayment }) => {
   const [viewMode, setViewMode] = useState('grid'); // grid or list

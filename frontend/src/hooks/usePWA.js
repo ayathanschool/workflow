@@ -59,19 +59,6 @@ export const usePWA = () => {
       setHasUpdate(true);
     };
 
-    // Check if manifest is valid (only once)
-    if (!window.__PWA_MANIFEST_CHECKED__) {
-      fetch('/manifest.json')
-        .then(response => response.json())
-        .then(() => {
-          // Manifest loaded successfully, no need to log
-          window.__PWA_MANIFEST_CHECKED__ = true;
-        })
-        .catch(error => {
-          console.error('PWA: Manifest error:', error);
-        });
-    }
-
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);

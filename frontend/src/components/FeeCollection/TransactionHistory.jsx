@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
 import { 
-  Search, Filter, Download, Calendar, DollarSign, Eye,
-  ChevronDown, ChevronUp, Printer, X, CheckCircle, XCircle
+  Search, Filter, Download, Calendar, Eye,
+  ChevronDown, ChevronUp, Printer, X, XCircle
 } from 'lucide-react';
+import React, { useState } from 'react';
 import { confirmDestructive } from '../../utils/confirm';
 
 const TransactionHistory = ({ transactions, onVoidReceipt, onRefresh }) => {

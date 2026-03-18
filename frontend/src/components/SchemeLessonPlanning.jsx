@@ -757,8 +757,8 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
           <div className="animate-spin rounded-full h-16 w-16 border-4 border-t-blue-600 border-r-blue-600 absolute top-0 left-0"></div>
         </div>
         <div className="text-center">
-          <p className="text-gray-700 font-medium">Loading your schemes...</p>
-          <p className="text-sm text-gray-500 mt-1">This may take a moment</p>
+          <p className="text-gray-700 dark:text-gray-300 font-medium">Loading your schemes...</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">This may take a moment</p>
         </div>
       </div>
     );
@@ -783,12 +783,12 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6">
         {/* Mobile-optimized header */}
         <div className="space-y-4 mb-4">
           {/* Title */}
           <div className="flex items-center justify-between">
-            <h2 className="text-lg sm:text-xl font-semibold text-gray-900 flex items-center">
+            <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white flex items-center">
               <BookOpen className="w-5 h-5 mr-2 text-blue-600" />
               <span className="hidden sm:inline">Lesson Plan Preparation</span>
               <span className="sm:hidden">Lesson Plans</span>
@@ -832,14 +832,14 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
           {/* Filters - Full width on mobile, side by side on desktop */}
           <div className="flex flex-col sm:flex-row gap-2 sm:gap-4">
             <div className="flex items-center space-x-2 flex-1">
-              <label htmlFor="class-filter" className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap">
+              <label htmlFor="class-filter" className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
                 Class:
               </label>
               <select
                 id="class-filter"
                 value={classFilter}
                 onChange={(e) => setClassFilter(e.target.value)}
-                className="flex-1 border border-gray-300 rounded-md px-2 sm:px-3 py-1.5 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="flex-1 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md px-2 sm:px-3 py-1.5 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="all">All Classes</option>
                 {availableClasses.map(cls => (
@@ -848,14 +848,14 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               </select>
             </div>
             <div className="flex items-center space-x-2 flex-1">
-              <label htmlFor="subject-filter" className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap">
+              <label htmlFor="subject-filter" className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
                 Subject:
               </label>
               <select
                 id="subject-filter"
                 value={subjectFilter}
                 onChange={(e) => setSubjectFilter(e.target.value)}
-                className="flex-1 border border-gray-300 rounded-md px-2 sm:px-3 py-1.5 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="flex-1 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md px-2 sm:px-3 py-1.5 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="all">All Subjects</option>
                 {availableSubjects.map(subj => (
@@ -864,14 +864,14 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               </select>
             </div>
             <div className="flex items-center space-x-2 flex-1">
-              <label htmlFor="chapter-filter" className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap">
+              <label htmlFor="chapter-filter" className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
                 Chapter:
               </label>
               <select
                 id="chapter-filter"
                 value={chapterFilter}
                 onChange={(e) => setChapterFilter(e.target.value)}
-                className="flex-1 border border-gray-300 rounded-md px-2 sm:px-3 py-1.5 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="flex-1 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md px-2 sm:px-3 py-1.5 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="all">All Chapters</option>
                 {availableChapters.map(chapter => (
@@ -883,15 +883,15 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
         </div>
 
         {schemes.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
-            <BookOpen className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+            <BookOpen className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
             <p>No approved schemes found. Please ensure you have approved schemes before creating lesson plans.</p>
           </div>
         ) : (
           <div className="space-y-6">
             {filteredSchemes.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                <Users className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
                 <p>
                   No schemes found
                   {classFilter !== 'all' && ` for class "${classFilter}"`}
@@ -1339,12 +1339,12 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
       {/* Lesson Plan Creation Modal */}
       {showLessonPlanForm && selectedSession && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white p-3 sm:p-6 border-b border-gray-200 z-10">
-              <h3 className="text-base sm:text-lg font-semibold text-gray-900">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white dark:bg-gray-800 p-3 sm:p-6 border-b border-gray-200 dark:border-gray-700 z-10">
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">
                 Create Lesson Plan: {selectedSession.chapter} - Session {selectedSession.session}
               </h3>
-              <p className="text-xs sm:text-sm text-gray-500 mt-1">
+              <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-1">
                 {selectedSession.class} {selectedSession.subject} | {selectedSession.sessionName}
               </p>
             </div>
@@ -1368,11 +1368,11 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
             <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
               {/* Period Selection */}
               <div>
-                <h4 className="font-medium text-gray-900 mb-2 text-sm sm:text-base">Select Teaching Period</h4>
+                <h4 className="font-medium text-gray-900 dark:text-white mb-2 text-sm sm:text-base">Select Teaching Period</h4>
                 {loadingPeriods ? (
                   <div className="text-center py-4">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
-                    <span className="text-sm text-gray-500 mt-2">Loading available periods...</span>
+                    <span className="text-sm text-gray-500 dark:text-gray-400 mt-2">Loading available periods...</span>
                   </div>
                 ) : availablePeriods.length === 0 ? (
                   <div className="text-center py-8 bg-amber-50 rounded-lg border-2 border-amber-300">
@@ -1403,7 +1403,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   </div>
                 ) : (
                   <div>
-                    <div className="text-xs text-gray-500 mb-2">
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">
                       Showing {availablePeriods.filter(p => p.isAvailable).length} available periods
                       (Total: {availablePeriods.length}, Occupied: {availablePeriods.filter(p => p.isOccupied).length})
                     </div>
@@ -1413,15 +1413,15 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                           key={`${period.date}-${period.period}`}
                           onClick={() => handlePeriodSelect(period)}
                           className={`p-3 border rounded cursor-pointer transition-colors ${lessonPlanData.selectedDate === period.date && lessonPlanData.selectedPeriod === period.period
-                            ? 'bg-blue-50 border-blue-300'
-                            : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
+                            ? 'bg-blue-50 border-blue-300 dark:bg-blue-900/30 dark:border-blue-600'
+                            : 'bg-gray-50 border-gray-200 hover:bg-gray-100 dark:bg-gray-700 dark:border-gray-600 dark:hover:bg-gray-600'
                             }`}
                         >
                           <div className="text-sm font-medium">{formatDate(period.date)}</div>
-                          <div className="text-xs text-gray-600">
+                          <div className="text-xs text-gray-600 dark:text-gray-400">
                             Period {period.period} ({period.startTime} - {period.endTime})
                           </div>
-                          <div className="text-xs text-gray-500">
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
                             {period.class} {period.subject}
                           </div>
                           {(() => {
@@ -1481,7 +1481,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                     </>
                   )}
                 </button>
-                <p className="text-xs text-gray-500 mt-1 text-center">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-center">
                   Powered by Google Gemini AI • Free to use • Edit suggestions before submitting
                 </p>
               </div>
@@ -1490,7 +1490,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <label className="block text-sm font-medium text-gray-700">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Learning Objectives
                     </label>
                     <button
@@ -1509,7 +1509,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   <textarea
                     value={lessonPlanData.learningObjectives}
                     onChange={(e) => setLessonPlanData({ ...lessonPlanData, learningObjectives: e.target.value })}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     rows="4"
                     placeholder="What will students learn in this session?"
                   />
@@ -1517,7 +1517,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <label className="block text-sm font-medium text-gray-700">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Teaching Methods
                     </label>
                     <button
@@ -1536,7 +1536,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   <textarea
                     value={lessonPlanData.teachingMethods}
                     onChange={(e) => setLessonPlanData({ ...lessonPlanData, teachingMethods: e.target.value })}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     rows="4"
                     placeholder="How will you teach this session?"
                   />
@@ -1544,7 +1544,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <label className="block text-sm font-medium text-gray-700">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Resources Required
                     </label>
                     <button
@@ -1563,7 +1563,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   <textarea
                     value={lessonPlanData.resourcesRequired}
                     onChange={(e) => setLessonPlanData({ ...lessonPlanData, resourcesRequired: e.target.value })}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     rows="4"
                     placeholder="What materials, tools, or resources do you need?"
                   />
@@ -1571,7 +1571,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <label className="block text-sm font-medium text-gray-700">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                       Assessment Methods
                     </label>
                     <button
@@ -1590,7 +1590,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                   <textarea
                     value={lessonPlanData.assessmentMethods}
                     onChange={(e) => setLessonPlanData({ ...lessonPlanData, assessmentMethods: e.target.value })}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="w-full p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     rows="4"
                     placeholder="How will you assess student understanding?"
                   />
@@ -1612,7 +1612,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                     selectedPeriod: ''
                   });
                 }}
-                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
               >
                 Cancel
               </button>
@@ -1663,7 +1663,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
       {/* View Session Details Modal (Read-Only) */}
       {showViewModal && viewSessionData && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-blue-700 text-white p-6 rounded-t-xl">
               <div className="flex justify-between items-start">
                 <div>
@@ -1690,28 +1690,28 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
             <div className="p-6 space-y-6">
               {/* Session Info */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h3 className="font-semibold text-blue-900 mb-3">📅 Session Information</h3>
+              <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg p-4">
+                <h3 className="font-semibold text-blue-900 dark:text-blue-200 mb-3">📅 Session Information</h3>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
-                    <span className="text-gray-600">Session Name:</span>
-                    <p className="font-medium text-gray-900">{viewSessionData.session.sessionName || 'N/A'}</p>
+                    <span className="text-gray-600 dark:text-gray-400">Session Name:</span>
+                    <p className="font-medium text-gray-900 dark:text-white">{viewSessionData.session.sessionName || 'N/A'}</p>
                   </div>
                   <div>
-                    <span className="text-gray-600">Session Number:</span>
-                    <p className="font-medium text-gray-900">{viewSessionData.session.sessionNumber}</p>
+                    <span className="text-gray-600 dark:text-gray-400">Session Number:</span>
+                    <p className="font-medium text-gray-900 dark:text-white">{viewSessionData.session.sessionNumber}</p>
                   </div>
                   <div>
-                    <span className="text-gray-600">Date:</span>
-                    <p className="font-medium text-gray-900">
+                    <span className="text-gray-600 dark:text-gray-400">Date:</span>
+                    <p className="font-medium text-gray-900 dark:text-white">
                       {viewSessionData.session.plannedDate
                         ? formatDate(viewSessionData.session.plannedDate)
                         : (viewSessionData.session.date ? formatDate(viewSessionData.session.date) : 'Not scheduled')}
                     </p>
                   </div>
                   <div>
-                    <span className="text-gray-600">Period:</span>
-                    <p className="font-medium text-gray-900">
+                    <span className="text-gray-600 dark:text-gray-400">Period:</span>
+                    <p className="font-medium text-gray-900 dark:text-white">
                       {viewSessionData.session.plannedPeriod
                         ? `Period ${viewSessionData.session.plannedPeriod}`
                         : (viewSessionData.session.period ? `Period ${viewSessionData.session.period}` : 'N/A')}
@@ -1724,7 +1724,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               {viewSessionData.session.learningObjectives && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                   <h3 className="font-semibold text-green-900 mb-2">🎯 Learning Objectives</h3>
-                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.learningObjectives}</p>
+                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{viewSessionData.session.learningObjectives}</p>
                 </div>
               )}
 
@@ -1732,7 +1732,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               {viewSessionData.session.teachingMethods && (
                 <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
                   <h3 className="font-semibold text-purple-900 mb-2">👨‍🏫 Teaching Methods</h3>
-                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.teachingMethods}</p>
+                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{viewSessionData.session.teachingMethods}</p>
                 </div>
               )}
 
@@ -1740,7 +1740,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               {viewSessionData.session.resourcesRequired && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                   <h3 className="font-semibold text-yellow-900 mb-2">📚 Learning Resources</h3>
-                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.resourcesRequired}</p>
+                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{viewSessionData.session.resourcesRequired}</p>
                 </div>
               )}
 
@@ -1748,7 +1748,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               {viewSessionData.session.assessmentMethods && (
                 <div className="bg-pink-50 border border-pink-200 rounded-lg p-4">
                   <h3 className="font-semibold text-pink-900 mb-2">📝 Assessment Methods</h3>
-                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.assessmentMethods}</p>
+                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{viewSessionData.session.assessmentMethods}</p>
                 </div>
               )}
 
@@ -1756,7 +1756,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               {viewSessionData.session.activities && (
                 <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
                   <h3 className="font-semibold text-indigo-900 mb-2">🎨 Activities</h3>
-                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.activities}</p>
+                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{viewSessionData.session.activities}</p>
                 </div>
               )}
 
@@ -1764,7 +1764,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               {viewSessionData.session.homework && (
                 <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
                   <h3 className="font-semibold text-orange-900 mb-2">📖 Homework</h3>
-                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.homework}</p>
+                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{viewSessionData.session.homework}</p>
                 </div>
               )}
 
@@ -1772,7 +1772,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               {viewSessionData.session.differentiation && (
                 <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
                   <h3 className="font-semibold text-teal-900 mb-2">🎭 Differentiation Strategies</h3>
-                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.differentiation}</p>
+                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{viewSessionData.session.differentiation}</p>
                 </div>
               )}
 
@@ -1780,7 +1780,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               {viewSessionData.session.ictIntegration && (
                 <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-4">
                   <h3 className="font-semibold text-cyan-900 mb-2">💻 ICT Integration</h3>
-                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.ictIntegration}</p>
+                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{viewSessionData.session.ictIntegration}</p>
                 </div>
               )}
 
@@ -1788,20 +1788,20 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
               {viewSessionData.session.crossCurricularLinks && (
                 <div className="bg-violet-50 border border-violet-200 rounded-lg p-4">
                   <h3 className="font-semibold text-violet-900 mb-2">🔗 Cross-curricular Links</h3>
-                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.crossCurricularLinks}</p>
+                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{viewSessionData.session.crossCurricularLinks}</p>
                 </div>
               )}
 
               {/* Notes */}
               {viewSessionData.session.notes && (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                  <h3 className="font-semibold text-gray-900 mb-2">📋 Notes</h3>
-                  <p className="text-gray-700 whitespace-pre-wrap">{viewSessionData.session.notes}</p>
+                <div className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-4">
+                  <h3 className="font-semibold text-gray-900 dark:text-white mb-2">📋 Notes</h3>
+                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{viewSessionData.session.notes}</p>
                 </div>
               )}
             </div>
 
-            <div className="sticky bottom-0 bg-gray-50 px-6 py-4 border-t flex justify-end">
+            <div className="sticky bottom-0 bg-gray-50 dark:bg-gray-800 px-6 py-4 border-t dark:border-gray-700 flex justify-end">
               <button
                 onClick={() => setShowViewModal(false)}
                 className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
@@ -1987,10 +1987,10 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
         <div className="p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-gray-900">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white">
               {data.chapter.chapterName}
             </h3>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -2017,10 +2017,10 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
           {/* Progress indicator */}
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-gray-700">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 Session {currentSession + 1} of {data.sessionCount}
               </span>
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-gray-500 dark:text-gray-400">
                 {sessions.filter(s => s.learningObjectives.trim() && s.teachingMethods.trim()).length}/{data.sessionCount} completed
               </span>
             </div>
@@ -2049,7 +2049,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
               <h4 className="font-medium text-green-900 mb-2">📅 Assigned Period:</h4>
               <div className="text-sm">
                 <div className="font-medium">{assignedPeriod.dayName}, {assignedPeriod.date}</div>
-                <div className="text-gray-700">Period {assignedPeriod.period} ({assignedPeriod.startTime}-{assignedPeriod.endTime})</div>
+                <div className="text-gray-700 dark:text-gray-300">Period {assignedPeriod.period} ({assignedPeriod.startTime}-{assignedPeriod.endTime})</div>
               </div>
             </div>
           ) : (
@@ -2062,8 +2062,8 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
           <div className="space-y-4">
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="block text-sm font-medium text-gray-700">
-                  Learning Objectives * <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Learning Objectives * <span className="text-xs text-gray-500 dark:text-gray-400">(Session {currentSession + 1})</span>
                 </label>
                 <button
                   type="button"
@@ -2081,7 +2081,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
               <textarea
                 value={session.learningObjectives}
                 onChange={(e) => updateSession('learningObjectives', e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 rows="3"
                 placeholder="What will students learn in this specific session?"
               />
@@ -2089,8 +2089,8 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
 
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="block text-sm font-medium text-gray-700">
-                  Teaching Methods * <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Teaching Methods * <span className="text-xs text-gray-500 dark:text-gray-400">(Session {currentSession + 1})</span>
                 </label>
                 <button
                   type="button"
@@ -2108,7 +2108,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
               <textarea
                 value={session.teachingMethods}
                 onChange={(e) => updateSession('teachingMethods', e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 rows="3"
                 placeholder="How will you teach this session?"
               />
@@ -2116,8 +2116,8 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
 
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="block text-sm font-medium text-gray-700">
-                  Resources Required <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Resources Required <span className="text-xs text-gray-500 dark:text-gray-400">(Session {currentSession + 1})</span>
                 </label>
                 <button
                   type="button"
@@ -2135,7 +2135,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
               <textarea
                 value={session.resourcesRequired}
                 onChange={(e) => updateSession('resourcesRequired', e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 rows="2"
                 placeholder="Materials, tools, or resources needed"
               />
@@ -2143,8 +2143,8 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
 
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="block text-sm font-medium text-gray-700">
-                  Assessment Methods <span className="text-xs text-gray-500">(Session {currentSession + 1})</span>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Assessment Methods <span className="text-xs text-gray-500 dark:text-gray-400">(Session {currentSession + 1})</span>
                 </label>
                 <button
                   type="button"
@@ -2162,7 +2162,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
               <textarea
                 value={session.assessmentMethods}
                 onChange={(e) => updateSession('assessmentMethods', e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 rows="2"
                 placeholder="How will you assess student learning?"
               />
@@ -2173,7 +2173,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
           <div className="mt-6 flex gap-3">
             <button
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
             >
               Cancel
             </button>
@@ -2182,7 +2182,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
               <button
                 onClick={handlePrev}
                 disabled={currentSession === 0}
-                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ← Previous
               </button>

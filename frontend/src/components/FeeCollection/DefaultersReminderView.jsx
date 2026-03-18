@@ -1,8 +1,8 @@
-import React, { useState, useMemo } from 'react';
 import { 
-  AlertTriangle, Download, MessageCircle, Copy, Filter, X,
+  AlertTriangle, Download, MessageCircle, Copy, Filter,
   ChevronDown, ChevronUp, Users, DollarSign, Calendar, Phone, Bus
 } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
 
 const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
   const [filters, setFilters] = useState({

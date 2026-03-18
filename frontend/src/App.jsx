@@ -7,19 +7,14 @@ import {
   Calendar, 
   FileText, 
   CheckCircle, 
-  Clock, 
   AlertCircle, 
-  LogOut, 
-  Menu, 
   X, 
   ChevronLeft,
   ChevronRight,
-  ChevronDown,
   Home,
   Users,
   Book,
   BarChart2,
-  Bell,
   Search,
   Filter,
   Eye,
@@ -53,16 +48,14 @@ import LoadingSplash from './auth/LoadingSplash';
 import LoginForm from './auth/LoginForm';
 import AnimatedPage from './components/AnimatedPage';
 import PerformanceDebugger from './components/PerformanceDebugger';
-import StatsCard from './components/shared/StatsCard';
-import FeeCollectionModule from './components/FeeCollectionModule';
 import ModernFeeCollection from './components/FeeCollection/ModernFeeCollection';
 import PWAControls from './components/PWAControls';
 import PWAInstallBanner from './components/PWAInstallBanner';
-import ThemeToggle from './components/ThemeToggle';
 import { useGoogleAuth } from './contexts/GoogleAuthContext';
 import { ToastProvider, useToast } from './hooks/useToast';
-import { useTheme } from './contexts/ThemeContext';
 import ApiErrorBanner from './components/shared/ApiErrorBanner';
+import AppHeader from './components/AppHeader';
+import AppSidebar from './components/AppSidebar';
 // import { useRealTimeUpdates } from './hooks/useRealTimeUpdates';
 
 // Lazy load heavy components for better performance
@@ -97,6 +90,124 @@ import { periodToTimeString, todayIST, formatDateForInput, formatLocalDate } fro
 
 // Common utility functions to avoid duplication
 const appNormalize = (s) => (s || '').toString().trim().toLowerCase();
+
+// ---------------------------------------------------------------------------
+// Module-scope pure utilities — no App state, stable across renders
+// ---------------------------------------------------------------------------
+const stripStdPrefix = (className) => {
+  if (!className) return '';
+  const v = Array.isArray(className) ? className[0] : className;
+  return String(v).trim().replace(/^STD\s*/i, '').trim();
+};
+
+const formatDate = (dateString) => {
+  if (!dateString) return '-';
+  try {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric', month: 'short', day: '2-digit', timeZone: 'Asia/Kolkata'
+    });
+  } catch (e) {
+    return dateString;
+  }
+};
+
+const subjectDisplayName = (subject) => {
+  const s = String(subject || '').trim();
+  if (!s) return '';
+  if (/^english\s+grammar$/i.test(s)) return 'Eng G';
+  return s;
+};
+
+// ---------------------------------------------------------------------------
+// Module-scope components — stable identities prevent unmount/remount on
+// every parent re-render (unlike components defined inside App()).
+// ---------------------------------------------------------------------------
+const Detail = ({ label, value }) => (
+  <div>
+    <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
+    <div className="text-gray-900 dark:text-gray-100">{value ?? '-'}</div>
+  </div>
+);
+
+const SubmitOverlay = ({ submitting }) => (
+  submitting && submitting.active ? (
+    <div className="fixed inset-0 z-[1150] flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-lg shadow-lg p-6 flex items-center space-x-4">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+        <div className="text-sm text-gray-700">{submitting.message || 'Submitting...'}</div>
+      </div>
+    </div>
+  ) : null
+);
+
+const LessonModal = ({ show, lesson, onClose }) => (
+  show && lesson ? (
+    <div className="fixed inset-0 z-[1250] flex items-center justify-center bg-black/40">
+      <div className="bg-white dark:bg-gray-800 w-full max-w-2xl rounded-xl shadow-lg p-4 md:p-6 mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-start mb-4">
+          <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100">{lesson.title || lesson.chapter || lesson.lpId || lesson.schemeId || lesson.class || 'Details'}</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4 border-b border-gray-200 dark:border-gray-700">
+            <Detail label="Class" value={stripStdPrefix(lesson.class)} />
+            <Detail label="Subject" value={lesson.subject} />
+            <Detail label="Chapter" value={lesson.chapter} />
+            <Detail label="Session" value={
+              lesson.session && lesson.noOfSessions
+                ? `${lesson.session} of ${lesson.noOfSessions}`
+                : lesson.session
+                  ? lesson.session
+                  : lesson.noOfSessions
+                    ? `${lesson.noOfSessions} sessions`
+                    : '-'
+            } />
+            <Detail label="Teacher" value={lesson.teacherName || lesson.teacher || ''} />
+            <Detail label="Status" value={lesson.status} />
+            {lesson.selectedDate && <Detail label="Date" value={formatDate(lesson.selectedDate)} />}
+            {lesson.selectedPeriod && <Detail label="Period" value={lesson.selectedPeriod} />}
+          </div>
+          <div>
+            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Learning Objectives</h4>
+            <div className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap bg-gray-50 dark:bg-gray-700 p-3 rounded">
+              {lesson.learningObjectives || lesson.objectives || '-'}
+            </div>
+          </div>
+          <div>
+            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Teaching Methods</h4>
+            <div className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap bg-gray-50 dark:bg-gray-700 p-3 rounded">
+              {lesson.teachingMethods || lesson.activities || '-'}
+            </div>
+          </div>
+          {lesson.resourcesRequired && (
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 mb-2">Resources Required</h4>
+              <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded">{lesson.resourcesRequired}</div>
+            </div>
+          )}
+          {lesson.assessmentMethods && (
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 mb-2">Assessment Methods</h4>
+              <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded">{lesson.assessmentMethods}</div>
+            </div>
+          )}
+          {lesson.reviewComments && (
+            <div className="border-t border-gray-200 pt-4">
+              <h4 className="text-sm font-medium text-red-700 mb-2">Review Comments</h4>
+              <div className="text-sm text-gray-800 whitespace-pre-wrap bg-red-50 p-3 rounded">{lesson.reviewComments}</div>
+            </div>
+          )}
+        </div>
+        <div className="mt-6 flex justify-end border-t border-gray-200 pt-4">
+          <button onClick={onClose} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">Close</button>
+        </div>
+      </div>
+    </div>
+  ) : null
+);
 
 const App = () => {
   
@@ -134,30 +245,7 @@ const App = () => {
     }
   });
   
-  // Create a memoized version of appSettings to avoid unnecessary re-renders
-  const memoizedSettings = useMemo(() => {
-    return appSettings || {
-      allowNextWeekOnly: false,
-      allowBackfillReporting: false,
-      dailyReportDeleteMinutes: 0,
-      cascadeAutoEnabled: false,
-      lessonplanBulkOnly: false,
-      lessonplanNotifyEnabled: false,
-      lessonplanNotifyRoles: '',
-      lessonplanNotifyEmails: '',
-      lessonplanNotifyEvents: '',
-      periodTimes: null,
-      periodTimesWeekday: null,
-      periodTimesFriday: null,
-      periodTimesByClassRaw: '',
-      missingDailyReports: {
-        lookbackDays: 7,
-        escalationDays: 2,
-        maxRangeDays: 31,
-        allowCustomRange: true
-      }
-    };
-  }, [appSettings]);
+  const memoizedSettings = useMemo(() => appSettings, [appSettings]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -237,7 +325,6 @@ const App = () => {
 
   // ----- GLOBAL submit overlay -----
   const [submitting, setSubmitting] = useState({ active:false, message:'' });
-  const [viewModal, setViewModal] = useState(null);
 
   // Lesson view modal state
   const [viewLesson, setViewLesson] = useState(null);
@@ -253,53 +340,9 @@ const App = () => {
   };
 
   // tiny helper for field rows inside the modal
-  const Detail = ({ label, value }) => (
-    <div>
-      <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
-      <div className="text-gray-900 dark:text-gray-100">{value ?? '-'}</div>
-    </div>
-  );
-
-  // Format date helper
-  const formatDate = (dateString) => {
-    if (!dateString) return '-';
-    try {
-      const date = new Date(dateString);
-      // Format as: Dec 01, 2025 (date only, no time)
-      const options = { 
-        year: 'numeric', 
-        month: 'short', 
-        day: '2-digit',
-        timeZone: 'Asia/Kolkata'
-      };
-      const formattedDate = date.toLocaleDateString('en-US', options);
-      return formattedDate;
-    } catch (e) {
-      return dateString; // Return original if parsing fails
-    }
-  };
-
-  // Strip "STD " prefix from class names for display
-  const stripStdPrefix = (className) => {
-    if (!className) return '';
-    const v = Array.isArray(className) ? className[0] : className;
-    return String(v).trim().replace(/^STD\s*/i, '').trim();
-  };
-
-  // Subject display helper (keeps stored subject values untouched)
-  const subjectDisplayName = (subject) => {
-    const s = String(subject || '').trim();
-    if (!s) return '';
-
-    // Prefer sheet-style abbreviation where commonly used
-    if (/^english\s+grammar$/i.test(s)) return 'Eng G';
-
-    return s;
-  };
-
   const submitInFlightRef = useRef(null);
 
-  const withSubmit = async (message, fn) => {
+  const withSubmit = useCallback(async (message, fn) => {
     // Prevent accidental double-submits; if clicked twice, return the same in-flight promise.
     if (submitInFlightRef.current) return submitInFlightRef.current;
 
@@ -322,133 +365,9 @@ const App = () => {
 
     submitInFlightRef.current = p;
     return p;
-  };
+  }, [success, error]);
 
-  const ViewModal = () => (
-    viewModal ? (
-      <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/40">
-        <div className="bg-white dark:bg-gray-800 w-full max-w-2xl rounded-xl shadow-lg p-6 mx-4">
-          <div className="flex justify-between items-start">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{viewModal.title || 'Lesson Details'}</h3>
-            <button onClick={() => setViewModal(null)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-          <div className="mt-4 space-y-4">
-            <div>
-              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Objectives</h4>
-              <div className="mt-1 text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{viewModal.objectives || '-'}</div>
-            </div>
-            <div>
-              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Activities</h4>
-              <div className="mt-1 text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{viewModal.activities || '-'}</div>
-            </div>
-          </div>
-          <div className="mt-6 flex justify-end">
-            <button onClick={() => setViewModal(null)} className="px-4 py-2 bg-gray-200 dark:bg-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-600">Close</button>
-          </div>
-        </div>
-      </div>
-    ) : null
-  );
 
-  // Full-screen submit overlay displayed while `withSubmit` is active
-  const SubmitOverlay = () => (
-    submitting && submitting.active ? (
-      <div className="fixed inset-0 z-[1150] flex items-center justify-center bg-black/40">
-        <div className="bg-white rounded-lg shadow-lg p-6 flex items-center space-x-4">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-          <div className="text-sm text-gray-700">{submitting.message || 'Submitting...'}</div>
-        </div>
-      </div>
-    ) : null
-  );
-  
-  // Lesson detail modal (opened by Eye buttons)
-  const LessonModal = () => (
-    showLessonModal && viewLesson ? (
-      <div className="fixed inset-0 z-[1250] flex items-center justify-center bg-black/40">
-        <div className="bg-white dark:bg-gray-800 w-full max-w-2xl rounded-xl shadow-lg p-4 md:p-6 mx-4 max-h-[90vh] overflow-y-auto">
-          <div className="flex justify-between items-start mb-4">
-            <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100">{viewLesson.title || viewLesson.chapter || viewLesson.lpId || viewLesson.schemeId || viewLesson.class || 'Details'}</h3>
-            <button onClick={closeLessonView} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-          <div className="space-y-4">
-            {/* Basic Info Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4 border-b border-gray-200 dark:border-gray-700">
-              <Detail label="Class" value={stripStdPrefix(viewLesson.class)} />
-              <Detail label="Subject" value={viewLesson.subject} />
-              <Detail label="Chapter" value={viewLesson.chapter} />
-              <Detail label="Session" value={
-                viewLesson.session && viewLesson.noOfSessions 
-                  ? `${viewLesson.session} of ${viewLesson.noOfSessions}` 
-                  : viewLesson.session 
-                    ? viewLesson.session 
-                    : viewLesson.noOfSessions 
-                      ? `${viewLesson.noOfSessions} sessions`
-                      : '-'
-              } />
-              <Detail label="Teacher" value={viewLesson.teacherName || viewLesson.teacher || ''} />
-              <Detail label="Status" value={viewLesson.status} />
-              {viewLesson.selectedDate && <Detail label="Date" value={formatDate(viewLesson.selectedDate)} />}
-              {viewLesson.selectedPeriod && <Detail label="Period" value={viewLesson.selectedPeriod} />}
-            </div>
-            
-            {/* Learning Objectives */}
-            <div>
-              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Learning Objectives</h4>
-              <div className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap bg-gray-50 dark:bg-gray-700 p-3 rounded">
-                {viewLesson.learningObjectives || viewLesson.objectives || '-'}
-              </div>
-            </div>
-            
-            {/* Teaching Methods */}
-            <div>
-              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Teaching Methods</h4>
-              <div className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap bg-gray-50 dark:bg-gray-700 p-3 rounded">
-                {viewLesson.teachingMethods || viewLesson.activities || '-'}
-              </div>
-            </div>
-            
-            {/* Resources Required */}
-            {viewLesson.resourcesRequired && (
-              <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-2">Resources Required</h4>
-                <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded">
-                  {viewLesson.resourcesRequired}
-                </div>
-              </div>
-            )}
-            
-            {/* Assessment Methods */}
-            {viewLesson.assessmentMethods && (
-              <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-2">Assessment Methods</h4>
-                <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded">
-                  {viewLesson.assessmentMethods}
-                </div>
-              </div>
-            )}
-            
-            {/* Review Comments (if any) */}
-            {viewLesson.reviewComments && (
-              <div className="border-t border-gray-200 pt-4">
-                <h4 className="text-sm font-medium text-red-700 mb-2">Review Comments</h4>
-                <div className="text-sm text-gray-800 whitespace-pre-wrap bg-red-50 p-3 rounded">
-                  {viewLesson.reviewComments}
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="mt-6 flex justify-end border-t border-gray-200 pt-4">
-            <button onClick={closeLessonView} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">Close</button>
-          </div>
-        </div>
-      </div>
-    ) : null
-  );
   // -----------------------------------------
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -491,8 +410,8 @@ const App = () => {
   const lastUpdate = null;
 
   // Role helpers — use normalized comparisons to handle different spellings/casing
-  const _normRole = (r) => (r || '').toString().toLowerCase().trim();
-  const hasRole = (token) => {
+  const _normRole = useCallback((r) => (r || '').toString().toLowerCase().trim(), []);
+  const hasRole = useCallback((token) => {
     const currentUser = effectiveUser || user;
     if (!currentUser || !Array.isArray(currentUser.roles)) return false;
     const t = (token || '').toString().toLowerCase();
@@ -505,8 +424,8 @@ const App = () => {
       if (t.replace(/\s+/g,'') === rr.replace(/\s+/g,'')) return true;
       return false;
     });
-  };
-  const hasAnyRole = (tokens) => Array.isArray(tokens) && tokens.some(tok => hasRole(tok));
+  }, [effectiveUser, user, _normRole]);
+  const hasAnyRole = useCallback((tokens) => Array.isArray(tokens) && tokens.some(tok => hasRole(tok)), [hasRole]);
 
   // Authentication functions
   const login = async (email, password = '') => {
@@ -583,7 +502,7 @@ const App = () => {
   }, [user?.email]);
 
   // Navigation items based on user role
-  const getNavigationItems = () => {
+  const getNavigationItems = useCallback(() => {
     const currentUser = effectiveUser || user;
     if (!currentUser) {
       return [];
@@ -813,7 +732,9 @@ const App = () => {
     }
 
     return items;
-  };
+  }, [effectiveUser, user, hasRole, hasAnyRole]);
+
+  const navigationItems = useMemo(() => getNavigationItems(), [getNavigationItems]);
 
   // Substitution notifications state (moved to App level to avoid hook issues)
   
@@ -1800,194 +1721,6 @@ const App = () => {
     }
   }, [googleAuth?.user?.email]);
 
-  // Sidebar component
-  const Sidebar = () => {
-    const navigationItems = getNavigationItems();
-    const [expandedGroups, setExpandedGroups] = useState({});
-    
-    const toggleGroup = (groupId) => {
-      setExpandedGroups(prev => ({
-        ...prev,
-        [groupId]: !prev[groupId]
-      }));
-    };
-    
-    // Debug: Log navigation items
-    if (navigationItems.length === 0) {
-      console.error('[Sidebar Debug] No navigation items:', {
-        user: user?.email,
-        userRoles: user?.roles,
-        effectiveUser: effectiveUser?.email,
-        effectiveUserRoles: effectiveUser?.roles,
-        googleAuthUser: googleAuth?.user?.email,
-        localUser: localUser?.email
-      });
-    }
-
-    return (
-      <>
-        {/* Drawer sidebar (auto-hidden by default; works on all screen sizes) */}
-        {sidebarOpen && (
-          <div className="fixed inset-0 z-[60]">
-            <div
-              className="fixed inset-0 bg-gray-600 bg-opacity-75 transition-opacity z-[65]"
-              onClick={() => {
-                if (Date.now() - sidebarOpenedAt < 300) return;
-                setSidebarOpen(false);
-              }}
-            />
-            <div
-              className="fixed inset-y-0 left-0 flex flex-col w-72 max-w-[85vw] bg-white dark:bg-gray-800 z-[70] shadow-xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between h-16 flex-shrink-0 px-4 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-                <div className="flex items-center">
-                  <School className="h-7 w-7 text-blue-600" />
-                  <span className="ml-2 text-lg font-semibold text-gray-900 dark:text-white">SchoolFlow</span>
-                </div>
-                <button
-                  onClick={() => setSidebarOpen(false)}
-                  className="p-2 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-white dark:hover:bg-gray-700 transition-colors"
-                  aria-label="Close menu"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto py-3">
-                <nav className="px-2 space-y-1">
-                  {navigationItems.map((item) => {
-                    const Icon = item.icon;
-                    
-                    // Render group with children
-                    if (item.isGroup && item.children) {
-                      const isExpanded = expandedGroups[item.id];
-                      return (
-                        <div key={item.id} className="space-y-1">
-                          <button
-                            onClick={() => toggleGroup(item.id)}
-                            className="text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-200 dark:hover:bg-gray-700 dark:hover:text-white group flex items-center justify-between px-3 py-2 text-sm font-medium rounded-md w-full text-left transition-colors duration-200"
-                          >
-                            <div className="flex items-center">
-                              <Icon className="mr-3 h-5 w-5" />
-                              {item.label}
-                            </div>
-                            <ChevronDown 
-                              className={`h-4 w-4 transition-transform duration-200 ${
-                                isExpanded ? 'transform rotate-180' : ''
-                              }`}
-                            />
-                          </button>
-                          
-                          {isExpanded && (
-                            <div className="ml-4 space-y-1">
-                              {item.children.map((child) => {
-                                const ChildIcon = child.icon;
-                                return (
-                                  <button
-                                    key={child.id}
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      setActiveView(child.id);
-                                      setSidebarOpen(false);
-                                    }}
-                                    className={`${
-                                      activeView === child.id
-                                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200'
-                                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/50 dark:hover:text-white'
-                                    } group flex items-center px-3 py-2 text-sm rounded-md w-full text-left transition-colors duration-200`}
-                                  >
-                                    <ChildIcon className="mr-3 h-4 w-4" />
-                                    {child.label}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    }
-                    
-                    // Render regular item
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setActiveView(item.id);
-                          setSidebarOpen(false);
-                        }}
-                        className={`${
-                          activeView === item.id
-                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200'
-                            : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-200 dark:hover:bg-gray-700 dark:hover:text-white'
-                        } group flex items-center px-3 py-2 text-sm font-medium rounded-md w-full text-left transition-colors duration-200`}
-                      >
-                        <Icon className="mr-3 h-5 w-5" />
-                        {item.label}
-                      </button>
-                    );
-                  })}
-                </nav>
-              </div>
-            </div>
-          </div>
-        )}
-      </>
-    );
-  };
-
-  // Header component
-  const Header = () => {
-    return (
-      <div className="flex items-center justify-between p-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 transition-colors duration-300">
-        <div className="flex items-center">
-          <button
-            onClick={() => { setSidebarOpen(true); setSidebarOpenedAt(Date.now()); }}
-            className="mr-3 p-2 rounded-md transition-colors duration-200 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-700"
-          >
-            <Menu className="h-6 w-6" />
-          </button>
-          <h1 className="text-xl font-semibold capitalize text-gray-900 dark:text-white">
-            {activeView.replace('-', ' ')}
-          </h1>
-        </div>
-        
-        <div className="flex items-center space-x-4">
-          <ThemeToggle />
-          <button className="p-2 transition-colors duration-200 text-gray-400 hover:text-gray-500 dark:text-gray-400 dark:hover:text-gray-300">
-            <Bell className="h-5 w-5" />
-          </button>
-          <div className="flex items-center">
-            <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
-              <User className="h-5 w-5 text-blue-600" />
-            </div>
-            <div className="ml-2 hidden md:block text-gray-700 dark:text-gray-300">
-              <div className="text-sm font-medium">{user?.name}</div>
-              {user?.roles && user.roles.length > 0 && (
-                <div className="text-xs text-gray-500 dark:text-gray-400">
-                  {user.roles.join(', ')}
-                </div>
-              )}
-              {googleAuth?.user ? (
-                <div className="text-xs text-blue-600 dark:text-blue-400">Google Login</div>
-              ) : (
-                <div className="text-xs text-green-600 dark:text-green-400">Password Login</div>
-              )}
-            </div>
-            <button
-              onClick={logout}
-              className="ml-4 text-sm flex items-center transition-colors duration-200 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-            >
-              <LogOut className="h-4 w-4 mr-1" />
-              Logout
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
   
   // Main content router
   const renderContent = () => {
@@ -2014,7 +1747,6 @@ const App = () => {
               case 'schemes':
                 return <SchemesView />;
               case 'lessonplans':
-                const lpTab = new URLSearchParams(window.location.search).get('tab');
                 return (
                   <LessonPlansManager 
                     user={user}
@@ -2138,7 +1870,14 @@ const App = () => {
               case 'lesson-cascading':
                 return <LessonCascading user={user} />;
               default:
-                return <Dashboard />;
+                return (
+                  <Dashboard
+                    showSendNotification={showSendNotification}
+                    setShowSendNotification={setShowSendNotification}
+                    notificationData={notificationData}
+                    setNotificationData={setNotificationData}
+                  />
+                );
             }
           })()}
         </AnimatedPage>
@@ -4647,7 +4386,7 @@ const App = () => {
     // Fetch insights if not provided
     useEffect(() => {
       if (!insightsProp) {
-        async function fetchInsights() {
+        const fetchInsights = async () => {
           try {
             const [hmData, classes] = await Promise.all([
               api.getHmInsights(),
@@ -4662,7 +4401,7 @@ const App = () => {
           } catch (err) {
             console.error('Failed to fetch HM insights:', err);
           }
-        }
+        };
         fetchInsights();
       }
     }, [insightsProp]);
@@ -11801,14 +11540,29 @@ const App = () => {
         )}
         
         {/* Global submit overlay rendered at app root */}
-        <SubmitOverlay />
-        <LessonModal />
+        <SubmitOverlay submitting={submitting} />
+        <LessonModal show={showLessonModal} lesson={viewLesson} onClose={closeLessonView} />
         <ApiErrorBanner error={apiError} onDismiss={() => setApiError(null)} />
         
         <div className="flex h-screen min-w-0">
-          <Sidebar />
+          <AppSidebar
+            navigationItems={navigationItems}
+            sidebarOpen={sidebarOpen}
+            sidebarOpenedAt={sidebarOpenedAt}
+            setSidebarOpen={setSidebarOpen}
+            setActiveView={setActiveView}
+            activeView={activeView}
+          />
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-            <Header />
+            <AppHeader
+              activeView={activeView}
+              setSidebarOpen={setSidebarOpen}
+              setSidebarOpenedAt={setSidebarOpenedAt}
+              user={user}
+              googleAuth={googleAuth}
+              onLogout={logout}
+              onNotification={() => setShowSendNotification(true)}
+            />
             <main className="flex-1 min-w-0 overflow-auto p-6 bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
               {renderContent()}
             </main>

@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
-  Search, User, DollarSign, Calendar, CreditCard, Receipt,
-  CheckCircle, XCircle, AlertCircle, ArrowRight, Printer, X, Share2
+  Search, User, DollarSign, Receipt,
+  CheckCircle, XCircle, ArrowRight, Printer, X, Share2
 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 
 const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPaymentSuccess, onNewPayment, preselectedStudent }) => {
   const [step, setStep] = useState(1); // 1: Select Student, 2: Select Fees, 3: Confirm & Pay, 4: Receipt
@@ -39,11 +39,6 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
       s.class?.toLowerCase().includes(term)
     );
   }).slice(0, 50);
-
-  // Get applicable fees for selected student
-  const applicableFees = selectedStudent 
-    ? (feeHeads || []).filter(f => f.class === selectedStudent.class)
-    : [];
 
   const handleStudentSelect = (student) => {
     setSelectedStudent(student);
@@ -197,18 +192,20 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
     ));
   };
 
+  const isWaiverMode = paymentForm.mode === 'Waiver';
   const selectedFeesTotal = selectedFees
     .filter(f => f.selected)
-    .reduce((sum, f) => sum + (Number(f.amount) || 0) + (Number(f.fine) || 0), 0);
+    .reduce((sum, f) => isWaiverMode
+      ? sum + (Number(f.balance) || 0)
+      : sum + (Number(f.amount) || 0) + (Number(f.fine) || 0), 0);
 
   const handlePayment = async () => {
-    const isWaiver = paymentForm.mode === 'Waiver';
     const items = selectedFees
-      .filter(f => f.selected && (isWaiver ? f.balance > 0 : f.amount > 0))
+      .filter(f => f.selected && (isWaiverMode ? f.balance > 0 : f.amount > 0))
       .map(f => ({
         feeHead: f.feeHead,
-        amount: isWaiver ? f.balance : f.amount,
-        fine: isWaiver ? 0 : f.fine
+        amount: isWaiverMode ? f.balance : f.amount,
+        fine: isWaiverMode ? 0 : f.fine
       }));
 
     if (!items.length) {
@@ -235,6 +232,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
           name: selectedStudent.name,
           cls: selectedStudent.class,
           mode: paymentForm.mode,
+          remarks: paymentForm.remarks || '',
           routeNo: selectedStudent.transportRoute || '',
           items,
           ...(token ? { token } : {})
@@ -254,6 +252,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
           totalAmount: items.reduce((sum, i) => sum + (Number(i.amount) || 0), 0),
           totalFine: items.reduce((sum, i) => sum + (Number(i.fine) || 0), 0),
           mode: paymentForm.mode,
+          remarks: paymentForm.remarks || '',
           processing: false,
           partialPayments: payload.partialPayments
         };
@@ -295,8 +294,9 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
       `Total Amount: ₹${receipt.totalAmount || 0}%0A` +
       (receipt.totalFine > 0 ? `Total Fine: ₹${receipt.totalFine}%0A` : '') +
       `*Grand Total: ₹${receipt.total || receipt.grandTotal || 0}*%0A` +
-      `Payment Mode: ${receipt.mode}%0A%0A` +
-      `Thank you for your payment!`;
+      `Payment Mode: ${receipt.mode}%0A` +
+      (receipt.remarks ? `Reference: ${receipt.remarks}%0A` : '') +
+      `%0AThank you for your payment!`;
     
     // Open WhatsApp with pre-filled message (user can choose contact)
     const whatsappUrl = `https://wa.me/?text=${message}`;
@@ -661,6 +661,26 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
             </div>
           </div>
 
+          {/* Remarks / Reference */}
+          <div className="mb-5">
+            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+              {paymentForm.mode === 'Cheque' ? 'Cheque Number' :
+               paymentForm.mode === 'Online' || paymentForm.mode === 'UPI' ? 'Transaction / Reference ID' :
+               'Remarks (optional)'}
+            </label>
+            <input
+              type="text"
+              value={paymentForm.remarks}
+              onChange={(e) => setPaymentForm(prev => ({ ...prev, remarks: e.target.value }))}
+              placeholder={
+                paymentForm.mode === 'Cheque' ? 'e.g. 004521' :
+                paymentForm.mode === 'Online' || paymentForm.mode === 'UPI' ? 'e.g. UPI123456789' :
+                'Any notes about this payment'
+              }
+              className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
           {/* Waiver warning */}
           {paymentForm.mode === 'Waiver' && (
             <div className="mb-4 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-600 rounded-xl">
@@ -683,7 +703,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
             <div className="space-y-2 mb-4 text-sm">
               <div className="flex justify-between">
                 <span className="text-gray-500 dark:text-gray-400">Date:</span>
-                <span className="font-medium text-gray-900 dark:text-gray-100">{new Date(paymentForm.date).toLocaleDateString()}</span>
+                <span className="font-medium text-gray-900 dark:text-gray-100">{new Date(paymentForm.date + 'T00:00:00').toLocaleDateString()}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500 dark:text-gray-400">Student:</span>
@@ -701,6 +721,15 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
                 <span className="text-gray-500 dark:text-gray-400">Mode:</span>
                 <span className="font-medium text-gray-900 dark:text-gray-100">{paymentForm.mode}</span>
               </div>
+              {paymentForm.remarks && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500 dark:text-gray-400">
+                    {paymentForm.mode === 'Cheque' ? 'Cheque No:' :
+                     paymentForm.mode === 'Online' || paymentForm.mode === 'UPI' ? 'Ref ID:' : 'Remarks:'}
+                  </span>
+                  <span className="font-medium text-gray-900 dark:text-gray-100">{paymentForm.remarks}</span>
+                </div>
+              )}
             </div>
 
             {/* Fee items table */}
@@ -753,7 +782,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
               ) : (
                 <>
                   <CheckCircle className="h-5 w-5" />
-                  Confirm &amp; Pay
+                  {paymentForm.mode === 'Waiver' ? 'Confirm Waiver' : 'Confirm & Pay'}
                 </>
               )}
             </button>
@@ -812,7 +841,7 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600 dark:text-gray-400">Date:</span>
                 <span className="font-medium text-gray-900 dark:text-gray-100">
-                  {new Date(receipt.date).toLocaleDateString()}
+                  {new Date(String(receipt.date).includes('T') ? receipt.date : receipt.date + 'T00:00:00').toLocaleDateString()}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
@@ -831,6 +860,15 @@ const ModernPaymentForm = ({ students, feeHeads, transactions, apiBaseUrl, onPay
                 <span className="text-gray-600 dark:text-gray-400">Payment Mode:</span>
                 <span className="font-medium text-gray-900 dark:text-gray-100">{receipt.mode}</span>
               </div>
+              {receipt.remarks && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-400">
+                    {receipt.mode === 'Cheque' ? 'Cheque No:' :
+                     receipt.mode === 'Online' || receipt.mode === 'UPI' ? 'Ref ID:' : 'Remarks:'}
+                  </span>
+                  <span className="font-medium text-gray-900 dark:text-gray-100">{receipt.remarks}</span>
+                </div>
+              )}
               {receipt.student?.transportRoute && (
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600 dark:text-gray-400">Transport Route:</span>

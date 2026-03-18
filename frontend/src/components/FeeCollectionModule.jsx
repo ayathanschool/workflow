@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
 import { 
-  DollarSign, Search, Calendar, User, Receipt, AlertCircle, 
-  CheckCircle, XCircle, Download, Filter, Loader, Clock,
-  AlertTriangle, CreditCard, TrendingUp, Users
+  DollarSign, Calendar, Receipt, AlertCircle, 
+  CheckCircle, XCircle, Download, Loader,
+  AlertTriangle, CreditCard, TrendingUp
 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 
 const FeeCollectionModule = ({ user, apiBaseUrl }) => {
   const [activeTab, setActiveTab] = useState('payment');
@@ -27,10 +27,6 @@ const FeeCollectionModule = ({ user, apiBaseUrl }) => {
   // Search and filters
   const [searchTerm, setSearchTerm] = useState('');
   const [classFilter, setClassFilter] = useState('');
-  const [dateFilter, setDateFilter] = useState({
-    from: new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().split('T')[0],
-    to: new Date().toISOString().split('T')[0]
-  });
 
   // Load initial data
   useEffect(() => {

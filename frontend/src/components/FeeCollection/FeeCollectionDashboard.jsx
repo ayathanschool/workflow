@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
 import { 
   DollarSign, TrendingUp, Users, AlertCircle, Calendar,
-  ArrowUp, ArrowDown, Clock, CheckCircle, XCircle, Bus
+  ArrowUp, ArrowDown, Clock, CheckCircle, Bus
 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 
 const FeeCollectionDashboard = ({ transactions, students, feeHeads, onNavigate }) => {
   const [timeRange, setTimeRange] = useState('month'); // today, week, month, year

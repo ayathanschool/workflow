@@ -1,9 +1,8 @@
-import React, { useState, useMemo } from 'react';
 import { 
-  AlertTriangle, TrendingUp, Calendar, Mail, MessageCircle,
-  Phone, Download, Filter, Search, Send, Check, X,
-  ChevronDown, ChevronUp, Users, DollarSign
+  AlertTriangle, Calendar, Mail, MessageCircle,
+  Phone, Download, Search, Send, Check, Users, DollarSign
 } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
 
 const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPayment }) => {
   const [filters, setFilters] = useState({
