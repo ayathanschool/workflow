@@ -2,9 +2,11 @@ import {
   AlertTriangle, Download, MessageCircle, Copy, Filter,
   ChevronDown, ChevronUp, Users, DollarSign, Calendar, Phone, Bus
 } from 'lucide-react';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 
 const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
+  const defaultTemplate = `Dear Parent,\n\nThis is a gentle reminder regarding the pending fee payment for {name} (Adm No: {admNo}), Class {class}.\n\nPending Fee Details:\n{lines}\n\nTotal Outstanding: ₹{total}\n\nKindly make the payment at the earliest to avoid any inconvenience.\n\nThank you,\nAyathan School`;
+
   const [filters, setFilters] = useState({
     class: '',
     route: '',
@@ -14,9 +16,28 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
     includeTransport: true
   });
   const [expandedStudent, setExpandedStudent] = useState(null);
-  const [messageTemplate, setMessageTemplate] = useState(
-    `Dear Parent,\n\nThis is a gentle reminder regarding the pending fee payment for {name} (Adm No: {admNo}), Class {class}.\n\nPending Fee Details:\n{lines}\n\nTotal Outstanding: ₹{total}\n\nKindly make the payment at the earliest to avoid any inconvenience.\n\nThank you,\nAyathan School`
-  );
+  const [messageTemplate, setMessageTemplate] = useState(defaultTemplate);
+
+  // Load saved template from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('fee_reminder_template');
+    if (saved) {
+      setMessageTemplate(saved);
+    }
+  }, []);
+
+  // Save template to localStorage
+  const saveTemplate = () => {
+    localStorage.setItem('fee_reminder_template', messageTemplate);
+    alert('Message template saved successfully!');
+  };
+
+  // Reset to default template
+  const resetTemplate = () => {
+    setMessageTemplate(defaultTemplate);
+    localStorage.removeItem('fee_reminder_template');
+    alert('Message template reset to default!');
+  };
 
   // Helper to strip "STD " prefix from class names
   const stripStdPrefix = (className) => {
@@ -475,6 +496,20 @@ const DefaultersReminderView = ({ user, students, feeHeads, transactions }) => {
               className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-xs sm:text-sm"
               placeholder="Enter message template..."
             />
+            <div className="flex gap-2 mt-2">
+              <button
+                onClick={saveTemplate}
+                className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors"
+              >
+                Save Template
+              </button>
+              <button
+                onClick={resetTemplate}
+                className="px-3 py-1 bg-gray-600 text-white rounded text-sm hover:bg-gray-700 transition-colors"
+              >
+                Reset to Default
+              </button>
+            </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
               Available placeholders: {'{name}'}, {'{admNo}'}, {'{class}'}, {'{lines}'}, {'{total}'}
             </p>
