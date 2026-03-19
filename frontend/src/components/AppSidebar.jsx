@@ -24,7 +24,14 @@ const AppSidebar = ({
           return (
             <div key={item.id} className="space-y-1">
               <button
-                onClick={() => toggleGroup(item.id)}
+                onClick={() => {
+                  toggleGroup(item.id);
+                  // If the group is the Fee Collection section, also navigate to its overview
+                  if (item.id === 'fee-collection-group') {
+                    setActiveView('fee-collection');
+                    setSidebarOpen(false);
+                  }
+                }}
                 className="text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-200 dark:hover:bg-gray-700 dark:hover:text-white group flex items-center justify-between px-3 py-2 text-sm font-medium rounded-md w-full text-left transition-colors duration-200"
               >
                 <div className="flex items-center">
