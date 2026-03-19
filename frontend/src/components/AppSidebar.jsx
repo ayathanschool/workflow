@@ -28,7 +28,7 @@ const AppSidebar = ({
                   toggleGroup(item.id);
                   // If the group is the Fee Collection section, also navigate to its overview
                   if (item.id === 'fee-collection-group') {
-                    setActiveView('fee-collection');
+                    setActiveView('fee-collection-new-payment');
                     setSidebarOpen(false);
                   }
                 }}
