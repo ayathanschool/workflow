@@ -19,6 +19,25 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
   const [showReminderModal, setShowReminderModal] = useState(false);
   const [reminderType, setReminderType] = useState('email'); // email, sms, whatsapp
 
+  // Helpers
+  const cleanPhone = (phone) => {
+    if (!phone) return null;
+    let cleaned = String(phone).replace(/\D/g, '');
+    if (cleaned.length === 10 && !cleaned.startsWith('91')) {
+      cleaned = '91' + cleaned;
+    }
+    return cleaned.length >= 10 ? cleaned : null;
+  };
+
+  const formatReminderMessage = (defaulters) => {
+    const lines = defaulters.map(d => {
+      const overdueText = d.visibleOverdueDays > 0 ? ` (Overdue ${d.visibleOverdueDays}d)` : '';
+      return `${d.name} (Adm: ${d.admNo}, ${d.class}) - ₹${d.visibleBalance.toLocaleString('en-IN')}${overdueText}`;
+    }).join('\n');
+
+    return `Dear Parent,\n\nThis is a reminder for pending fee payment at Ayathan School.\n\n${lines}\n\nPlease make the payment at the earliest to avoid inconvenience.\n\nThank you.`;
+  };
+
   // Calculate outstanding fees for each student
   const defaulters = useMemo(() => {
     return (students || [])
@@ -226,8 +245,41 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
   };
 
   const confirmSendReminders = () => {
-    // In a real implementation, this would call an API endpoint
-    alert(`Sending ${reminderType} reminders to ${selectedStudents.length} students...`);
+    const selected = filteredDefaulters.filter(d => selectedStudents.includes(d.admNo));
+    if (!selected.length) {
+      alert('No students selected for reminders.');
+      return;
+    }
+
+    const message = formatReminderMessage(selected);
+
+    if (reminderType === 'whatsapp') {
+      const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
+      window.open(url, '_blank');
+    } else if (reminderType === 'email') {
+      const emails = selected
+        .map(d => d.email)
+        .filter(Boolean);
+      if (emails.length === 0) {
+        alert('No email addresses found for selected students.');
+        return;
+      }
+      const mailto = `mailto:${emails.join(',')}` +
+        `?subject=${encodeURIComponent('Fee Reminder')}` +
+        `&body=${encodeURIComponent(message)}`;
+      window.location.href = mailto;
+    } else if (reminderType === 'sms') {
+      const phones = selected
+        .map(d => cleanPhone(d.parentContact || d.phone || ''))
+        .filter(Boolean);
+      if (phones.length === 0) {
+        alert('No valid phone numbers found for selected students.');
+        return;
+      }
+      const sms = `sms:${phones[0]}?body=${encodeURIComponent(message)}`;
+      window.location.href = sms;
+    }
+
     setShowReminderModal(false);
     setSelectedStudents([]);
   };
