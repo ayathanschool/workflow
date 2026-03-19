@@ -432,11 +432,11 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
 
       {/* Class-wise Breakdown */}
       {classStats.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+        <details className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <summary className="px-4 py-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Class-wise Outstanding</h3>
             <span className="text-xs text-gray-500 dark:text-gray-400">{classStats.length} classes</span>
-          </div>
+          </summary>
           <div className="divide-y divide-gray-100 dark:divide-gray-700">
             {classStats.map(stat => {
               const maxTotal = Math.max(...classStats.map(s => s.total));
@@ -461,16 +461,16 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
               );
             })}
           </div>
-        </div>
+        </details>
       )}
 
       {/* Route-wise Breakdown */}
       {routeStats.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-amber-200 dark:border-amber-800 overflow-hidden">
-          <div className="px-4 py-3 border-b border-amber-100 dark:border-amber-800 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">🚌 Route-wise Transport Outstanding</h3>
-            <span className="text-xs text-gray-500 dark:text-gray-400">{routeStats.length} routes</span>
-          </div>
+        <details className="bg-white dark:bg-gray-800 rounded-xl border border-amber-200 dark:border-amber-800 overflow-hidden">
+          <summary className="px-4 py-3 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-900/10 transition-colors flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-100">🚌 Route-wise Transport Outstanding</h3>
+            <span className="text-xs text-amber-600 dark:text-amber-400">{routeStats.length} routes</span>
+          </summary>
           <div className="divide-y divide-amber-50 dark:divide-gray-700">
             {routeStats.map(stat => {
               const maxTotal = Math.max(...routeStats.map(s => s.total));
@@ -495,7 +495,7 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
               );
             })}
           </div>
-        </div>
+        </details>
       )}
 
       {/* Filters */}
@@ -504,15 +504,24 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
           {/* Search */}
           <div className="flex-1 min-w-[160px]">
             <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Search</label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <input
-                type="text"
-                value={filters.search}
-                onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
-                placeholder="Name or adm no..."
-                className="w-full pl-9 pr-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"
-              />
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  value={filters.search}
+                  onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                  placeholder="Name or adm no..."
+                  className="w-full pl-9 pr-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm"
+                />
+              </div>
+              <button
+                onClick={() => setFilters(prev => ({ ...prev, search: '' }))}
+                className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                title="Clear search"
+              >
+                ✕
+              </button>
             </div>
           </div>
 
@@ -712,14 +721,15 @@ const OutstandingFeesView = ({ students, feeHeads, transactions, onNavigateToPay
                       </div>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      {onNavigateToPayment && (
-                        <button
-                          onClick={() => onNavigateToPayment(defaulter)}
-                          className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-                        >
-                          Collect
-                        </button>
-                      )}
+                      <button
+                        onClick={() => {
+                          setSelectedStudents([defaulter.admNo]);
+                          setShowReminderModal(true);
+                        }}
+                        className="px-3 py-1.5 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700 transition-colors"
+                      >
+                        Send Reminder
+                      </button>
                     </td>
                   </tr>
                 ))
