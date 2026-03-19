@@ -40,10 +40,7 @@ import {
   Shield,
   DollarSign,
   Target,
-  Settings,
-  CreditCard,
-  Receipt,
-  Bell
+  Settings
 } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense, useRef } from 'react';
 import * as api from './api'
@@ -570,20 +567,7 @@ const App = () => {
           icon: DollarSign, 
           isGroup: true,
           children: [
-            {
-              id: 'fee-collection-group',
-              label: 'Fee Collection',
-              icon: DollarSign,
-              isGroup: true,
-              children: [
-                { id: 'fee-collection', label: 'Overview', icon: DollarSign },
-                { id: 'fee-collection-new-payment', label: 'New Payment', icon: CreditCard },
-                { id: 'fee-collection-transactions', label: 'Transactions', icon: Receipt },
-                { id: 'fee-collection-students', label: 'Students', icon: Users },
-                { id: 'fee-collection-outstanding', label: 'Outstanding', icon: AlertTriangle },
-                { id: 'fee-collection-reminders', label: 'Reminders', icon: Bell }
-              ]
-            },
+            { id: 'fee-collection', label: 'Fee Collection', icon: DollarSign },
             { id: 'fund-collection', label: 'Fund Collection', icon: DollarSign },
             { id: 'expense-management', label: 'Expense Management', icon: DollarSign },
             { id: 'financial-dashboard', label: 'Dashboard', icon: Target }
@@ -608,20 +592,7 @@ const App = () => {
     // Accounts role: Fee Collection + Financial
     if (hasAnyRole(['accounts', 'accountant', 'account'])) {
       items.push(
-        {
-          id: 'fee-collection-group',
-          label: 'Fee Collection',
-          icon: DollarSign,
-          isGroup: true,
-          children: [
-            { id: 'fee-collection', label: 'Overview', icon: DollarSign },
-            { id: 'fee-collection-new-payment', label: 'New Payment', icon: CreditCard },
-            { id: 'fee-collection-transactions', label: 'Transactions', icon: Receipt },
-            { id: 'fee-collection-students', label: 'Students', icon: Users },
-            { id: 'fee-collection-outstanding', label: 'Outstanding', icon: AlertTriangle },
-            { id: 'fee-collection-reminders', label: 'Reminders', icon: Bell }
-          ]
-        },
+        { id: 'fee-collection', label: 'Fee Collection', icon: DollarSign },
         { id: 'fund-collection', label: 'Fund Collection', icon: DollarSign },
         { id: 'expense-management', label: 'Expense Management', icon: DollarSign },
         { id: 'financial-dashboard', label: 'Financial Dashboard', icon: Target }
@@ -1889,18 +1860,7 @@ const App = () => {
               case 'class-period-timetable':
                 return <ClassPeriodSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
               case 'fee-collection':
-              case 'fee-collection-dashboard':
-              case 'fee-collection-new-payment':
-              case 'fee-collection-transactions':
-              case 'fee-collection-students':
-              case 'fee-collection-outstanding':
-              case 'fee-collection-reminders':
-                {
-                  const initialView = activeView.startsWith('fee-collection-')
-                    ? activeView.replace('fee-collection-', '')
-                    : 'dashboard';
-                  return <ModernFeeCollection user={user} apiBaseUrl={api.getBaseUrl()} initialView={initialView} />;
-                }
+                return <ModernFeeCollection user={user} apiBaseUrl={api.getBaseUrl()} />;
               case 'fund-collection':
                 return <FundCollectionModule user={user} />;
               case 'expense-management':

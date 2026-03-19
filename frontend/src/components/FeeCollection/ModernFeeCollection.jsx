@@ -22,11 +22,12 @@ const ModernFeeCollection = ({ user, apiBaseUrl, initialView }) => {
   // Determine user role and access level
   const normalizedRoles = (user?.roles || []).map(r => String(r).toLowerCase());
   const isSuperAdmin = normalizedRoles.some(r => r === 'super admin' || r === 'superadmin' || r === 'super_admin');
+  const isAdmin = normalizedRoles.includes('admin');
   const isAccounts = normalizedRoles.some(r => r.includes('accounts') || r === 'accountant' || r === 'account');
   const isHM = normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('head'));
   const isClassTeacher = Boolean(user?.classTeacherFor || user?.class);
-  // Only restrict HM/Class Teacher if NOT Accounts and NOT Super Admin
-  const isRestrictedRole = !isSuperAdmin && !isAccounts && (isHM || isClassTeacher);
+  // Only restrict HM/Class Teacher if NOT Accounts, NOT Super Admin, and NOT Admin
+  const isRestrictedRole = !isSuperAdmin && !isAdmin && !isAccounts && (isHM || isClassTeacher);
   
   const defaultView = isRestrictedRole ? 'reminders' : 'dashboard';
   const [activeView, setActiveView] = useState(initialView ? initialView : defaultView);
