@@ -12,7 +12,7 @@ import OutstandingFeesView from './OutstandingFeesView';
 import StudentsView from './StudentsView';
 import TransactionHistory from './TransactionHistory';
 
-const ModernFeeCollection = ({ user, apiBaseUrl }) => {
+const ModernFeeCollection = ({ user, apiBaseUrl, initialView }) => {
   // Helper to strip "STD " prefix from class names
   const stripStdPrefix = (className) => {
     if (!className) return '';
@@ -28,7 +28,14 @@ const ModernFeeCollection = ({ user, apiBaseUrl }) => {
   // Only restrict HM/Class Teacher if NOT Accounts and NOT Super Admin
   const isRestrictedRole = !isSuperAdmin && !isAccounts && (isHM || isClassTeacher);
   
-  const [activeView, setActiveView] = useState(isRestrictedRole ? 'reminders' : 'dashboard');
+  const defaultView = isRestrictedRole ? 'reminders' : 'dashboard';
+  const [activeView, setActiveView] = useState(initialView ? initialView : defaultView);
+
+  useEffect(() => {
+    if (!isRestrictedRole && initialView) {
+      setActiveView(initialView);
+    }
+  }, [initialView, isRestrictedRole]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({
