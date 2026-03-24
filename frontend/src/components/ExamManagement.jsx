@@ -41,12 +41,13 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       : [String(user.roles).toLowerCase().trim()];
   }, [user, userRolesNorm]);
   
-  // Check if user is Super Admin
+  // Check if user is Super Admin or Admin
   const isSuperAdmin = useMemo(() => {
     return normalizedRoles.some(r => 
       r === 'super admin' || 
       r === 'superadmin' || 
-      r === 'super_admin'
+      r === 'super_admin' ||
+      r === 'admin'
     );
   }, [normalizedRoles]);
   
@@ -356,13 +357,14 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         // Fetch classes for HM or use teacher's classes
         if (user) {
           // Check if hasRole is a function before calling it
-          const isHeadmaster = typeof hasRole === 'function' ? 
+          const isHeadmaster = isSuperAdmin || (typeof hasRole === 'function' ? 
             hasRole('h m') : 
-            normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'));
+            normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster')));
           
           if (isHeadmaster) {
-            const cls = await api.getAllClasses();
-            setAvailableClasses(Array.isArray(cls) ? cls : []);
+            const clsResp = await api.getAllClasses();
+            const cls = Array.isArray(clsResp) ? clsResp : (Array.isArray(clsResp?.classes) ? clsResp.classes : []);
+            setAvailableClasses(cls);
           } else {
             setAvailableClasses(user.classes || []);
           }
@@ -383,9 +385,9 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       try {
         setSubjectsLoading(true);
 
-        const isHeadmaster = typeof hasRole === 'function'
+        const isHeadmaster = isSuperAdmin || (typeof hasRole === 'function'
           ? hasRole('h m')
-          : normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'));
+          : normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster')));
         const isClassTeacher = normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher');
 
         // Determine target class: prefer bulk representative class, then exam form class, else class-teacher's class, else filter selection
@@ -1765,7 +1767,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-2xl font-bold text-gray-900">Exam Management</h1>
         <div className="flex flex-wrap gap-3 w-full sm:w-auto">
-          {user && (normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'))) && (
+          {user && (isSuperAdmin || normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster'))) && (
             <>
               <button
                 onClick={() => setShowExamForm(true)}

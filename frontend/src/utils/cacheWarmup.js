@@ -1,5 +1,6 @@
 // Cache warming utility to improve initial load performance
 import * as api from '../api';
+import { getBaseUrl } from './apiUtils';
 
 /**
  * Warm up caches by pre-fetching commonly accessed data
@@ -40,6 +41,7 @@ export async function warmupCache(user) {
  */
 export async function warmupBackendCache() {
   try {
+    const baseUrl = getBaseUrl();
     let token = '';
     try {
       const s = JSON.parse(localStorage.getItem('sf_google_session') || '{}');
@@ -47,7 +49,7 @@ export async function warmupBackendCache() {
     } catch {}
     const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
     const response = await fetch(
-      `${import.meta.env.VITE_API_BASE_URL}?action=warmCache${tokenParam}`,
+      `${baseUrl}?action=warmCache${tokenParam}`,
       { method: 'GET' }
     );
     

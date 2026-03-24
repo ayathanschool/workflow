@@ -1,19 +1,9 @@
 // src/api.js
-// Apps Script Web App URL (ends with /exec)
-// MUST be provided via env var: VITE_API_BASE_URL (preferred) or VITE_GAS_WEB_APP_URL or VITE_APP_SCRIPT_URL
-// Remove legacy hardcoded fallback to avoid accidental calls to old deployments.
-const BASE_URL = (import.meta && import.meta.env && (
-  import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_GAS_WEB_APP_URL || import.meta.env.VITE_APP_SCRIPT_URL
-)) ? (
-  import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_GAS_WEB_APP_URL || import.meta.env.VITE_APP_SCRIPT_URL
-) : (() => { throw new Error('Missing API base URL. Set VITE_API_BASE_URL in .env'); })();
+import { getBaseUrl } from './utils/apiUtils.js';
 
-// Export BASE_URL for components that need to build direct URLs
-// Delegate to the canonical utility to avoid drift across modules
-import { getBaseUrl as getBaseUrlUtil } from './utils/apiUtils.js';
-export function getBaseUrl() {
-  return getBaseUrlUtil();
-}
+const BASE_URL = getBaseUrl();
+
+export { getBaseUrl };
 
 // Import advanced caching system
 import { cacheManager, CacheTTL, invalidateCache } from './utils/cacheManager.js';

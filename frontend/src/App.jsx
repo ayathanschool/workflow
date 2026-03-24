@@ -51,6 +51,7 @@ import PerformanceDebugger from './components/PerformanceDebugger';
 import ModernFeeCollection from './components/FeeCollection/ModernFeeCollection';
 import PWAControls from './components/PWAControls';
 import PWAInstallBanner from './components/PWAInstallBanner';
+import { hasRole as userHasRole, hasAnyRole as userHasAnyRole, isAdmin, isHM, isTeacher, isClassTeacher } from './utils/roles';
 import { useGoogleAuth } from './contexts/GoogleAuthContext';
 import { ToastProvider, useToast } from './hooks/useToast';
 import ApiErrorBanner from './components/shared/ApiErrorBanner';
@@ -409,23 +410,21 @@ const App = () => {
   const updateCount = 0;
   const lastUpdate = null;
 
-  // Role helpers — use normalized comparisons to handle different spellings/casing
-  const _normRole = useCallback((r) => (r || '').toString().toLowerCase().trim(), []);
-  const hasRole = useCallback((token) => {
-    const currentUser = effectiveUser || user;
-    if (!currentUser || !Array.isArray(currentUser.roles)) return false;
-    const t = (token || '').toString().toLowerCase();
-    return currentUser.roles.some(r => {
-      const rr = _normRole(r);
-      // exact match or substring match (covers 'class teacher' and 'teacher')
-      if (rr === t) return true;
-      if (rr.includes(t)) return true;
-      // handle compact variants like 'HM' vs 'H M'
-      if (t.replace(/\s+/g,'') === rr.replace(/\s+/g,'')) return true;
-      return false;
-    });
-  }, [effectiveUser, user, _normRole]);
-  const hasAnyRole = useCallback((tokens) => Array.isArray(tokens) && tokens.some(tok => hasRole(tok)), [hasRole]);
+  // Role helpers — use helpers from utils/roles.js
+  const currentUser = effectiveUser || user || null;
+  const hasCurrentUserRole = (role) => userHasRole(currentUser, role);
+  const hasCurrentUserAnyRole = (roles) => userHasAnyRole(currentUser, roles);
+
+  // Backward compatibility callbacks (used in getNavigationItems and other places)
+  const hasRole = useCallback(
+    (token) => userHasRole(effectiveUser || user, token),
+    [effectiveUser, user]
+  );
+
+  const hasAnyRole = useCallback(
+    (tokens) => userHasAnyRole(effectiveUser || user, tokens),
+    [effectiveUser, user]
+  );
 
   // Authentication functions
   const login = async (email, password = '') => {
@@ -489,9 +488,9 @@ const App = () => {
       // Teacher-specific warmup: Scheme lesson planning is one of the slowest endpoints on cold start.
       // Prefetch it after login so opening the tab is instant.
       try {
-        if (hasRole('teacher') && user?.email) {
+        if (hasCurrentUserRole('teacher') && currentUser?.email) {
           promises.push(
-            api.getApprovedSchemesForLessonPlanning(user.email)
+            api.getApprovedSchemesForLessonPlanning(currentUser.email)
               .catch((err) => { console.warn('Failed to prefetch approved schemes:', err); return null; })
           );
         }
@@ -499,7 +498,7 @@ const App = () => {
 
       Promise.all(promises).catch((err) => { console.warn('Prefetch failed:', err); });
     }
-  }, [user?.email]);
+  }, [currentUser?.email]);
 
   // Navigation items based on user role
   const getNavigationItems = useCallback(() => {
@@ -649,7 +648,7 @@ const App = () => {
       items.push({ id: 'assessments', label: 'Assessments', icon: Award });
     }
 
-    if (hasRole('class teacher')) {
+    if (hasCurrentUserRole('class teacher')) {
       items.push(
         { id: 'class-data', label: 'Class Data', icon: UserCheck },
         { id: 'class-students', label: 'Students', icon: Users },
@@ -657,7 +656,7 @@ const App = () => {
       );
     }
 
-    if (hasRole('h m')) {
+    if (hasCurrentUserRole('h m')) {
       items.push(
         // Academic Oversight Group
         { 
@@ -868,7 +867,7 @@ const App = () => {
         try {
           setDashboardLoading(true);
           // Headmaster view: use HM insights and classes count
-          if (hasRole('h m')) {
+          if (hasCurrentUserRole('h m')) {
             const [hmData, classes] = await Promise.all([
               api.getHmInsights(),
               api.getAllClasses()
@@ -882,7 +881,7 @@ const App = () => {
               pendingReports: 0
             };
             setInsights(newInsights);
-          } else if (hasAnyRole(['teacher','class teacher'])) {
+          } else if (hasCurrentUserAnyRole(['teacher','class teacher'])) {
             // Teacher view: compute classes and subjects from user object
             // Some users (notably class teachers) may not have `user.classes` populated; fall back to classTeacherFor.
             const teachingClassesFromUser = Array.isArray(currentUser?.classes)
@@ -893,7 +892,7 @@ const App = () => {
               : (currentUser?.classTeacherFor ? [currentUser.classTeacherFor] : []);
             const teachingClasses = (teachingClassesFromUser.length > 0)
               ? teachingClassesFromUser
-              : (hasRole('class teacher') ? classTeacherFor : []);
+              : (hasCurrentUserRole('class teacher') ? classTeacherFor : []);
 
             const teachingSubjects = Array.isArray(currentUser?.subjects)
               ? currentUser.subjects
@@ -935,7 +934,7 @@ const App = () => {
               let classPerformance = {};
               let assignedClassPerformance = null;
 
-              if (hasRole('class teacher') && uniqueTeachingClasses.length > 0) {
+              if (hasCurrentUserRole('class teacher') && uniqueTeachingClasses.length > 0) {
                 try {
                   // PERFORMANCE: Batch fetch students for all classes in one API call.
                   const strippedClasses = uniqueTeachingClasses
@@ -1091,7 +1090,7 @@ const App = () => {
 
                       // Summary cards should reflect ONLY the class teacher's assigned class.
                       // Keep class-wise performance for all teaching classes.
-                      if (hasRole('class teacher') && classTeacherFor.length > 0) {
+                      if (hasCurrentUserRole('class teacher') && classTeacherFor.length > 0) {
                         const assignedNormKey = normClassKey(classTeacherFor[0]);
                         assignedClassPerformance = classPerformance?.[assignedNormKey] || null;
                         if (assignedClassPerformance) {
@@ -1143,8 +1142,8 @@ const App = () => {
     // Teacher dashboard: load today's timetable + plans in a single call.
     useEffect(() => {
       if (!currentUser?.email) return;
-      if (!hasAnyRole(['teacher', 'class teacher'])) return;
-      if (hasAnyRole(['h m', 'admin', 'admin', 'admin'])) return;
+      if (!hasCurrentUserAnyRole(['teacher', 'class teacher'])) return;
+      if (isAdmin(currentUser) || hasCurrentUserRole('h m')) return;
 
       let cancelled = false;
 
@@ -1255,8 +1254,8 @@ const App = () => {
 
     useEffect(() => {
       if (!currentUser?.email) return;
-      if (!hasAnyRole(['teacher', 'class teacher'])) return;
-      if (hasAnyRole(['h m', 'admin', 'admin', 'admin'])) return;
+      if (!hasCurrentUserAnyRole(['teacher', 'class teacher'])) return;
+      if (isAdmin(currentUser) || hasCurrentUserRole('h m')) return;
 
       const t = setInterval(() => setNowTick(Date.now()), 30_000);
       return () => clearInterval(t);
@@ -1394,7 +1393,7 @@ const App = () => {
           <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
           <div className="flex items-center space-x-4">
             {/* Send Notification Button - HM Only */}
-            {user && hasRole('h m') && (
+            {currentUser && hasCurrentUserRole('h m') && (
               <button 
                 onClick={() => setShowSendNotification(true)}
                 className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
@@ -1407,15 +1406,15 @@ const App = () => {
         </div>
 
   {/* Check admin FIRST - highest priority */}
-  {user?.roles && user.roles.includes('admin') ? (
+  {isAdmin(currentUser) ? (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6">
             <Suspense fallback={<div className="flex items-center justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>}>
-              <AdminDashboard user={user} onNavigate={setActiveView} />
+              <AdminDashboard user={currentUser} onNavigate={setActiveView} />
             </Suspense>
           </div>
-    ) : user && hasRole('h m') ? (
+    ) : currentUser && hasCurrentUserRole('h m') ? (
       <HMDashboardView insights={insights} />
-    ) : user && hasAnyRole(['teacher','class teacher']) ? (
+    ) : currentUser && hasCurrentUserAnyRole(['teacher','class teacher']) ? (
       <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 md:gap-4">
               <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
@@ -1427,7 +1426,7 @@ const App = () => {
                     </span>
                   )}
                 </div>
-                <div className={`grid grid-cols-2 ${hasRole('class teacher') ? 'md:grid-cols-5' : 'md:grid-cols-3'} gap-3 md:gap-4`}>
+                <div className={`grid grid-cols-2 ${hasCurrentUserRole('class teacher') ? 'md:grid-cols-5' : 'md:grid-cols-3'} gap-3 md:gap-4`}>
                   <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
                     <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
                       <School className="w-4 h-4 text-blue-600" /> Classes
@@ -1445,7 +1444,7 @@ const App = () => {
                   </div>
 
 
-                  {hasRole('class teacher') && (
+                  {hasCurrentUserRole('class teacher') && (
                     <>
                       <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
                         <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-300">
@@ -1626,7 +1625,7 @@ const App = () => {
             )}
             
             {/* Class-wise Performance Breakdown - Only for class teachers */}
-            {hasRole('class teacher') && insights.classPerformance && Object.keys(insights.classPerformance).length > 0 && (
+            {hasCurrentUserRole('class teacher') && insights.classPerformance && Object.keys(insights.classPerformance).length > 0 && (
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-4 md:p-6 border border-gray-100 dark:border-gray-700">
                 <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Class-wise Performance</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
@@ -1721,7 +1720,64 @@ const App = () => {
     }
   }, [googleAuth?.user?.email]);
 
-  
+  const redirectToViewWithTab = (view, tab, mode = 'push') => {
+    setTimeout(() => {
+      setActiveView(view);
+
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location);
+
+        if (tab) {
+          url.searchParams.set('tab', tab);
+        } else {
+          url.searchParams.delete('tab');
+        }
+
+        if (mode === 'replace') {
+          window.history.replaceState({}, '', url);
+        } else {
+          window.history.pushState({}, '', url);
+        }
+      }
+    }, 0);
+  };
+
+  const renderDashboardView = () => (
+    <Dashboard
+      showSendNotification={showSendNotification}
+      setShowSendNotification={setShowSendNotification}
+      notificationData={notificationData}
+      setNotificationData={setNotificationData}
+    />
+  );
+
+  const renderSubstitutionsView = () => (
+    <EnhancedSubstitutionView user={currentUser} periodTimes={memoizedSettings.periodTimes} />
+  );
+
+  const renderSchemesView = () => (
+    <SchemesView />
+  );
+
+  const renderLessonPlansView = () => (
+    <LessonPlansView />
+  );
+
+  const renderReportsView = () => (
+    <ReportsView />
+  );
+
+  const renderLessonPlanningView = () => (
+    <SchemeLessonPlanning
+      userEmail={currentUser?.email}
+      userName={currentUser?.name}
+    />
+  );
+
+  const renderAssessmentsView = () => (
+    <AssessmentsManager user={currentUser} withSubmit={withSubmit} hasRole={hasCurrentUserRole} />
+  );
+
   // Main content router
   const renderContent = () => {
     return (
@@ -1736,64 +1792,33 @@ const App = () => {
           {(() => {
             switch (activeView) {
               case 'dashboard':
-                return (
-                  <Dashboard
-                    showSendNotification={showSendNotification}
-                    setShowSendNotification={setShowSendNotification}
-                    notificationData={notificationData}
-                    setNotificationData={setNotificationData}
-                  />
-                );
+              default:
+                return renderDashboardView();
               case 'schemes':
-                return <SchemesView />;
+                return renderSchemesView();
               case 'lessonplans':
                 return (
                   <LessonPlansManager 
-                    user={user}
+                    user={currentUser}
                     SchemeLessonPlanning={SchemeLessonPlanning}
                     LessonPlansView={LessonPlansView}
                     onNavigate={(view) => setActiveView(view)}
                   />
                 );
               case 'lesson-plans':
-                // Redirect to unified lessonplans with submitted tab
-                setTimeout(() => setActiveView('lessonplans'), 0);
-                if (typeof window !== 'undefined') {
-                  const params = new URLSearchParams(window.location.search);
-                  params.set('tab', 'submitted');
-                  window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
-                }
-                return <LessonPlansView />;
+                redirectToViewWithTab('lessonplans', 'submitted', 'replace');
+                return renderLessonPlansView();
               case 'scheme-lesson-planning':
-                // Redirect to unified lessonplans with draft tab
-                setTimeout(() => setActiveView('lessonplans'), 0);
-                if (typeof window !== 'undefined') {
-                  const params = new URLSearchParams(window.location.search);
-                  params.set('tab', 'draft');
-                  window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
-                }
-                return <SchemeLessonPlanning userEmail={user?.email} userName={user?.name} />;
+                redirectToViewWithTab('lessonplans', 'draft', 'replace');
+                return renderLessonPlanningView();
               case 'session-tracking':
-                return <SessionCompletionTracker user={user} />;
+                return <SessionCompletionTracker user={currentUser} />;
               case 'timetable':
                 return <TimetableView />;
               case 'my-substitutions':
-                return <MySubstitutionsView user={user} periodTimes={memoizedSettings.periodTimes} />;
+                return <MySubstitutionsView user={currentUser} periodTimes={memoizedSettings.periodTimes} />;
               case 'reports':
-                // Render reporting directly to avoid remounts on parent re-renders
-                return (
-                  <div className="space-y-6">
-                    <div className="flex justify-between items-center">
-                      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Daily Reports</h1>
-                      <div className="text-sm text-gray-600 dark:text-gray-400">
-                        Complete your daily reports based on your timetable
-                      </div>
-                    </div>
-                    <div className="bg-transparent">
-                      <DailyReportModern user={memoizedUser} settings={memoizedSettings} />
-                    </div>
-                  </div>
-                );
+                return renderReportsView();
               case 'hm-dashboard':
                 return <HMDashboardView />;
               case 'day-timetable':
@@ -1805,79 +1830,57 @@ const App = () => {
               case 'my-daily-reports':
                 return <MyDailyReportsView />;
               case 'daily-oversight':
-                return <HMDailyOversight user={user} />;
+                return <HMDailyOversight user={currentUser} />;
               
               case 'substitutions':
-                return <EnhancedSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
+                return renderSubstitutionsView();
               case 'substitution-analytics':
-                return <SubstitutionAnalyticsView user={user} />;
+                return <SubstitutionAnalyticsView user={currentUser} />;
               case 'missing-daily-reports':
-                return <MissingDailyReportsTeacherwiseView user={user} />;
+                return <MissingDailyReportsTeacherwiseView user={currentUser} />;
               case 'full-timetable':
                 return <FullTimetableView />;
               case 'users':
-                return <UserManagement user={user} />;
+                return <UserManagement user={currentUser} />;
               case 'audit-log':
-                return <AuditLog user={user} />;
+                return <AuditLog user={currentUser} />;
               
               // New unified assessments module
               case 'assessments':
-                return <AssessmentsManager user={user} withSubmit={withSubmit} />;
+                return renderAssessmentsView();
               
               // Old routes - redirect to unified module with appropriate tab
               case 'exam-marks':
-                // Auto-redirect to assessments with marks-entry tab
-                setTimeout(() => setActiveView('assessments'), 0);
-                return <AssessmentsManager user={user} withSubmit={withSubmit} />;
+                redirectToViewWithTab('assessments', null);
+                return renderAssessmentsView();
               case 'report-card':
-                // Auto-redirect to assessments with reports tab
-                setTimeout(() => {
-                  setActiveView('assessments');
-                  const url = new URL(window.location);
-                  url.searchParams.set('tab', 'reports');
-                  window.history.pushState({}, '', url);
-                }, 0);
-                return <AssessmentsManager user={user} withSubmit={withSubmit} />;
+                redirectToViewWithTab('assessments', 'reports');
+                return renderAssessmentsView();
               case 'marklist':
-                // Auto-redirect to assessments with marklists tab
-                setTimeout(() => {
-                  setActiveView('assessments');
-                  const url = new URL(window.location);
-                  url.searchParams.set('tab', 'marklists');
-                  window.history.pushState({}, '', url);
-                }, 0);
-                return <AssessmentsManager user={user} withSubmit={withSubmit} />;
+                redirectToViewWithTab('assessments', 'marklists');
+                return renderAssessmentsView();
               case 'class-data':
                 return <ClassDataView />;
               case 'admin-data':
-                return <AdminDataEditor user={user} />;
+                return <AdminDataEditor user={currentUser} />;
               case 'settings':
-                return <SettingsPanel user={user} settings={memoizedSettings} onSettingsUpdated={handleSettingsUpdated} />;
+                return <SettingsPanel user={currentUser} settings={memoizedSettings} onSettingsUpdated={handleSettingsUpdated} />;
               case 'class-students':
                 return <ClassStudentsView />;
               case 'daily-reports-management':
                 return <DailyReportsManagementView />;
               case 'class-period-timetable':
-                return <ClassPeriodSubstitutionView user={user} periodTimes={memoizedSettings.periodTimes} />;
+                return <ClassPeriodSubstitutionView user={currentUser} periodTimes={memoizedSettings.periodTimes} />;
               case 'fee-collection':
-                return <ModernFeeCollection user={user} apiBaseUrl={api.getBaseUrl()} />;
+                return <ModernFeeCollection user={currentUser} apiBaseUrl={api.getBaseUrl()} />;
               case 'fund-collection':
-                return <FundCollectionModule user={user} />;
+                return <FundCollectionModule user={currentUser} />;
               case 'expense-management':
-                return <ExpenseManagementModule user={user} />;
+                return <ExpenseManagementModule user={currentUser} />;
               case 'financial-dashboard':
-                return <FinancialDashboard user={user} />;
+                return <FinancialDashboard user={currentUser} />;
               case 'lesson-cascading':
-                return <LessonCascading user={user} />;
-              default:
-                return (
-                  <Dashboard
-                    showSendNotification={showSendNotification}
-                    setShowSendNotification={setShowSendNotification}
-                    notificationData={notificationData}
-                    setNotificationData={setNotificationData}
-                  />
-                );
+                return <LessonCascading user={currentUser} />;
             }
           })()}
         </AnimatedPage>
@@ -1976,12 +1979,12 @@ const App = () => {
     // Load planning helper when class, subject, and term are selected
     useEffect(() => {
       const loadPlanningHelper = async () => {
-        if (formData.class && formData.subject && formData.term && user?.email) {
+        if (formData.class && formData.subject && formData.term && currentUser?.email) {
           try {
             setLoadingHelper(true);
             const termStr = `Term ${formData.term}`;
             const response = await api.getSchemeSubmissionHelper(
-              user.email,
+              currentUser.email,
               formData.class,
               formData.subject,
               termStr
@@ -2004,18 +2007,18 @@ const App = () => {
         }
       };
       loadPlanningHelper();
-    }, [formData.class, formData.subject, formData.term, user?.email]);
+    }, [formData.class, formData.subject, formData.term, currentUser?.email]);
 
     // Check if teacher can submit a new scheme whenever class+subject change
     useEffect(() => {
 
-      if (!formData.class || !formData.subject || !user?.email) { setSchemeGateCheck(null); return; }
+      if (!formData.class || !formData.subject || !currentUser?.email) { setSchemeGateCheck(null); return; }
       let cancelled = false;
-      api.checkCanSubmitScheme(user.email, formData.class, formData.subject)
+      api.checkCanSubmitScheme(currentUser.email, formData.class, formData.subject)
         .then(result => { if (!cancelled) setSchemeGateCheck(result); })
         .catch(() => { if (!cancelled) setSchemeGateCheck(null); });
       return () => { cancelled = true; };
-    }, [formData.class, formData.subject, user?.email]);
+    }, [formData.class, formData.subject, currentUser?.email]);
 
     const handleSubmit = async (e) => {
       e.preventDefault();
@@ -2897,8 +2900,8 @@ const App = () => {
             objectives: preparationData.objectives,
             activities: preparationData.activities,
             notes: preparationData.notes,
-            teacherEmail: user?.email || '',
-            teacherName: user?.name || ''
+            teacherEmail: currentUser?.email || '',
+            teacherName: currentUser?.name || ''
           });
           
           // Unwrap the response (backend wraps in {status, data, timestamp})
@@ -8417,7 +8420,7 @@ const App = () => {
           </div>
         </div>
         <div className="mb-4">
-          {user && user.roles && hasRole('h m') && (
+          {currentUser && hasCurrentUserRole('h m') && (
             <div className="bg-white rounded-lg p-4 flex flex-wrap items-center gap-3">
               <div>
                 <label className="text-xs text-gray-500">Day</label>
@@ -8600,12 +8603,12 @@ const App = () => {
           const examList = await api.getExams();
           setExams(Array.isArray(examList) ? examList : []);
           // Fetch classes for HM or use teacher's classes
-          if (user) {
-            if (hasRole('h m')) {
+          if (currentUser) {
+            if (isAdmin(currentUser) || hasCurrentUserRole('h m')) {
               const cls = await api.getAllClasses();
               setAvailableClasses(Array.isArray(cls) ? cls : []);
             } else {
-              setAvailableClasses(user.classes || []);
+              setAvailableClasses(currentUser.classes || []);
             }
           }
         } catch (err) {
@@ -8623,7 +8626,7 @@ const App = () => {
           const allSubjects = await api.getSubjects();
           
           // If user is a teacher (not HM), restrict to their subjects
-          if (user && !hasRole('h m')) {
+          if (user && !hasCurrentUserRole('h m')) {
             const teacherSubjects = Array.isArray(user.subjects) ? user.subjects : [];
             setAvailableSubjects(teacherSubjects);
           } else {
@@ -8640,9 +8643,9 @@ const App = () => {
       function fallbackToExamBasedSubjects() {
         const cls = (examFormData.class || '').toString().trim();
         
-        // If user is a teacher (not HM), restrict to their subjects
-        if (user && !hasRole('h m')) {
-          const teacherSubjects = Array.isArray(user.subjects) ? user.subjects : [];
+        // If user is a teacher (not HM/admin), restrict to their subjects
+        if (currentUser && !isAdmin(currentUser) && !hasCurrentUserRole('h m')) {
+          const teacherSubjects = Array.isArray(currentUser.subjects) ? currentUser.subjects : [];
           setAvailableSubjects(teacherSubjects);
           return;
         }
@@ -8688,7 +8691,7 @@ const App = () => {
       
       // Call the function to fetch subjects
       fetchAllSubjects();
-    }, [examFormData.class, user, exams, hasRole]);
+    }, [examFormData.class, currentUser, exams, hasRole]);
 
     // Handlers for Exam Creation
     const handleExamFormChange = (field, value) => {
@@ -8924,15 +8927,15 @@ const App = () => {
   // characters so values like "6 A" and "6A" match reliably.
   const normKey = (s) => (s || '').toString().toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '').replace(/^std/, '');
   // Use appNormalize defined at the top level of the app
-  const userRolesNorm = (user?.roles || []).map(r => appNormalize(r));
-  const userClassesSet = new Set((user?.classes || []).map(c => normKey(c)));
-  const userSubjectsSet = new Set((user?.subjects || []).map(s => normKey(s)));
+  const userRolesNorm = (currentUser?.roles || []).map(r => appNormalize(r));
+  const userClassesSet = new Set((currentUser?.classes || []).map(c => normKey(c)));
+  const userSubjectsSet = new Set((currentUser?.subjects || []).map(s => normKey(s)));
 
     // Filter exams based on user role and permissions
 
   const examsForTeacher = exams.filter(ex => {
-    if (!user) return false;
-    if (hasRole('h m')) return true;
+    if (!currentUser) return false;
+    if (isAdmin(currentUser) || hasCurrentUserRole('h m')) return true;
     const exClass = normKey(ex.class);
     const exSubject = normKey(ex.subject);
     const teachesClass = userClassesSet.has(exClass);
@@ -8951,7 +8954,7 @@ const App = () => {
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">Exam Management</h1>
           <div className="flex space-x-3">
-            {user && hasRole('h m') && (
+            {currentUser && (isAdmin(currentUser) || hasCurrentUserRole('h m')) && (
               <button
                 onClick={() => setShowExamForm(true)}
                 className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700"
@@ -8960,7 +8963,7 @@ const App = () => {
                 Create Exam
               </button>
             )}
-            {user && ((userRolesNorm || []).some(r => r.includes('teacher'))) && (
+            {currentUser && (isAdmin(currentUser) || hasCurrentUserRole('h m') || (userRolesNorm || []).some(r => r.includes('teacher'))) && (
               <button
                 onClick={() => {
                   // If there are no exams matching this teacher's classes/subjects, show feedback
@@ -9231,21 +9234,21 @@ const App = () => {
                 {exams.map((exam) => {
                   // Use appNormalize defined at the top level of the app
                   // Determine permissions: HM can enter for any exam; Class Teacher by class; regular Teacher by class+subject
-                  const isHm = hasRole('h m');
-                  const isClassTeacher = hasRole('class teacher') || hasAnyRole(['classteacher']);
-                  const isSubjectTeacher = hasAnyRole(['teacher']);
+                  const isHmOrAdmin = isAdmin(currentUser) || hasCurrentUserRole('h m');
+                  const isClassTeacher = hasCurrentUserRole('class teacher') || hasCurrentUserAnyRole(['classteacher']);
+                  const isSubjectTeacher = hasCurrentUserAnyRole(['teacher']);
                   // Enhanced class match: include classTeacherFor and allow section-insensitive match by standard number
                   const norm = (s) => (s || '').toString().trim().toLowerCase().replace(/std\s*/g, '').replace(/\s+/g, '');
                   const num = (s) => { const m = (s || '').toString().match(/\d+/); return m ? m[0] : ''; };
                   const examClassNorm = norm(exam.class);
                   const examClassNum = num(exam.class);
-                  const userClasses = Array.isArray(user?.classes) ? user.classes : [];
-                  const userCTFor = Array.isArray(user?.classTeacherFor) ? user.classTeacherFor : [];
+                  const userClasses = Array.isArray(currentUser?.classes) ? currentUser.classes : [];
+                  const userCTFor = Array.isArray(currentUser?.classTeacherFor) ? currentUser.classTeacherFor : [];
                   const teachesClass = [...userClasses, ...userCTFor].some(c => norm(c) === examClassNorm || (examClassNum && num(c) === examClassNum));
-                  const teachesSubject = new Set((user?.subjects||[]).map(s => appNormalize(s))).has(appNormalize(exam.subject));
+                  const teachesSubject = new Set((currentUser?.subjects||[]).map(s => appNormalize(s))).has(appNormalize(exam.subject));
                   let canEnter = false;
-                  if (!user) canEnter = false;
-                  else if (isHm) canEnter = true;
+                  if (!currentUser) canEnter = false;
+                  else if (isHmOrAdmin) canEnter = true;
                   else if (isClassTeacher) canEnter = teachesClass; // Class teachers can manage their class (all sections)
                   else if (isSubjectTeacher) canEnter = teachesClass && teachesSubject;
                   // Permission check completed
@@ -9350,7 +9353,7 @@ const App = () => {
     const currentUser = effectiveUser || user;
 
     // Check if user is admin or HM - they can access all classes
-    const isadminOrHM = hasAnyRole(['admin', 'admin', 'admin', 'h m']);
+    const isadminOrHM = isAdmin(currentUser) || hasCurrentUserRole('h m');
     
     // Fix: Ensure className is a string, not an array
     const rawClassName = currentUser?.classTeacherFor || '';
@@ -10719,7 +10722,7 @@ const App = () => {
     const [groupByClass, setGroupByClass] = useState(false);
     const [groupByChapter, setGroupByChapter] = useState(false);
     const [schemeLookup, setSchemeLookup] = useState({});
-    const email = user?.email || '';
+    const email = currentUser?.email || '';
 
     const [missingReportsSummary, setMissingReportsSummary] = useState({
       loading: false,
@@ -10735,8 +10738,8 @@ const App = () => {
 
     useEffect(() => {
       if (!email) return;
-      if (!hasAnyRole(['teacher', 'class teacher'])) return;
-      if (hasAnyRole(['h m', 'admin', 'admin', 'admin'])) return;
+      if (!hasCurrentUserAnyRole(['teacher', 'class teacher'])) return;
+      if (isAdmin(currentUser) || hasCurrentUserRole('h m')) return;
 
       let cancelled = false;
 
