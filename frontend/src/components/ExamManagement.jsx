@@ -390,8 +390,8 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
           : normalizedRoles.some(r => r.includes('h m') || r === 'hm' || r.includes('headmaster')));
         const isClassTeacher = normalizedRoles.some(r => r.includes('class teacher') || r === 'classteacher');
 
-        // Determine target class: prefer bulk representative class, then exam form class, else class-teacher's class, else filter selection
-        const selectedClass = (bulkExamFormData.class || examFormData.class || (isClassTeacher ? user?.classTeacherFor : filters.class) || '')
+        // Determine target class: edit modal takes priority, then bulk, then create form, then class-teacher's class, else filter selection
+        const selectedClass = (editExamData?.class || bulkExamFormData.class || examFormData.class || (isClassTeacher ? user?.classTeacherFor : filters.class) || '')
           .toString()
           .trim();
 
@@ -459,7 +459,7 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
     }
 
     fetchAllSubjects();
-  }, [user, hasRole, normalizedRoles, bulkExamFormData.class, examFormData.class, filters.class]);
+  }, [user, hasRole, normalizedRoles, editExamData?.class, bulkExamFormData.class, examFormData.class, filters.class]);
 
   // Handlers for Exam Creation
   const handleExamFormChange = (field, value) => {
@@ -1188,14 +1188,17 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
           date: editExamData.date
         });
         
+        // Unwrap backend envelope { status, data, timestamp }
+        const payload = response?.data ?? response;
+        
         // Check for errors in response
-        if (response && response.error) {
-          throw new Error(response.error);
+        if (payload?.error) {
+          throw new Error(payload.error);
         }
         
         // Verify response indicates success
-        if (!response || (response.success === false)) {
-          throw new Error(response?.message || 'Update failed with no error message');
+        if (!payload?.ok && payload?.success !== true) {
+          throw new Error(payload?.message || 'Update failed with no error message');
         }
         
         return response;
@@ -2908,6 +2911,10 @@ const ExamManagement = ({ user, hasRole, withSubmit, userRolesNorm }) => {
                     required
                   >
                     <option value="">Select Subject</option>
+                    {/* Always include the current subject even if not in the loaded list */}
+                    {editExamData.subject && !availableSubjects.includes(editExamData.subject) && (
+                      <option key={editExamData.subject} value={editExamData.subject}>{editExamData.subject}</option>
+                    )}
                     {availableSubjects.map((subject) => (
                       <option key={subject} value={subject}>{subject}</option>
                     ))}

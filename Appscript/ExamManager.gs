@@ -249,8 +249,8 @@ function updateExam(data) {
     // Get current exam data
     const currentExam = _indexByHeader(rows[targetRow - 2], headers);
     
-    // Check permission (only creator or admin can edit)
-    const isSuperAdmin = _isSuperAdminSafe(userEmail);
+    // Check permission (creator, HM, or admin can edit)
+    const isSuperAdmin = _isHMOrAdminSafe(userEmail);
     const isCreator = String(currentExam.creatorEmail || '').toLowerCase() === userEmail;
     
     if (!isSuperAdmin && !isCreator) {
@@ -509,7 +509,7 @@ function submitExamMarks(data) {
   // 3. Class Teacher for this class - allowed for ALL subjects in their class
   // 4. Subject Teacher - allowed if they teach this subject in this class
   
-  const isSuperAdmin = _isSuperAdminSafe(teacherEmail);
+  const isSuperAdmin = _isHMOrAdminSafe(teacherEmail);
   if (!isSuperAdmin) {
     // Get user details
     const userSh = _getSheet('Users');
@@ -849,7 +849,11 @@ function _fetchExamMarks(examId) {
   const exIdx = examIdCol - 1;
   for (var r = 0; r < block.length; r++) {
     if (String(block[r][exIdx] || '').trim() !== target) continue;
-    out.push(_indexByHeader(block[r], headers));
+    var row = _indexByHeader(block[r], headers);
+    // Alias ce/te as internal/external so the frontend can use either field name
+    row.internal = row.ce;
+    row.external = row.te;
+    out.push(row);
   }
   return out;
 }
