@@ -39,11 +39,42 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
     substituteSubject: '',
     note: ''
   });
+  const [substituteSubjectOptions, setSubstituteSubjectOptions] = useState([]);
+  const [loadingSubjectOptions, setLoadingSubjectOptions] = useState(false);
 
   // Clear pending list when date changes
   useEffect(() => {
     setPendingSubstitutions([]);
   }, [selectedDate]);
+
+  // Fetch all subjects for the period's class whenever the modal opens for a period
+  useEffect(() => {
+    const teacherEmail = assignmentForm.substituteTeacher;
+    const className = selectedPeriod?.class;
+    if (!teacherEmail || !className) {
+      setSubstituteSubjectOptions([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingSubjectOptions(true);
+    api.getClassSubjects(className).then(res => {
+      if (cancelled) return;
+      // getClassSubjects returns { subjects: [...] } or an array directly
+      const raw = Array.isArray(res) ? res : (Array.isArray(res?.subjects) ? res.subjects : []);
+      const subjects = raw.filter(Boolean).sort();
+      // Always include the period's own subject at the top if not already present
+      const periodSubject = selectedPeriod?.subject;
+      const all = periodSubject && !subjects.includes(periodSubject)
+        ? [periodSubject, ...subjects]
+        : subjects.length > 0 ? subjects : (periodSubject ? [periodSubject] : []);
+      setSubstituteSubjectOptions(all);
+    }).catch(() => {
+      if (!cancelled) setSubstituteSubjectOptions(selectedPeriod?.subject ? [selectedPeriod.subject] : []);
+    }).finally(() => {
+      if (!cancelled) setLoadingSubjectOptions(false);
+    });
+    return () => { cancelled = true; };
+  }, [assignmentForm.substituteTeacher, selectedPeriod?.class]);
 
   const pendingKey = (s) => {
     const d = String(s?.date || '').trim();
@@ -1332,13 +1363,30 @@ const EnhancedSubstitutionViewInner = ({ user, periodTimes }) => {
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Substitute Subject
+                  {loadingSubjectOptions && <span className="ml-2 text-xs text-gray-400">(loading...)</span>}
                 </label>
-                <input
-                  type="text"
-                  value={assignmentForm.substituteSubject}
-                  onChange={(e) => setAssignmentForm(prev => ({ ...prev, substituteSubject: e.target.value }))}
-                  className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                />
+                {substituteSubjectOptions.length > 0 ? (
+                  <select
+                    value={assignmentForm.substituteSubject}
+                    onChange={(e) => setAssignmentForm(prev => ({ ...prev, substituteSubject: e.target.value }))}
+                    className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    disabled={loadingSubjectOptions}
+                  >
+                    <option value="">Select subject...</option>
+                    {substituteSubjectOptions.map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={assignmentForm.substituteSubject}
+                    onChange={(e) => setAssignmentForm(prev => ({ ...prev, substituteSubject: e.target.value }))}
+                    className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    placeholder={loadingSubjectOptions ? 'Loading subjects...' : 'Enter subject'}
+                    disabled={loadingSubjectOptions}
+                  />
+                )}
               </div>
 
               <div>

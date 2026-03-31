@@ -1,0 +1,11 @@
+export { default as ReportsView } from './ReportsView';
+export { default as SchemesView } from './SchemesView';
+export { default as LessonPlansView } from './LessonPlansView';
+export { default as HMDashboardView } from './HMDashboardView';
+export { default as LessonApprovalsView } from './LessonApprovalsView';
+export { default as AnalyticsView } from './AnalyticsView';
+export { default as SubstitutionsView } from './SubstitutionsView';
+export { default as ClassStudentsView } from './ClassStudentsView';
+export { default as DailyReportsManagementView } from './DailyReportsManagementView';
+export { default as MyDailyReportsView } from './MyDailyReportsView';
+export { default as FeeCollectionView } from './FeeCollectionView';
