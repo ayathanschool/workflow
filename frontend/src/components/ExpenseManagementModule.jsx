@@ -69,9 +69,15 @@ export default function ExpenseManagementModule({ user }) {
       
       if (activeTab === 'my-expenses') {
         const result = await api.getTeacherExpenseRequests(user.email);
+        if (result.success === false && result.error) {
+          setError(result.error);
+        }
         setRequests(result.requests || []);
       } else if (activeTab === 'approve' || activeTab === 'disburse' || activeTab === 'all-transactions') {
         const result = await api.getAllExpenseRequests(user.email);
+        if (result.success === false && result.error) {
+          setError(result.error);
+        }
         setRequests(result.requests || []);
       }
       

@@ -70,7 +70,6 @@ export default function AdminDataEditor({ user }) {
     if (!isadmin) return;
     if (!selectedSheet) return;
     refreshSheet(selectedSheet);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSheet, isadmin]);
 
   const onEditCell = (rowNumber, key, value) => {
@@ -145,8 +144,8 @@ export default function AdminDataEditor({ user }) {
   if (!isadmin) {
     return (
       <div className="space-y-6">
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <p className="text-gray-600">Permission denied. admin access required.</p>
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
+          <p className="text-gray-600 dark:text-gray-300">Permission denied. admin access required.</p>
         </div>
       </div>
     );
@@ -155,12 +154,12 @@ export default function AdminDataEditor({ user }) {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Admin Data</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Admin Data</h1>
         <div className="flex items-center gap-3">
           <select
             value={selectedSheet}
             onChange={(e) => setSelectedSheet(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg"
+            className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
           >
             {sheets.map(s => (
               <option key={s.name} value={s.name}>{s.name}</option>
@@ -177,20 +176,20 @@ export default function AdminDataEditor({ user }) {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+        <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/60 rounded-lg p-4 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <p className="text-gray-600">Loading...</p>
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
+          <p className="text-gray-600 dark:text-gray-300">Loading...</p>
         </div>
       ) : (
         <>
-          <div className="bg-white rounded-xl shadow-sm p-6">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">Add Row</h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Add Row</h2>
               <button
                 onClick={onAddRow}
                 disabled={saving || headers.length === 0}
@@ -202,33 +201,33 @@ export default function AdminDataEditor({ user }) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {headers.map(h => (
                 <label key={h} className="text-sm">
-                  <div className="text-gray-600 mb-1">{h}</div>
+                  <div className="text-gray-600 dark:text-gray-300 mb-1">{h}</div>
                   <input
                     value={draftNewRow[h] ?? ''}
                     onChange={(e) => onChangeNew(h, e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
                   />
                 </label>
               ))}
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm p-6 overflow-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 overflow-auto">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">Rows ({rows.length})</h2>
-              {saving && <span className="text-sm text-gray-600">Saving...</span>}
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Rows ({rows.length})</h2>
+              {saving && <span className="text-sm text-gray-600 dark:text-gray-300">Saving...</span>}
             </div>
             {headers.length === 0 ? (
-              <p className="text-gray-600">No headers found in this sheet.</p>
+              <p className="text-gray-600 dark:text-gray-300">No headers found in this sheet.</p>
             ) : (
               <table className="min-w-full text-sm">
                 <thead>
-                  <tr className="text-left border-b">
-                    <th className="py-2 pr-3 text-gray-600">Row</th>
+                  <tr className="text-left border-b border-gray-200 dark:border-gray-700">
+                    <th className="py-2 pr-3 text-gray-600 dark:text-gray-300">Row</th>
                     {headers.map(h => (
-                      <th key={h} className="py-2 pr-3 text-gray-600">{h}</th>
+                      <th key={h} className="py-2 pr-3 text-gray-600 dark:text-gray-300">{h}</th>
                     ))}
-                    <th className="py-2 text-gray-600">Actions</th>
+                    <th className="py-2 text-gray-600 dark:text-gray-300">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -237,14 +236,14 @@ export default function AdminDataEditor({ user }) {
                     const edits = rowEdits[rowNumber] || {};
                     const isDirty = Object.keys(edits).length > 0;
                     return (
-                      <tr key={rowNumber} className="border-b align-top">
-                        <td className="py-2 pr-3 text-gray-500">{rowNumber}</td>
+                      <tr key={rowNumber} className="border-b border-gray-100 dark:border-gray-700 align-top">
+                        <td className="py-2 pr-3 text-gray-500 dark:text-gray-400">{rowNumber}</td>
                         {headers.map(h => (
                           <td key={h} className="py-2 pr-3">
                             <input
                               value={edits[h] ?? (r[h] ?? '')}
                               onChange={(e) => onEditCell(rowNumber, h, e.target.value)}
-                              className="w-full px-2 py-1 border border-gray-200 rounded"
+                              className="w-full px-2 py-1 border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
                             />
                           </td>
                         ))}

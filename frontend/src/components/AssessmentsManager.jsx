@@ -103,7 +103,7 @@ const AssessmentsManager = ({ user, hasRole, withSubmit, userRolesNorm }) => {
         </div>
 
         {/* Tab Content */}
-        <div className="p-6">
+        <div className="p-6 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
           <CurrentComponent 
             user={user} 
             hasRole={hasRole} 

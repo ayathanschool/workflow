@@ -79,7 +79,8 @@ export default function DailyReportModern({ user }) {
     const loadSettings = async () => {
       try {
         const appSettings = await getAppSettings();
-        setSettings(appSettings || {});
+        // getAppSettings returns { status, data, timestamp } — unwrap data
+        setSettings(appSettings?.data || appSettings || {});
       } catch (err) {
         console.error('Failed to load app settings:', err);
         setSettings({});
@@ -93,7 +94,8 @@ export default function DailyReportModern({ user }) {
     if (!settings) return { minDate: null, maxDate: null, isDisabled: false, helpText: '' };
 
     const today = todayIST();
-    const allowBackfill = String(settings.allow_backfill_reporting || '').toUpperCase() === 'TRUE';
+    const allowBackfill = settings.allowBackfillReporting === true ||
+      String(settings.allow_backfill_reporting || '').toUpperCase() === 'TRUE';
     const backwardLimit = parseInt(settings.dailyReportBackwardDaysLimit || '0');
     const forwardLimit = parseInt(settings.dailyReportForwardDaysLimit || '0');
 
@@ -851,7 +853,7 @@ export default function DailyReportModern({ user }) {
       const selectedPlan = subData && subData.nextPlan ? subData.nextPlan : null;
       if (expectedSession && selectedPlan && Number(selectedPlan.sessionNo || 0) !== expectedSession) {
         // Auto-clear mismatched plan to avoid invalid submission under strict sequencing.
-        onUpdate('lessonPlanId', '');
+        updateDraft(key, 'lessonPlanId', '');
         setMessage({
           text: `❌ Session ${expectedSession} must be reported first. The selected plan was Session ${selectedPlan.sessionNo}, so it has been cleared.`,
           type: "error"

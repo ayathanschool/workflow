@@ -28,13 +28,31 @@ function _getStoredGoogleSession() {
 
 function _getStoredAuthToken() {
   const s = _getStoredGoogleSession();
-  return s && s.idToken ? String(s.idToken) : '';
+  if (s && (s.authToken || s.idToken)) return String(s.authToken || s.idToken);
+  try {
+    if (typeof window === 'undefined') return '';
+    const raw = window.localStorage.getItem('user');
+    if (!raw) return '';
+    const u = JSON.parse(raw);
+    return u && (u.authToken || u.idToken || u.token) ? String(u.authToken || u.idToken || u.token) : '';
+  } catch {
+    return '';
+  }
 }
 
 function _getStoredAuthEmail() {
   const s = _getStoredGoogleSession();
   const email = s && s.user && s.user.email ? String(s.user.email) : '';
-  return email ? email.toLowerCase() : '';
+  if (email) return email.toLowerCase();
+  try {
+    if (typeof window === 'undefined') return '';
+    const raw = window.localStorage.getItem('user');
+    if (!raw) return '';
+    const u = JSON.parse(raw);
+    return u && u.email ? String(u.email).toLowerCase() : '';
+  } catch {
+    return '';
+  }
 }
 
 function _urlHasToken(url) {
@@ -980,18 +998,19 @@ export async function getAppSettings() {
   // Expect either an object with settings or { settings: { ... } }
   // Cache for 5 minutes since settings rarely change
   const res = await getJSON(`${BASE_URL}?action=getAppSettings`, 300000);
+  const body = res?.data || res || {};
 
   // Check if response has the period times directly
-  if (res && (res.periodTimesWeekday || res.periodTimesFriday)) {
-    return res;
+  if (body && (body.periodTimesWeekday || body.periodTimesFriday)) {
+    return body;
   }
 
   // Check if wrapped in settings object
-  if (res && res.settings && typeof res.settings === 'object') {
-    return res.settings;
+  if (body && body.settings && typeof body.settings === 'object') {
+    return body.settings;
   }
 
-  return res || {};
+  return body;
 }
 
 export async function updateAppSettings(email, settingsUpdates = [], name = '') {

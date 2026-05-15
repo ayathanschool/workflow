@@ -174,9 +174,45 @@ function getTeacherExpenseRequests(teacherEmail, status = '') {
  * Get all expense requests for admin/accounts
  */
 /**
+ * Internal helper — reads expense requests without role check.
+ * Used by backend-to-backend calls (dashboards, reports, counts).
+ *
+ * @param {string} status   - Optional status filter
+ * @param {string} category - Optional category filter
+ * @returns {Object} { success: true, count: number, requests: Array }
+ */
+function _getExpenseRequestsData(status = '', category = '') {
+  try {
+    const allRequests = _getCachedSheetData('ExpenseRequests').data;
+    let requests = allRequests;
+
+    if (status) {
+      const statusFilter = String(status).toLowerCase().trim();
+      requests = requests.filter(r =>
+        String(r.status || '').toLowerCase() === statusFilter
+      );
+    }
+
+    if (category) {
+      const categoryFilter = String(category).toLowerCase().trim();
+      requests = requests.filter(r =>
+        String(r.category || '').toLowerCase().trim() === categoryFilter
+      );
+    }
+
+    requests.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+
+    return { success: true, count: requests.length, requests: requests };
+  } catch (error) {
+    console.error('Error in _getExpenseRequestsData:', error);
+    return { success: false, error: error.message, requests: [] };
+  }
+}
+
+/**
  * Get all expense requests for admin/accounts
  * Enforces role-based access control
- * 
+ *
  * @param {string} userEmail - Email of requesting user
  * @param {string} status - Optional status filter
  * @param {string} category - Optional category filter

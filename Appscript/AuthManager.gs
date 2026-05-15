@@ -50,6 +50,56 @@ function isHMOrAdmin(userEmail) {
 }
 
 /**
+ * Create/verify lightweight app session tokens for this Apps Script backend.
+ * This supports email/password login and the current Google profile exchange.
+ */
+function _authSecret_() {
+  try {
+    var configured = PropertiesService.getScriptProperties().getProperty('APP_SESSION_SECRET');
+    if (configured) return String(configured);
+  } catch (e) {}
+  return String(typeof SPREADSHEET_ID !== 'undefined' ? SPREADSHEET_ID : 'schoolflow') + ':app-session-v1';
+}
+
+function _base64Url_(value) {
+  var bytes = (typeof value === 'string') ? Utilities.newBlob(value).getBytes() : value;
+  return Utilities.base64EncodeWebSafe(bytes).replace(/=+$/g, '');
+}
+
+function _signSession_(email, ts) {
+  var msg = String(email || '').toLowerCase().trim() + '|' + String(ts || '');
+  var sig = Utilities.computeHmacSha256Signature(msg, _authSecret_());
+  return _base64Url_(sig);
+}
+
+function createAppSessionToken(email) {
+  var e = String(email || '').toLowerCase().trim();
+  if (!e) return '';
+  var ts = String(Date.now());
+  return ['app1', _base64Url_(e), ts, _signSession_(e, ts)].join('.');
+}
+
+function verifyAppSessionToken(token) {
+  try {
+    var parts = String(token || '').split('.');
+    if (parts.length !== 4 || parts[0] !== 'app1') return { success: false, error: 'Not an app session token' };
+    var email = Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[1])).getDataAsString().toLowerCase().trim();
+    var ts = Number(parts[2] || 0);
+    var sig = parts[3] || '';
+    if (!email || !ts || !sig) return { success: false, error: 'Invalid app session token' };
+    if (_signSession_(email, String(parts[2])) !== sig) return { success: false, error: 'Invalid app session signature' };
+    if (Date.now() - ts > 14 * 24 * 60 * 60 * 1000) return { success: false, error: 'App session expired' };
+
+    var list = _getCachedSheetData('Users').data;
+    var found = list.find(function(u) { return String(u.email || '').toLowerCase().trim() === email; });
+    if (!found) return { success: false, error: 'User not found' };
+    return { success: true, email: email, emailVerified: true, tokenInfo: { type: 'app_session' } };
+  } catch (err) {
+    return { success: false, error: String(err && err.message ? err.message : err) };
+  }
+}
+
+/**
  * Handle regular email/password login
  */
 function handleBasicLogin(email, password) {
@@ -94,7 +144,8 @@ function handleBasicLogin(email, password) {
     classes: classes,
     subjects: subjects,
     classTeacherFor: classTeacherFor,
-    loginMethod: 'basic'
+    loginMethod: 'basic',
+    authToken: createAppSessionToken(found.email || email)
   };
 }
 
@@ -168,7 +219,8 @@ function handleGoogleLogin(payload) {
       classes,
       subjects,
       classTeacherFor,
-      loginMethod: 'google'
+      loginMethod: 'google',
+      authToken: createAppSessionToken(found.email || email)
     };
     
     return _respond(userData);

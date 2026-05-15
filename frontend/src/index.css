@@ -6,60 +6,99 @@
   color-scheme: light;
 }
 
+.dark,
 .dark-theme {
   color-scheme: dark;
 }
 
 /* Dark mode component overrides */
+.dark .bg-white,
 .dark-theme .bg-white {
   background-color: rgb(31 41 55) !important; /* gray-800 */
 }
 
+.dark .text-gray-900,
 .dark-theme .text-gray-900 {
   color: rgb(243 244 246) !important; /* gray-100 */
 }
 
+.dark .text-gray-800,
 .dark-theme .text-gray-800 {
   color: rgb(229 231 235) !important; /* gray-200 */
 }
 
+.dark .text-gray-700,
 .dark-theme .text-gray-700 {
   color: rgb(209 213 219) !important; /* gray-300 */
 }
 
+.dark .text-gray-600,
 .dark-theme .text-gray-600 {
   color: rgb(156 163 175) !important; /* gray-400 */
 }
 
+.dark .text-gray-500,
 .dark-theme .text-gray-500 {
-  color: rgb(107 114 128) !important; /* gray-500 */
+  color: rgb(156 163 175) !important; /* gray-400 */
 }
 
+.dark .border-gray-100,
 .dark-theme .border-gray-100 {
   border-color: rgb(55 65 81) !important; /* gray-700 */
 }
 
+.dark .border-gray-200,
 .dark-theme .border-gray-200 {
   border-color: rgb(55 65 81) !important; /* gray-700 */
 }
 
+.dark .border-gray-300,
 .dark-theme .border-gray-300 {
   border-color: rgb(75 85 99) !important; /* gray-600 */
 }
 
+.dark .bg-gray-50,
 .dark-theme .bg-gray-50 {
   background-color: rgb(55 65 81) !important; /* gray-700 */
 }
 
+.dark .bg-gray-100,
+.dark-theme .bg-gray-100,
+.dark .bg-gray-200,
+.dark-theme .bg-gray-200 {
+  background-color: rgb(75 85 99) !important; /* gray-600 */
+}
+
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]),
+.dark-theme .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgb(55 65 81) !important; /* gray-700 */
+}
+
+.dark table,
+.dark-theme table {
+  color: rgb(229 231 235); /* gray-200 */
+}
+
+.dark option,
+.dark-theme option {
+  background-color: rgb(31 41 55);
+  color: rgb(243 244 246);
+}
+
+.dark .hover\:bg-gray-50:hover,
 .dark-theme .hover\:bg-gray-50:hover {
   background-color: rgb(55 65 81) !important; /* gray-700 */
 }
 
+.dark .hover\:bg-gray-100:hover,
 .dark-theme .hover\:bg-gray-100:hover {
   background-color: rgb(75 85 99) !important; /* gray-600 */
 }
 
 /* Form inputs dark mode */
+.dark input,
+.dark select,
+.dark textarea,
 .dark-theme input,
 .dark-theme select,
 .dark-theme textarea {
@@ -68,6 +107,9 @@
   border-color: rgb(75 85 99) !important; /* gray-600 */
 }
 
+.dark input:focus,
+.dark select:focus,
+.dark textarea:focus,
 .dark-theme input:focus,
 .dark-theme select:focus,
 .dark-theme textarea:focus {
@@ -76,14 +118,17 @@
 }
 
 /* Enhanced shadows for dark mode */
+.dark .shadow-sm,
 .dark-theme .shadow-sm {
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.3) !important;
 }
 
+.dark .shadow,
 .dark-theme .shadow {
   box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4) !important;
 }
 
+.dark .shadow-lg,
 .dark-theme .shadow-lg {
   box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.4) !important;
 }

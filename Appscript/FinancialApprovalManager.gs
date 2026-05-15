@@ -23,7 +23,7 @@ function getAdminFinancialDashboard(userEmail) {
     const revisedFundRequests = getAllFundRequests('Revised');
     
     // Get pending expense requests
-    const pendingExpenseRequests = getAllExpenseRequests('Pending');
+    const pendingExpenseRequests = _getExpenseRequestsData('Pending');
     
     // Get recent approvals (last 30 days)
     const thirtyDaysAgo = new Date();
@@ -35,7 +35,7 @@ function getAdminFinancialDashboard(userEmail) {
       return r.status === 'Approved' && r.approvedAt && _isoDateString(r.approvedAt) >= startDate;
     });
     
-    const allExpenseRequests = getAllExpenseRequests();
+    const allExpenseRequests = _getExpenseRequestsData();
     const recentExpenseApprovals = allExpenseRequests.requests.filter(r => {
       return r.status === 'Approved' && r.approvedAt && _isoDateString(r.approvedAt) >= startDate;
     });
@@ -91,14 +91,14 @@ function getAccountsFinancialDashboard(userEmail) {
     });
     
     // Get approved expense requests (awaiting disbursement)
-    const approvedExpenseRequests = getAllExpenseRequests('Approved');
+    const approvedExpenseRequests = _getExpenseRequestsData('Approved');
     
     // Get disbursed items (last 30 days)
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const startDate = _isoDateString(thirtyDaysAgo);
     
-    const allExpenseRequests = getAllExpenseRequests();
+    const allExpenseRequests = _getExpenseRequestsData();
     const recentDisbursements = allExpenseRequests.requests.filter(r => {
       return r.status === 'Disbursed' && r.disbursedAt && _isoDateString(r.disbursedAt) >= startDate;
     });
@@ -223,7 +223,7 @@ function getFinancialReport(params = {}) {
     }
     
     // Get all expense requests
-    const allExpenseRequests = getAllExpenseRequests().requests;
+    const allExpenseRequests = _getExpenseRequestsData().requests;
     let expenseRequests = allExpenseRequests;
     
     if (startDate) {
@@ -305,10 +305,10 @@ function getPendingFinancialCount(userEmail, userRole) {
     if (role === 'hm' || role.includes('admin')) {
       const pendingFund = getAllFundRequests('Pending').count;
       const revisedFund = getAllFundRequests('Revised').count;
-      const pendingExpense = getAllExpenseRequests('Pending').count;
+      const pendingExpense = _getExpenseRequestsData('Pending').count;
       count = pendingFund + revisedFund + pendingExpense;
     } else if (role === 'accounts') {
-      const approvedExpense = getAllExpenseRequests('Approved').count;
+      const approvedExpense = _getExpenseRequestsData('Approved').count;
       const completedFund = getAllFundRequests('Completed').requests.filter(r => !r.acknowledgedBy).length;
       count = approvedExpense + completedFund;
     } else if (role === 'teacher') {
@@ -401,7 +401,7 @@ function getFinancialActivityLog(params = {}) {
     }
     
     if (!type || type === 'expense') {
-      const expenseRequests = getAllExpenseRequests().requests;
+      const expenseRequests = _getExpenseRequestsData().requests;
       expenseRequests.forEach(r => {
         if (r.submittedAt) {
           activities.push({

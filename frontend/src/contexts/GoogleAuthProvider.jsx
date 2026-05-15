@@ -125,7 +125,7 @@ function InnerAuthProvider({ children }) {
 				const r = Array.isArray(appUser.roles) ? appUser.roles : (appUser.role ? [appUser.role] : []);
 				setUser(appUser);
 				setRoles(r);
-				persist({ user: appUser, roles: r, idToken: accessToken });
+				persist({ user: appUser, roles: r, idToken: appUser.authToken || accessToken });
 			} catch (e) {
 				console.error('Google login failed', e);
 				setError(e.message || String(e));
