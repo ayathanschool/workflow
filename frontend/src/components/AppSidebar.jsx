@@ -1,4 +1,4 @@
-import { ChevronDown, School, X } from 'lucide-react';
+import { ChevronDown, LogOut, School, X } from 'lucide-react';
 import React, { useState } from 'react';
 
 const AppSidebar = ({
@@ -8,6 +8,7 @@ const AppSidebar = ({
   setSidebarOpen,
   setActiveView,
   activeView,
+  onLogout,
 }) => {
   const [expandedGroups, setExpandedGroups] = useState({});
 
@@ -125,6 +126,15 @@ const AppSidebar = ({
             </div>
             <div className="flex-1 overflow-y-auto py-3">
               <NavItems />
+            </div>
+            <div className="border-t border-gray-200 p-3 dark:border-gray-700">
+              <button
+                onClick={onLogout}
+                className="flex w-full items-center rounded-md px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 dark:text-red-300 dark:hover:bg-red-900/20 dark:hover:text-red-200"
+              >
+                <LogOut className="mr-3 h-5 w-5" />
+                Logout
+              </button>
             </div>
           </div>
         </div>

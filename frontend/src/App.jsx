@@ -4278,6 +4278,7 @@ const App = () => {
             setSidebarOpen={setSidebarOpen}
             setActiveView={setActiveView}
             activeView={activeView}
+            onLogout={logout}
           />
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             <AppHeader
