@@ -1,4 +1,4 @@
-import { Bell, LogOut, Menu, User } from 'lucide-react';
+import { Bell, Menu, User } from 'lucide-react';
 import React from 'react';
 import ThemeToggle from './ThemeToggle';
 
@@ -8,7 +8,6 @@ const AppHeader = ({
   setSidebarOpenedAt,
   user,
   googleAuth,
-  onLogout,
   onNotification,
 }) => (
   <div className="flex items-center justify-between gap-2 p-3 sm:p-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 transition-colors duration-300">
@@ -53,15 +52,6 @@ const AppHeader = ({
             )}
           </div>
         </div>
-        <button
-          onClick={onLogout}
-          className="ml-1 sm:ml-4 flex h-9 w-9 items-center justify-center rounded-md text-sm transition-colors duration-200 text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-300 dark:hover:bg-gray-700 sm:h-auto sm:w-auto sm:bg-transparent sm:hover:bg-transparent"
-          aria-label="Logout"
-          title="Logout"
-        >
-          <LogOut className="h-4 w-4 sm:mr-1" />
-          <span className="hidden sm:inline">Logout</span>
-        </button>
       </div>
     </div>
   </div>
