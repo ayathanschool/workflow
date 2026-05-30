@@ -1814,7 +1814,7 @@ const App = () => {
 
   const renderLessonPlansView = () => (
     <LessonPlansView
-      user={user}
+      user={currentUser}
       currentUser={currentUser}
       withSubmit={withSubmit}
       success={success}
@@ -1865,6 +1865,17 @@ const App = () => {
                     user={currentUser}
                     SchemeLessonPlanning={SchemeLessonPlanning}
                     LessonPlansView={LessonPlansView}
+                    lessonPlansViewProps={{
+                      user: currentUser,
+                      currentUser,
+                      withSubmit,
+                      success,
+                      error,
+                      warning,
+                      openLessonView,
+                      stripStdPrefix,
+                      memoizedSettings
+                    }}
                     onNavigate={(view) => setActiveView(view)}
                   />
                 );

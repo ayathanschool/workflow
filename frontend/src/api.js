@@ -409,9 +409,13 @@ export async function getTeacherLessonPlanFilters(email) {
 
 export async function getTeacherLessonPlans(email, subject = '', cls = '', status = '', search = '') {
   const q = new URLSearchParams({ action: 'getTeacherLessonPlans', email, subject, class: cls, status, search })
-  const result = await getJSON(`${BASE_URL}?${q.toString()}`)
+  const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE)
   // Unwrap response: backend wraps in {status, data, timestamp}
-  return result?.data || result || []
+  const data = result?.data || result || []
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data.lessonPlans)) return data.lessonPlans
+  if (Array.isArray(data.plans)) return data.plans
+  return []
 }
 
 export async function submitPlan(email, planData) {

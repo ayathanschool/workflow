@@ -10,6 +10,7 @@ const LessonPlansManager = ({
   user,
   SchemeLessonPlanning, 
   LessonPlansView,
+  lessonPlansViewProps = {},
   onNavigate
 }) => {
   const [activeTab, setActiveTab] = useState('draft');
@@ -141,7 +142,7 @@ const LessonPlansManager = ({
             />
           )}
           {activeTab === 'submitted' && (
-            <LessonPlansView />
+            <LessonPlansView {...lessonPlansViewProps} />
           )}
         </div>
       </div>
