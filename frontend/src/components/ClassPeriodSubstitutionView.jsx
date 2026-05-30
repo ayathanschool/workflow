@@ -5,9 +5,27 @@ import * as api from '../api';
 import { useTheme } from '../contexts/ThemeContext';
 import { formatLocalDate, periodToTimeString, formatDateForInput } from '../utils/dateUtils';
 
+function getDefaultTimetableDate() {
+  const today = formatDateForInput(new Date());
+  const date = new Date(`${today}T00:00:00`);
+  const day = date.getDay();
+
+  if (day === 6) {
+    date.setDate(date.getDate() + 2);
+    return formatDateForInput(date);
+  }
+
+  if (day === 0) {
+    date.setDate(date.getDate() + 1);
+    return formatDateForInput(date);
+  }
+
+  return today;
+}
+
 export default function ClassPeriodSubstitutionView({ user, periodTimes }) {
   const { theme } = useTheme();
-  const [date, setDate] = useState(formatDateForInput(new Date()));
+  const [date, setDate] = useState(getDefaultTimetableDate());
   const [timetableData, setTimetableData] = useState([]);
   const [substitutions, setSubstitutions] = useState([]);
   const [loading, setLoading] = useState(false);

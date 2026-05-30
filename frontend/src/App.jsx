@@ -1959,25 +1959,84 @@ const App = () => {
   const TimetableView = () => {
     const [timetable, setTimetable] = useState([]);
 
+    const hasRealPeriods = (days) => (
+      Array.isArray(days) && days.some(day =>
+        Array.isArray(day.periods) && day.periods.some(p =>
+          p && p.period && (String(p.subject || '').trim() || String(p.class || '').trim())
+        )
+      )
+    );
+
+    const normalizeWeeklyTimetable = (days) => {
+      if (!Array.isArray(days)) return [];
+      return days.map(day => ({
+        ...day,
+        day: day.day || day.dayName || day.dayOfWeek || '',
+        periods: Array.isArray(day.periods)
+          ? day.periods
+              .filter(p => p && p.period && (String(p.subject || '').trim() || String(p.class || '').trim()))
+              .map(p => ({ ...p, period: Number(p.period) }))
+          : []
+      }));
+    };
+
+    const teacherMatches = (entry, teacher) => {
+      const norm = (value) => String(value || '').trim().toLowerCase();
+      const entryEmail = norm(entry.teacherEmail || entry.email);
+      const userEmail = norm(teacher?.email);
+      if (entryEmail && userEmail && entryEmail === userEmail) return true;
+
+      const entryName = norm(entry.teacherName || entry.teacher);
+      const userName = norm(teacher?.name);
+      if (!entryName || !userName) return false;
+
+      const firstName = userName.split(/\s+/)[0];
+      return entryName === userName || entryName === firstName || userName.startsWith(`${entryName} `);
+    };
+
+    const buildWeeklyFromFullTimetable = (rows, teacher) => {
+      const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+      return dayOrder.map(day => ({
+        day,
+        periods: (Array.isArray(rows) ? rows : [])
+          .filter(row =>
+            String(row.dayOfWeek || row.day || '').trim().toLowerCase() === day.toLowerCase() &&
+            teacherMatches(row, teacher) &&
+            (String(row.subject || '').trim() || String(row.class || '').trim())
+          )
+          .map(row => ({ ...row, period: Number(row.period) }))
+          .sort((a, b) => Number(a.period) - Number(b.period))
+      }));
+    };
+
     useEffect(() => {
       async function fetchTimetable() {
         try {
-          if (!user) return;
+          const teacher = effectiveUser || user;
+          if (!teacher) return;
           
           // For HM role, don't fetch teacher timetable (they won't have entries)
-          if (user.role === 'hm') {
+          if (teacher.role === 'hm') {
             setTimetable([]);
             return;
           }
           
-          const data = await api.getTeacherWeeklyTimetable(user.email);
-          setTimetable(Array.isArray(data) ? data : []);
+          const data = await api.getTeacherWeeklyTimetable(teacher.email || '');
+          let normalized = normalizeWeeklyTimetable(data);
+
+          if (!hasRealPeriods(normalized)) {
+            const fullTimetable = await api.getFullTimetable();
+            normalized = buildWeeklyFromFullTimetable(fullTimetable, teacher);
+          }
+
+          setTimetable(normalized);
         } catch (err) {
           console.error(err);
+          setTimetable([]);
         }
       }
       fetchTimetable();
-    }, [user]);
+    }, [effectiveUser, user]);
 
     // Determine the maximum number of periods across the week to build the table header dynamically
     const maxPeriods = Math.max(
