@@ -392,7 +392,7 @@ export async function googleLogin(googleAuthInfo) {
 }
 
 export async function getTeacherWeeklyTimetable(email) {
-  const result = await getJSON(`${BASE_URL}?action=getTeacherWeeklyTimetable&email=${encodeURIComponent(email)}`);
+  const result = await getJSON(`${BASE_URL}?action=getTeacherWeeklyTimetable&email=${encodeURIComponent(email)}`, NO_CACHE);
   // Unwrap if backend sends wrapped response
   return result?.data || result || [];
 }
