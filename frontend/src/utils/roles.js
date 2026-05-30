@@ -22,7 +22,7 @@ export const hasAnyRole = (user, rolesToCheck = []) => {
   return rolesToCheck.some((role) => roles.includes(normalizeRole(role)));
 };
 
-export const isAdmin = (user) => hasRole(user, 'admin');
+export const isAdmin = (user) => hasAnyRole(user, ['admin', 'super admin', 'superadmin']);
 export const isHM = (user) => hasAnyRole(user, ['h m', 'hm', 'headmaster', 'headmistress']);
 export const isTeacher = (user) => hasRole(user, 'teacher');
 export const isClassTeacher = (user) => hasAnyRole(user, ['class teacher', 'classteacher']);

@@ -526,7 +526,7 @@ const App = () => {
     }
 
     // Admin gets access to everything (monitoring & management, not teacher workflows)
-    if (hasAnyRole(['admin'])) {
+    if (hasAnyRole(['admin', 'super admin', 'superadmin'])) {
       items.push(
         // User Management
         { id: 'users', label: 'User Management', icon: Users },
@@ -2846,10 +2846,72 @@ const App = () => {
     const [filterDay, setFilterDay] = useState('');
     const [filterClass, setFilterClass] = useState('');
     const [filterTeacher, setFilterTeacher] = useState('');
-    const [searchDate, setSearchDate] = useState(formatDateForInput(todayIST()));
+    const [searchDate, setSearchDate] = useState('');
     const [availableDays, setAvailableDays] = useState([]);
     const [availableClasses, setAvailableClasses] = useState([]);
     const [availableTeachers, setAvailableTeachers] = useState([]);
+
+    const isTimetableAdmin = currentUser && (isAdmin(currentUser) || hasCurrentUserRole('h m'));
+    const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+    const normalizeFullTimetable = (rows) => {
+      if (!Array.isArray(rows)) return [];
+
+      const groupedInput = rows.some(day => Array.isArray(day?.periods));
+      if (groupedInput) {
+        return rows.map(day => ({
+          ...day,
+          day: day.day || day.dayName || day.dayOfWeek || '',
+          periods: Array.isArray(day.periods)
+            ? day.periods.map(period => ({
+                ...period,
+                period: Number(period.period),
+                entries: Array.isArray(period.entries)
+                  ? period.entries
+                  : (period.class || period.subject || period.teacher || period.teacherName)
+                    ? [{
+                        class: period.class || '',
+                        subject: period.subject || '',
+                        teacher: period.teacher || period.teacherName || ''
+                      }]
+                    : []
+              }))
+            : []
+        }));
+      }
+
+      const byDay = new Map();
+      rows.forEach(row => {
+        const dayName = String(row.day || row.dayName || row.dayOfWeek || '').trim();
+        const periodNumber = Number(row.period);
+        if (!dayName || !periodNumber) return;
+
+        if (!byDay.has(dayName)) byDay.set(dayName, new Map());
+        const periods = byDay.get(dayName);
+        if (!periods.has(periodNumber)) periods.set(periodNumber, []);
+
+        if (String(row.class || '').trim() || String(row.subject || '').trim() || String(row.teacher || row.teacherName || '').trim()) {
+          periods.get(periodNumber).push({
+            class: row.class || '',
+            subject: row.subject || '',
+            teacher: row.teacher || row.teacherName || ''
+          });
+        }
+      });
+
+      return Array.from(byDay.entries())
+        .sort(([a], [b]) => {
+          const ai = dayOrder.indexOf(a);
+          const bi = dayOrder.indexOf(b);
+          return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+        })
+        .map(([day, periods]) => ({
+          day,
+          periods: Array.from(periods.entries())
+            .sort(([a], [b]) => Number(a) - Number(b))
+            .map(([period, entries]) => ({ period: Number(period), entries }))
+        }));
+    };
 
     // Load timetable: unfiltered weekly by default; use server filtering when class/teacher/date are provided
     useEffect(() => {
@@ -2864,7 +2926,7 @@ const App = () => {
             data = await api.getFullTimetable();
           }
           if (cancelled) return;
-          const ft = Array.isArray(data) ? data : [];
+          const ft = normalizeFullTimetable(Array.isArray(data) ? data : []);
           setFullTimetable(ft);
           // Derive filter lists from current data
           const classes = new Set();
@@ -2881,7 +2943,11 @@ const App = () => {
           });
           setAvailableClasses(Array.from(classes).sort());
           setAvailableTeachers(Array.from(teachers).sort());
-          setAvailableDays(Array.from(days));
+          setAvailableDays(Array.from(days).sort((a, b) => {
+            const ai = dayOrder.indexOf(a);
+            const bi = dayOrder.indexOf(b);
+            return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+          }));
         } catch (err) {
           if (cancelled) return;
           console.error(err);
@@ -2918,7 +2984,7 @@ const App = () => {
           </div>
         </div>
         <div className="mb-4">
-          {currentUser && hasCurrentUserRole('h m') && (
+          {isTimetableAdmin && (
             <div className="bg-white rounded-lg p-4 flex flex-wrap items-center gap-3">
               <div>
                 <label className="text-xs text-gray-500">Day</label>
