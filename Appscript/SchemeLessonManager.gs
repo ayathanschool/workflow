@@ -78,6 +78,25 @@ function _slmNormalizeSubjectKey_(v) {
   return String(v || '').toLowerCase().trim().replace(/\s+/g, ' ');
 }
 
+function _slmEmailLocalKey_(v) {
+  const s = String(v || '').toLowerCase().trim();
+  const at = s.indexOf('@');
+  return at === -1 ? s : s.slice(0, at);
+}
+
+function _slmTeacherEmailMatches_(rowEmail, teacherEmail) {
+  const rowNorm = String(rowEmail || '').toLowerCase().trim();
+  const teacherNorm = String(teacherEmail || '').toLowerCase().trim();
+  if (!rowNorm || !teacherNorm) return false;
+  if (rowNorm === teacherNorm) return true;
+
+  // Some timetable rows have domain typos, e.g. ayathanscool.com.
+  // Fall back to the local part only after exact email fails.
+  const rowLocal = _slmEmailLocalKey_(rowNorm);
+  const teacherLocal = _slmEmailLocalKey_(teacherNorm);
+  return !!rowLocal && rowLocal === teacherLocal;
+}
+
 /**
  * Shared helper: check whether a DailyReport row signals "Chapter Complete".
  * Extracted from three previously-duplicate inline closures.
@@ -1506,7 +1525,7 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
     const timetableData = _rows(timetableSheet).map(row => _indexByHeader(row, timetableHeaders));
     
     const teacherTimetable = timetableData.filter(slot =>
-      (slot.teacherEmail || '').toLowerCase() === teacherEmail.toLowerCase()
+      _slmTeacherEmailMatches_(slot.teacherEmail || slot.teacher || '', teacherEmail)
     );
     
     // Get existing lesson plans to check occupied slots
@@ -2675,7 +2694,7 @@ function _validatePeriodAvailability(teacherEmail, date, period) {
     const dayName = _dayNameIST(dateNorm);
     
     const slot = tt.find(s =>
-      String(s.teacherEmail || '').trim().toLowerCase() === emailNorm &&
+      _slmTeacherEmailMatches_(s.teacherEmail || s.teacher || '', emailNorm) &&
       _normalizeDayName(s.dayOfWeek || '') === _normalizeDayName(dayName) &&
       String(s.period || '').trim() === String(periodNum)
     );
