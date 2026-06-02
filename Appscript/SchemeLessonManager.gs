@@ -65,6 +65,19 @@ function _slmNormalizeReportRow_(report) {
   return report;
 }
 
+function _slmNormalizeClassKey_(v) {
+  return String(v || '')
+    .toLowerCase()
+    .trim()
+    .replace(/^std\s+/i, '')
+    .replace(/^standard\s+/i, '')
+    .replace(/\s+/g, '');
+}
+
+function _slmNormalizeSubjectKey_(v) {
+  return String(v || '').toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
 /**
  * Shared helper: check whether a DailyReport row signals "Chapter Complete".
  * Extracted from three previously-duplicate inline closures.
@@ -1592,11 +1605,15 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
       }
       
       // Find periods for this day that match the scheme's class and subject
+      const requestedClassKey = _slmNormalizeClassKey_(schemeClass);
+      const requestedSubjectKey = _slmNormalizeSubjectKey_(schemeSubject);
+
       const dayPeriods = teacherTimetable.filter(slot => {
         const dayMatch = _normalizeDayName(slot.dayOfWeek || '') === _normalizeDayName(dayName);
-        // ONLY show periods that match the scheme's class and subject (trim + case-insensitive)
-        const classMatch = String(slot.class || '').toLowerCase().trim() === String(schemeClass || '').toLowerCase().trim();
-        const subjectMatch = String(slot.subject || '').toLowerCase().trim() === String(schemeSubject || '').toLowerCase().trim();
+        // ONLY show periods that match the scheme's class and subject.
+        // Classes may be stored as "5A" in schemes and "STD 5A" in timetable.
+        const classMatch = _slmNormalizeClassKey_(slot.class || '') === requestedClassKey;
+        const subjectMatch = _slmNormalizeSubjectKey_(slot.subject || '') === requestedSubjectKey;
         
         return dayMatch && classMatch && subjectMatch;
       });
@@ -1649,7 +1666,12 @@ function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, endDate, excl
         occupiedSlotsFound: occupiedSlots,
         teacherEmail: teacherEmail,
         requestedDateRange: `${startDate} to ${endDate}`,
-        schemeFilter: `${schemeClass} ${schemeSubject}`
+        schemeFilter: `${schemeClass} ${schemeSubject}`,
+        normalizedSchemeFilter: `${_slmNormalizeClassKey_(schemeClass)} ${_slmNormalizeSubjectKey_(schemeSubject)}`,
+        matchingTimetableRows: teacherTimetable.filter(slot =>
+          _slmNormalizeClassKey_(slot.class || '') === _slmNormalizeClassKey_(schemeClass) &&
+          _slmNormalizeSubjectKey_(slot.subject || '') === _slmNormalizeSubjectKey_(schemeSubject)
+        ).length
       }
     };
   } catch (error) {

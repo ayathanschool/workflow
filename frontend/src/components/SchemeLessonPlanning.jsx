@@ -2034,7 +2034,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Session {session.sessionNumber} of {totalSessions || data.sessionCount}
+                Session {session.sessionNumber}{totalSessions ? ` of ${totalSessions}` : ''}
               </span>
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 {sessions.filter(s => s.learningObjectives.trim() && s.teachingMethods.trim()).length}/{data.sessionCount} completed
@@ -2079,12 +2079,12 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Learning Objectives * <span className="text-xs text-gray-500 dark:text-gray-400">(Session {currentSession + 1})</span>
+                  Learning Objectives * <span className="text-xs text-gray-500 dark:text-gray-400">(Session {session.sessionNumber})</span>
                 </label>
                 <button
                   type="button"
                   onClick={() => {
-                    const query = `lesson plan learning objectives ${data.scheme.subject} class ${data.scheme.class} ${data.chapter.chapterName} session ${currentSession + 1}`.trim();
+                    const query = `lesson plan learning objectives ${data.scheme.subject} class ${data.scheme.class} ${data.chapter.chapterName} session ${session.sessionNumber}`.trim();
                     window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
                   }}
                   className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
@@ -2106,7 +2106,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Teaching Methods * <span className="text-xs text-gray-500 dark:text-gray-400">(Session {currentSession + 1})</span>
+                  Teaching Methods * <span className="text-xs text-gray-500 dark:text-gray-400">(Session {session.sessionNumber})</span>
                 </label>
                 <button
                   type="button"
@@ -2133,7 +2133,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Resources Required <span className="text-xs text-gray-500 dark:text-gray-400">(Session {currentSession + 1})</span>
+                  Resources Required <span className="text-xs text-gray-500 dark:text-gray-400">(Session {session.sessionNumber})</span>
                 </label>
                 <button
                   type="button"
@@ -2160,7 +2160,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Assessment Methods <span className="text-xs text-gray-500 dark:text-gray-400">(Session {currentSession + 1})</span>
+                  Assessment Methods <span className="text-xs text-gray-500 dark:text-gray-400">(Session {session.sessionNumber})</span>
                 </label>
                 <button
                   type="button"
