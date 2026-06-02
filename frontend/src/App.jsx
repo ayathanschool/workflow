@@ -487,28 +487,49 @@ const App = () => {
 
   // Prefetch common data when user logs in
   useEffect(() => {
-    if (user) {
+    const warmupUser = effectiveUser || user;
+    if (warmupUser) {
       // Prefetch common data in parallel to warm up cache - with error handling
-      const promises = [
-        api.getAllClasses().catch((err) => { console.warn('Failed to prefetch classes:', err); return []; }),
-        api.getGradeTypes().catch((err) => { console.warn('Failed to prefetch grade types:', err); return []; })
-        // Temporarily removed getSubjects() due to API issues
-      ];
+      const runWarmup = () => {
+        const promises = [
+          api.getAllClasses().catch((err) => { console.warn('Failed to prefetch classes:', err); return []; }),
+          api.getGradeTypes().catch((err) => { console.warn('Failed to prefetch grade types:', err); return []; })
+          // Temporarily removed getSubjects() due to API issues
+        ];
 
-      // Teacher-specific warmup: Scheme lesson planning is one of the slowest endpoints on cold start.
-      // Prefetch it after login so opening the tab is instant.
-      try {
-        if (hasCurrentUserRole('teacher') && currentUser?.email) {
-          promises.push(
-            api.getApprovedSchemesForLessonPlanning(currentUser.email)
-              .catch((err) => { console.warn('Failed to prefetch approved schemes:', err); return null; })
-          );
+        // Teacher-specific warmup: Scheme lesson planning is one of the slowest endpoints on cold start.
+        // Prefetch it after login so opening the tab is instant.
+        try {
+          if (userHasRole(warmupUser, 'teacher') && warmupUser?.email) {
+            promises.push(
+              api.getApprovedSchemesForLessonPlanning(warmupUser.email)
+                .catch((err) => { console.warn('Failed to prefetch approved schemes:', err); return null; })
+            );
+          }
+        } catch {}
+
+        Promise.all(promises).catch((err) => { console.warn('Prefetch failed:', err); });
+      };
+
+      let timeoutId = null;
+      let idleId = null;
+
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        idleId = window.requestIdleCallback(runWarmup, { timeout: 1500 });
+      } else {
+        timeoutId = window.setTimeout(runWarmup, 250);
+      }
+
+      return () => {
+        if (idleId !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+          window.cancelIdleCallback(idleId);
         }
-      } catch {}
-
-      Promise.all(promises).catch((err) => { console.warn('Prefetch failed:', err); });
+        if (timeoutId !== null) {
+          window.clearTimeout(timeoutId);
+        }
+      };
     }
-  }, [currentUser?.email]);
+  }, [effectiveUser?.email, user?.email]);
 
   // Navigation items based on user role
   const getNavigationItems = useCallback(() => {

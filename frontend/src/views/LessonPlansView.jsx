@@ -61,11 +61,14 @@ const LessonPlansView = ({ user, currentUser, withSubmit, success, error, warnin
     // No planning restrictions - teachers can plan anytime
 
     // Fetch real timetable slots, lesson plans, approved schemes, and app settings from the API
-    useEffect(() => {
-      async function fetchData() {
-        setLoading(true);
+    const fetchData = useCallback(async ({ silent = false } = {}) => {
+        if (!user) return;
+        if (!silent) {
+          setLoading(true);
+        }
         try {
-          if (!user) return;
+          api.clearCache('getTeacherLessonPlans');
+          api.clearCache('getTeacherSchemes');
           const [plansResult, schemesResult] = await Promise.allSettled([
             api.getTeacherLessonPlans(user.email),
             api.getTeacherSchemes(user.email)
@@ -92,11 +95,15 @@ const LessonPlansView = ({ user, currentUser, withSubmit, success, error, warnin
         } catch (err) {
           console.error(err);
         } finally {
-          setLoading(false);
+          if (!silent) {
+            setLoading(false);
+          }
         }
-      }
+      }, [user]);
+
+    useEffect(() => {
       fetchData();
-    }, [user]);
+    }, [fetchData]);
 
     // Helper to force-refresh lesson plans when status updates elsewhere (e.g., HM approvals)
     const refreshTeacherLessonPlans = useCallback(async () => {
@@ -119,6 +126,16 @@ const LessonPlansView = ({ user, currentUser, withSubmit, success, error, warnin
       window.addEventListener('lesson-plan-status-updated', handler);
       return () => window.removeEventListener('lesson-plan-status-updated', handler);
     }, [refreshTeacherLessonPlans]);
+
+    useEffect(() => {
+      const handler = () => fetchData({ silent: true });
+      window.addEventListener('scheme-submitted', handler);
+      window.addEventListener('lesson-plan-submitted', handler);
+      return () => {
+        window.removeEventListener('scheme-submitted', handler);
+        window.removeEventListener('lesson-plan-submitted', handler);
+      };
+    }, [fetchData]);
 
     const handlePrepareLesson = (slot) => {
       // Find existing lesson plan for this class, subject, and date

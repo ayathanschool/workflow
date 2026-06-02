@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Plus, X, CheckCircle, AlertCircle, Eye, Trash2 } from 'lucide-react';
 import * as api from '../api';
 
@@ -226,6 +226,7 @@ const SchemesView = ({ user, currentUser, setSubmitting, success, error, warning
         }
         
         // Refresh schemes list
+        api.clearCache('getTeacherSchemes');
         const list = await api.getTeacherSchemes(user.email);
         const sorted = Array.isArray(list) ? list.sort((a, b) => {
           const dateA = new Date(a.createdAt || 0);
@@ -233,6 +234,7 @@ const SchemesView = ({ user, currentUser, setSubmitting, success, error, warning
           return dateB - dateA;
         }) : [];
         setSchemes(sorted);
+        window.dispatchEvent(new CustomEvent('scheme-submitted', { detail: { teacherEmail: user.email } }));
         
       } catch (err) {
         console.error('Failed to submit scheme:', err);
@@ -262,11 +264,11 @@ const SchemesView = ({ user, currentUser, setSubmitting, success, error, warning
     // Load all schemes for this teacher from the API on mount.  We use
     // getTeacherSchemes() so teachers can see the status of previously
     // submitted schemes (Pending, Approved, Rejected).
-    useEffect(() => {
-      async function fetchSchemes() {
+    const fetchSchemes = useCallback(async () => {
         try {
           if (!user) return;
           setLoading(true);
+          api.clearCache('getTeacherSchemes');
           const list = await api.getTeacherSchemes(user.email);
           // Sort by createdAt descending (latest first)
           const sorted = Array.isArray(list) ? list.sort((a, b) => {
@@ -280,9 +282,17 @@ const SchemesView = ({ user, currentUser, setSubmitting, success, error, warning
         } finally {
           setLoading(false);
         }
-      }
+      }, [user]);
+
+    useEffect(() => {
       fetchSchemes();
-    }, [user]);
+    }, [fetchSchemes]);
+
+    useEffect(() => {
+      const handler = () => fetchSchemes();
+      window.addEventListener('scheme-submitted', handler);
+      return () => window.removeEventListener('scheme-submitted', handler);
+    }, [fetchSchemes]);
 
     return (
       <div className="space-y-6">

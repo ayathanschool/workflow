@@ -96,9 +96,11 @@ class EnhancedApiCache {
     return entry.data;
   }
 
-  set(url, data, method = 'GET', body = null) {
+  set(url, data, method = 'GET', body = null, durationOverride = null) {
     const key = this.getCacheKey(url, method, body);
-    const duration = this.getCacheDuration(url);
+    const duration = Number.isFinite(durationOverride) && durationOverride > 0
+      ? durationOverride
+      : this.getCacheDuration(url);
     
     this.cache.set(key, {
       data,
@@ -157,6 +159,12 @@ class EnhancedApiCache {
       if (key.includes(pattern)) {
         this.cache.delete(key);
         count++;
+      }
+    }
+
+    for (const key of this.pendingRequests.keys()) {
+      if (key.includes(pattern)) {
+        this.pendingRequests.delete(key);
       }
     }
     

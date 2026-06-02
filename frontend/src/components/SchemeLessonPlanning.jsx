@@ -619,6 +619,7 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
       if (actualData && actualData.success) {
         alert('Lesson plan created successfully!');
+        window.dispatchEvent(new CustomEvent('lesson-plan-submitted', { detail: { teacherEmail: userEmail } }));
         setShowLessonPlanForm(false);
         setSelectedSession(null);
         setLessonPlanData({
@@ -1927,6 +1928,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
       const actualData = response?.data || response;
       if (actualData && actualData.success) {
         alert(`✅ Successfully created ${actualData.createdCount} lesson plans!`);
+        window.dispatchEvent(new CustomEvent('lesson-plan-submitted', { detail: { teacherEmail: userEmail } }));
         onSuccess();
       } else {
         const errorMsg = actualData?.error || actualData?.message || 'Unknown error occurred';

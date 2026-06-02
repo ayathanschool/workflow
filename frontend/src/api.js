@@ -126,6 +126,72 @@ function setCacheEntry(key, data, duration = CACHE_DURATION) {
   });
 }
 
+function invalidateAfterMutation(action = '') {
+  if (!action) return;
+
+  // Central invalidation rules from EnhancedApiCache
+  try { enhancedCache.invalidateRelated(action); } catch {}
+
+  // Clear all caches related to the action using pattern matching
+  if (action.includes('DailyReport')) {
+    enhancedCache.clearPattern('getDailyReport');
+    enhancedCache.clearPattern('getTeacherDailyData');
+    enhancedCache.clearPattern('getPlannedLessons');
+    enhancedCache.clearPattern('getLessonPlan');
+  }
+  if (action.includes('LessonPlan') || action.includes('SchemeLessonPlan')) {
+    enhancedCache.clearPattern('getLessonPlan');
+    enhancedCache.clearPattern('getApprovedSchemes');
+    enhancedCache.clearPattern('getAvailablePeriods');
+  }
+
+  // Many lesson-plan related actions are named submitPlan/deleteLessonPlan/etc.
+  // Treat any "*Plan*" mutation as a reason to invalidate plan-derived caches.
+  if (/plan/i.test(action)) {
+    enhancedCache.clearPattern('Plan');
+    enhancedCache.clearPattern('plan');
+    enhancedCache.clearPattern('getMissingLessonPlans');
+    enhancedCache.clearPattern('getAllMissingLessonPlans');
+    enhancedCache.clearPattern('getTeacherLessonPlans');
+    enhancedCache.clearPattern('getPlannedLessons');
+    enhancedCache.clearPattern('getPlannedLesson');
+  }
+  if (action.includes('Substitution') || action === 'assignSubstitution') {
+    enhancedCache.clearPattern('Substitution');
+    enhancedCache.clearPattern('VacantSlots');
+    enhancedCache.clearPattern('FreeTeachers');
+    enhancedCache.clearPattern('AvailableTeachers');
+    enhancedCache.clearPattern('Timetable');
+  }
+  if (action.includes('Exam') || action.includes('Marks')) {
+    enhancedCache.clearPattern('Exam');
+    enhancedCache.clearPattern('Marks');
+    enhancedCache.clearPattern('ReportCard');
+  }
+  if (action.includes('Scheme') || action === 'submitPlan') {
+    enhancedCache.clearPattern('Scheme');
+    enhancedCache.clearPattern('scheme');
+    enhancedCache.clearPattern('getAllApprovedSchemes');
+    enhancedCache.clearPattern('getTeacherSchemes');
+    enhancedCache.clearPattern('getAllSchemes');
+    enhancedCache.clearPattern('getApprovedSchemesForLessonPlanning');
+    enhancedCache.clearPattern('getSchemeDetails');
+    enhancedCache.clearPattern('getSchemeSubmissionHelper');
+  }
+  if (action.includes('Fund') || action.includes('Expense') || action.includes('Financial')) {
+    enhancedCache.clearPattern('Fund');
+    enhancedCache.clearPattern('Expense');
+    enhancedCache.clearPattern('Financial');
+    enhancedCache.clearPattern('getTeacherFundRequests');
+    enhancedCache.clearPattern('getAllFundRequests');
+    enhancedCache.clearPattern('getTeacherExpenseRequests');
+    enhancedCache.clearPattern('getAllExpenseRequests');
+    enhancedCache.clearPattern('getAdminFinancialDashboard');
+    enhancedCache.clearPattern('getAccountsFinancialDashboard');
+    enhancedCache.clearPattern('getTeacherFinancialDashboard');
+  }
+}
+
 async function getJSON(url, cacheDuration = CACHE_DURATION) {
   const startMark = `api-get-${Date.now()}`;
   perfMonitor.mark(startMark);
@@ -187,7 +253,7 @@ async function getJSON(url, cacheDuration = CACHE_DURATION) {
       const data = await res.json();
       
       // Cache the result
-      enhancedCache.set(cacheKey, data, 'GET');
+      enhancedCache.set(cacheKey, data, 'GET', null, cacheDuration);
       perfMonitor.measure(startMark, `GET (fresh) ${url.split('?')[0]}`);
       
       return data;
@@ -233,62 +299,7 @@ async function postJSON(url, payload) {
   }
 
   if (action.includes('submit') || action.includes('create') || action.includes('update') || action.includes('delete') || action.includes('approve') || action.includes('disburse') || action.includes('acknowledge') || action.includes('add')) {
-    // Central invalidation rules from EnhancedApiCache
-    try { enhancedCache.invalidateRelated(action); } catch {}
-
-    // Clear all caches related to the action using pattern matching
-    if (action.includes('DailyReport')) {
-      enhancedCache.clearPattern('getDailyReport');
-      enhancedCache.clearPattern('getTeacherDailyData');
-      enhancedCache.clearPattern('getPlannedLessons');
-      enhancedCache.clearPattern('getLessonPlan');
-    }
-    if (action.includes('LessonPlan') || action.includes('SchemeLessonPlan')) {
-      enhancedCache.clearPattern('getLessonPlan');
-      enhancedCache.clearPattern('getApprovedSchemes');
-      enhancedCache.clearPattern('getAvailablePeriods');
-    }
-
-    // Many lesson-plan related actions are named submitPlan/deleteLessonPlan/etc.
-    // Treat any "*Plan*" mutation as a reason to invalidate plan-derived caches.
-    if (/plan/i.test(action)) {
-      enhancedCache.clearPattern('LessonPlan');
-      enhancedCache.clearPattern('getMissingLessonPlans');
-      enhancedCache.clearPattern('getAllMissingLessonPlans');
-      enhancedCache.clearPattern('getTeacherLessonPlans');
-      enhancedCache.clearPattern('getPlannedLessons');
-      enhancedCache.clearPattern('getPlannedLesson');
-    }
-    if (action.includes('Substitution') || action === 'assignSubstitution') {
-      enhancedCache.clearPattern('Substitution');
-      enhancedCache.clearPattern('VacantSlots');
-      enhancedCache.clearPattern('FreeTeachers');
-      enhancedCache.clearPattern('AvailableTeachers');
-      enhancedCache.clearPattern('Timetable');
-    }
-    if (action.includes('Exam') || action.includes('Marks')) {
-      enhancedCache.clearPattern('Exam');
-      enhancedCache.clearPattern('Marks');
-      enhancedCache.clearPattern('ReportCard');
-    }
-    if (action.includes('Scheme')) {
-      enhancedCache.clearPattern('Scheme');
-      enhancedCache.clearPattern('getAllApprovedSchemes');
-      enhancedCache.clearPattern('getTeacherSchemes');
-      enhancedCache.clearPattern('getAllSchemes');
-    }
-    if (action.includes('Fund') || action.includes('Expense') || action.includes('Financial')) {
-      enhancedCache.clearPattern('Fund');
-      enhancedCache.clearPattern('Expense');
-      enhancedCache.clearPattern('Financial');
-      enhancedCache.clearPattern('getTeacherFundRequests');
-      enhancedCache.clearPattern('getAllFundRequests');
-      enhancedCache.clearPattern('getTeacherExpenseRequests');
-      enhancedCache.clearPattern('getAllExpenseRequests');
-      enhancedCache.clearPattern('getAdminFinancialDashboard');
-      enhancedCache.clearPattern('getAccountsFinancialDashboard');
-      enhancedCache.clearPattern('getTeacherFinancialDashboard');
-    }
+    invalidateAfterMutation(action);
   }
 
   const body = JSON.stringify(payload);
@@ -313,6 +324,9 @@ async function postJSON(url, payload) {
     }
     
     const data = await res.json();
+    if (action.includes('submit') || action.includes('create') || action.includes('update') || action.includes('delete') || action.includes('approve') || action.includes('disburse') || action.includes('acknowledge') || action.includes('add')) {
+      invalidateAfterMutation(action);
+    }
     perfMonitor.measure(startMark, `POST ${action || 'unknown'}`);
     return data;
   } catch (err) {
@@ -419,6 +433,10 @@ export async function getTeacherLessonPlans(email, subject = '', cls = '', statu
 }
 
 export async function submitPlan(email, planData) {
+  clearCache('getTeacherSchemes');
+  clearCache('getAllSchemes');
+  clearCache('getApprovedSchemesForLessonPlanning');
+  clearCache('getSchemeSubmissionHelper');
   return postJSON(`${BASE_URL}?action=submitPlan`, { email, ...planData })
 }
 
@@ -482,7 +500,7 @@ export async function getPendingLessonReviews(teacher = '', cls = '', subject = 
   const { noCache = false } = options || {};
   const q = new URLSearchParams({ action: 'getPendingLessonReviews', teacher, class: cls, subject, status });
   if (noCache) q.append('_', String(Date.now()));
-  const response = await getJSON(`${BASE_URL}?${q.toString()}`);
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, noCache ? NO_CACHE : CACHE_DURATION);
   return response?.data || response || [];
 }
 
@@ -547,7 +565,7 @@ export async function getLessonPlansByChapter({ teacher = '', class: cls = '', s
   if (dateFrom) q.append('dateFrom', dateFrom);
   if (dateTo) q.append('dateTo', dateTo);
   if (noCache) q.append('_', String(Date.now()));
-  const res = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  const res = await getJSON(`${BASE_URL}?${q.toString()}`, noCache ? NO_CACHE : SHORT_CACHE_DURATION);
   return res?.data || res || { groups: [] };
 }
 
@@ -561,7 +579,7 @@ export async function getLessonPlansByClass({ teacher = '', class: cls = '', sub
   if (dateFrom) q.append('dateFrom', dateFrom);
   if (dateTo) q.append('dateTo', dateTo);
   if (noCache) q.append('_', String(Date.now()));
-  const res = await getJSON(`${BASE_URL}?${q.toString()}`, SHORT_CACHE_DURATION);
+  const res = await getJSON(`${BASE_URL}?${q.toString()}`, noCache ? NO_CACHE : SHORT_CACHE_DURATION);
   return res?.data || res || { groups: [] };
 }
 
@@ -737,7 +755,7 @@ export async function getVacantSlotsForAbsent(date, absent = [], options = {}) {
   const q = new URLSearchParams({ action: 'getVacantSlotsForAbsent', date })
   absent.forEach(a => q.append('absent', a))
   if (noCache) q.append('_', String(Date.now()))
-  return getJSON(`${BASE_URL}?${q.toString()}`)
+  return getJSON(`${BASE_URL}?${q.toString()}`, noCache ? NO_CACHE : CACHE_DURATION)
 }
 
 export async function getPotentialAbsentTeachers() {
@@ -772,14 +790,14 @@ export async function getDailyTimetableWithSubstitutions(date, options = {}) {
   const { noCache = false } = options || {};
   const q = new URLSearchParams({ action: 'getDailyTimetableWithSubstitutions', date })
   if (noCache) q.append('_', String(Date.now()))
-  return getJSON(`${BASE_URL}?${q.toString()}`)
+  return getJSON(`${BASE_URL}?${q.toString()}`, noCache ? NO_CACHE : CACHE_DURATION)
 }
 
 export async function getAssignedSubstitutions(date, options = {}) {
   const { noCache = false } = options || {};
   const q = new URLSearchParams({ action: 'getAssignedSubstitutions', date })
   if (noCache) q.append('_', String(Date.now()))
-  return getJSON(`${BASE_URL}?${q.toString()}`)
+  return getJSON(`${BASE_URL}?${q.toString()}`, noCache ? NO_CACHE : CACHE_DURATION)
 }
 
 // New substitution management functions
@@ -787,7 +805,7 @@ export async function getDailyTimetableForDate(date, options = {}) {
   const { noCache = false } = options || {};
   const q = new URLSearchParams({ action: 'getDailyTimetableForDate', date })
   if (noCache) q.append('_', String(Date.now()))
-  const response = await getJSON(`${BASE_URL}?${q.toString()}`);
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, noCache ? NO_CACHE : CACHE_DURATION);
   // Backend returns { status, data: { date, dayName, timetable: [...] }, timestamp }
   // Unwrap and extract the timetable array
   const unwrapped = response?.data || response;
@@ -821,7 +839,7 @@ export async function getSubstitutionsForDate(date, options = {}) {
   q.append('_', String(Date.now()));
 
   try {
-    const result = await getJSON(`${BASE_URL}?${q.toString()}`);
+    const result = await getJSON(`${BASE_URL}?${q.toString()}`, NO_CACHE);
 
     // Backend returns { status, data: { date, substitutions }, timestamp }
     // Unwrap the response
@@ -852,7 +870,7 @@ export async function getAvailableTeachers(date, period, options = {}) {
   const { noCache = false } = options || {};
   const q = new URLSearchParams({ action: 'getAvailableTeachers', date, period })
   if (noCache) q.append('_', String(Date.now()))
-  const response = await getJSON(`${BASE_URL}?${q.toString()}`);
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, noCache ? NO_CACHE : CACHE_DURATION);
   // Backend returns { status, data: [...teachers], timestamp }
   // Unwrap and return the teachers array
   return response?.data || response || [];
@@ -870,7 +888,7 @@ export async function getTeacherSubjectsForClass(teacherEmail, className, option
     className: className || ''
   });
   if (noCache) q.append('_', String(Date.now()));
-  const response = await getJSON(`${BASE_URL}?${q.toString()}`);
+  const response = await getJSON(`${BASE_URL}?${q.toString()}`, noCache ? NO_CACHE : CACHE_DURATION);
   // Returns { success: true, subjects: ['English', 'Math', 'Other'], ... }
   return response;
 }
@@ -1779,6 +1797,11 @@ export async function getAvailablePeriodsForLessonPlan(teacherEmail, startDate, 
 
 // Create scheme-based lesson plan
 export async function createSchemeLessonPlan(lessonPlanData) {
+  clearCache('getApprovedSchemesForLessonPlanning');
+  clearCache('getSchemeDetails');
+  clearCache('getTeacherLessonPlans');
+  clearCache('getPlannedLessons');
+  clearCache('getAvailablePeriodsForLessonPlan');
   return postJSON(BASE_URL, {
     action: 'createSchemeLessonPlan',
     lessonPlanData
@@ -1787,6 +1810,11 @@ export async function createSchemeLessonPlan(lessonPlanData) {
 
 // Create bulk scheme-based lesson plans (all sessions at once)
 export async function createBulkSchemeLessonPlans(bulkPlanData) {
+  clearCache('getApprovedSchemesForLessonPlanning');
+  clearCache('getSchemeDetails');
+  clearCache('getTeacherLessonPlans');
+  clearCache('getPlannedLessons');
+  clearCache('getAvailablePeriodsForLessonPlan');
   return postJSON(BASE_URL, {
     action: 'createBulkSchemeLessonPlans',
     bulkPlanData
