@@ -2072,6 +2072,7 @@ function createBulkSchemeLessonPlans(bulkData) {
 
     // Get available periods for this class/subject
     const sessionCount = parseInt(bulkData.sessionCount);
+    const startSession = Math.max(1, parseInt(bulkData.startSession || 1));
     const dateRange = _calculateLessonPlanningDateRange();
     
     const periodsResult = getAvailablePeriodsForLessonPlan(
@@ -2131,7 +2132,7 @@ function createBulkSchemeLessonPlans(bulkData) {
     
     // Create lesson plans for each session
     for (let i = 0; i < sessionCount; i++) {
-      const sessionNumber = i + 1;
+      const sessionNumber = startSession + i;
       const period = availablePeriods[i];
       
       try {

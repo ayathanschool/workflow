@@ -60,7 +60,7 @@ const SHEETS = {
   DailyReports: ['id','date','teacherEmail','teacherName','class','subject','schemeId','period','planType','lessonPlanId','chapter','sessionNo','totalSessions','completionPercentage','chapterStatus','deviationReason','difficulties','nextSessionPlan','objectives','activities','completed','notes','createdAt','isSubstitution','absentTeacher','regularSubject','substituteSubject','verified','verifiedBy','verifiedAt','reopenReason','reopenedBy','reopenedAt'],
   
   // === SYLLABUS & CALENDAR (2 sheets) ===
-  Syllabus: ['standard','subject','term','chapterNo','chapterName','minSessions','topics','sequence'],
+  Syllabus: ['standard','subject','term','Unit','chapterNo','chapterName','minSessions','MonthOfCompletion','topics','sequence'],
   // AcademicCalendar: Simple blocking periods for lesson planning
   // Add multiple rows for different blocking periods (exams, holidays, events)
   // System will skip these date ranges when showing available lesson plan dates

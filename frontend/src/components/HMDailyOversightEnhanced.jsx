@@ -2230,6 +2230,35 @@ const HMDailyOversightEnhanced = ({ user }) => {
                         </div>
                       )}
 
+                      {subject.monthTargets && (
+                        <div className="mt-3 p-3 bg-white rounded border border-gray-200">
+                          <p className="text-sm font-medium text-gray-700 mb-2">
+                            Month Target: {subject.monthTargets.currentMonth}
+                          </p>
+                          {subject.monthTargets.dueChapters?.length > 0 ? (
+                            <div className="space-y-1">
+                              {subject.monthTargets.dueChapters.map((chapter, cIdx) => {
+                                const unplanned = subject.monthTargets.dueUnplannedChapters?.some(
+                                  ch => String(ch.chapterName || '').toLowerCase() === String(chapter.chapterName || '').toLowerCase()
+                                );
+                                return (
+                                  <div key={cIdx} className="flex items-center justify-between text-sm">
+                                    <span className="text-gray-700">
+                                      Ch {chapter.chapterNo}: {chapter.chapterName}
+                                    </span>
+                                    <span className={unplanned ? 'text-red-600 font-medium' : 'text-green-700 font-medium'}>
+                                      {unplanned ? 'Not planned' : 'Planned'}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-500">No syllabus chapters targeted for this month.</p>
+                          )}
+                        </div>
+                      )}
+
                       {/* Warnings */}
                       {subject.warnings && subject.warnings.length > 0 && (
                         <div className="mt-2 space-y-1">

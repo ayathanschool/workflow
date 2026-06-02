@@ -428,6 +428,12 @@ const SchemesView = ({ user, currentUser, setSubmitting, success, error, warning
                             <div key={idx} className="text-sm text-gray-600 py-1 border-b border-gray-100 last:border-0">
                               <span className="font-medium">Ch {ch.chapterNo}: {ch.chapterName}</span>
                               <span className="text-blue-600 ml-2">({ch.minSessions} sessions)</span>
+                              {ch.monthOfCompletion && (
+                                <span className="text-emerald-700 ml-2">Target: {ch.monthOfCompletion}</span>
+                              )}
+                              {ch.unit && (
+                                <span className="text-gray-500 ml-2">Unit {ch.unit}</span>
+                              )}
                               {ch.topics && <div className="text-xs text-gray-500 mt-1">{ch.topics}</div>}
                             </div>
                           ))}

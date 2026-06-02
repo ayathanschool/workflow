@@ -4601,6 +4601,20 @@
   * Provides planning context for teachers when creating schemes
   * Returns: syllabus requirements, available periods, timeline, warnings
   */
+  function _getSyllabusUnit_(row) {
+    return String((row && (row.Unit || row.unit)) || '').trim();
+  }
+
+  function _getSyllabusMonthOfCompletion_(row) {
+    return String((row && (
+      row.MonthOfCompletion ||
+      row.monthOfCompletion ||
+      row['Month of Chapter Completion'] ||
+      row.month ||
+      row.Month
+    )) || '').trim();
+  }
+
   function getSchemeSubmissionHelper(teacherEmail, className, subject, term) {
     try {
       // 1. Get Academic Calendar for the term
@@ -4667,7 +4681,9 @@
       const chapterDetails = syllabusChapters.map(ch => ({
         chapterNo: ch.chapterNo || '',
         chapterName: ch.chapterName || '',
+        unit: _getSyllabusUnit_(ch),
         minSessions: parseInt(ch.minSessions || 0),
+        monthOfCompletion: _getSyllabusMonthOfCompletion_(ch),
         topics: ch.topics || ''
       }));
       
@@ -4713,6 +4729,11 @@
       
       if (syllabusChapters.length === 0) {
         warnings.push(`❌ No syllabus data found for ${className} ${subject} ${term}. Please add syllabus entries.`);
+      }
+
+      const chaptersWithoutCompletionMonth = chapterDetails.filter(ch => !ch.monthOfCompletion).length;
+      if (chaptersWithoutCompletionMonth > 0) {
+        warnings.push(`📌 ${chaptersWithoutCompletionMonth} syllabus chapter(s) do not have MonthOfCompletion set. Add it for better HM pace tracking.`);
       }
       
       // 7. Build response
@@ -4815,7 +4836,9 @@
         syllabusMap[key].chapters.push({
           chapterNo: row.chapterNo,
           chapterName: row.chapterName,
-          minSessions: minSessions
+          unit: _getSyllabusUnit_(row),
+          minSessions: minSessions,
+          monthOfCompletion: _getSyllabusMonthOfCompletion_(row)
         });
         syllabusMap[key].totalSessions += minSessions;
       });
@@ -4836,7 +4859,7 @@
         );
         
         const plannedSessions = schemes.reduce((sum, s) => 
-          sum + parseInt(s.sessions || 0), 0
+          sum + parseInt(s.noOfSessions || s.sessions || 0), 0
         );
         
         // Get completed lessons
@@ -4859,6 +4882,25 @@
         );
         
         const actualCompleted = reports.length;
+        const currentMonthName = Utilities.formatDate(today, Session.getScriptTimeZone() || 'Asia/Kolkata', 'MMMM');
+        const currentMonthShort = Utilities.formatDate(today, Session.getScriptTimeZone() || 'Asia/Kolkata', 'MMM');
+        const monthMatchesCurrentOrPast = function(monthValue) {
+          const raw = String(monthValue || '').trim();
+          if (!raw) return false;
+          const m = raw.toLowerCase();
+          const currentLong = currentMonthName.toLowerCase();
+          const currentShort = currentMonthShort.toLowerCase();
+          return m === currentLong || m === currentShort || m.indexOf(currentLong) >= 0 || m.indexOf(currentShort) >= 0;
+        };
+        const dueChapters = syllabus.chapters.filter(ch => monthMatchesCurrentOrPast(ch.monthOfCompletion));
+        const plannedChapterNames = {};
+        schemes.forEach(s => {
+          const chapter = String(s.chapter || '').trim().toLowerCase();
+          if (chapter) plannedChapterNames[chapter] = true;
+        });
+        const dueUnplannedChapters = dueChapters.filter(ch =>
+          !plannedChapterNames[String(ch.chapterName || '').trim().toLowerCase()]
+        );
         
         // Calculate percentages
         const syllabusTarget = syllabus.totalSessions;
@@ -4912,6 +4954,10 @@
           riskLevel = 'HIGH';
           warnings.push('No scheme submitted yet for this subject');
           recommendation = 'Teacher needs to submit a scheme of work immediately';
+        } else if (dueUnplannedChapters.length > 0) {
+          riskLevel = 'HIGH';
+          warnings.push(`${dueUnplannedChapters.length} chapter(s) targeted for ${currentMonthName} are not in approved schemes`);
+          recommendation = 'Ask teacher to submit schemes for the current month target chapters';
         } else if (behindBy > 20) {
           riskLevel = 'HIGH';
           warnings.push(`Behind schedule by ${Math.round(behindBy)}%`);
@@ -4963,7 +5009,23 @@
           projectedCompletion: projectedCompletion,
           riskLevel: riskLevel,
           recommendation: recommendation,
-          warnings: warnings
+          warnings: warnings,
+          chapters: syllabus.chapters,
+          monthTargets: {
+            currentMonth: currentMonthName,
+            dueChapters: dueChapters.map(ch => ({
+              chapterNo: ch.chapterNo,
+              chapterName: ch.chapterName,
+              monthOfCompletion: ch.monthOfCompletion,
+              minSessions: ch.minSessions
+            })),
+            dueUnplannedChapters: dueUnplannedChapters.map(ch => ({
+              chapterNo: ch.chapterNo,
+              chapterName: ch.chapterName,
+              monthOfCompletion: ch.monthOfCompletion,
+              minSessions: ch.minSessions
+            }))
+          }
         });
       }
       

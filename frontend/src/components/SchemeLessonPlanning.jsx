@@ -3,6 +3,8 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import * as ai from '../api-ai.js';
 import * as api from '../api.js';
 
+const LESSON_PLAN_BATCH_SIZE = 5;
+
 // Generic API request function
 const apiRequest = async (action, params = {}, method = 'GET') => {
   try {
@@ -717,12 +719,20 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
   const handleBulkPrepareClick = async (scheme, chapter) => {
     console.log('Bulk prepare clicked:', { scheme, chapter });
+    const totalSessions = Number(chapter.totalSessions) || 0;
+    const plannedSessions = Number(chapter.plannedSessions) || 0;
+    const firstSession = Math.max(1, plannedSessions + 1);
+    const remainingSessions = Math.max(0, totalSessions - plannedSessions);
+    const batchCount = Math.min(LESSON_PLAN_BATCH_SIZE, remainingSessions || totalSessions || LESSON_PLAN_BATCH_SIZE);
 
     // Open the bulk preparation modal
     setBulkPrepData({
       scheme,
       chapter,
-      sessionCount: chapter.totalSessions
+      firstSession,
+      sessionCount: batchCount,
+      totalSessions,
+      remainingSessions
     });
     setShowBulkModal(true);
   };
@@ -1145,17 +1155,17 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
                                   </span>
                                 </span>
                               )}
-                              {chapter.plannedSessions === 0 && (
+                              {Number(chapter.plannedSessions || 0) < Number(chapter.totalSessions || 0) && (
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleBulkPrepareClick(scheme, chapter);
                                   }}
                                   className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg font-semibold transition-colors inline-flex items-center gap-2 shadow-sm hover:bg-blue-700 hover:shadow-md"
-                                  title="Prepare all sessions at once (bulk preparation)"
+                                  title={`Prepare the next ${Math.min(LESSON_PLAN_BATCH_SIZE, Math.max(1, Number(chapter.totalSessions || 0) - Number(chapter.plannedSessions || 0)))} unplanned session(s)`}
                                 >
                                   <Plus className="w-4 h-4" />
-                                  Prepare All ({chapter.totalSessions} Sessions)
+                                  Prepare Next {Math.min(LESSON_PLAN_BATCH_SIZE, Math.max(1, Number(chapter.totalSessions || 0) - Number(chapter.plannedSessions || 0)))}
                                 </button>
                               )}
                               
@@ -1819,10 +1829,13 @@ const SchemeLessonPlanning = ({ userEmail, userName }) => {
 
 // Bulk Preparation Modal Component
 const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, onClose, onSuccess }) => {
+  const firstSession = Number(data.firstSession) || 1;
+  const totalSessions = Number(data.totalSessions) || Number(data.sessionCount) || 0;
+
   // Initialize session-specific data
   const [sessions, setSessions] = useState(
     Array.from({ length: data.sessionCount }, (_, idx) => ({
-      sessionNumber: idx + 1,
+      sessionNumber: firstSession + idx,
       learningObjectives: '',
       teachingMethods: '',
       resourcesRequired: '',
@@ -1909,6 +1922,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
         schemeId: data.scheme.schemeId,
         chapter: data.chapter.chapterName,
         sessionCount: data.sessionCount,
+        startSession: firstSession,
         teacherEmail: userEmail,
         teacherName: userName,
         sessionObjectives: sessions.map(s => s.learningObjectives),
@@ -1952,9 +1966,9 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
         class: data.scheme.class,
         subject: data.scheme.subject,
         chapter: data.chapter.chapterName,
-        session: i + 1,
+        session: firstSession + i,
         topic: data.scheme.content,
-        totalSessions: total
+        totalSessions: totalSessions || total
       }));
       const results = await Promise.all(contexts.map(ctx => ai.suggestLessonPlan(ctx).catch(err => ({ success: false, error: err?.message }))));
 
@@ -2005,14 +2019,14 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
           {/* AI Bulk Prefill (no save) */}
           <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg flex items-center justify-between">
             <div className="text-sm text-purple-800">
-              ✨ Prefill all {data.sessionCount} sessions into the four fields. Review, then submit.
+              ✨ Prefill this batch of {data.sessionCount} session(s). Review, then submit.
             </div>
             <button
               onClick={handleAIPrefillAll}
               disabled={aiBulkLoading}
               className="px-3 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg text-sm font-medium shadow hover:shadow-md disabled:opacity-50"
             >
-              {aiBulkLoading ? 'Prefilling…' : `AI Prefill All (${data.sessionCount})`}
+              {aiBulkLoading ? 'Prefilling…' : `AI Prefill Batch (${data.sessionCount})`}
             </button>
           </div>
 
@@ -2020,7 +2034,7 @@ const BulkPreparationModal = ({ data, userEmail, userName, planningDateRange, on
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Session {currentSession + 1} of {data.sessionCount}
+                Session {session.sessionNumber} of {totalSessions || data.sessionCount}
               </span>
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 {sessions.filter(s => s.learningObjectives.trim() && s.teachingMethods.trim()).length}/{data.sessionCount} completed
