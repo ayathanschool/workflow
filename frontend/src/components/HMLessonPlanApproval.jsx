@@ -13,7 +13,7 @@ export default function HMLessonPlanApproval({ currentUser }) {
   const [selection, setSelection] = useState(new Set());
   const [bulkState, setBulkState] = useState({ working: false, result: null });
 
-  const isHM = useMemo(() => {
+  const canApprove = useMemo(() => {
     if (!currentUser) return false;
     const rawRoles = currentUser.roles;
     const roleArray = Array.isArray(rawRoles)
@@ -25,7 +25,7 @@ export default function HMLessonPlanApproval({ currentUser }) {
     if (roleArray.length === 0) return false;
     return roleArray.some(r => {
       const norm = String(r).toLowerCase().replace(/[^a-z]/g, '');
-      if (['hm','headmaster','headteacher','headmistress','principal'].includes(norm)) return true;
+      if (['admin','superadmin','hm','headmaster','headteacher','headmistress','principal'].includes(norm)) return true;
       // Handle split variants like "h m" or "head master"
       return norm === 'head' && roleArray.some(rr => /master|teacher|mistress/i.test(rr));
     });
@@ -98,7 +98,7 @@ export default function HMLessonPlanApproval({ currentUser }) {
   }, [filtered]);
 
   async function bulkApprove() {
-    if (!isHM || selection.size === 0) return;
+    if (!canApprove || selection.size === 0) return;
     setBulkState({ working: true, result: null });
     try {
       const ids = Array.from(selection);
@@ -138,7 +138,7 @@ export default function HMLessonPlanApproval({ currentUser }) {
             const checked = selection.has(id);
             return (
               <tr key={id} className="border-t hover:bg-yellow-50">
-                <td className="p-2"><input type="checkbox" disabled={!isHM} checked={checked} onChange={() => toggle(id)} /></td>
+                <td className="p-2"><input type="checkbox" disabled={!canApprove} checked={checked} onChange={() => toggle(id)} /></td>
                 <td className="p-2">{lp.class}</td>
                 <td className="p-2">{lp.subject}</td>
                 <td className="p-2">{lp.chapter}</td>
@@ -158,7 +158,7 @@ export default function HMLessonPlanApproval({ currentUser }) {
   return (
     <div className="p-4">
       <h2 className="text-lg font-semibold mb-3">HM Lesson Plan Approval</h2>
-      {!isHM && <div className="text-red-600 mb-2">HM role required for approvals (view only).</div>}
+      {!canApprove && <div className="text-red-600 mb-2">HM or Admin role required for approvals (view only).</div>}
       {/* Sticky controls bar stays visible while scrolling */}
       <div className="flex flex-wrap gap-2 mb-3 items-center sticky top-0 z-10 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b border-gray-200 py-2 px-2 -mx-2">
         <input placeholder="Teacher" className="border px-2 py-1" value={filters.teacher} onChange={e => setFilters(f => ({ ...f, teacher: e.target.value }))} />
@@ -171,7 +171,7 @@ export default function HMLessonPlanApproval({ currentUser }) {
         </select>
         <div className="ml-auto flex gap-2 items-center">
           <button onClick={loadPending} className="bg-blue-600 text-white px-3 py-1 rounded">Refresh</button>
-          {isHM && (
+          {canApprove && (
             <button
               disabled={bulkState.working || selection.size === 0}
               onClick={bulkApprove}
@@ -216,7 +216,11 @@ export default function HMLessonPlanApproval({ currentUser }) {
       {bulkState.result && (
         <div className="mt-4 text-sm">
           {bulkState.result.error && <div className="text-red-600">Bulk Error: {bulkState.result.error}</div>}
-          {bulkState.result.success && <div className="text-green-700">Bulk Success: {bulkState.result.successCount} / {bulkState.result.totalRequested} approved.</div>}
+          {bulkState.result.success && (
+            <div className="text-green-700">
+              Bulk Success: {bulkState.result.updated ?? bulkState.result.successCount ?? 0} / {bulkState.result.totalRequested ?? selection.size} approved.
+            </div>
+          )}
           {bulkState.result.errors && bulkState.result.errors.length > 0 && (
             <details className="mt-2">
               <summary className="cursor-pointer">Errors ({bulkState.result.errors.length})</summary>

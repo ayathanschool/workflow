@@ -213,7 +213,7 @@
   function _isAdminSafe(userEmail) {
     try {
       if (typeof isAdmin === 'function') {
-        return !!isAdmin(userEmail);
+        if (isAdmin(userEmail)) return true;
       }
     } catch (e) {
       // ignore and fall back
@@ -230,7 +230,7 @@
         if (String(list[i].email || '').toLowerCase() === email) { user = list[i]; break; }
       }
       if (!user) return false;
-      var roles = String(user.roles || '').toLowerCase();
+      var roles = String(user.roles || user.role || user.Role || '').toLowerCase();
       return roles.indexOf('admin') !== -1;
     } catch (err) {
       try { appLog('ERROR', '_isAdminSafe', String(err && err.message ? err.message : err)); } catch (ee) {}
@@ -241,7 +241,7 @@
   function _isHMOrAdminSafe(userEmail) {
     try {
       if (typeof isHMOrAdmin === 'function') {
-        return !!isHMOrAdmin(userEmail);
+        if (isHMOrAdmin(userEmail)) return true;
       }
     } catch (e) {
       // ignore and fall back
@@ -257,7 +257,7 @@
         if (String(list[i].email || '').toLowerCase() === email) { user = list[i]; break; }
       }
       if (!user) return false;
-      var roles = String(user.roles || '').toLowerCase();
+      var roles = String(user.roles || user.role || user.Role || '').toLowerCase();
       return roles.indexOf('hm') !== -1 || roles.indexOf('headmaster') !== -1 || roles.indexOf('h m') !== -1 || roles.indexOf('principal') !== -1;
     } catch (err) {
       try { appLog('ERROR', '_isHMOrAdminSafe', String(err && err.message ? err.message : err)); } catch (ee) {}
@@ -3386,24 +3386,13 @@
   * Handle UPDATE lesson plan status (HM approval/rejection)
   */
   /**
-   * Check if all sessions of a chapter have been submitted
-   * Returns {complete: true} if all sessions exist, or {complete: false, missing: [], total: N}
+   * Check if submitted lesson-plan sessions for a chapter are contiguous.
+   * Do not use Schemes.noOfSessions as a hard approval gate: teachers can submit
+   * a smaller lesson-plan batch for review, and HM should be able to approve it.
+   * Returns {complete: true} if submitted sessions have no gaps.
    */
   function _checkChapterSessionsComplete(schemeId, chapter) {
     try {
-      
-      // Get the scheme to find noOfSessions
-      const schemesSheet = _getSheet('Schemes');
-      const schemesHeaders = _headers(schemesSheet);
-      const allSchemes = _rows(schemesSheet).map(row => _indexByHeader(row, schemesHeaders));
-      
-      const scheme = allSchemes.find(s => s.schemeId === schemeId);
-      if (!scheme) {
-        return { complete: false, error: 'Scheme not found' };
-      }
-      
-      const totalSessions = parseInt(scheme.noOfSessions || 2);
-      
       // Get all lesson plans for this scheme and chapter
       const lpSheet = _getSheet('LessonPlans');
       const lpHeaders = _headers(lpSheet);
@@ -3416,6 +3405,10 @@
         
         return matchScheme && matchChapter && notCancelled;
       });
+
+      if (chapterPlans.length === 0) {
+        return { complete: false, missing: [], total: 0, submitted: 0, error: 'No lesson plans submitted for this chapter' };
+      }
       
       // Check which sessions exist
       const existingSessions = new Set();
@@ -3425,10 +3418,18 @@
           existingSessions.add(sessionNum);
         }
       });
+
+      if (existingSessions.size === 0) {
+        return { complete: false, missing: [], total: 0, submitted: 0, error: 'No numbered sessions found for this chapter' };
+      }
+
+      const sessionNumbers = Array.from(existingSessions).sort((a, b) => a - b);
+      const maxSubmittedSession = sessionNumbers[sessionNumbers.length - 1];
       
-      // Find missing sessions
+      // Find missing sessions only inside the submitted range. Do not block
+      // future sessions that have not been submitted as part of this batch.
       const missingSessions = [];
-      for (let i = 1; i <= totalSessions; i++) {
+      for (let i = 1; i <= maxSubmittedSession; i++) {
         if (!existingSessions.has(i)) {
           missingSessions.push(i);
         }
@@ -3441,7 +3442,7 @@
       return {
         complete: isComplete,
         missing: missingSessions,
-        total: totalSessions,
+        total: maxSubmittedSession,
         submitted: existingSessions.size
       };
       
@@ -3595,10 +3596,152 @@
    */
   function _handleBatchUpdateLessonPlanStatus(data) {
     try {
-      // Feature disabled: batch lesson plan approval removed per requirements
-      return _respond({ success: false, error: 'Batch lesson plan approvals are disabled' });
+      const ids = data.lessonPlanIds || data.lpIds || data.ids || [];
+      const lessonPlanIds = Array.isArray(ids) ? ids.map(id => String(id || '').trim()).filter(Boolean) : [];
+      const targetStatus = String(data.status || '').trim();
+      const comments = String(data.reviewComments || data.remarks || '').trim();
+      const requesterEmail = String(data.requesterEmail || data.email || data.approverEmail || '').trim().toLowerCase();
+
+      if (!lessonPlanIds.length) {
+        return _respond({ success: false, error: 'No lesson plans selected' });
+      }
+      if (!targetStatus) {
+        return _respond({ success: false, error: 'Target status is required' });
+      }
+
+      const allowedStatuses = ['Ready', 'Needs Rework', 'Rejected'];
+      if (allowedStatuses.indexOf(targetStatus) === -1) {
+        return _respond({ success: false, error: 'Invalid target status' });
+      }
+
+      if (!requesterEmail) {
+        return _respond({ success: false, error: 'Authorization required: User email must be provided' });
+      }
+      if (!_isHMOrAdminSafe(requesterEmail)) {
+        return _respond({ success: false, error: 'Unauthorized: Only Headmaster or Admin can update lesson plan approvals' });
+      }
+
+      if ((targetStatus === 'Needs Rework' || targetStatus === 'Rejected') && !comments) {
+        return _respond({ success: false, error: 'Remarks are required for rework/rejection' });
+      }
+
+      const sh = _getSheet('LessonPlans');
+      const headers = _headers(sh);
+      const rows = _rows(sh);
+      const plans = rows.map(row => _indexByHeader(row, headers));
+      const idSet = new Set(lessonPlanIds.map(id => id.toLowerCase()));
+      const targets = [];
+
+      for (let i = 0; i < plans.length; i++) {
+        const p = plans[i];
+        const rowId = String(p.lpId || p.lessonPlanId || p.id || '').trim();
+        if (rowId && idSet.has(rowId.toLowerCase())) {
+          targets.push({ idx: i, plan: p, lpId: rowId });
+        }
+      }
+
+      const foundIds = new Set(targets.map(t => t.lpId.toLowerCase()));
+      const notFound = lessonPlanIds.filter(id => !foundIds.has(String(id || '').toLowerCase()));
+      if (targets.length === 0) {
+        return _respond({ success: false, error: 'Selected lesson plans were not found', notFound: notFound });
+      }
+
+      if (targetStatus === 'Ready') {
+        const checkedChapters = {};
+        const blocked = [];
+        targets.forEach(t => {
+          const schemeId = String(t.plan.schemeId || '').trim();
+          const chapter = String(t.plan.chapter || '').trim();
+          if (!schemeId || !chapter) return;
+          const key = schemeId + '|' + chapter.toLowerCase();
+          if (checkedChapters[key]) return;
+          const completeness = _checkChapterSessionsComplete(schemeId, chapter);
+          checkedChapters[key] = true;
+          if (!completeness || completeness.complete === false) {
+            blocked.push({
+              schemeId: schemeId,
+              chapter: chapter,
+              missing: completeness && completeness.missing || [],
+              total: completeness && completeness.total,
+              submitted: completeness && completeness.submitted
+            });
+          }
+        });
+
+        if (blocked.length > 0) {
+          const first = blocked[0];
+          return _respond({
+            success: false,
+            error: `Cannot approve: All ${first.total || ''} sessions must be submitted before approval. Missing sessions: ${(first.missing || []).join(', ')}`,
+            incomplete: true,
+            blocked: blocked
+          });
+        }
+      }
+
+      const normH = headers.map(h => String(h).trim());
+      let statusIdx = normH.findIndex(h => h === 'status');
+      if (statusIdx === -1) statusIdx = normH.findIndex(h => h.toLowerCase() === 'status');
+      if (statusIdx === -1) return _respond({ success: false, error: 'Status column not found in sheet' });
+
+      let commentsIdx = normH.findIndex(h => h === 'reviewComments');
+      if (commentsIdx === -1) commentsIdx = normH.findIndex(h => h.toLowerCase() === 'reviewcomments');
+
+      let reviewedAtIdx = normH.findIndex(h => h === 'reviewedAt');
+      if (reviewedAtIdx === -1) reviewedAtIdx = normH.findIndex(h => h.toLowerCase() === 'reviewedat');
+
+      const nowISO = new Date().toISOString();
+      let updated = 0;
+      const updatedIds = [];
+      const failed = [];
+      const teacherEmails = {};
+
+      targets.forEach(t => {
+        const rowIndex = t.idx + 2;
+        try {
+          sh.getRange(rowIndex, statusIdx + 1).setValue(targetStatus);
+          if (commentsIdx >= 0 && comments) sh.getRange(rowIndex, commentsIdx + 1).setValue(comments);
+          if (reviewedAtIdx >= 0) sh.getRange(rowIndex, reviewedAtIdx + 1).setValue(nowISO);
+          updated += 1;
+          updatedIds.push(t.lpId);
+          const te = String(t.plan.teacherEmail || '').toLowerCase().trim();
+          if (te) teacherEmails[te] = true;
+        } catch (writeErr) {
+          failed.push({ lpId: t.lpId, error: String(writeErr && writeErr.message ? writeErr.message : writeErr) });
+        }
+      });
+
+      try {
+        Object.keys(teacherEmails).forEach(te => invalidateCache('teacher_lessonplans_' + te));
+        invalidateCache('approved_schemes');
+      } catch (invErr) {
+      }
+
+      try {
+        logAudit({
+          action: targetStatus === 'Ready' ? AUDIT_ACTIONS.APPROVE : (targetStatus === 'Rejected' || targetStatus === 'Needs Rework' ? AUDIT_ACTIONS.REJECT : AUDIT_ACTIONS.UPDATE),
+          entityType: AUDIT_ENTITIES.LESSON_PLAN,
+          entityId: 'batch:' + updatedIds.join(','),
+          userEmail: requesterEmail,
+          userName: requesterEmail,
+          userRole: 'HM',
+          description: `Batch lesson plan status changed to ${targetStatus} (${updated} updated)`,
+          severity: AUDIT_SEVERITY.WARNING
+        });
+      } catch (auditErr) { /* ignore audit failures */ }
+
+      return _respond({
+        success: failed.length === 0,
+        updated: updated,
+        skipped: lessonPlanIds.length - updated,
+        totalRequested: lessonPlanIds.length,
+        lpIdsUpdated: updatedIds,
+        notFound: notFound,
+        failed: failed,
+        message: updated + ' lesson plan(s) updated successfully'
+      });
     } catch (error) {
-      return _respond({ error: error.message });
+      return _respond({ success: false, error: error.message });
     }
   }
 
@@ -8300,7 +8443,7 @@
   }
 
   /**
-   * Chapter-scoped bulk update of lesson plan statuses (HM only)
+   * Chapter-scoped bulk update of lesson plan statuses (HM/Admin only)
    * Accepts: { schemeId, chapter, status, reviewComments?, requesterEmail? }
    * - Only updates lessons in the specified scheme+chapter currently in 'Pending Review'
    * - For status 'Ready', enforces chapter completeness via _checkChapterSessionsComplete
@@ -8325,16 +8468,14 @@
         return _respond({ success: false, error: 'Invalid target status' });
       }
 
-      // ROLE CHECK: Only HM or Admin can perform bulk approvals
-      if (targetStatus === 'Ready') {
-        if (!requesterEmail) {
-          return _respond({ success: false, error: 'Authorization required: User email must be provided for approval' });
-        }
-        
-        const isAuthorized = _isHMOrAdminSafe(requesterEmail);
-        if (!isAuthorized) {
-          return _respond({ success: false, error: 'Unauthorized: Only Headmaster or Admin can approve lesson plans' });
-        }
+      // ROLE CHECK: Only HM or Admin can perform bulk approval/rework/rejection.
+      if (!requesterEmail) {
+        return _respond({ success: false, error: 'Authorization required: User email must be provided' });
+      }
+
+      const isAuthorized = _isHMOrAdminSafe(requesterEmail);
+      if (!isAuthorized) {
+        return _respond({ success: false, error: 'Unauthorized: Only Headmaster or Admin can update lesson plan approvals' });
       }
 
       // For approval to Ready, require completeness of chapter
